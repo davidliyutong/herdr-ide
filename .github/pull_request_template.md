@@ -11,5 +11,5 @@
 - [ ] Tests added or updated
 - [ ] Docs updated (`docs/reference.md` for flags, endpoints and files, `docs/architecture.md` for design, the feature's `docs/features/NN-*.md`, `docs/deployment.md` for operations, both READMEs for user-facing summaries)
 - [ ] UI text added to `web/src/i18n/en.ts` and `zh-CN.ts` (a plugin's to its `web/src/plugins/<id>/i18n/`)
-- [ ] No hardcoded product name (use `internal/brand`, `web/src/brand.ts`, the extension's `src/brand.ts`)
+- [ ] No hardcoded product name (use `backend/shared/lib/brand.ts`, `web/src/brand.ts`, the extension's `src/brand.ts`)
 - [ ] Security impact considered (`SECURITY.md`), remote resources bounded (`docs/deployment.md#remote-resources`)

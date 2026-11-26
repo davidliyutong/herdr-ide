@@ -3,7 +3,7 @@
 //
 // The browser plugin's address rules: where a page of a machine's port is
 // framed from (never the UI's own host name), and what the address field
-// takes: never the core's own address (the UI is on 127.0.0.1:5173 here).
+// takes: never the hub's own address (the UI is on 127.0.0.1:5173 here).
 
 import { describe, expect, it } from 'vitest';
 import { isOwnAddress } from '../lib/webUrl';
@@ -89,7 +89,7 @@ describe('the address field', () => {
     }
   });
 
-  it('refuses the core’s own address, under any name of the loopback and either scheme', () => {
+  it('refuses the hub’s own address, under any name of the loopback and either scheme', () => {
     for (const s of [
       '5173',
       'localhost:5173',
@@ -128,8 +128,8 @@ describe('the address field', () => {
   });
 });
 
-describe('a machine’s own loopback with the core’s port number', () => {
-  // The page is http://127.0.0.1:5173 here: the core's address in these tests.
+describe('a machine’s own loopback with the hub’s port number', () => {
+  // The page is http://127.0.0.1:5173 here: the hub's address in these tests.
   it('is no page of this computer, and is one of a remote machine', () => {
     for (const input of ['5173', 'localhost:5173', 'http://127.0.0.1:5173/x', '0.0.0.0:5173']) {
       expect(parseAddress(input).kind, input).toBe('refused');

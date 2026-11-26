@@ -34,7 +34,7 @@ export interface StatsView {
   /** Mean milliseconds per frame. */
   decodeMs: number;
   drawMs: number;
-  /** Frames per second the core did not send here (this window was behind). */
+  /** Frames per second the hub did not send here (this window was behind). */
   skipped: number;
   machine?: {
     /** Changes of the picture sent per second, and the frames (tiles) they took. */
@@ -81,7 +81,7 @@ export class FrameStats {
   constructor(private since: number) {}
 
   /** A frame arrived. Sequence numbers count every frame of the window, so
-   * a gap is frames the core skipped for this browser window. */
+   * a gap is frames the hub skipped for this browser window. */
   received(seq: number, bytes: number) {
     if (this.lastSeq !== undefined) {
       const gap = (seq - this.lastSeq - 1) >>> 0;

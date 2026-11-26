@@ -1,9 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bindingsOf, followCore, settingsOf, type Net, type ShellSettings } from './follow';
+import { bindingsOf, followHub, settingsOf, type HubLink, type ShellSettings } from './follow';
 import type { Binding } from './menu';
-
-const origin = 'http://127.0.0.1:7791';
 
 test('the bindings of the platform, well-formed ones only', () => {
   const reply = {
@@ -42,48 +40,43 @@ test('the theme, language, zoom and UI font size settings, defaults for anything
   assert.equal(settingsOf(null), undefined);
 });
 
-/** A stand-in for the event channel and the core's API. */
-function fakeNet(replies: Record<string, unknown>) {
-  const sockets: FakeSocket[] = [];
+/** A stand-in for the hub: its event channel and its API. */
+function fakeHub(replies: Record<string, unknown>) {
+  type On = Parameters<HubLink['channel']>[1];
+  const sockets: Array<{ path: string; on: On; closed: boolean; push(m: unknown): void }> = [];
   const fetched: string[] = [];
-  class FakeSocket {
-    onopen: (() => void) | null = null;
-    onmessage: ((ev: { data: unknown }) => void) | null = null;
-    onclose: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-    closed = false;
-    constructor(readonly url: string) {
-      sockets.push(this);
-    }
-    close() {
-      this.closed = true;
-    }
-    push(m: unknown) {
-      this.onmessage?.({ data: JSON.stringify(m) });
-    }
-  }
-  const net: Net = {
-    WebSocket: FakeSocket,
-    fetch: async (url) => {
-      fetched.push(url.pathname);
-      return { ok: true, json: async () => replies[url.pathname] };
+  const hub: HubLink = {
+    channel(path, on) {
+      const s = {
+        path,
+        on,
+        closed: false,
+        push: (m: unknown) => on.message(JSON.stringify(m)),
+      };
+      sockets.push(s);
+      return { close: () => (s.closed = true) };
+    },
+    fetch: async (path) => {
+      fetched.push(path);
+      return { ok: true, json: async () => replies[path] };
     },
   };
-  return { net, sockets, fetched };
+  return { hub, sockets, fetched };
 }
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
+const settle = () => new Promise((r) => setImmediate(r));
 
-test('reads the state once the channel is open, then follows its messages', async () => {
-  const { net, sockets, fetched } = fakeNet({
+test('reads the state once the channel is open, then follows its messages', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { hub, sockets, fetched } = fakeHub({
     '/api/settings': { values: { 'appearance.theme': { value: 'dark' } } },
     '/api/keybindings': { commands: [], effective: { mac: [{ key: 'cmd+t', command: 'tab.new', when: 'terminal' }] } },
   });
   const got: { bindings: Binding[][]; settings: ShellSettings[] } = { bindings: [], settings: [] };
-  const stop = followCore(origin, 'mac', { bindings: (b) => got.bindings.push(b), settings: (s) => got.settings.push(s) }, net);
-  assert.equal(sockets[0].url, 'ws://127.0.0.1:7791/ws');
+  const stop = followHub(hub, 'mac', { bindings: (b) => got.bindings.push(b), settings: (s) => got.settings.push(s) });
+  assert.equal(sockets[0].path, '/ws');
   assert.deepEqual(fetched, []);
-  sockets[0].onopen!();
+  sockets[0].on.open();
   await settle();
   assert.deepEqual(fetched.sort(), ['/api/keybindings', '/api/settings']);
   assert.deepEqual(got.settings, [{ theme: 'dark', language: 'auto', zoom: 1, uiFontSize: 13 }]);
@@ -93,23 +86,27 @@ test('reads the state once the channel is open, then follows its messages', asyn
   sockets[0].push({ t: 'keybindings', effective: { mac: [{ key: 'cmd+shift+t', command: 'tab.new', when: 'terminal' }], pc: [] } });
   sockets[0].push({ t: 'settings', values: { 'appearance.language': { value: 'zh-CN' }, 'window.zoom': { value: 90 } } });
   sockets[0].push({ t: 'machines', list: [] });
-  sockets[0].onmessage!({ data: 'not json' });
+  sockets[0].on.message('not json');
+  sockets[0].on.message(new Uint8Array([1]));
   assert.deepEqual(got.bindings.at(-1), [{ key: 'cmd+shift+t', command: 'tab.new', when: 'terminal' }]);
   assert.deepEqual(got.settings.at(-1), { theme: 'system', language: 'zh-CN', zoom: 0.9, uiFontSize: 13 });
   assert.equal(got.bindings.length, 2);
 
   stop();
   assert.ok(sockets[0].closed);
-  sockets[0].onclose!();
-  await new Promise((r) => setTimeout(r, 600));
+  sockets[0].on.close();
+  t.mock.timers.tick(600);
+  await settle();
   assert.equal(sockets.length, 1, 'no reconnection after stop');
 });
 
-test('opens the channel again when it drops', async () => {
-  const { net, sockets } = fakeNet({});
-  const stop = followCore(origin, 'mac', { bindings: () => {}, settings: () => {} }, net);
-  sockets[0].onclose!();
-  await new Promise((r) => setTimeout(r, 600));
+test('opens the channel again when it drops', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { hub, sockets } = fakeHub({});
+  const stop = followHub(hub, 'mac', { bindings: () => {}, settings: () => {} });
+  sockets[0].on.close();
+  t.mock.timers.tick(750);
+  await settle();
   assert.equal(sockets.length, 2);
   stop();
 });

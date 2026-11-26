@@ -163,6 +163,13 @@ body.resizing .sidebar-resizer::after {
 .ms-error {
   background: var(--error);
 }
+/* What a connecting machine's dial is doing, under its status. */
+.deploy-progress {
+  margin-top: 4px;
+}
+.deploy-progress .transfer-bar {
+  margin-top: 4px;
+}
 .machine-status {
   margin: 2px 12px 4px 30px;
   padding: 6px 8px;

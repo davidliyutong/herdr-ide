@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // The Git panel (plugins/git/GitPanel.tsx) as the directory it follows
-// moves and as it goes away and comes back, with the core's routes stubbed
+// moves and as it goes away and comes back, with the hub's routes stubbed
 // and the followed directory (files/FilesPanel followedDir) scripted: a
 // terminal's cd inside the repository changes nothing in the panel (also
 // while the directory's repository is asked or could not be asked); a
@@ -386,5 +386,120 @@ describe('the Git panel across machines and workspaces', () => {
     await flush();
     expect(title()).toBe('repo');
     expect(asked.filter((a) => a.m !== 'A')).toEqual([]);
+  });
+});
+
+describe('focused editor and diff pane tracking for nested repositories', () => {
+  let host: HTMLDivElement;
+  let root: Root;
+  const flush = async () => {
+    for (let i = 0; i < 4; i++) await act(async () => settle());
+  };
+
+  beforeEach(async () => {
+    places = undefined;
+    followed = undefined;
+    forgetRepos();
+    forgetPanels();
+    useGit.setState({ repos: {} });
+    vi.stubGlobal('fetch', async (input: string) => {
+      const url = new URL(input, 'http://x');
+      const action = url.pathname.split('/').pop()!;
+      const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
+      switch (action) {
+        case 'repo': {
+          const p = url.searchParams.get('path')!;
+          const base = { gitDir: '', commonDir: '', branch: 'main', head: 'h1', ahead: 0, behind: 0, remotes: [] };
+          if (p === INNER || p.startsWith(INNER + '/')) return json({ ...base, root: INNER, parents: [ROOT] });
+          if (p === ROOT || p.startsWith(ROOT + '/')) return json({ ...base, root: ROOT, nested: [INNER] });
+          return json({ error: 'not_a_repo', message: 'no' }, 404);
+        }
+        case 'status':
+          return json({ branch: 'main', head: 'h1', ahead: 0, behind: 0, files: [] });
+        case 'log':
+          return json({ commits: [], more: false, refs: [] });
+        case 'stashes':
+          return json([]);
+        case 'watch':
+          return json({ token: 't' });
+      }
+      return json({});
+    });
+    useTerms.setState({
+      machines: {
+        E: {
+          terminals: {},
+          layout: {
+            version: 2,
+            workspaces: [
+              {
+                id: 'ew1',
+                name: '',
+                cwd: ROOT,
+                tabs: [
+                  {
+                    root: {
+                      split: 'horizontal',
+                      ratio: 0.5,
+                      children: [
+                        { view: { id: 'ed1', plugin: 'files', kind: 'editor', path: `${INNER}/src/file.ts` } },
+                        { view: { id: 'df1', plugin: 'git', kind: 'diff', repo: ROOT, path: 'top.txt', mode: 'worktree' } },
+                      ],
+                    },
+                    focused: 'view:ed1',
+                  },
+                ],
+                selected: 0,
+              },
+            ],
+            selected: 0,
+          },
+        },
+      },
+    });
+    const s = useStore.getState();
+    s.setReadOnly(false);
+    s.setMachines([{ id: 'E', label: 'E', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
+    s.selectMachine('E');
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => root.render(createElement(GitPanel)));
+    await flush();
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    useTerms.setState({ machines: {} });
+  });
+
+  it('tracks the innermost repository of a focused editor or diff pane', async () => {
+    // Editor in INNER is focused -> GitPanel shows INNER and offers ROOT in picker.
+    expect(host.querySelector('.git-title')!.textContent).toBe('lib');
+    expect(host.querySelector('.git-repo-pick')).not.toBeNull();
+    // Switch focus to the diff pane targeting ROOT -> GitPanel switches to ROOT.
+    await act(async () =>
+      useTerms.setState((s) => ({
+        machines: {
+          ...s.machines,
+          E: {
+            ...s.machines.E,
+            layout: {
+              ...s.machines.E.layout!,
+              workspaces: [
+                {
+                  ...s.machines.E.layout!.workspaces[0],
+                  tabs: [{ ...s.machines.E.layout!.workspaces[0].tabs[0], focused: 'view:df1' }],
+                },
+              ],
+            },
+          },
+        },
+      })),
+    );
+    await flush();
+    expect(host.querySelector('.git-title')!.textContent).toBe('repo');
   });
 });

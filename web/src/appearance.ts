@@ -1,7 +1,7 @@
-// Applies the appearance settings: light/dark theme (also sent to the core,
+// Applies the appearance settings: light/dark theme (also sent to the hub,
 // which switches VS Code windows to match) and the UI font. Terminals follow
 // the terminal settings themselves (components/TerminalView.tsx); the
-// desktop app's shell reads the theme from the core itself.
+// desktop app's shell reads the theme from the hub itself.
 
 import { create } from 'zustand';
 import { getPrefs, usePrefs, type Prefs, type TermColors } from './prefs';
@@ -43,11 +43,6 @@ export const useSystemDark = create<{ dark: boolean }>(() => ({ dark: darkQuery?
 export function resolveTheme(pref: Prefs['theme'], systemDark = useSystemDark.getState().dark): ThemeKind {
   if (pref === 'dark' || pref === 'light') return pref;
   return systemDark ? 'dark' : 'light';
-}
-
-/** The theme kind in use. */
-export function themeKind(): ThemeKind {
-  return resolveTheme(getPrefs().theme);
 }
 
 /** The theme kind in use, for components: it changes with the setting and,

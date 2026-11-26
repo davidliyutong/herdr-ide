@@ -11,7 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: () => {} } }));
 
 import { useStore } from '../state/store';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import type { MachineState } from '../lib/machine';
 import { Palette } from '../components/Palette';
 import { SettingsDialog } from '../components/SettingsDialog';
@@ -23,7 +23,7 @@ let root: Root;
 let before: HTMLButtonElement;
 
 beforeEach(async () => {
-  const core = new FakeCore();
+  const hub = new FakeHub();
   const workspaces = Array.from({ length: 250 }, (_, i) => ({
     id: `ws${String(i).padStart(6, '0')}`,
     name: `project ${i}`,
@@ -31,10 +31,10 @@ beforeEach(async () => {
     tabs: [],
     selected: 0,
   }));
-  core.machine('m', [], { version: 2, workspaces, selected: 0 });
-  core.install();
+  hub.machine('m', [], { version: 2, workspaces, selected: 0 });
+  hub.install();
   useStore.getState().setMachines([{ id: 'm', label: 'box', kind: 'local', status: 'ready' } as unknown as MachineState]);
-  core.model.subscribe('m');
+  hub.model.subscribe('m');
   await settle();
   host = document.createElement('div');
   before = document.createElement('button');

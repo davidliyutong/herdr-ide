@@ -1,0 +1,25 @@
+{"event":{"t":"notice","method":"_veldr/imported","params":{"lossy":true}}}
+{"event":{"t":"info","chat":{"id":"","kind":"","title":"Reply with the word hi","cwd":"","sessionId":"","state":"","status":"","created":"0001-01-01T00:00:00Z","updated":"0001-01-01T00:00:00Z","seq":0,"seen":0,"capabilities":{"images":false,"compact":false,"queue":false,"plan":false,"questions":false,"effort":false,"model":false,"cancelQueued":false}}}}
+{"event":{"t":"user","content":[{"type":"text","text":"Reply with the word hi"}]}}
+{"event":{"t":"turn","state":"start"}}
+{"event":{"t":"update","item":"h-t-2","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"I need respond to user \"Reply with the word hi\". I'll respond with exactly hi likely. Should consider system reminders no tools dynamic etc irrelevant. Respond just hi. Should not include anything else. Ensure word hi lowercase."}}}}
+{"event":{"t":"update","item":"h-m-3","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}}}
+{"event":{"t":"turn","state":"end","stopReason":"end_turn"}}
+{"event":{"t":"user","content":[{"type":"text","text":"Create a file hello.txt containing hi in the current directory"}]}}
+{"event":{"t":"turn","state":"start"}}
+{"event":{"t":"update","item":"h-t-5","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"I need create file hello.txt containing hi current directory. Should use Write dedicated tool. I have tools. Perhaps file exact \"hi\" no newline? User says containing hi; use Write content hi. Should have no extra. Then respond concise. Perhaps no need Read. New file. Use functions.Write path hello.txt content hi."}}}}
+{"event":{"t":"update","item":"2:tool_fake0003","update":{"content":[{"type":"content","content":{"type":"text","text":"Wrote 2 bytes to hello.txt"}}],"kind":"edit","rawInput":{"path":"hello.txt","content":"hi"},"sessionUpdate":"tool_call","status":"completed","title":"Write","toolCallId":"2:tool_fake0003"}}}
+{"event":{"t":"update","item":"h-m-6","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Created `hello.txt` containing `hi`."}}}}
+{"event":{"t":"turn","state":"end","stopReason":"end_turn"}}
+{"event":{"t":"user","content":[{"type":"text","text":"Run `echo hi` in the shell and tell me its output."}]}}
+{"event":{"t":"turn","state":"start"}}
+{"event":{"t":"update","item":"h-t-8","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Now run echo hi in shell via Bash. User explicitly requests. Use Bash command echo hi. Then tell output. Should have no unnecessary."}}}}
+{"event":{"t":"update","item":"4:tool_fake0004","update":{"content":[{"type":"content","content":{"type":"text","text":"hi\n"}}],"kind":"execute","rawInput":{"command":"echo hi"},"sessionUpdate":"tool_call","status":"completed","title":"Bash","toolCallId":"4:tool_fake0004"}}}
+{"event":{"t":"update","item":"h-m-9","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Output:\n\n```text\nhi\n```"}}}}
+{"event":{"t":"turn","state":"end","stopReason":"end_turn"}}
+{"event":{"t":"user","content":[{"type":"text","text":"Count slowly from 1 to 50, one number per line, with a short comment after each number."},{"type":"text","text":"What color is this image? One word."}]}}
+{"event":{"t":"turn","state":"start"}}
+{"event":{"t":"update","item":"h-t-11","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"I need answer latest user image question one word. Should inspect provided image mentally: small 8x8? It shows red square with perhaps tiny green/brown corner? User asks what color image one word. I'll answer red. No tools needed. Should ignore previous interrupted count request due latest message continues? The reminder says previous turn interrupted before completion; next message continues conversation. User now asks image. Answer Red perhaps one word. Should use exact color red. Image appears red. Respond \"Red\"."}}}}
+{"event":{"t":"update","item":"h-m-12","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Red"}}}}
+{"event":{"t":"turn","state":"end","stopReason":"end_turn"}}
+{"chat":{"id":"","kind":"","title":"","cwd":"","sessionId":"","state":"","status":"","created":"0001-01-01T00:00:00Z","updated":"0001-01-01T00:00:00Z","seq":0,"seen":0,"capabilities":{"images":false,"compact":false,"queue":false,"plan":false,"questions":false,"effort":false,"model":false,"cancelQueued":false}}}

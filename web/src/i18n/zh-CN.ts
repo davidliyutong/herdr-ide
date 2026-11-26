@@ -3,20 +3,24 @@ import type { Messages } from './en';
 import { zhCN as filesZhCN } from '../plugins/files/i18n/zh-CN';
 import { zhCN as gitZhCN } from '../plugins/git/i18n/zh-CN';
 import { zhCN as monitorZhCN } from '../plugins/monitor/i18n/zh-CN';
+import { zhCN as searchZhCN } from '../plugins/search/i18n/zh-CN';
 import { zhCN as usageZhCN } from '../plugins/usage/i18n/zh-CN';
 import { zhCN as vaultZhCN } from '../plugins/vault/i18n/zh-CN';
 import { zhCN as browserZhCN } from '../plugins/browser/i18n/zh-CN';
+import { zhCN as agentsZhCN } from '../plugins/agents/i18n/zh-CN';
+import { zhCN as chatZhCN } from '../plugins/chat/i18n/zh-CN';
+import { zhCN as historyZhCN } from '../plugins/history/i18n/zh-CN';
+import { zhCN as conversationZhCN } from '../conversation/i18n/zh-CN';
 
 export const zhCN: Messages = {
   'desktop.failed': '桌面应用启动失败或与服务器的连接已中断。',
   'desktop.failureHelp': '请退出后重新打开，检查本地端口是否被占用，以及内置服务器能否运行。详情：',
   'desktop.quit': '退出',
-  'desktop.badPort': '配置的端口无效。',
   'desktop.badInstance': '开发实例名只能由小写字母、数字和连字符组成。',
-  'desktop.coreTimeout': '服务器未能在 30 秒内启动。',
-  'desktop.coreExited': '服务器在启动过程中退出。',
-  'desktop.coreBadReady': '服务器报告了意外的地址。',
-  'desktop.coreLost': '服务器意外停止。',
+  'desktop.hubTimeout': '服务器未能在 30 秒内启动。',
+  'desktop.hubExited': '服务器在启动过程中退出。',
+  'desktop.hubFailed': '服务器无法启动。',
+  'desktop.hubLost': '服务器意外停止，每次重新启动后仍会停止。',
   'desktop.rendererGone': '窗口页面已停止运行。',
   'desktop.menu.about': '关于 {app}',
   'desktop.menu.hide': '隐藏 {app}',
@@ -124,6 +128,9 @@ export const zhCN: Messages = {
   'gui.status.open': '已连接',
   'gui.status.reconnecting': '正在重新连接…',
   'gui.status.gone': '窗口已关闭',
+  'gui.viewOnly': '仅查看：程序窗口由另一个连接控制',
+  'gui.takeControl': '接管控制',
+  'gui.state.viewOnly': '仅查看',
   'gui.stats.browser': '浏览器：{fps} 帧/s · {kb} kB/帧 · {mbps} Mbit/s · 解码 {decode} ms · 绘制 {draw} ms · 跳过 {skipped}/s',
   'gui.stats.machine':
     '机器：{ups} 次更新/s（{fps} 帧/s，{mpx} Mpx/s）· 每次更新：截取 {capture} ms · 转换 {convert} ms · 编码 {encode} ms · JPEG {jpeg} · PNG {png}',
@@ -185,6 +192,11 @@ export const zhCN: Messages = {
   'machine.auth_required': '需要登录',
   'machine.error': '出错',
   'machine.disabled': '已禁用',
+  'machine.deploy.probe': '正在检查机器…',
+  'machine.deploy.download': '机器正在下载 node…',
+  'machine.deploy.upload': '正在上传 node：{sent} / {total}',
+  'machine.deploy.install': '正在机器上安装 node…',
+  'machine.deploy.start': '正在启动 node…',
 
   'machine.enableFailed': '无法更改机器：{detail}',
   'machine.removed': '已移除 {machine}。',
@@ -199,6 +211,13 @@ export const zhCN: Messages = {
     '它的 ssh 目标被拒绝（以“-”开头，或含空白、控制字符或 $ ; | 等 shell 字符），因此不会连接。可以重命名或移除它，或在机器列表文件中改正目标后重启。',
   'machine.code.local_unsupported':
     '本机需要 Linux 或 macOS：在 Windows 上，本机的终端、文件和 VS Code 都不可用。请添加 SSH 机器（Linux 或 macOS）在上面工作；运行 ssh 服务的 WSL 发行版也可以。',
+  'machine.failure.platform_unsupported':
+    '没有适用于这台机器的系统和处理器的机器端构建：机器端运行在 Linux 和 macOS 上，支持 x86-64 和 arm64。',
+  'machine.failure.cpu_unsupported':
+    '这台机器的处理器缺少机器端构建所需的 SSE4.2（使用 QEMU 默认处理器型号的虚拟机就是这样：请改用宿主机的处理器型号）。',
+  'machine.failure.libs_missing': 'musl 版的机器端构建需要这台机器上有 libstdc++ 和 libgcc。在 Alpine 上：apk add libstdc++ libgcc。',
+  'machine.failure.build_unavailable':
+    '无法获得机器端构建：机器无法从发布页下载它，这台电脑的机器端构建目录（--agent-dir）和缓存中也没有，且无法下载。请把发布页中适用于这台机器的机器端构建放入该目录，或让这台电脑或机器能访问发布页。',
   'machine.gone': '这台机器已不在列表中。',
   'machine.localOnly': '本机不能这样修改。',
   'machine.notSaved': '无法保存机器列表文件。',
@@ -211,6 +230,8 @@ export const zhCN: Messages = {
   'command.workspace.previous': '上一个工作区',
   'command.workspace.new': '新建工作区…',
   'command.workspace.edit': '编辑工作区…',
+  'command.workspace.mute': '静音工作区',
+  'command.workspace.unmute': '取消静音工作区',
   'command.workspace.close': '关闭工作区',
   'command.tab.new': '新建标签页',
   'command.tab.rename': '重命名标签页',
@@ -235,8 +256,11 @@ export const zhCN: Messages = {
   'command.tab.closeRight': '关闭右侧标签页',
   'command.tab.pin': '固定标签页',
   'command.tab.unpin': '取消固定标签页',
+  'command.tab.mute': '静音标签页',
+  'command.tab.unmute': '取消静音标签页',
   'command.pane.rename': '重命名窗格',
   'command.pane.actions': '窗格操作…',
+  'command.pane.leave': '聚焦应用界面',
   'command.view.toggleSidebar': '显示/隐藏侧栏',
   'command.view.zoomIn': '放大',
   'command.view.zoomOut': '缩小',
@@ -262,7 +286,6 @@ export const zhCN: Messages = {
   'confirm.disableMachineTitle': '禁用 {machine}？',
   'confirm.disableMachine': '它的连接会断开，那里的 VS Code 会停止，终端则继续在那里运行。可以在侧栏重新启用。',
   'confirm.disableStopCore': '同时停止它的终端服务（结束那里的所有终端）',
-  'confirm.close': '关闭',
   'confirm.removeMachineTitle': '移除 {machine}？',
   'confirm.removeMachine': '机器 {target} 会从本应用中移除。那台机器上的内容不会被删除，终端继续运行。',
   'confirm.remove': '移除',
@@ -457,6 +480,7 @@ export const zhCN: Messages = {
   'sidebar.machines': '机器和工作区',
   'workspace.tabs': '标签页',
   'workspace.pinned': '已固定',
+  'workspace.muted': '已静音：不响铃、不发通知',
 
   'workspace.waiting': '正在等待机器连接…',
   'workspace.machineStatus': '{machine}：{status}',
@@ -615,6 +639,9 @@ export const zhCN: Messages = {
   'settings.notifications.sound.desc': '智能体需要输入时播放一段提示音，完成时播放另一段；其窗格显示在当前聚焦的窗口中时不播放。',
   'settings.notifications.system': '系统通知',
   'settings.notifications.system.desc': '窗口在后台时，智能体需要输入或已完成会弹出系统通知。',
+  'settings.notifications.permission.allow': '允许浏览器通知',
+  'settings.notifications.permission.denied': '浏览器已阻止通知权限。请在浏览器设置中允许此站点发送通知。',
+  'settings.notifications.permission.unavailable': '当前环境不支持浏览器通知（需要 HTTPS 或 localhost）。',
   'settings.notifications.badge': '图标角标',
   'settings.notifications.badge.desc': '在应用图标和窗口标题上显示等待输入的智能体数量。',
   'settings.notifications.mutedAgents': '静音的智能体',
@@ -668,6 +695,10 @@ export const zhCN: Messages = {
   'command.find.next': '查找下一个',
   'command.find.previous': '查找上一个',
   'settings.section.performance': '性能',
+  'settings.section.machines': '机器',
+  'settings.machines.download': '机器自行下载构建',
+  'settings.machines.download.desc':
+    '缺少当前版本机器端构建的机器自行从发布页下载（按摘要校验），省下这台电脑的上传。关闭时，或机器无法下载时，由这台电脑通过 ssh 上传。',
   'settings.performance.keptTerminals': '后台保留的终端数',
   'settings.performance.keptTerminals.desc': '切走后仍保持连接的终端数量，切回时立即显示并停在原来的位置。每个都占用内存；0 表示不保留。',
   'perf.usage': '当前占用',
@@ -679,7 +710,7 @@ export const zhCN: Messages = {
   'perf.process.page': '窗口',
   'perf.process.gpu': 'GPU 进程',
   'perf.process.helper': '辅助进程',
-  'perf.process.core': '核心',
+  'perf.process.core': '服务器',
   'perf.note.desktop': 'CPU 为占用单个处理器的比例。终端和 VS Code 里运行的程序不计入。',
   'perf.note.browser': '窗口的内存指其脚本占用；浏览器不向页面提供 CPU 和 GPU 占用。终端和 VS Code 里运行的程序不计入。',
   'perf.terminals': '终端',
@@ -880,7 +911,7 @@ export const zhCN: Messages = {
   'eol.readOnly': '{name} 混用了 LF 和 CRLF 换行符：以只读方式打开（设置 › Git）。',
   'settings.plugins.vault.enabled': '变量库',
   'settings.plugins.vault.enabled.desc':
-    '在 core 所在电脑上加密保存 API 密钥等变量，经你批准后，各机器上的编程智能体（Claude Code、Codex 等）可通过 MCP 服务器读取。',
+    '在服务器所在电脑上加密保存 API 密钥等变量，经你批准后，各机器上的编程智能体（Claude Code、Codex 等）可通过 MCP 服务器读取。',
   'command.view.panel.vault': '显示变量库',
   'settings.plugins.usage.enabled': 'AI 用量',
   'command.view.panel.usage': '显示 AI 用量',
@@ -897,6 +928,20 @@ export const zhCN: Messages = {
   'settings.plugins.monitor.enabled.desc':
     '按住 ⌘ 悬停主机或通过状态栏查看实时 CPU、内存、每块 GPU、网络与磁盘占用，并提供支持树状视图与搜索的任务管理器。',
   'command.view.panel.monitor': '显示任务管理器',
+  // search plugin
+  'settings.plugins.search.enabled': '项目搜索',
+  'settings.plugins.search.enabled.desc': '搜索面板，在主机上某个文件夹的文件中查找文本（有 ripgrep 时使用 ripgrep）。',
+  'command.view.panel.search': '显示搜索',
+  // agents plugin
+  'settings.plugins.agents.enabled': '编程智能体',
+  'settings.plugins.agents.enabled.desc':
+    '在各机器上找出终端中每个编程智能体（Claude Code、Codex）的会话：状态栏显示它的用量，终端核心重新启动后，智能体会回到它自己的对话中。',
+  // chat plugin
+  'settings.plugins.chat.enabled': '智能体对话',
+  'settings.plugins.chat.enabled.desc': '与编程智能体的对话：智能体在机器上不经终端运行，界面由本应用绘制。',
+  // terminal history plugin
+  'settings.plugins.history.enabled': '终端历史',
+  'settings.plugins.history.enabled.desc': '机器在开启“保存终端输出的快照”后保存在磁盘上的终端输出，在终端核心重新启动后显示。',
   // unsaved changes
   'unsaved.title': '未保存的更改',
   'unsaved.one': '要保存对 {name} 的更改吗？',
@@ -912,7 +957,12 @@ export const zhCN: Messages = {
   ...filesZhCN,
   ...gitZhCN,
   ...monitorZhCN,
+  ...searchZhCN,
   ...usageZhCN,
   ...vaultZhCN,
   ...browserZhCN,
+  ...agentsZhCN,
+  ...chatZhCN,
+  ...historyZhCN,
+  ...conversationZhCN,
 };

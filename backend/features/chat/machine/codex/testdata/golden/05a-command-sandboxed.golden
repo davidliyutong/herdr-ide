@@ -1,0 +1,76 @@
+{"t":"turn","item":"00000000-0000-7000-8000-000000000002","state":"start"}
+{"t":"update","item":"exec-00000000-0000-7000-8000-000000000004","update":{"kind":"execute","rawInput":{"command":"echo hi","cwd":"/work"},"sessionUpdate":"tool_call","status":"in_progress","title":"echo hi","toolCallId":"exec-00000000-0000-7000-8000-000000000004"}}
+{"t":"update","item":"exec-00000000-0000-7000-8000-000000000004","update":{"_meta":{"veldr":{"exitCode":0}},"content":[{"content":{"text":"hi\n","type":"text"},"type":"content"}],"kind":"execute","rawInput":{"command":"echo hi","cwd":"/work"},"sessionUpdate":"tool_call","status":"completed","title":"echo hi","toolCallId":"exec-00000000-0000-7000-8000-000000000004"}}
+{"t":"update","live":true,"item":"msg_fake0001","update":{"content":{"text":"hi","type":"text"},"messageId":"msg_fake0001","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","item":"msg_fake0001","update":{"_meta":{"veldr":{"phase":"final_answer"}},"content":{"text":"hi","type":"text"},"messageId":"msg_fake0001","sessionUpdate":"agent_message_chunk"}}
+{"t":"turn","item":"00000000-0000-7000-8000-000000000002","state":"end","stopReason":"end_turn"}
+{"t":"turn","item":"00000000-0000-7000-8000-000000000006","state":"start"}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":"The","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":" shell","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":" couldn","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":"’t","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":" create","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":" `","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":"a","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":".txt","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":"`:","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":" the","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":" workspace","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":" is","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":" read","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":"-only","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":" (`","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":"operation","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":" not","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":" permitted","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0002","update":{"content":{"text":"`).","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","item":"msg_fake0002","update":{"_meta":{"veldr":{"phase":"final_answer"}},"content":{"text":"The shell couldn’t create `a.txt`: the workspace is read-only (`operation not permitted`).","type":"text"},"messageId":"msg_fake0002","sessionUpdate":"agent_message_chunk"}}
+{"t":"turn","item":"00000000-0000-7000-8000-000000000006","state":"end","stopReason":"end_turn"}
+{"t":"turn","item":"00000000-0000-7000-8000-000000000009","state":"start"}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":"The","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" shell","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" couldn","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":"’t","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" create","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" `","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":"b","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":".txt","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":"`","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" because","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" the","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" workspace","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" is","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" read","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":"-only","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" (`","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":"operation","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" not","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":" permitted","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0003","update":{"content":{"text":"`).","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","item":"msg_fake0003","update":{"_meta":{"veldr":{"phase":"final_answer"}},"content":{"text":"The shell couldn’t create `b.txt` because the workspace is read-only (`operation not permitted`).","type":"text"},"messageId":"msg_fake0003","sessionUpdate":"agent_message_chunk"}}
+{"t":"turn","item":"00000000-0000-7000-8000-000000000009","state":"end","stopReason":"end_turn"}
+{"t":"turn","item":"00000000-0000-7000-8000-000000000012","state":"start"}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":"The","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" command","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" failed","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" again","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":":","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" the","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" workspace","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" is","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" read","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":"-only","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":",","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" so","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" `","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":"b","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":".txt","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":"`","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" could","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" not","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" be","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":" created","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","live":true,"item":"msg_fake0004","update":{"content":{"text":".","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"update","item":"msg_fake0004","update":{"_meta":{"veldr":{"phase":"final_answer"}},"content":{"text":"The command failed again: the workspace is read-only, so `b.txt` could not be created.","type":"text"},"messageId":"msg_fake0004","sessionUpdate":"agent_message_chunk"}}
+{"t":"turn","item":"00000000-0000-7000-8000-000000000012","state":"end","stopReason":"end_turn"}
+{"chat":{"id":"","kind":"","title":"","cwd":"","sessionId":"00000000-0000-7000-8000-000000000001","state":"","status":"","created":"0001-01-01T00:00:00Z","updated":"0001-01-01T00:00:00Z","seq":0,"seen":0,"agentVersion":"0.171.0","config":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gpt-6-luna","options":[{"value":"gpt-6.2-sol","name":"GPT-6.2-Sol","description":"Fast, go-to model for coding and everyday work."},{"value":"gpt-6.2-astra","name":"GPT-6.2-Astra","description":"Our most capable model for complex coding and professional work."},{"value":"gpt-6.1-terra","name":"GPT-6.1 Terra","description":"Efficient model that excels at visual understanding and computer use."},{"value":"gpt-6.1-sol","name":"GPT-6.1-Sol","description":"Previous generation model for coding and everyday work."},{"value":"gpt-6-astra","name":"GPT-6-Astra","description":"Previous generation model for complex coding and professional work."},{"value":"gpt-6-sol","name":"GPT-6-Sol","description":"Legacy model for coding and everyday work."},{"value":"gpt-6-luna","name":"GPT-6-Luna","description":"Fast and affordable model for easier tasks."},{"value":"gpt-5.6-sol","name":"GPT-5.6-Sol","description":"Legacy model for coding and everyday work."},{"value":"gpt-5.6-terra","name":"GPT-5.6-Terra","description":"Legacy balanced model for agentic coding."},{"value":"gpt-5.6-luna","name":"GPT-5.6-Luna","description":"Legacy fast model for simpler tasks."}]},{"id":"thought_level","name":"Effort","category":"thought_level","type":"select","currentValue":"xhigh","options":[{"value":"low","name":"low","description":"Fast responses with lighter reasoning"},{"value":"medium","name":"medium","description":"Balances speed and reasoning depth for everyday tasks"},{"value":"high","name":"high","description":"Greater reasoning depth for complex problems"},{"value":"xhigh","name":"xhigh","description":"Extra high reasoning depth for complex problems"},{"value":"max","name":"max","description":"Maximum reasoning depth for the hardest problems"}]},{"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"default","options":[{"value":"default","name":"Ask"},{"value":"acceptEdits","name":"Accept edits"},{"value":"plan","name":"Plan"},{"value":"full","name":"Full access","full":true}]}],"commands":[{"name":"compact","description":"Summarize the conversation to free context"}],"usage":{"used":20021,"size":828400,"percentage":2.4168276195074845,"limits":[{"id":"codex.primary","usedPercent":0,"resetsAt":1795365279,"windowMinutes":300},{"id":"codex.secondary","usedPercent":25,"resetsAt":1795870530,"windowMinutes":10080}]},"capabilities":{"images":true,"compact":true,"queue":true,"plan":true,"questions":true,"effort":true,"model":true,"cancelQueued":false}}}

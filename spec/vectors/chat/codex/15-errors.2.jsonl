@@ -1,0 +1,10 @@
+{"dir": "out", "t": 3, "msg": {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "herdr_ide", "title": "veldr", "version": "0.0.0-spike"}, "capabilities": {"experimentalApi": false, "requestAttestation": false}}}}
+{"dir": "in", "t": 154, "msg": {"id": 1, "result": {"userAgent": "herdr_ide/0.171.0 (Mac OS 26.6.2; arm64) ghostty (herdr_ide; 0.0.0-spike)", "codexHome": "/home/user/.codex", "platformFamily": "unix", "platformOs": "macos"}}}
+{"dir": "in", "t": 154, "msg": {"method": "configWarning", "params": {"summary": "`[features].multi_agent` is deprecated. It still controls the V1 fallback. `[agents].enabled = false` disables subagent tools even when the model selects a subagent version, unless `[features].multi_agent_v2` is enabled.", "details": null}, "emittedAtMs": 1795347743360}}
+{"dir": "in", "t": 155, "msg": {"method": "remoteControl/status/changed", "params": {"status": "disabled", "serverName": "host.local", "installationId": "installation-FAKE", "environmentId": null}, "emittedAtMs": 1795347743360}}
+{"dir": "out", "t": 155, "msg": {"method": "initialized"}}
+{"dir": "out", "t": 155, "msg": {"id": 2, "method": "collaborationMode/list", "params": {}}}
+{"dir": "in", "t": 155, "msg": {"error": {"code": -32600, "message": "collaborationMode/list requires experimentalApi capability"}, "id": 2}}
+{"dir": "out", "t": 155, "msg": {"id": 3, "method": "thread/start", "params": {"approvalPolicy": "on-request", "sandbox": "read-only", "ephemeral": true, "experimentalRawEvents": true}}}
+{"dir": "in", "t": 155, "msg": {"error": {"code": -32600, "message": "thread/start.experimentalRawEvents requires experimentalApi capability"}, "id": 3}}
+{"dir": "in", "t": 475, "msg": {"method": "account/updated", "params": {"authMode": "chatgpt", "planType": "plus", "reason": "workspaceRoutingReady"}, "emittedAtMs": 1795347743680}}

@@ -1,11 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { actions, attentionList, terminalPlace, workspaceTitle } from '../actions';
+import { actions, attentionList, attentionName, attentionTitle, current, focusAttention, terminalPlace, workspaceTitle } from '../actions';
 import { commandEnabled, commandLabel, keyHint, runCommand } from '../keymap';
 import { useKeys } from '../keybindings';
 import { locales, t, type MessageKey } from '../i18n';
 import { usePrefs } from '../prefs';
-import { agentOf, terminalTitle } from '../lib/machine';
 import { useTerms } from '../state/terms';
 import { StatusDot } from './StatusDot';
 import { pluginPaletteItems } from '../plugins/registry';
@@ -15,6 +14,7 @@ import { titleIfCut } from './ContextMenu';
 import { useReturnFocus } from './useDismiss';
 import { revealTop, visibleRange } from '../lib/windowed';
 import { useSize } from '../lib/sizes';
+import { AGENT_KINDS, startArgv } from '../conversation/kinds';
 
 // The matcher is shared with the pickers (lib/match.ts).
 export { matchScore };
@@ -25,6 +25,24 @@ interface Item {
   hint?: string;
   icon?: React.ReactNode;
   run(): void;
+}
+
+/** The palette's commands that start an agent: each kind the registry
+ * starts (conversation/kinds.ts), in its order, with the argv it gives. */
+export function agentStartItems(): Array<{ id: string; label: string; argv: string[] }> {
+  return AGENT_KINDS.flatMap((k) => {
+    const argv = startArgv(k.id);
+    return argv ? [{ id: `start:${k.id}`, label: t('action.startAgent', { kind: k.id }), argv }] : [];
+  });
+}
+
+/** Runs argv in a new terminal split to the right of the focused pane, or
+ * in a new tab when no pane is focused. */
+async function startBeside(argv: string[]) {
+  const c = current();
+  if (!c) return;
+  if (c.focused) await actions.split(c.m, c.focused, 'right', argv);
+  else await actions.newTab(c.m, undefined, argv);
 }
 
 export function Palette() {
@@ -66,12 +84,12 @@ export function Palette() {
       }
     }
     // An agent by its name and where it is (its workspace and tab).
-    const agents: Item[] = attentionList().map(({ m, terminal, record, status }) => ({
-      id: `agent:${m}:${terminal}`,
-      label: `${agentOf(record) ?? terminalTitle(record, terminal)} · ${terminalPlace(m, terminal) || terminalTitle(record, terminal)}`,
-      hint: s.machines[m]?.label,
-      icon: <StatusDot status={status} />,
-      run: () => actions.focusPane(m, terminal),
+    const agents: Item[] = attentionList().map((i) => ({
+      id: `agent:${i.m}:${i.terminal}`,
+      label: i.unopened ? attentionName(i) : `${attentionName(i)} · ${terminalPlace(i.m, i.terminal) || attentionTitle(i)}`,
+      hint: s.machines[i.m]?.label,
+      icon: <StatusDot status={i.status} />,
+      run: () => focusAttention(i),
     }));
     // Commands that open the palette, the tabs by number and commands that
     // cannot run now are left out.
@@ -80,10 +98,7 @@ export function Palette() {
       .getState()
       .commands.filter((c) => !hidden.test(c.id) && commandEnabled(c.id))
       .map((c) => ({ id: `cmd:${c.id}`, label: commandLabel(c.id), hint: keyHint(c.id) || undefined, run: () => runCommand(c.id) }));
-    const kinds = ['claude', 'codex', 'gemini', 'opencode', 'kimi', 'grok', 'cursor', 'copilot', 'qwen', 'amp'];
-    for (const k of kinds) {
-      cmds.push({ id: `start:${k}`, label: t('action.startAgent', { kind: k }), run: () => void actions.startAgent(k) });
-    }
+    for (const a of agentStartItems()) cmds.push({ id: a.id, label: a.label, run: () => void startBeside(a.argv) });
     for (const l of locales) {
       cmds.push({
         id: `locale:${l.id}`,

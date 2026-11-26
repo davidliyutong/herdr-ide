@@ -1,0 +1,8 @@
+{
+  "displayName": "veldr 桥接",
+  "description": "把 code-server 窗口连接到 veldr Web IDE（打开文件、查看变更、Git Graph、把代码发送给 agent、下载文件）。",
+  "command.sendToAgent": "发送给 agent",
+  "command.download": "下载（文件夹打包为 zip）",
+  "command.reconnect": "重新连接",
+  "command.leave": "把键盘交回 veldr"
+}

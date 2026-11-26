@@ -35,7 +35,7 @@ export function CopyButton({ text, label, action }: { text: string; label: strin
   );
 }
 
-/** The machines to choose from: the core's, with their state, and any
+/** The machines to choose from: the hub's, with their state, and any
  * chosen one it no longer has (by its id). */
 export function machineItems(
   order: string[],

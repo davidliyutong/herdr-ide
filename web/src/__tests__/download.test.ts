@@ -5,7 +5,7 @@
 // machine), the chooser takes several entries and directories in one
 // download, a path that names nothing becomes a note, and only the page with
 // the focus downloads what VS Code's explorer asked for. The downloads
-// panel follows each download through the core's events.
+// panel follows each download through the hub's events.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -19,7 +19,7 @@ import { vscodeOn } from './fakeSettings';
 definePlugins([vscodePlugin]);
 vscodeOn();
 
-/** Messages the page sent the core. */
+/** Messages the page sent the hub. */
 const sent = vi.hoisted(() => [] as unknown[]);
 const link = vi.hoisted(() => ({ connected: true }));
 vi.mock('../lib/conn', () => ({
@@ -68,7 +68,7 @@ beforeAll(async () => {
   });
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
     fetches.push({ url, method: init?.method ?? 'GET' });
-    const u = new URL(url, 'http://core');
+    const u = new URL(url, 'http://hub');
     if (u.pathname.endsWith('/list')) {
       const path = u.searchParams.get('path')!;
       const entries = dirs[path];
@@ -111,7 +111,7 @@ afterEach(() => {
 const labels = (e: MenuEntry[]) => e.map((x) => (x === 'sep' ? '-' : x.label));
 const item = (e: MenuEntry[], label: string) => e.find((x): x is MenuItem => x !== 'sep' && x.label === label)!;
 const flush = () => act(() => new Promise((r) => setTimeout(r, 0)));
-const query = (url: string) => new URL(url, 'http://core').searchParams.getAll('path');
+const query = (url: string) => new URL(url, 'http://hub').searchParams.getAll('path');
 
 describe('pane menu', () => {
   it('downloads a path under the pointer and chooses from the directory', async () => {
@@ -149,7 +149,7 @@ describe('pane menu', () => {
     expect(labels(local).filter((l) => l.startsWith('Download'))).toEqual([]);
     const remote = menus.surfaceMenu({ ctx: { m: 'gpu', cwd: '/home/u' } });
     expect(labels(remote)).toEqual(['Copy', '-', 'Download files…']);
-    // A browser downloads from every machine, the core's own too.
+    // A browser downloads from every machine, the hub's own too.
     shell = undefined;
     expect(labels(menus.surfaceMenu({ ctx: { m: 'local', cwd: '/Users/u' } }))).toContain('Download files…');
   });
@@ -267,7 +267,7 @@ describe('VS Code explorer', () => {
 
 describe('downloads panel', () => {
   let Downloads: typeof import('../components/Downloads');
-  const id = (href: string) => new URL(href, 'http://core').searchParams.get('dl')!;
+  const id = (href: string) => new URL(href, 'http://hub').searchParams.get('dl')!;
   const active = () => download.useDownloads.getState().active;
   const history = () => download.useDownloads.getState().history;
   beforeAll(async () => {
@@ -284,7 +284,7 @@ describe('downloads panel', () => {
     vi.setSystemTime(1_000_000);
     download.startDownload('gpu', ['/srv/data.bin']);
     const dl = id(clicked[0]);
-    // The core reports it to this page alone.
+    // The hub reports it to this page alone.
     expect(sent).toEqual([{ t: 'download.watch', ids: [dl] }]);
     expect(active()).toMatchObject([{ id: dl, m: 'gpu', machine: 'gpu', name: 'data.bin', status: 'starting', sent: 0 }]);
     expect(Downloads.downloadDetail(active()[0])).toBe('Starting…');
@@ -327,7 +327,7 @@ describe('downloads panel', () => {
     expect(store.useStore.getState().toasts.at(-1)?.msg).toBe('Could not download srv.zip: The machine is not connected');
   });
 
-  it('cancels through the core, waits for a download the browser holds back, and downloads again', async () => {
+  it('cancels through the hub, waits for a download the browser holds back, and downloads again', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     download.startDownload('gpu', ['/srv/a.txt']);
     const dl = id(clicked[0]);
@@ -337,7 +337,7 @@ describe('downloads panel', () => {
     download.downloadEvent({ id: dl, state: 'cancelled', sent: 10, total: 100 });
     expect(history()[0]).toMatchObject({ id: dl, status: 'cancelled' });
 
-    // No word from the core: not started yet (the browser holds it back
+    // No word from the hub: not started yet (the browser holds it back
     // behind other downloads, or blocked it), not a failure; the time
     // while the page is not connected does not count.
     download.startDownload('gpu', ['/srv/b.txt']);
@@ -356,7 +356,7 @@ describe('downloads panel', () => {
     download.downloadEvent({ id: b, state: 'running', sent: 1, total: 100 });
     expect(active()[0]).toMatchObject({ status: 'downloading' });
     expect(active()[0].waiting).toBeUndefined();
-    // Cancelled while held back, the core answers at once.
+    // Cancelled while held back, the hub answers at once.
     download.startDownload('gpu', ['/srv/c.txt']);
     const c = id(clicked[2]);
     download.cancelDownload(c);
@@ -370,7 +370,7 @@ describe('downloads panel', () => {
     expect(active()).toHaveLength(2);
   });
 
-  it('asks again after a reconnect, and ends what the core no longer knows', () => {
+  it('asks again after a reconnect, and ends what the hub no longer knows', () => {
     download.startDownload('gpu', ['/srv/a.txt']);
     download.startDownload('gpu', ['/srv/b.txt']);
     download.startDownload('gpu', ['/srv/c.txt']);
@@ -380,7 +380,7 @@ describe('downloads panel', () => {
     sent.length = 0;
     download.resyncDownloads();
     expect(sent).toEqual([{ t: 'download.watch', ids: [a, b, c] }]);
-    // The final event was lost while away: the core still knows it.
+    // The final event was lost while away: the hub still knows it.
     download.downloadEvent({ id: a, state: 'done', sent: 100, total: 100 });
     // Not seen yet: still starting.
     download.downloadEvent({ id: b, state: 'unknown' });
@@ -391,7 +391,7 @@ describe('downloads panel', () => {
       { id: c, status: 'failed', error: 'lost' },
       { id: a, status: 'done' },
     ]);
-    // Cancelling one the core never saw ends it.
+    // Cancelling one the hub never saw ends it.
     download.cancelDownload(b);
     download.downloadEvent({ id: b, state: 'unknown' });
     expect(active()).toEqual([]);

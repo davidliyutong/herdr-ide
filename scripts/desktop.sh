@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
-# The Electron desktop app on macOS, Windows and Linux, for this machine's
-# system (DESKTOP_OS=mac|win|linux packages another one's --dir app, to
-# check the packaging; installers are built on their own system).
-# ARCH=arm64|x64 (default: this machine's); VERSION, when set, must be a
-# semver, optionally with the release tag's leading v (dropped for the app
-# metadata).
+# Stage 2: The Electron desktop app on macOS, Windows and Linux.
 #
-#   build    the core for the app's platform, the web UI and the shell
+# Runs the Stage 1 compiled Bun hub executable (`<slug> desktop`) directly
+# and bundles all 6 Stage 1 machine release archives (<slug>-<platform>.tar.gz
+# + SHA256SUMS) into the app (release and dev alike), so Desktop and CLI
+# share the exact same hub runtime and remote deployment binaries.
+#
+#   build    ensures Stage 1 archives exist (runs scripts/build.sh unless
+#            STAGE1_ARCHIVES is provided), stages the host hub binary + all
+#            6 machine archives + licenses into dist/desktop-stage, and
+#            builds the Electron shell
 #   app      build, then the unpacked app in dist/desktop/<os>[-<arch>][-unpacked]/
 #   dist     build, then the installers: macOS DMG and zip, Windows NSIS
 #            setup, Linux AppImage and deb
 #   install  (macOS) the .app, copied over INSTALL_DIR/<app> (default
-#            /Applications). A copy running from there is quit first (its
-#            core stops, the terminal cores keep running) and started again
-#            afterwards.
+#            /Applications)
 #   dev      build, then unpackaged Electron in development mode
 #
-# SKIP_BUILD=1 packages what `build` made (the release workflow's signing
-# step, the only one with the secrets, runs only electron-builder).
+# Stage 2 CI inputs:
+#   STAGE1_ARCHIVES=<dir>  directory holding Stage 1's 6 *.tar.gz + SHA256SUMS
+#   STAGE1_HUB_EXE=<file>  explicit Stage 1 hub binary (required when os=win
+#                          and STAGE1_ARCHIVES is used)
+#   SKIP_BUILD=1           package what `build` already staged
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -31,15 +35,12 @@ case "$(uname -s)" in
 esac
 os=${DESKTOP_OS:-$host}
 case "$os" in
-  mac) goos=darwin ;;
-  win) goos=windows ;;
-  linux) goos=linux ;;
+  mac|win|linux) ;;
   *) echo "DESKTOP_OS must be mac, win or linux" >&2; exit 2 ;;
 esac
 DESKTOP_ARCH=${ARCH:-$(node -p process.arch)}
 case "$DESKTOP_ARCH" in
-  arm64) go_arch=arm64 ;;
-  x64) go_arch=amd64 ;;
+  arm64|x64) ;;
   *) echo "ARCH must be arm64 or x64" >&2; exit 2 ;;
 esac
 if [[ "$os" == win && "$DESKTOP_ARCH" != x64 ]]; then
@@ -58,18 +59,75 @@ if [[ "$mode" == install && "$os" != mac ]]; then
   echo "install copies the macOS app; use the installers elsewhere (mode dist)." >&2
   exit 2
 fi
+export DESKTOP_OS="$os"
 export DESKTOP_ARCH
+
 INSTALL_DIR=${INSTALL_DIR:-/Applications}
 if [[ "$mode" == install && ! ( -d "$INSTALL_DIR" && -w "$INSTALL_DIR" ) ]]; then
   echo "$INSTALL_DIR is not a writable directory." >&2
   exit 1
 fi
-# VERSION is optional. Without it the core reports `git describe` like
-# scripts/build.sh, and the app metadata uses desktop/package.json.
+
+# The app's version is its hub's (electron-builder.cjs reads VERSION).
+source scripts/version.sh
+
+slug=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
+cpu=${DESKTOP_ARCH/x64/amd64}
+stage=dist/desktop-stage
 
 if [[ -z "${SKIP_BUILD:-}" ]]; then
+  if [[ -n "${STAGE1_ARCHIVES:-}" && -z "${STAGE1_HUB_EXE:-}" && "$os" == win ]]; then
+    echo "STAGE1_HUB_EXE is required when STAGE1_ARCHIVES is set for Windows." >&2
+    exit 2
+  fi
+  archives_dir=${STAGE1_ARCHIVES:-}
+  if [[ -z "$archives_dir" ]]; then
+    echo "==> Stage 1: building full cross-platform binaries"
+    WITH_WINDOWS=$([[ "$os" == win ]] && echo 1 || echo 0) scripts/build.sh
+    archives_dir=dist/release
+  fi
+
+  rm -rf "$stage"
+  mkdir -p "$stage/bin" "$stage/machines" "$stage/licenses"
+
+  # Copy all 6 Stage 1 machine release archives + SHA256SUMS.
+  cp "$archives_dir/SHA256SUMS" "$stage/machines/SHA256SUMS"
+  for k in linux-amd64 linux-arm64 linux-amd64-musl linux-arm64-musl darwin-amd64 darwin-arm64; do
+    cp "$archives_dir/$slug-$k.tar.gz" "$stage/machines/$slug-$k.tar.gz"
+  done
+
+  # Extract third-party licenses from a Stage 1 archive so Stage 2 needs no
+  # separate backend/web build when STAGE1_ARCHIVES is supplied.
+  ref_pkg="$slug-linux-amd64"
+  tmp_lic=$(mktemp -d)
+  tar -xzf "$archives_dir/$ref_pkg.tar.gz" -C "$tmp_lic" "$ref_pkg/licenses.md" "$ref_pkg/licenses"
+  cp "$tmp_lic/$ref_pkg/licenses.md" "$stage/licenses/licenses.md"
+  cp -R "$tmp_lic/$ref_pkg/licenses/herdr-core" "$stage/licenses/herdr-core"
+  cp -R "$tmp_lic/$ref_pkg/licenses/herdr-detect" "$stage/licenses/herdr-detect"
+  cp -R "$tmp_lic/$ref_pkg/licenses/encoder" "$stage/licenses/encoder"
+  rm -rf "$tmp_lic"
+
+  # Place this desktop target's Stage 1 compiled Bun hub executable.
+  # Unless STAGE1_HUB_EXE is explicitly given, POSIX targets always extract
+  # the hub from the selected Stage 1 archive so an older dist/<slug>-<key>
+  # from a previous local build cannot be mixed with newer machine archives.
+  if [[ -n "${STAGE1_HUB_EXE:-}" ]]; then
+    if [[ "$os" == win ]]; then
+      cp "$STAGE1_HUB_EXE" "$stage/bin/$slug.exe"
+    else
+      cp "$STAGE1_HUB_EXE" "$stage/bin/$slug"
+      chmod 755 "$stage/bin/$slug"
+    fi
+  elif [[ "$os" == win ]]; then
+    cp "dist/$slug-windows-amd64.exe" "$stage/bin/$slug.exe"
+  else
+    hub_os=$([[ "$os" == mac ]] && echo darwin || echo linux)
+    hub_key="$hub_os-$cpu"
+    tar -xzf "$archives_dir/$slug-$hub_key.tar.gz" -O "$slug-$hub_key/$slug" > "$stage/bin/$slug"
+    chmod 755 "$stage/bin/$slug"
+  fi
+
   pnpm -C desktop install --frozen-lockfile
-  TARGETS="$goos/$go_arch" scripts/build.sh
   pnpm -C desktop build
 fi
 
@@ -82,7 +140,15 @@ done
 builder=(pnpm -C desktop exec electron-builder "--$os" "--$DESKTOP_ARCH" --publish never)
 case "$mode" in
   build) ;;
-  dev) pnpm -C desktop start ;; # unpackaged Electron always runs in development mode
+  dev)
+    env_prefix=$(node -p "'${slug}'.toUpperCase().replaceAll('-', '_') + '_'")
+    hub_bin_var="${env_prefix}HUB_BIN"
+    agent_dir_var="${env_prefix}AGENT_DIR"
+    hub_exe="$slug$([[ "$os" == win ]] && echo .exe || true)"
+    export "${hub_bin_var}=${!hub_bin_var:-$PWD/$stage/bin/$hub_exe}"
+    export "${agent_dir_var}=${!agent_dir_var:-$PWD/$stage/machines}"
+    pnpm -C desktop start
+    ;;
   app|install) "${builder[@]}" --dir ;;
   dist) "${builder[@]}" ;;
 esac
@@ -91,14 +157,15 @@ esac
 name=$(sed -n "s/^export const APP_NAME = '\\(.*\\)';$/\\1/p" web/src/brand.ts)
 built=dist/desktop/mac$([[ "$DESKTOP_ARCH" == x64 ]] || echo "-$DESKTOP_ARCH")/$name.app
 dest=$INSTALL_DIR/$name.app
-test -d "$built"
-# The installed app's main process; its helpers and core run from other paths.
+if [[ ! -d "$built" ]]; then
+  echo "electron-builder made no $built (ARCH=$DESKTOP_ARCH); nothing installed." >&2
+  exit 1
+fi
 main="^$dest/Contents/MacOS/$name( |\$)"
 reopen=
 if pgrep -f "$main" >/dev/null; then
   echo "==> quitting $dest"
   reopen=1
-  # SIGTERM quits like the menu: the app stops its core (up to 20 s) first.
   pkill -TERM -f "$main" || true
   for _ in $(seq 60); do
     pgrep -f "$main" >/dev/null || break
@@ -110,7 +177,6 @@ if pgrep -f "$main" >/dev/null; then
   fi
 fi
 echo "==> installing $dest"
-# Copied beside the old app first, so a failed copy leaves that one in place.
 tmp=$INSTALL_DIR/.$name.app.installing
 rm -rf "$tmp"
 ditto "$built" "$tmp"

@@ -1,0 +1,5 @@
+# Always remove job containers on exit so interrupted local CI runs do not
+# accumulate stopped containers. Runner images (-P ubuntu-24.04=...) are
+# selected explicitly by scripts/ci-local.sh so integration/desktop/e2e always
+# receive the Xvfb-equipped derivative image without .actrc overriding it.
+--rm

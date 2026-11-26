@@ -1,5 +1,5 @@
 // The variable vault (docs/features/30-variable-vault.md): environment
-// variables kept encrypted on the core host, which coding agents on the
+// variables kept encrypted on the hub host, which coding agents on the
 // machines read through an MCP server. Its panel in the right sidebar, and
 // the approval prompts and the file dialogs (export, import) on every page:
 // openVaultExport() and openVaultImport() open them from anywhere.

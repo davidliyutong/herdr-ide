@@ -41,6 +41,13 @@ export function ensureTabStop(list: HTMLElement | null, preferred: string) {
 /** The menu key, or Shift+F10. */
 export const isMenuKey = (e: { key: string; shiftKey: boolean }) => e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10');
 
+/** Rename key: Enter on macOS (as Finder), F2 on Windows and Linux. */
+export const isRenameKey = (e: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean }, mac = isMac) =>
+  !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && e.key === (mac ? 'Enter' : 'F2');
+
+/** Hint shown in menus for renaming a file or folder. */
+export const renameKeyHint = (mac = isMac) => (mac ? '↩' : 'F2');
+
 /** Delete, or ⌘Backspace on macOS (as Finder). */
 export const isDeleteKey = (e: { key: string; metaKey: boolean }, mac = isMac) =>
   e.key === 'Delete' || (mac && e.metaKey && e.key === 'Backspace');

@@ -66,21 +66,21 @@ describe('a view’s element', () => {
     const el = document.querySelector('.browser-layer iframe');
     expect(el).not.toBeNull();
     // The pane moves: out of its tab into a tab of its own, selected.
-    await act(async () => h!.core.model.mutate('a', (l) => L.moveToNewTab(l, 'view:p1', 'w1')));
+    await act(async () => h!.hub.model.mutate('a', (l) => L.moveToNewTab(l, 'view:p1', 'w1')));
     await flush();
     expect(document.querySelector('.browser-layer iframe')).toBe(el);
     // Another tab is shown: the pane is off screen, its element stays.
-    await act(async () => h!.core.model.mutate('a', (l) => L.selectTab(l, 'w1', 0)));
+    await act(async () => h!.hub.model.mutate('a', (l) => L.selectTab(l, 'w1', 0)));
     await flush();
     expect(document.querySelector('.browser-layer iframe')).toBe(el);
     expect(Object.values(useFrames.getState().frames).map((f) => f.hidden !== undefined)).toEqual([true]);
     // Shown again.
-    await act(async () => h!.core.model.mutate('a', (l) => L.selectTab(l, 'w1', 1)));
+    await act(async () => h!.hub.model.mutate('a', (l) => L.selectTab(l, 'w1', 1)));
     await flush();
     expect(document.querySelector('.browser-layer iframe')).toBe(el);
     expect(Object.values(useFrames.getState().frames).map((f) => f.hidden)).toEqual([undefined]);
     // Closed: the view leaves its layout and its frame with it.
-    await act(async () => h!.core.model.mutate('a', (l) => L.closePane(l, 'view:p1')));
+    await act(async () => h!.hub.model.mutate('a', (l) => L.closePane(l, 'view:p1')));
     await flush();
     expect(document.querySelector('.browser-layer iframe')).toBeNull();
     expect(useFrames.getState().frames).toEqual({});
@@ -108,7 +108,7 @@ describe('a view’s element', () => {
         '200px',
       ]);
       // Off screen it is hidden, not moved.
-      await act(async () => h!.core.model.mutate('a', (l) => L.selectTab(l, 'w1', 0)));
+      await act(async () => h!.hub.model.mutate('a', (l) => L.selectTab(l, 'w1', 0)));
       await flush();
       expect(document.querySelector<HTMLElement>('.browser-layer iframe')!.style.display).toBe('none');
     } finally {

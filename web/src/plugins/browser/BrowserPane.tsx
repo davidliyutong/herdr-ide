@@ -450,7 +450,7 @@ function ListeningPorts({ m, onOpen }: { m: string; onOpen(port: number): void }
   useEffect(() => {
     let dead = false;
     setPorts('loading');
-    // On this computer the core's own port is no page for a pane.
+    // On this computer the hub's own port is no page for a pane.
     const mine = (p: ListeningPort) => !isRemote(m) && parseAddress(String(p.port)).kind !== 'page';
     browserApi.listening(m).then(
       (p) => !dead && setPorts(p.filter((x) => !mine(x))),

@@ -1,0 +1,48 @@
+// The terminal history plugin's Chinese messages.
+import type { en } from './en';
+
+export const zhCN: Record<keyof typeof en, string> = {
+  'history.title': '终端历史',
+  'history.description': '把终端输出的快照保存在各台机器的磁盘上，终端核心重新启动后仍可查看终端之前显示的内容。',
+  'settings.section.history': '终端历史',
+  'settings.history.capture': '保存终端输出的快照',
+  'settings.history.capture.desc':
+    '定期把终端显示的内容写入这台机器的磁盘，以便终端核心重新启动（如重启机器）后查看。终端输出可能包含机密信息，例如终端里打印出的密钥、令牌和密码：它们也会被写入那台机器的磁盘。',
+  'settings.history.interval': '快照间隔',
+  'settings.history.interval.desc': '终端输出变化时，每隔多久保存一次。',
+  'settings.history.interval.unit': '秒',
+  'settings.history.lines': '每个终端的行数',
+  'settings.history.lines.desc': '一个快照最多保留的终端输出行数。',
+  'settings.history.lines.unit': '行',
+  'settings.history.maxTerminals': '终端数',
+  'settings.history.maxTerminals.desc': '一台机器上最多为多少个终端保存快照；超出时先删除最旧的快照。',
+  'settings.history.maxTotalMB': '磁盘空间',
+  'settings.history.maxTotalMB.desc': '快照在一台机器上最多占用的空间；超出时先删除最旧的快照。',
+  'settings.history.maxTotalMB.unit': 'MB',
+  'settings.history.days': '保留天数',
+  'settings.history.days.desc': '早于这个天数的快照会被删除。',
+  'settings.history.days.unit': '天',
+  'history.note': '-- 保存于 {time} 的输出；上面的程序已经结束 --',
+  'history.settings.saved': '已保存的输出',
+  'history.settings.noMachine': '当前没有显示任何机器。',
+  'history.settings.loading': '正在读取快照…',
+  'history.settings.none': '{machine} 上没有快照。',
+  'history.settings.count': '{machine} 上保存了 {count} 个终端输出快照，共 {size}。',
+  'history.settings.restoreScreenOn':
+    '{machine} 上终端核心自带的 restore_screen 已开启：正常停止后，它会自己在新 shell 上方显示被替换程序的最后一屏，因此只有在机器重启后才会显示已保存的输出；本应用从不修改终端核心的配置文件。',
+  'history.settings.restoreScreenOff':
+    '{machine} 上终端核心自带的 restore_screen 未开启：终端核心每次重新启动后，都会在新 shell 上方显示已保存的输出；本应用从不修改终端核心的配置文件。',
+  'history.settings.clear': '清除已保存的输出',
+  'history.settings.clearTitle': '清除已保存的输出？',
+  'history.settings.clearMessage': '将从 {machine} 的磁盘上删除所有终端的快照。在新 shell 上方显示已保存输出的终端将不再显示它。',
+  'history.settings.clearConfirm': '清除',
+  'history.settings.removed': '已删除 {count} 个终端的快照。',
+  'history.error.offline': '机器未连接。',
+  'history.error.network': '服务器没有响应。',
+  'history.error.busy': '机器正在保存快照，请稍后再试。',
+  'history.error.not_found': '快照已经不存在。',
+  'history.error.transport': '机器没有响应。',
+  'history.error.bad_reply': '无法理解机器的响应。',
+  'history.error.io': '机器无法读写已保存的输出。',
+  'history.error.timeout': '机器响应超时。',
+};

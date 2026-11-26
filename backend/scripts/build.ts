@@ -1,0 +1,166 @@
+// Builds the hub's executable: hosts/bun/main.ts compiled by Bun with the
+// payloads (kernel/payloads.ts) embedded as one tar archive.
+//
+//   bun scripts/build.ts --out FILE [--target bun-linux-x64-baseline]
+//     [--version V] [--web DIR] [--release-url URL] [--hc DIR] [--ext DIR]
+//     [--encoder DIR] [--gui DIR] [--gpupick DIR] [--payload-out DIR]
+//
+// The executable is both the hub (`serve`, `desktop`) and the machine build
+// of its own platform (`node`): it carries its platform's herdr-core
+// (embedded as herdr-core.gz, which its node installs), the SHA-256 of
+// every herdr-core of --hc (machine/hc.json, which the hub holds the
+// machines' builds to), machine/release.json (its version, its platform and
+// the release's download URL), the bridge extension (--ext <bridge>.vsix),
+// and the Linux video encoders (--encoder encoder-linux-{amd64,arm64}.gz,
+// embedded in every hub executable so any hub can provision remote Linux
+// machines, and read directly by a Linux machine's carriedEncoder()). A
+// build for Linux also carries the GUI helper of its architecture
+// (gui-helper.gz, from --gui: dist/deps/gui-helper) and the GPU selection
+// library (gpupick.so, from --gpupick: dist/deps/gpupick), both fetched and
+// verified by fetch-deps.ts.
+//
+// Every executable is compiled without autoloading a .env or bunfig.toml
+// of the directory it runs in, and reproducibly for one output path (what
+// it embeds is staged beside it).
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { keyOfTarget } from '../kernel/machines/transport/builds.ts';
+
+const { values: o } = parseArgs({
+  options: {
+    out: { type: 'string' },
+    target: { type: 'string', default: '' },
+    version: { type: 'string', default: 'dev' },
+    web: { type: 'string', default: '' },
+    'release-url': { type: 'string', default: '' },
+    'payload-out': { type: 'string', default: '' },
+    hc: { type: 'string', default: '' },
+    ext: { type: 'string', default: '' },
+    encoder: { type: 'string', default: '' },
+    gui: { type: 'string', default: '' },
+    gpupick: { type: 'string', default: '' },
+  },
+});
+if (!o.out) throw new Error('--out is required');
+if (o['release-url'] && !/^https:\/\/[^\s"'\\]+$/.test(o['release-url'])) throw new Error('--release-url is an https URL');
+
+/** The platform of the executable: of --target, else this host's. */
+function ownKey(target: string): string {
+  if (target) return keyOfTarget(target);
+  if (process.platform === 'win32') return '';
+  return `${process.platform}-${process.arch === 'x64' ? 'amd64' : process.arch}`;
+}
+
+const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
+/** A string of the Agent SDK's code (sdk.mjs), in no source of ours. */
+const SDK_MARKER = 'CLAUDE_SDK_CAN_USE_TOOL' + '_SHADOWED';
+const entries: Record<string, Uint8Array> = {};
+/** Files embedded beside the payload archive (Bun.embeddedFiles). */
+const extra: Record<string, Uint8Array> = {};
+const walk = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? walk(join(dir, e.name)) : e.isFile() ? [join(dir, e.name)] : [],
+  );
+if (o.web) for (const f of walk(o.web)) entries[`web/${relative(o.web, f).replaceAll('\\', '/')}`] = readFileSync(f);
+const key = ownKey(o.target);
+// The platform, os-arch, of the herdr-core this build carries.
+const ownPlatform = key.replace(/-musl$/, '');
+entries['machine/release.json'] = Buffer.from(
+  JSON.stringify({ version: o.version, key, ...(o['release-url'] ? { release: o['release-url'].replace(/\/$/, '') } : {}) }),
+);
+const hcs: Record<string, string> = {};
+if (o.hc)
+  for (const name of readdirSync(o.hc)) {
+    const m = /^hc-([a-z0-9]+-[a-z0-9]+)\.gz$/.exec(name);
+    if (m) hcs[m[1]!] = sha256(gunzipSync(readFileSync(join(o.hc, name))));
+  }
+entries['machine/hc.json'] = Buffer.from(JSON.stringify(hcs));
+// Without one (tests), its node installs none and runs the machine's.
+if (key && hcs[ownPlatform]) extra['herdr-core.gz'] = readFileSync(join(o.hc, `hc-${ownPlatform}.gz`));
+else if (key) console.warn(`${o.out}: no herdr-core for ${ownPlatform} (--hc)`);
+if (ownPlatform.startsWith('linux-') && (o.gui || o.gpupick)) {
+  const arch = ownPlatform.slice('linux-'.length);
+  const recorded = (dir: string, list: string, name: string) => {
+    const listPath = join(dir, list);
+    if (!existsSync(listPath)) throw new Error(`${listPath} is missing; run 'bun backend/scripts/fetch-deps.ts'`);
+    const line = readFileSync(listPath, 'utf8')
+      .split('\n')
+      .find((l) => l.endsWith(`  ${name}`));
+    const b = readFileSync(join(dir, name));
+    if (!line || line.split(' ')[0] !== sha256(b)) throw new Error(`${join(dir, name)} is not the one ${list} records`);
+    return b;
+  };
+  if (o.gui) extra['gui-helper.gz'] = gzipSync(recorded(o.gui, 'gui-helper.sha256', `gui-helper-linux-${arch}`), { level: 9 });
+  if (o.gpupick) extra['gpupick.so'] = recorded(o.gpupick, 'gpupick.sha256', `gpupick-linux-${arch}.so`);
+}
+if (o.ext) for (const name of readdirSync(o.ext)) if (name.endsWith('.vsix')) entries[`ext/${name}`] = readFileSync(join(o.ext, name));
+if (o.encoder) {
+  if (!existsSync(o.encoder)) throw new Error(`${o.encoder} is missing; run 'bun backend/scripts/fetch-deps.ts'`);
+  for (const plat of ['linux-amd64', 'linux-arm64']) {
+    const name = `encoder-${plat}.gz`;
+    const p = join(o.encoder, name);
+    if (!existsSync(p)) throw new Error(`missing ${p}; run 'bun backend/scripts/fetch-deps.ts'`);
+    entries[`encoder/${name}`] = readFileSync(p);
+  }
+}
+
+if (o['payload-out'])
+  for (const [path, b] of Object.entries(entries)) {
+    if (path.startsWith('web/')) continue;
+    const f = join(o['payload-out'], path);
+    mkdirSync(dirname(f), { recursive: true });
+    writeFileSync(f, b);
+  }
+
+// Beside the output, at a path of its own: Bun names the files in the
+// executable, which then depends on nothing but the output's path. The
+// compile runs in it: Bun leaves a .<hash>.bun-build copy of the
+// executable in its working directory, which goes with the stage.
+const stage = resolve(`${o.out}.files`);
+rmSync(stage, { recursive: true, force: true });
+mkdirSync(stage, { recursive: true });
+try {
+  const payload = join(stage, 'payload.tar');
+  await Bun.Archive.write(payload, entries);
+  const files = [payload];
+  for (const [name, b] of Object.entries(extra)) {
+    writeFileSync(join(stage, name), b);
+    files.push(join(stage, name));
+  }
+  const args = [
+    'build',
+    '--compile',
+    '--minify-syntax',
+    '--no-compile-autoload-dotenv',
+    '--no-compile-autoload-bunfig',
+    '--entry-naming=[name].[ext]',
+    '--asset-naming=[name].[ext]',
+    `--define=BUILD_VERSION=${JSON.stringify(o.version)}`,
+  ];
+  if (o.target) args.push(`--target=${o.target}`);
+  const hosts = join(import.meta.dir, '..', 'hosts', 'bun');
+  args.push(
+    join(hosts, 'main.ts'),
+    join(hosts, 'state-worker.ts'),
+    join(hosts, '..', 'common', 'hub-state-worker.ts'),
+    ...files,
+    '--outfile',
+    resolve(o.out),
+  );
+  const p = Bun.spawnSync([process.execPath, ...args], { cwd: stage, stdout: 'inherit', stderr: 'inherit' });
+  if (p.exitCode !== 0) process.exit(p.exitCode ?? 1);
+  // Anthropic's Agent SDK is fetched by the machines that use it, never
+  // shipped (features/chat/claudesdk.ts): an executable with its code in it
+  // is not one to release.
+  if (readFileSync(o.out).includes(SDK_MARKER)) {
+    rmSync(o.out, { force: true });
+    console.error(`${o.out}: it holds @anthropic-ai/claude-agent-sdk's code (a value import of it outside the tests?); removed`);
+    process.exit(1);
+  }
+  console.log(`${o.out}: ${Object.keys(entries).length} payload files`);
+} finally {
+  rmSync(stage, { recursive: true, force: true });
+}

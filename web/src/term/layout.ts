@@ -3,7 +3,7 @@
 // leaves are terminals, VS Code views and previews of a file. It is the
 // document "layout" in the machine's terminal core
 // (docs/features/22-terminal-protocol.md), tested with the vectors in
-// design/testdata/layout. The functions return new values and never change
+// spec/vectors/layout. The functions return new values and never change
 // their arguments; a layout is its own document value, and fields this
 // version does not know are kept at every level.
 
@@ -16,8 +16,65 @@ export type Axis = 'horizontal' | 'vertical';
 /** Fields of a newer client, written back as they were. */
 type Extra = { [key: string]: unknown };
 
-/** A terminal of the machine's terminal core, by its address. */
-export type TerminalLeaf = Extra & { terminal: string };
+/** A terminal of the machine's terminal core, by its address. A coding
+ * agent's terminal may say which session it runs; read from a document, a
+ * field of another type or shape is left out, and so is one earlier
+ * versions wrote that this one drops (terminalFields). */
+export type TerminalLeaf = Extra & {
+  terminal: string;
+  /** The session of the agent in it (a lower-case UUID, isSessionId). */
+  session?: string;
+  /** The address of the terminal this one took the place of (isAddress). */
+  before?: string;
+};
+
+/** The fields of a terminal leaf whose values are checked, and the only
+ * ones setTerminalFields changes. */
+export const TERMINAL_FIELDS = ['session', 'before'] as const;
+
+/** Fields of a terminal leaf that earlier versions wrote and that are
+ * dropped when a document is read: render ("native": the pane showed the
+ * agent's conversation over its terminal). */
+export const DROPPED_TERMINAL_FIELDS = ['render'] as const;
+
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// A terminal core's addresses are short words of letters and digits ("t1",
+// "t3q"): the form takes them, and refuses what could be read as a path
+// ("." or "..") or an option ("-rf").
+const ADDRESS = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+/** Whether s has the form of a terminal's address: letters, digits, "_"
+ * and "-", at most 64, starting with a letter or digit. */
+export function isAddress(s: unknown): s is string {
+  return typeof s === 'string' && ADDRESS.test(s);
+}
+
+/** Whether s is an agent's session id: a lower-case UUID
+ * (agentkinds.ValidSessionID). */
+export function isSessionId(s: unknown): s is string {
+  return typeof s === 'string' && SESSION_ID.test(s);
+}
+
+/** Whether a checked field of a terminal leaf has a value it may have. */
+function validTerminalField(field: (typeof TERMINAL_FIELDS)[number], v: unknown): boolean {
+  if (field === 'session') return isSessionId(v);
+  return isAddress(v);
+}
+
+/** A terminal leaf without the checked fields whose values are not what
+ * they may be, and without the dropped ones; the same leaf when it has
+ * none of either. */
+function terminalFields(leaf: TerminalLeaf): TerminalLeaf {
+  const bad = [
+    ...TERMINAL_FIELDS.filter((f) => Object.hasOwn(leaf, f) && !validTerminalField(f, leaf[f])),
+    ...DROPPED_TERMINAL_FIELDS.filter((f) => Object.hasOwn(leaf, f)),
+  ];
+  if (!bad.length) return leaf;
+  const next: TerminalLeaf = { ...leaf };
+  for (const f of bad) delete next[f];
+  return next;
+}
+
 /** VS Code of the machine for a folder ("" for the one code-server opens). */
 export type CodeView = Extra & { id: string; folder: string };
 export type CodeLeaf = Extra & { code: CodeView };
@@ -39,8 +96,12 @@ export type Tab = Extra & {
   /** Set only when the user named the tab. */
   name?: string;
   /** Pinned: it stays left of the others, Close Others and Close to the
-   * Right leave it, and it shows a pin where the others have ×. */
+   * Right leave it, pane.close leaves its last pane, and it shows a pin
+   * where the others have ×. */
   pinned?: true;
+  /** Muted: its agents and terminals make no sound and no notification;
+   * their status still shows. */
+  muted?: true;
   root: Node;
   /** The pane with the keyboard focus (paneKey). */
   focused: string;
@@ -54,6 +115,9 @@ export type Workspace = Extra & {
   cwd: string;
   tabs: Tab[];
   selected: number;
+  /** Muted: its tabs' agents and terminals make no sound and no
+   * notification, as each muted tab's. */
+  muted?: true;
 };
 
 export type Layout = Extra & { version: 2; workspaces: Workspace[]; selected: number };
@@ -120,10 +184,23 @@ export const panesOf = (node: Node): string[] => leavesOf(node).map((l) => paneK
 /** The addresses of a tree's terminals, in order. */
 export const terminalsOf = (node: Node): string[] => leavesOf(node).flatMap((l) => (isTerminalLeaf(l) ? [l.terminal] : []));
 
+/** A plugin's pane: its key (view:<id>) and its view. */
+export interface ViewPane {
+  key: string;
+  view: PluginView;
+}
+
+/** The plugins' panes of a tree, in order. */
+export const viewsOf = (node: Node): ViewPane[] =>
+  leavesOf(node).flatMap((l) => (isPluginLeaf(l) ? [{ key: viewKey(l.view.id), view: l.view }] : []));
+
 export const tabPanes = (tab: Tab): string[] => panesOf(tab.root);
 export const tabTerminals = (tab: Tab): string[] => terminalsOf(tab.root);
 export const workspaceTerminals = (ws: Workspace): string[] => ws.tabs.flatMap(tabTerminals);
 export const layoutTerminals = (layout: Layout): string[] => layout.workspaces.flatMap(workspaceTerminals);
+export const tabViews = (tab: Tab): ViewPane[] => viewsOf(tab.root);
+export const workspaceViews = (ws: Workspace): ViewPane[] => ws.tabs.flatMap(tabViews);
+export const layoutViews = (layout: Layout): ViewPane[] => layout.workspaces.flatMap(workspaceViews);
 export const selectedWorkspace = (layout: Layout): Workspace | undefined => layout.workspaces[layout.selected];
 export const selectedTab = (layout: Layout): Tab | undefined => {
   const ws = selectedWorkspace(layout);
@@ -215,7 +292,7 @@ export function newId(): string {
 // Reading a document.
 
 function parseNode(raw: Extra): Node {
-  if (typeof raw.terminal === 'string' && raw.terminal) return { ...raw };
+  if (typeof raw.terminal === 'string' && raw.terminal) return terminalFields({ ...raw, terminal: raw.terminal });
   if (id(raw.code)) {
     const code = raw.code as Extra;
     return { ...raw, code: { ...code, id: code.id as string, folder: text(code.folder) } };
@@ -232,13 +309,14 @@ function parseNode(raw: Extra): Node {
 
 function parseTab(raw: unknown): Tab | null {
   if (!isObject(raw) || !isObject(raw.root)) return null;
-  const { name, root: rawRoot, focused, pinned, ...extra } = raw;
+  const { name, root: rawRoot, focused, pinned, muted, ...extra } = raw;
   const root = parseNode(rawRoot);
   const panes = panesOf(root);
   return {
     ...extra,
     ...(typeof name === 'string' && name ? { name } : {}),
     ...(pinned === true ? { pinned: true as const } : {}),
+    ...(muted === true ? { muted: true as const } : {}),
     root,
     focused: typeof focused === 'string' && panes.includes(focused) ? focused : (panes[0] ?? ''),
   };
@@ -246,9 +324,17 @@ function parseTab(raw: unknown): Tab | null {
 
 function parseWorkspace(raw: unknown, seen: ReadonlySet<string>): Workspace | null {
   if (!isObject(raw) || typeof raw.id !== 'string' || !raw.id || seen.has(raw.id)) return null;
-  const { id: wsId, name, cwd, tabs: rawTabs, selected, ...extra } = raw;
+  const { id: wsId, name, cwd, tabs: rawTabs, selected, muted, ...extra } = raw;
   const tabs = (Array.isArray(rawTabs) ? rawTabs : []).map(parseTab).filter((t): t is Tab => t !== null);
-  return { ...extra, id: wsId as string, name: text(name), cwd: text(cwd), tabs, selected: readIndex(selected, tabs.length) };
+  return {
+    ...extra,
+    id: wsId as string,
+    name: text(name),
+    cwd: text(cwd),
+    tabs,
+    selected: readIndex(selected, tabs.length),
+    ...(muted === true ? { muted: true as const } : {}),
+  };
 }
 
 /**
@@ -404,6 +490,33 @@ export function pinTab(layout: Layout, workspace: string, tab: number, pinned: b
     const target = tabs.filter((t, i) => t.pinned && i !== tab).length;
     return { ...ws, tabs: moved(tabs, tab, target), selected: afterMove(ws.selected, tab, target) };
   });
+}
+
+/** Mutes a tab or lets it sound again. */
+export function muteTab(layout: Layout, workspace: string, tab: number, muted: boolean): Layout {
+  return updateWorkspace(layout, workspace, (ws) => {
+    const current = ws.tabs[tab];
+    if (!current || !!current.muted === muted) return ws;
+    const { muted: _, ...rest } = current;
+    const next: Tab = muted ? { ...rest, muted: true } : rest;
+    return { ...ws, tabs: ws.tabs.map((t, i) => (i === tab ? next : t)) };
+  });
+}
+
+/** Mutes a workspace or lets it sound again. */
+export function muteWorkspace(layout: Layout, workspace: string, muted: boolean): Layout {
+  return updateWorkspace(layout, workspace, (ws) => {
+    if (!!ws.muted === muted) return ws;
+    const { muted: _, ...rest } = ws;
+    return muted ? { ...rest, muted: true } : rest;
+  });
+}
+
+/** Whether the pane key is in a muted tab or workspace. */
+export function paneMuted(layout: Layout, key: string): boolean {
+  const at = locate(layout, key);
+  const ws = at ? layout.workspaces[at.workspace] : undefined;
+  return !!ws && (!!ws.muted || !!ws.tabs[at!.tab]?.muted);
 }
 
 /** A tree whose plugin views shown as previews (`preview: true`) are kept. */
@@ -578,6 +691,14 @@ export function splitFocused(layout: Layout, axis: Axis, address: string): Layou
   return splitPane(layout, tab.focused, axis, { terminal: address });
 }
 
+/** Whether a pane is the only one of a pinned tab: closing it would close
+ * the tab, which pane.close does not do. */
+export function onlyPaneOfPinnedTab(layout: Layout, key: string): boolean {
+  const at = locate(layout, key);
+  const tab = at && layout.workspaces[at.workspace].tabs[at.tab];
+  return !!tab?.pinned && tabPanes(tab).length === 1;
+}
+
 /**
  * Removes a pane from every tab: its sibling takes its parent's place and the
  * focus, and a tab without panes goes. Workspaces stay.
@@ -750,6 +871,34 @@ export function setViewFields(layout: Layout, key: string, fields: Extra): Layou
   const at = locate(layout, key)!;
   const ws = layout.workspaces[at.workspace];
   return withWorkspace(layout, at.workspace, { ...ws, tabs: ws.tabs.map((t, i) => (i === at.tab ? { ...t, root: swap(t.root) } : t)) });
+}
+
+/** Changes what a terminal's leaf says of its agent: the fields session and
+ * before (TERMINAL_FIELDS). A patch's other keys are ignored: the address
+ * stays, agent, pid and resume are restore.ts's, and a dropped field
+ * (DROPPED_TERMINAL_FIELDS) is never written. A field
+ * whose value is undefined or null is removed, and so is one whose value
+ * is not one a document may hold (terminalFields). Each leaf of the
+ * address (a malformed document may have two) is changed from its own
+ * fields. The same layout when nothing changes or the terminal is not in
+ * it. */
+export function setTerminalFields(layout: Layout, terminal: string, patch: Extra): Layout {
+  const fields = TERMINAL_FIELDS.filter((f) => Object.hasOwn(patch, f));
+  if (!fields.length) return layout;
+  return mapTerminals(layout, (leaf) => {
+    if (leaf.terminal !== terminal) return leaf;
+    let next: TerminalLeaf = leaf;
+    for (const f of fields) {
+      const v = patch[f];
+      const set = v !== undefined && v !== null && validTerminalField(f, v);
+      if (set ? Object.hasOwn(next, f) && next[f] === v : !Object.hasOwn(next, f)) continue;
+      // A copy with the field defined on it (never a write through a prototype).
+      next = { ...next };
+      if (set) Object.defineProperty(next, f, { value: v, enumerable: true, writable: true, configurable: true });
+      else delete next[f];
+    }
+    return next;
+  });
 }
 
 /** A workspace's panes of a plugin's kind, in the order of its tabs and their trees. */

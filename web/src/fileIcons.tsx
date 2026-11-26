@@ -1,5 +1,5 @@
 // File-type icons, as VS Code's file icon themes give them: lucide's icons
-// in the design tokens' file icon hues (design/tokens.json fileIcon,
+// in the design tokens' file icon hues (spec/tokens.json fileIcon,
 // --ds-file-icon-*). A name is looked up, case ignored, by its special
 // names first (package.json, Dockerfile, README…), then its compound
 // extensions (.d.ts, .test.ts, .tar.gz…), then its extension; folders by
@@ -61,7 +61,7 @@ import {
 } from 'lucide-react';
 import { t } from './i18n';
 
-/** The hues of design/tokens.json fileIcon. */
+/** The hues of spec/tokens.json fileIcon. */
 export const FILE_ICON_COLORS = ['blue', 'sky', 'teal', 'green', 'yellow', 'orange', 'red', 'pink', 'purple', 'brown', 'grey'] as const;
 export type FileIconColor = (typeof FILE_ICON_COLORS)[number];
 

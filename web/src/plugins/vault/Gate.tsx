@@ -1,15 +1,17 @@
 // The vault panel's gate: creating the vault's passphrase, unlocking this
 // page's session with it or with biometrics, or the session's bar with the
-// auto-lock's countdown and the lock.
-import { useState } from 'react';
+// lock. A lock forgets the vault's key: biometrics unlock a locked vault
+// only by an unlock entry of theirs, and only within vault.passphraseDays
+// of the passphrase (docs/features/30-variable-vault.md).
+import { useEffect, useRef, useState } from 'react';
 import { Fingerprint, Lock, LockOpen, Settings, ShieldCheck } from 'lucide-react';
 import { useStore } from '../../state/store';
 import { t } from '../../i18n';
-import { errorText, lockVault, openSession, openSessionWithProof, setAutoLock, setPassphrase, useVault } from './api';
-import { FreshPassphrase, StrengthBar, noManager } from './fields';
-import { AutoLockButton } from './AutoLock';
-import { prove, ways } from './proof';
-import { useWayName } from './useWay';
+import { settingValue } from '../../settings';
+import { errorText, loadVault, lockVault, openSession, openSessionWithProof, setPassphrase, useVault, VaultError } from './api';
+import { StrengthBar, noManager } from './fields';
+import { prove, unlockWays, unlockWithDesktop, unlockWithPrf, ways } from './proof';
+import { unlockWayName, useCanUnlock, useWayName } from './useWay';
 
 /** When the passphrase was set, so that one the user did not choose shows
  * (on hover). */
@@ -34,6 +36,19 @@ function SettingsButton() {
   );
 }
 
+/** Loads the vault again a moment after the auto-lock's time, should the
+ * hub's word that it locked not reach this page. */
+function useLockReload() {
+  const lockAt = useVault((s) => (s.session ? s.autoLock?.lockAt : undefined));
+  useEffect(() => {
+    const at = lockAt ? Date.parse(lockAt) : NaN;
+    if (Number.isNaN(at)) return;
+    // setTimeout takes at most 2^31-1 ms.
+    const id = setTimeout(() => void loadVault(), Math.min(Math.max(at - Date.now() + 1000, 1000), 2 ** 31 - 1));
+    return () => clearTimeout(id);
+  }, [lockAt]);
+}
+
 /** The vault's gate: a passphrase to create or to unlock this page's
  * session with; with a session, its bar. */
 export function Gate() {
@@ -42,8 +57,7 @@ export function Gate() {
   const readOnly = useStore((s) => s.readOnly);
   const since = useSince();
   const [changing, setChanging] = useState(false);
-  // A longer automatic lock, waiting for the passphrase (undefined: none).
-  const [longer, setLonger] = useState<number | null>();
+  useLockReload();
   if (readOnly) {
     return (
       <div className="callout">
@@ -65,57 +79,14 @@ export function Gate() {
           <button className="sm ghost" onClick={() => setChanging(!changing)}>
             {t('vault.changePassphrase')}
           </button>
-          <AutoLockButton onPassphrase={setLonger} />
           <button className="sm" onClick={() => void lockVault()}>
             <Lock /> {t('vault.lock')}
           </button>
           <SettingsButton />
         </span>
       </div>
-      {longer !== undefined && <LongerLock minutes={longer} onDone={() => setLonger(undefined)} />}
       {changing && <PassphraseCard kind="change" onDone={() => setChanging(false)} />}
     </>
-  );
-}
-
-/** The passphrase that lets the vault stay unlocked longer (or never lock
- * by itself) for this unlock: a session alone may not. */
-function LongerLock({ minutes, onDone }: { minutes: number | null; onDone(): void }) {
-  const [pass, setPass] = useState('');
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    setErr('');
-    setBusy(true);
-    try {
-      await setAutoLock(minutes, pass);
-      onDone();
-    } catch (e) {
-      setErr(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <form
-      className="vault-gate"
-      data-fresh="autolock"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
-      }}
-    >
-      <FreshPassphrase value={pass} onChange={setPass} />
-      {err && <div className="callout error">{err}</div>}
-      <div className="vault-gate-actions">
-        <button type="button" onClick={onDone}>
-          {t('dialog.cancel')}
-        </button>
-        <button className="primary" type="submit" disabled={busy || !pass}>
-          {t('vault.save')}
-        </button>
-      </div>
-    </form>
   );
 }
 
@@ -206,15 +177,29 @@ function PassphraseCard({ kind, onDone }: { kind: 'create' | 'change'; onDone?()
   );
 }
 
-/** Unlocking this page's session with the passphrase, or with biometrics
- * while the core holds the key (the vault unlocked, or locked since the
- * passphrase was last given). */
+/** The days within which biometrics unlock after the passphrase (the
+ * setting vault.passphraseDays), for the message that it is due. */
+function passphraseDays(): number {
+  const v = settingValue('vault.passphraseDays');
+  return typeof v === 'number' && v > 0 ? v : 14;
+}
+
+/** Unlocking this page's session with the passphrase or biometrics: a
+ * vault unlocked (another page's session) by an authenticator's proof; a
+ * locked one by an unlock entry this page can use (the desktop app's key,
+ * a credential's PRF), while the passphrase is not due. */
 function UnlockCard() {
-  const locked = useVault((s) => s.status?.locked);
+  const locked = useVault((s) => !!s.status?.locked);
   const guard = useVault((s) => s.guard);
+  const unlock = useVault((s) => s.unlock);
   const since = useSince();
-  const w = ways(guard);
+  const canUnlock = useCanUnlock();
+  const w = ways(locked ? null : guard);
   const wayName = useWayName(w);
+  const u = unlockWays(locked ? unlock : undefined, canUnlock);
+  const byUnlock = !!u.desktop || u.prf;
+  const byProof = !locked && (w.desktop || w.webauthn);
+  const field = useRef<HTMLInputElement>(null);
   const [pass, setPass] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -230,8 +215,7 @@ function UnlockCard() {
       setBusy(false);
     }
   };
-  // An authenticator's proof opens a session, and unlocks the vault while
-  // the core holds the key.
+  // An authenticator's proof opens a session of the unlocked vault.
   const withProof = async () => {
     setErr('');
     setBusy(true);
@@ -245,6 +229,26 @@ function UnlockCard() {
       setBusy(false);
     }
   };
+  // An unlock entry unlocks the locked vault; a cancel says nothing.
+  const withUnlock = async () => {
+    setErr('');
+    setBusy(true);
+    try {
+      await (u.desktop ? unlockWithDesktop() : unlockWithPrf());
+    } catch (e) {
+      const code = e instanceof VaultError ? e.code : '';
+      if (code === 'passphrase_due') setErr(t('vault.gate.due', { days: passphraseDays() }));
+      else if (code === 'unlock_stale') setErr(t('vault.gate.stale'));
+      else setErr(errorText(e));
+      if (code === 'passphrase_due' || code === 'unlock_stale') {
+        field.current?.focus();
+        // What the list offers changed with it.
+        void loadVault();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
   const forget = async () => {
     setErr('');
     try {
@@ -253,7 +257,7 @@ function UnlockCard() {
       setErr(errorText(e));
     }
   };
-  const byProof = w.desktop || w.webauthn;
+  const due = byUnlock && unlock?.due ? new Date(unlock.due) : undefined;
   return (
     <form
       className="vault-gate"
@@ -270,6 +274,7 @@ function UnlockCard() {
       </div>
       <div className="vault-unlock-row">
         <input
+          ref={field}
           className="input"
           type="password"
           {...noManager}
@@ -287,19 +292,29 @@ function UnlockCard() {
           <button type="button" data-action="proof-session" disabled={busy} onClick={() => void withProof()}>
             <Fingerprint /> {t('vault.gate.withProof', { way: wayName })}
           </button>
-          {locked && (
-            <button
-              type="button"
-              className="ghost"
-              data-action="forget-key"
-              title={t('vault.gate.forgetTitle')}
-              disabled={busy}
-              onClick={() => void forget()}
-            >
-              {t('vault.gate.forget')}
-            </button>
-          )}
         </div>
+      )}
+      {byUnlock && (
+        <div className="vault-unlock-row">
+          <button type="button" data-action="unlock-biometric" disabled={busy} onClick={() => void withUnlock()}>
+            <Fingerprint /> {t('vault.gate.withProof', { way: unlockWayName(u) })}
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            data-action="forget-key"
+            title={t('vault.gate.forgetTitle')}
+            disabled={busy}
+            onClick={() => void forget()}
+          >
+            {t('vault.gate.forget')}
+          </button>
+        </div>
+      )}
+      {due && !Number.isNaN(due.getTime()) && (
+        <p className="vault-hint" data-note="due">
+          {t('vault.gate.until', { date: due.toLocaleDateString() })}
+        </p>
       )}
       {err && <div className="callout error">{err}</div>}
     </form>

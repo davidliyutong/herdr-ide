@@ -1,0 +1,13 @@
+# Claude Code's own executables, which the Agent SDK carries as optional
+# packages: the chat host runs the user's claude, never one of these.
+ignoredOptionalDependencies:
+  - '@anthropic-ai/claude-agent-sdk-*'
+packageExtensions:
+  # The Agent SDK's main entry carries what it uses of these; only its /core
+  # entry, not used here, imports them.
+  '@anthropic-ai/claude-agent-sdk':
+    peerDependenciesMeta:
+      '@anthropic-ai/sdk':
+        optional: true
+      '@modelcontextprotocol/sdk':
+        optional: true

@@ -2,7 +2,7 @@
 //
 // - On a pane, their paths are pasted into it, shell-quoted, as a terminal
 //   does. Files of the pane's own machine are pasted where they are: in the
-//   desktop app, those on the local machine, since the core runs on the same
+//   desktop app, those on the local machine, since the hub runs on the same
 //   Mac. Other files are uploaded into the pane's working directory on its
 //   machine first (transfers.ts, shown in the uploads panel), keeping files
 //   already there; folders cannot be uploaded and are skipped with a note.

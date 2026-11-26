@@ -1,0 +1,313 @@
+{
+  "description": "Strokes against each platform's default bindings (the keybindings of spec/generated/registry.json, which the core writes): ctrl+b runs pane.leave (escaping focus to app chrome), direct shortcuts run their commands, and unbound keys give none (reaching the program in the terminal on their first press). Run by web/src/__tests__/keys.test.ts.",
+  "cases": [
+    {
+      "description": "ctrl+b escapes focus to app chrome while other keys of shells and editors reach the terminal on their first press",
+      "platforms": [
+        "mac",
+        "mac-browser",
+        "windows",
+        "windows-browser",
+        "linux",
+        "linux-browser"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "ctrl+b",
+        "c",
+        "ctrl+b",
+        "ctrl+b",
+        "shift+slash",
+        "space",
+        "ctrl+a",
+        "ctrl+c",
+        "ctrl+d",
+        "ctrl+k",
+        "ctrl+r",
+        "ctrl+w",
+        "ctrl+z",
+        "ctrl+space",
+        "ctrl+backslash",
+        "ctrl+bracketleft",
+        "alt+b",
+        "alt+f",
+        "alt+period",
+        "f1",
+        "f10",
+        "escape",
+        "tab",
+        "enter",
+        "q",
+        "ctrl+left"
+      ],
+      "results": [
+        "run:pane.leave",
+        "none",
+        "run:pane.leave",
+        "run:pane.leave",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none"
+      ]
+    },
+    {
+      "description": "the desktop app's direct shortcuts on macOS",
+      "platforms": [
+        "mac"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "cmd+t",
+        "cmd+shift+p",
+        "cmd+slash",
+        "cmd+w",
+        "cmd+k",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:tab.new",
+        "run:app.commandPalette",
+        "run:app.keyboardShortcuts",
+        "run:pane.close",
+        "none",
+        "run:pane.leave"
+      ]
+    },
+    {
+      "description": "browsers on macOS keep cmd+t; the palette is cmd+k",
+      "platforms": [
+        "mac-browser"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "cmd+k",
+        "cmd+slash",
+        "cmd+f",
+        "cmd+t",
+        "cmd+shift+p",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:app.commandPalette",
+        "run:app.keyboardShortcuts",
+        "run:find.open",
+        "none",
+        "none",
+        "run:pane.leave"
+      ]
+    },
+    {
+      "description": "the desktop app on Windows: ctrl+shift keys, Windows Terminal splits and Alt+Left/Right back/forward",
+      "platforms": [
+        "windows"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "ctrl+shift+p",
+        "ctrl+shift+slash",
+        "ctrl+shift+t",
+        "ctrl+shift+w",
+        "alt+shift+equal",
+        "alt+shift+minus",
+        "alt+left",
+        "ctrl+t",
+        "ctrl+w",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:app.commandPalette",
+        "run:app.keyboardShortcuts",
+        "run:tab.new",
+        "run:tab.close",
+        "run:pane.splitRight",
+        "run:pane.splitDown",
+        "run:pane.back",
+        "none",
+        "none",
+        "run:pane.leave"
+      ]
+    },
+    {
+      "description": "the desktop app on Linux: ctrl+shift keys, Linux terminal splits, Ctrl+Alt workspace switch and Alt+Left/Right",
+      "platforms": [
+        "linux"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "ctrl+shift+p",
+        "ctrl+shift+slash",
+        "ctrl+shift+t",
+        "ctrl+shift+w",
+        "ctrl+shift+d",
+        "ctrl+shift+o",
+        "ctrl+alt+down",
+        "alt+left",
+        "ctrl+t",
+        "ctrl+w",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:app.commandPalette",
+        "run:app.keyboardShortcuts",
+        "run:tab.new",
+        "run:tab.close",
+        "run:pane.splitRight",
+        "run:pane.splitDown",
+        "run:workspace.next",
+        "run:pane.back",
+        "none",
+        "none",
+        "run:pane.leave"
+      ]
+    },
+    {
+      "description": "browsers on Windows and Linux: find, keyboard shortcuts and ctrl+b focus escape",
+      "platforms": [
+        "windows-browser",
+        "linux-browser"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "ctrl+shift+slash",
+        "ctrl+shift+f",
+        "ctrl+shift+p",
+        "ctrl+shift+t",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:app.keyboardShortcuts",
+        "run:find.open",
+        "none",
+        "none",
+        "run:pane.leave"
+      ]
+    },
+    {
+      "description": "in a VS Code pane the main UI's keys run, for the keys VS Code leaves (cmd+t, cmd+w, cmd+1…9); its own (cmd+j, cmd+shift+p) never reach the application",
+      "platforms": [
+        "mac"
+      ],
+      "context": "vscode",
+      "strokes": [
+        "cmd+t",
+        "cmd+w",
+        "cmd+1",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:tab.new",
+        "run:pane.close",
+        "run:tab.select1",
+        "run:pane.leave"
+      ]
+    },
+    {
+      "description": "the zoom keys zoom the desktop app's windows, also while a dialog or VS Code has the keyboard (⌘+ is cmd+shift+equal on a US layout)",
+      "platforms": [
+        "mac"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "cmd+shift+equal",
+        "cmd+equal",
+        "cmd+minus",
+        "cmd+0",
+        "cmd+shift+minus"
+      ],
+      "results": [
+        "run:view.zoomIn",
+        "run:view.zoomIn",
+        "run:view.zoomOut",
+        "run:view.zoomReset",
+        "none"
+      ]
+    },
+    {
+      "description": "the zoom keys in a dialog and in VS Code",
+      "platforms": [
+        "mac"
+      ],
+      "context": "vscode",
+      "strokes": [
+        "cmd+equal",
+        "cmd+minus",
+        "cmd+0"
+      ],
+      "results": [
+        "run:view.zoomIn",
+        "run:view.zoomOut",
+        "run:view.zoomReset"
+      ]
+    },
+    {
+      "description": "on Windows and Linux Ctrl with +, = , - or 0 zooms, as in terminal emulators; Ctrl+Shift+- (Ctrl+_, undo in shells) reaches the terminal",
+      "platforms": [
+        "windows",
+        "linux"
+      ],
+      "context": "dialog",
+      "strokes": [
+        "ctrl+shift+equal",
+        "ctrl+equal",
+        "ctrl+minus",
+        "ctrl+0",
+        "ctrl+shift+minus"
+      ],
+      "results": [
+        "run:view.zoomIn",
+        "run:view.zoomIn",
+        "run:view.zoomOut",
+        "run:view.zoomReset",
+        "none"
+      ]
+    },
+    {
+      "description": "browsers keep their zoom keys: no default takes them",
+      "platforms": [
+        "mac-browser",
+        "windows-browser",
+        "linux-browser"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "cmd+equal",
+        "cmd+shift+equal",
+        "cmd+minus",
+        "cmd+0",
+        "ctrl+equal",
+        "ctrl+shift+equal",
+        "ctrl+minus",
+        "ctrl+0"
+      ],
+      "results": [
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none"
+      ]
+    }
+  ]
+}

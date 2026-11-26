@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // The variable vault's panel and approval prompts (plugins/vault) against
-// a stand-in for the core's routes: values never come with the list; the
+// a stand-in for the hub's routes: values never come with the list; the
 // gate (a session opened with the passphrase, sent as X-Vault-Session)
 // stands before changes, reveals and approvals, a value is shown only
 // after a confirmed reveal, requests are answered once and close on every
@@ -21,7 +21,6 @@ import { VaultApprovals } from '../plugins/vault/Approvals';
 import { SetupGuide } from '../plugins/vault/SetupGuide';
 import { endSession, loadVault, openSession, useVault, vaultApi, vaultMessage } from '../plugins/vault/api';
 import { mcpCommand, setupSnippets } from '../plugins/vault/setup';
-import { clockText, minutesText, parseMinutes } from '../plugins/vault/lockTimes';
 import { pluginMessage } from '../plugins/registry';
 import '../plugins';
 
@@ -58,14 +57,14 @@ describe('vault', () => {
   let answerError: Failure | undefined;
   let sessionError: Failure | undefined;
   let failPut: boolean;
-  /** The core forgot the session (a restart). */
+  /** The hub forgot the session (a restart). */
   let sessionGone: boolean;
   /** The requests GET requests answers. */
   let pending: unknown[];
   /** The access log GET log answers. */
   let accessLog: unknown[];
-  /** The auto-lock the list says (the stand-in sets it as the route does). */
-  let autoLock: { after: number; custom: boolean; setting: number; lockAt?: string };
+  /** The auto-lock the list says (the setting's). */
+  let autoLock: { after: number; setting: number; lockAt?: string };
 
   beforeEach(async () => {
     calls = [];
@@ -74,7 +73,7 @@ describe('vault', () => {
     listError = answerError = sessionError = undefined;
     failPut = sessionGone = false;
     pending = [];
-    autoLock = { after: 3600, custom: false, setting: 3600, lockAt: new Date(Date.now() + 59 * 60_000 + 30_000).toISOString() };
+    autoLock = { after: 3600, setting: 3600, lockAt: new Date(Date.now() + 59 * 60_000 + 30_000).toISOString() };
     accessLog = [{ time: '2026-01-01T00:00:00Z', m: 'm1', tool: 'get', names: ['GITHUB_TOKEN'], result: 'approved' }];
     await endSession().catch(() => undefined);
     useVault.setState({ status: undefined, variables: [], log: [], requests: {}, error: undefined, session: false });
@@ -118,22 +117,6 @@ describe('vault', () => {
       // The gate.
       if (!open) return json({ error: 'vault_session' }, 401);
       if (url.endsWith('/reveal')) return json({ value: 'ghp_secret' });
-      if (url === '/api/p/vault/autolock') {
-        const { minutes, passphrase } = JSON.parse(String(init!.body)) as { minutes: number | null; passphrase?: string };
-        const after = minutes === null ? 3600 : minutes * 60;
-        // Longer, or never, takes the passphrase again.
-        if (autoLock.after > 0 && (after === 0 || after > autoLock.after)) {
-          if (!passphrase) return json({ error: 'passphrase_required' }, 403);
-          if (passphrase !== PASS) return json({ error: 'wrong_passphrase' }, 403);
-        }
-        autoLock = {
-          after,
-          custom: minutes !== null,
-          setting: 3600,
-          lockAt: after ? new Date(Date.now() + after * 1000).toISOString() : undefined,
-        };
-        return json(autoLock);
-      }
       if (url.startsWith('/api/p/vault/vars/') && method === 'PUT') return failPut ? json({ error: 'failed' }, 500) : json({});
       if (answer) return json({ ok: true });
       return json({ error: 'not_found' }, 404);
@@ -271,7 +254,7 @@ describe('vault', () => {
     await act(async () => host.querySelector<HTMLButtonElement>('.vault-load-error button')!.click());
     await flush();
     expect(host.querySelector('[data-error="invalid"]')?.textContent).toContain(t('vault.load.invalid'));
-    // Anything else (the core unreachable) says so too, with the retry.
+    // Anything else (the hub unreachable) says so too, with the retry.
     listError = { code: 502, error: '' };
     await act(async () => host.querySelector<HTMLButtonElement>('.vault-load-error button')!.click());
     await flush();
@@ -281,21 +264,21 @@ describe('vault', () => {
     await flush();
     expect(host.querySelector('.vault-load-error')).toBeNull();
     expect([...host.querySelectorAll<HTMLElement>('.vault-row')].map((r) => r.dataset.name)).toEqual(['GITHUB_TOKEN', 'DB_PASS']);
-    // A core that keeps no file says that, without a retry.
+    // A hub that keeps no file says that, without a retry.
     listError = { code: 503, error: 'unavailable' };
     await act(async () => void loadVault());
     await flush();
     expect(host.textContent).toBe(t('vault.unavailable'));
   });
 
-  it('loads the requests and the vault again when the connection to the core comes back', async () => {
+  it('loads the requests and the vault again when the connection to the hub comes back', async () => {
     useStore.setState({ connected: true });
     await act(async () => root.render(createElement('div', null, createElement(VaultPanel), createElement(VaultApprovals))));
     await flush();
     await unlock();
     expect(useVault.getState().session).toBe(true);
     act(() => useStore.setState({ connected: false }));
-    // The core restarted meanwhile: the session is gone, a request waits.
+    // The hub restarted meanwhile: the session is gone, a request waits.
     sessionGone = true;
     pending = [{ id: 'r9', m: 'm1', tool: 'get', names: ['X'], created: '1', expires: '2' }];
     calls = [];
@@ -308,7 +291,7 @@ describe('vault', () => {
     act(() => vaultMessage('m1', { type: 'resolved', id: 'r9', answer: 'deny' }));
   });
 
-  it('keeps a prompt whose answer failed, and says why; drops one the core no longer has', async () => {
+  it('keeps a prompt whose answer failed, and says why; drops one the hub no longer has', async () => {
     useStore.setState({ machines: { m1: { label: 'gpu-box' } } as never });
     await act(async () => root.render(createElement(VaultApprovals)));
     await flush();
@@ -343,83 +326,24 @@ describe('vault', () => {
     await unlock();
     expect(host.querySelector('.vault-gate .callout.error')?.textContent).toBe(t('vault.error.wait'));
     expect(t('vault.error.busy')).not.toBe(t('vault.error.wait'));
+    // A key that cannot be kept in locked memory says so, not "could not".
+    sessionError = { code: 503, error: 'memory' };
+    await unlock();
+    expect(host.querySelector('.vault-gate .callout.error')?.textContent).toBe(t('vault.error.memory'));
+    expect(t('vault.error.memory')).not.toBe(t('vault.error.failed'));
   });
 
-  it('counts down to the auto-lock and sets another time for this unlock', async () => {
+  it('shows no auto-lock countdown or time of its own in the session bar', async () => {
     await act(async () => root.render(createElement(VaultPanel)));
     await flush();
     await unlock();
-    const btn = () => host.querySelector<HTMLButtonElement>('.vault-autolock')!;
-    expect(btn().textContent).toMatch(/^59:(29|30)$/);
-    expect(btn().title).toBe(t('vault.autoLock.title', { time: t('vault.autoLock.hours', { n: 1 }) }));
-    const key = (k: string) =>
-      act(async () => {
-        (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
-      });
-    const choose = async (q: string) => {
-      await act(async () => btn().click());
-      await flush();
-      const search = document.body.querySelector<HTMLInputElement>('.picker .picker-search')!;
-      await act(async () => type(search, q));
-      await key('Enter');
-      await flush();
-    };
-    const lockCalls = () => calls.filter((c) => c.url === '/api/p/vault/autolock');
-    const confirmWith = async (passphrase: string) => {
-      const form = host.querySelector<HTMLFormElement>('[data-fresh="autolock"]')!;
-      await act(async () => type(form.querySelector<HTMLInputElement>('input[type="password"]')!, passphrase));
-      await act(async () => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
-      await flush();
-    };
-    // A shorter time typed: the session is enough.
-    await choose('30');
-    expect(lockCalls().at(-1)).toMatchObject({ method: 'POST', token: TOKEN, body: { minutes: 30 } });
-    expect(btn().classList.contains('custom')).toBe(true);
-    // A longer one, an hour and a half, asks for the passphrase first.
-    await choose('1h30m');
-    expect(lockCalls()).toHaveLength(1);
-    await confirmWith('wrong one');
-    expect(host.querySelector('[data-fresh="autolock"] .callout.error')?.textContent).toBe(t('vault.error.wrong_passphrase'));
-    await confirmWith(PASS);
-    expect(lockCalls().at(-1)!.body).toEqual({ minutes: 90, passphrase: PASS });
-    expect(host.querySelector('[data-fresh="autolock"]')).toBeNull();
-    expect(btn().textContent).toMatch(/^1:(29:59|30:00)$/);
-    // Never, from the list, likewise.
-    await choose(t('vault.autoLock.never'));
-    await confirmWith(PASS);
-    expect(lockCalls().at(-1)!.body).toEqual({ minutes: 0, passphrase: PASS });
-    expect(btn().textContent).toBe(t('vault.autoLock.off'));
-    // Back to the setting's time.
-    await choose(t('vault.autoLock.default', { time: t('vault.autoLock.hours', { n: 1 }) }));
-    expect(calls.at(-1)!.body).toEqual({ minutes: null });
-    expect(btn().classList.contains('custom')).toBe(false);
-  });
-
-  it('reads times typed for the auto-lock', () => {
-    expect(['90', '90m', '90 min', '2h', '1.5h', '1h30m', '1h30', '2小时', '45分钟'].map(parseMinutes)).toEqual([
-      90, 90, 90, 120, 90, 90, 90, 120, 45,
-    ]);
-    expect(['', '0', 'h', '25h', '2d', 'abc', '-5'].map(parseMinutes)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ]);
-    expect([clockText(5), clockText(65), clockText(3599.2), clockText(3723), clockText(-3)]).toEqual([
-      '0:05',
-      '1:05',
-      '1:00:00',
-      '1:02:03',
-      '0:00',
-    ]);
-    expect([minutesText(45), minutesText(120), minutesText(90)]).toEqual([
-      t('vault.autoLock.minutes', { n: 45 }),
-      t('vault.autoLock.hours', { n: 2 }),
-      t('vault.autoLock.hoursMinutes', { h: 1, m: 30 }),
-    ]);
+    const bar = host.querySelector<HTMLElement>('.vault-session')!;
+    expect(bar).not.toBeNull();
+    expect(bar.querySelector('.vault-autolock')).toBeNull();
+    // Change Passphrase, Lock and Settings: nothing that sets a time.
+    expect(bar.querySelectorAll('button')).toHaveLength(3);
+    expect(bar.textContent).not.toMatch(/\d+:\d\d/);
+    expect(calls.some((c) => c.url === '/api/p/vault/autolock')).toBe(false);
   });
 
   it('creates the passphrase of a new vault', async () => {
@@ -500,7 +424,7 @@ describe('vault', () => {
     await flush();
     expect(calls.find((c) => c.url === '/api/p/vault/requests/r4')?.body).toEqual({ answer: 'deny' });
 
-    // Answered on another page: the core says it is resolved.
+    // Answered on another page: the hub says it is resolved.
     act(() => vaultMessage('m1', { type: 'request', request: { ...request, id: 'r2' } }));
     expect(document.querySelector('[data-request="r2"]')).not.toBeNull();
     act(() => vaultMessage('m1', { type: 'resolved', id: 'r2', answer: 'deny' }));
@@ -510,7 +434,7 @@ describe('vault', () => {
   it('shows who asked: the process chain the agent saw, the directory, a page', async () => {
     useStore.setState({ machines: { m1: { label: 'gpu-box' } } as never });
     const chain = [
-      { pid: 4242, name: 'herdr-ide-mcp' },
+      { pid: 4242, name: 'veldr-mcp' },
       { pid: 4200, name: 'claude' },
     ];
     accessLog = [
@@ -531,6 +455,14 @@ describe('vault', () => {
     await act(async () => root.render(createElement('div', null, createElement(VaultPanel), createElement(VaultApprovals))));
     await flush();
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')][1].click());
+    // Without a session the log is not asked for: the hub shows it to a
+    // session only.
+    expect(calls.some((c) => c.url === '/api/p/vault/log')).toBe(false);
+    expect(host.querySelector('.vault-entry')).toBeNull();
+    expect(host.textContent).toContain(t('vault.log.needsSession'));
+    await act(async () => openSession(PASS));
+    await flush();
+    expect(calls.find((c) => c.url === '/api/p/vault/log')?.token).toBe(TOKEN);
     const entries = [...host.querySelectorAll<HTMLElement>('.vault-entry')];
     expect(entries.map((e) => e.dataset.result)).toEqual(['revealed', 'cancelled', 'allowed']);
     expect(entries[0].textContent).toContain(t('vault.log.page'));
@@ -538,7 +470,7 @@ describe('vault', () => {
     expect(entries[0].textContent).toContain(t('vault.result.revealed'));
     expect(entries[1].textContent).toContain(t('vault.log.count', { count: 3 }));
     expect(entries[2].textContent).toContain('/srv/app');
-    expect(entries[2].querySelector('.vault-entry-process')?.textContent).toBe('herdr-ide-mcp (4242) ← claude (4200)');
+    expect(entries[2].querySelector('.vault-entry-process')?.textContent).toBe('veldr-mcp (4242) ← claude (4200)');
     // Pages are a choice of the machine filter.
     const filter = host.querySelector<HTMLButtonElement>(`.picker-button[aria-label="${t('vault.log.machine')}"]`)!;
     expect(filter.textContent).toBe(t('vault.log.allMachines'));
@@ -551,7 +483,7 @@ describe('vault', () => {
     // The prompt shows the chain too.
     const request = { id: 'r8', m: 'm1', tool: 'get', names: ['A'], client: 'claude', process: chain, created: '1', expires: '2' };
     act(() => vaultMessage('m1', { type: 'request', request }));
-    expect(document.querySelector('[data-request="r8"] [data-meta="process"]')?.textContent).toBe('herdr-ide-mcp (4242) ← claude (4200)');
+    expect(document.querySelector('[data-request="r8"] [data-meta="process"]')?.textContent).toBe('veldr-mcp (4242) ← claude (4200)');
     act(() => vaultMessage('m1', { type: 'resolved', id: 'r8', answer: 'deny' }));
   });
 
@@ -583,14 +515,14 @@ describe('vault', () => {
   });
 
   it('gives each machine its setup', () => {
-    expect(mcpCommand({ home: '/home/u', data_dir: '/home/u/.x-dev' })).toBe('/home/u/.x-dev/bin/herdr-ide-mcp');
-    expect(mcpCommand({ home: '/Users/me' })).toBe('/Users/me/.herdr-ide/bin/herdr-ide-mcp');
-    const s = setupSnippets({ home: '/home/u', data_dir: '/home/u/.herdr-ide' });
-    expect(s.claude).toBe('claude mcp add --scope user herdr-ide-vault -- /home/u/.herdr-ide/bin/herdr-ide-mcp');
-    expect(s.codex).toBe('[mcp_servers.herdr-ide-vault]\ncommand = "/home/u/.herdr-ide/bin/herdr-ide-mcp"');
+    expect(mcpCommand({ home: '/home/u', data_dir: '/home/u/.x-dev' })).toBe('/home/u/.x-dev/bin/veldr-mcp');
+    expect(mcpCommand({ home: '/Users/me' })).toBe('/Users/me/.veldr/bin/veldr-mcp');
+    const s = setupSnippets({ home: '/home/u', data_dir: '/home/u/.veldr' });
+    expect(s.claude).toBe('claude mcp add --scope user veldr-vault -- /home/u/.veldr/bin/veldr-mcp');
+    expect(s.codex).toBe('[mcp_servers.veldr-vault]\ncommand = "/home/u/.veldr/bin/veldr-mcp"');
     expect(JSON.parse(s.json)).toEqual({
-      mcpServers: { 'herdr-ide-vault': { command: '/home/u/.herdr-ide/bin/herdr-ide-mcp', args: [] } },
+      mcpServers: { 'veldr-vault': { command: '/home/u/.veldr/bin/veldr-mcp', args: [] } },
     });
-    expect(setupSnippets({ home: '/home/a b' }).claude).toContain("'/home/a b/.herdr-ide/bin/herdr-ide-mcp'");
+    expect(setupSnippets({ home: '/home/a b' }).claude).toContain("'/home/a b/.veldr/bin/veldr-mcp'");
   });
 });

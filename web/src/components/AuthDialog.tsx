@@ -5,18 +5,20 @@ import { getPrefs } from '../prefs';
 import { TermPane, type TermLink } from '../vt/pane';
 import type { AttachOptions, StreamHandler } from '../term/connection';
 import { t } from '../i18n';
+import { openChannel } from '../lib/transport';
 
-/** A PTY on the core host behind a WebSocket, as a terminal's stream: the
+/** A PTY on the hub host behind a WebSocket, as a terminal's stream: the
  * output in messages, input sent as it is. The PTY gets its size when it
  * starts. */
 export class PtyLink implements TermLink {
   readonly connected = true;
   private ws?: WebSocket;
 
-  constructor(private readonly url: (cols: number, rows: number) => string) {}
+  /** path gives the channel's path (with its query) for the PTY's size. */
+  constructor(private readonly path: (cols: number, rows: number) => string) {}
 
   attach(o: AttachOptions, handler: StreamHandler): Promise<number> {
-    const ws = new WebSocket(this.url(o.cols, o.rows));
+    const ws = openChannel(this.path(o.cols, o.rows));
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     const enc = new TextEncoder();
@@ -38,7 +40,7 @@ export class PtyLink implements TermLink {
   }
 }
 
-/** Interactive ssh authentication for a machine, run in a PTY on the core
+/** Interactive ssh authentication for a machine, run in a PTY on the hub
  * host; the resulting ControlMaster is reused by later connections. */
 export function AuthDialog() {
   const m = useStore((s) => s.auth);
@@ -57,8 +59,7 @@ export function AuthDialog() {
   useEffect(() => {
     if (!m || !hostRef.current) return;
     setEnded(false);
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const link = new PtyLink((cols, rows) => `${proto}//${location.host}/api/m/${encodeURIComponent(m)}/auth?cols=${cols}&rows=${rows}`);
+    const link = new PtyLink((cols, rows) => `/api/m/${encodeURIComponent(m)}/auth?cols=${cols}&rows=${rows}`);
     const pane = new TermPane(
       hostRef.current,
       canvasRef.current!,
@@ -77,7 +78,7 @@ export function AuthDialog() {
         scrollback: () => 1000,
         setTitle: () => {},
         onFind: () => {},
-        // The core connects the machine again when the terminal ends.
+        // The hub connects the machine again when the terminal ends.
         onClosed: () => setEnded(true),
         onBell: () => {},
       },

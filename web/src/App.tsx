@@ -19,11 +19,21 @@ import { initDesktop } from './desktop';
 import { warnOnUnload } from './unsaved';
 import { followDesktopClose } from './quitGuard';
 import { takeOpenedFolders } from './drop';
-import { closeWindowPane, leaveWindowPane, commandLabel, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
+import {
+  closeWindowPane,
+  leaveWindowPane,
+  commandLabel,
+  handleKey,
+  handlePaneLeaveKey,
+  keyHint,
+  onChordChange,
+  pendingChord,
+  runCommand,
+} from './keymap';
 import { applySettings, loadSettings } from './settings';
 import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
-import { notifyAgent, updateBadge } from './notify';
+import { initNotifications, notifyAgent, updateBadge } from './notify';
 import { shortPath, terminalTitle } from './lib/machine';
 import * as L from './term/layout';
 import { useGui } from './gui/state';
@@ -86,7 +96,7 @@ function followTerms() {
       show(s.machineId);
       noteFocused();
     }
-    // Machines removed from the core are no longer followed.
+    // Machines removed from the hub are no longer followed.
     for (const m of prev.order) if (!s.machines[m] && prev.machines[m]) terms.forget(m);
   });
   const offTerms = useTerms.subscribe((st, prev) => {
@@ -132,7 +142,7 @@ export function App() {
         useStore.getState().setConnected(c);
         if (c) {
           resyncDownloads();
-          // Changes made while the page was away (e.g. a core restart).
+          // Changes made while the page was away (e.g. a hub restart).
           void loadSettings();
           void loadKeybindings();
         }
@@ -151,6 +161,7 @@ export function App() {
     const offTerms = followTerms();
     void loadKeybindings();
     const offDesktop = initDesktop();
+    const offNotify = initNotifications();
     const offUnload = warnOnUnload();
     const offClose = followDesktopClose();
     const offFolders = takeOpenedFolders();
@@ -160,21 +171,33 @@ export function App() {
       .then((c) => useStore.setState({ readOnly: !!c.read_only, sshLogin: c.ssh_login !== false }))
       .catch(() => {});
     const off = onChordChange(setChord);
-    // Bindings also work when the focus is outside a terminal.
+    // Ctrl+B escapes focus from editors and pane inputs before they consume it;
+    // terminals route their own keys through TermPane -> appKey -> handleKey.
+    const onCaptureKey = (ev: KeyboardEvent) => {
+      const el = ev.target as HTMLElement | null;
+      if (!el || el.closest('.term-host') || el.closest('.pane-header') || el.closest('.inline-edit')) return;
+      if (el.closest('.pane') || (el.closest('.panel') && el.closest('input, textarea, [contenteditable]'))) {
+        handlePaneLeaveKey(ev);
+      }
+    };
+    // Bindings also work when the focus is outside a terminal or Monaco editor.
     const onKey = (ev: KeyboardEvent) => {
       const el = ev.target as HTMLElement | null;
-      if (el?.closest('.term-host') || el?.closest('input, textarea, iframe, [contenteditable]')) return;
+      if (el?.closest('.term-host') || el?.closest('.monaco-editor') || el?.closest('input, textarea, iframe, [contenteditable]')) return;
       handleKey(ev);
     };
+    window.addEventListener('keydown', onCaptureKey, true);
     window.addEventListener('keydown', onKey);
     return () => {
       off();
       offTerms();
       offDesktop();
+      offNotify();
       offUnload();
       offClose();
       offFolders();
       offWorkers();
+      window.removeEventListener('keydown', onCaptureKey, true);
       window.removeEventListener('keydown', onKey);
     };
   }, []);
@@ -206,25 +229,51 @@ export function App() {
       <AuthDialog />
       <ContextMenu />
       <div className="toasts">
-        {toasts.map((toast) => (
-          <div key={toast.id} className={`toast ${toast.kind ?? ''}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
-            {toast.kind === 'error' && <CircleAlert />}
-            {toast.kind === 'warning' && <TriangleAlert />}
-            <span>{toast.msg}</span>
-            {toast.action && (
-              <button
-                className="sm"
-                onClick={() => {
-                  toast.action!.run();
-                  useStore.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== toast.id) }));
-                }}
-              >
-                {toast.action.label}
-              </button>
-            )}
-          </div>
-        ))}
+        {toasts
+          .filter((toast) => toast.position !== 'bottom-left')
+          .map((toast) => (
+            <div key={toast.id} className={`toast ${toast.kind ?? ''}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
+              {toast.kind === 'error' && <CircleAlert />}
+              {toast.kind === 'warning' && <TriangleAlert />}
+              <span>{toast.msg}</span>
+              {toast.action && (
+                <button
+                  className="sm"
+                  onClick={() => {
+                    toast.action!.run();
+                    useStore.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== toast.id) }));
+                  }}
+                >
+                  {toast.action.label}
+                </button>
+              )}
+            </div>
+          ))}
       </div>
+      {toasts.some((toast) => toast.position === 'bottom-left') && (
+        <div className="toasts toasts-left">
+          {toasts
+            .filter((toast) => toast.position === 'bottom-left')
+            .map((toast) => (
+              <div key={toast.id} className={`toast ${toast.kind ?? ''}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
+                {toast.kind === 'error' && <CircleAlert />}
+                {toast.kind === 'warning' && <TriangleAlert />}
+                <span>{toast.msg}</span>
+                {toast.action && (
+                  <button
+                    className="sm"
+                    onClick={() => {
+                      toast.action!.run();
+                      useStore.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== toast.id) }));
+                    }}
+                  >
+                    {toast.action.label}
+                  </button>
+                )}
+              </div>
+            ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 # Video encoder
 
-The core embeds a video encoder for Linux machines (`encoder-linux-amd64`,
+The hub embeds a video encoder for Linux machines (`encoder-linux-amd64`,
 `encoder-linux-arm64`), which it copies to a machine to send program windows
 that keep changing as video. It is `scripts/encoder/encoder.c` (part of this
 project, MIT) linked with:

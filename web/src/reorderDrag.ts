@@ -1,6 +1,6 @@
 // Dragging a tab within the tab bar (tabDrag.ts), or a workspace within its
 // machine's list in the sidebar, reorders it in the machine's layout document; dragging a
-// machine's header among the machines reorders the machines (the core stores
+// machine's header among the machines reorders the machines (the hub stores
 // their order). A drop lands
 // in a slot of the current order: 0 before the first item, n after the
 // last; the slots on either side of the dragged item change nothing, so

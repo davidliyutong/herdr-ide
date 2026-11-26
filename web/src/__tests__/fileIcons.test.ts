@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FileSymlink, FolderOpen, FolderSymlink } from 'lucide-react';
-import tokens from '../../../design/tokens.json';
+import tokens from '../../../spec/tokens.json';
 import { FILE_ICON_COLORS, FileIcon, fileIcon } from '../fileIcons';
 import { t } from '../i18n';
 

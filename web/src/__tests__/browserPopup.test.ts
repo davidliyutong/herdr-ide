@@ -18,13 +18,13 @@ import { definePlugins } from '../plugins/registry';
 import { browserPlugin } from '../plugins/browser';
 import { forwardGranted, grantForward, openBrowserTab, openPopup, resetGrants, revokeForward, useForwards } from '../plugins/browser/api';
 import { t } from '../i18n';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { click, fakeBrowserApi, flush, json, mountPane, type Call, type Harness } from './browserHarness';
 
-let core: FakeCore;
+let hub: FakeHub;
 let calls: Call[];
-const tabs = (m: string) => core.model.layout(m)!.workspaces[0].tabs;
-const views = (m: string) => L.pluginViews(core.model.layout(m)!.workspaces[0], 'browser', 'page').map((v) => v.view);
+const tabs = (m: string) => hub.model.layout(m)!.workspaces[0].tabs;
+const views = (m: string) => L.pluginViews(hub.model.layout(m)!.workspaces[0], 'browser', 'page').map((v) => v.view);
 const machine = (id: string, kind: 'local' | 'ssh') =>
   ({ id, label: id, kind, status: 'ready', info: { home: '/home/u' } }) as unknown as MachineState;
 const popup = async (url: string) => {
@@ -38,20 +38,20 @@ describe('a popup of a page in a pane', () => {
     resetGrants();
     useForwards.setState({ forwards: [], available: true });
     calls = fakeBrowserApi();
-    core = new FakeCore();
+    hub = new FakeHub();
     for (const id of ['a', 'b'])
-      core.machine(id, [FakeCore.term('s1')], {
+      hub.machine(id, [FakeHub.term('s1')], {
         version: 1,
         workspaces: [{ id: 'w1', name: '', cwd: '', tabs: [{ root: { terminal: 's1' }, focused: 's1' }], selected: 0 }],
         selected: 0,
       });
-    core.install();
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([machine('a', 'ssh'), machine('b', 'ssh')]);
     s.selectMachine('a');
-    core.model.subscribe('a');
-    core.model.subscribe('b');
+    hub.model.subscribe('a');
+    hub.model.subscribe('b');
     await settle();
   });
 
@@ -74,7 +74,7 @@ describe('a popup of a page in a pane', () => {
     ]);
     expect(tabs('a').length).toBe(4);
     for (const port of [2375, 9229, 8500]) expect(forwardGranted('a', port)).toBe(false);
-    // The core was asked for nothing.
+    // The hub was asked for nothing.
     expect(calls).toEqual([]);
     // The user's own way to the same address is the machine's port.
     await openBrowserTab('a', 'http://localhost:2375/containers/json');
@@ -118,7 +118,7 @@ describe('a popup of a page in a pane', () => {
     expect(calls).toEqual([]);
   });
 
-  it('opens nothing for what is no http(s) page, nor for the core’s own address', async () => {
+  it('opens nothing for what is no http(s) page, nor for the hub’s own address', async () => {
     for (const url of [
       'javascript:alert(1)',
       'file:///etc/passwd',

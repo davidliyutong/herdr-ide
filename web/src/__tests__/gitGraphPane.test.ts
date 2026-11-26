@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// The Git graph pane (plugins/git/GraphPane.tsx) with the core's routes
+// The Git graph pane (plugins/git/GraphPane.tsx) with the hub's routes
 // stubbed: rows with badges, a commit's details with its files, compare
 // with a Cmd/Ctrl-click, and the commit's context menu.
 

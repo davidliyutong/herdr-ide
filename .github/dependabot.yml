@@ -1,17 +1,17 @@
 version: 2
 updates:
-  - package-ecosystem: gomod
-    directory: /
+  - package-ecosystem: npm
+    directory: /backend
     schedule: { interval: weekly }
     groups:
-      go: { patterns: ['*'] }
+      backend: { patterns: ['*'] }
   - package-ecosystem: npm
     directory: /web
     schedule: { interval: weekly }
     groups:
       web: { patterns: ['*'] }
   - package-ecosystem: npm
-    directory: /extensions/herdr-ide-bridge
+    directory: /extensions/veldr-bridge
     schedule: { interval: weekly }
     groups:
       extension: { patterns: ['*'] }

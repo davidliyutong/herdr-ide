@@ -13,15 +13,38 @@ import { createRoot, type Root } from 'react-dom/client';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, send: () => {}, connected: true } }));
 
+/** Monaco's model: its line ends are of one kind, which its text decides
+ * (eolOf); setValue drops the undo history. */
 class FakeModel {
   value = '';
+  eol: '\n' | '\r\n' = '\n';
   version = 1;
+  /** setValue calls after the model was made. */
+  sets = 0;
   private listeners: Array<() => void> = [];
+  constructor(v = '') {
+    this.take(v);
+  }
+  private take(v: string) {
+    this.eol = eolOf(v) ?? this.eol;
+    this.value = v.replace(/\r\n|\r|\n/g, this.eol);
+  }
   getValue() {
     return this.value;
   }
   setValue(v: string) {
-    this.value = v;
+    this.take(v);
+    this.sets++;
+    this.version++;
+    this.listeners.forEach((l) => l());
+  }
+  getEOL() {
+    return this.eol;
+  }
+  pushEOL(seq: number) {
+    this.eol = seq === 1 ? '\r\n' : '\n';
+    this.value = this.value.replace(/\r\n|\r|\n/g, this.eol);
+    this.edits++;
     this.version++;
     this.listeners.forEach((l) => l());
   }
@@ -31,7 +54,10 @@ class FakeModel {
   onDidChangeContent(l: () => void) {
     this.listeners.push(l);
   }
-  dispose() {}
+  dispose() {
+    models.delete(this.uri);
+  }
+  uri = '';
   getVersionId() {
     return this.version;
   }
@@ -64,6 +90,7 @@ class FakeModel {
 
 type FakeDecoration = { range: { start: number; end: number }; options: { linesDecorationsClassName: string } };
 
+const focusSpy = vi.fn();
 const editor = {
   model: undefined as FakeModel | undefined,
   save: undefined as (() => void) | undefined,
@@ -87,8 +114,26 @@ const editor = {
   updateOptions(o: { readOnly?: boolean }) {
     this.readOnly = o.readOnly;
   },
-  focus() {},
+  focus: focusSpy,
+  /** Where the cursor was put and which lines were shown (revealAt). */
+  positions: [] as Array<{ lineNumber: number; column: number }>,
+  revealed: [] as number[],
+  setPosition(p: { lineNumber: number; column: number }) {
+    this.positions.push(p);
+  },
+  revealLineInCenter(line: number) {
+    this.revealed.push(line);
+  },
   dispose() {},
+  savedState: undefined as unknown,
+  restoredStates: [] as unknown[],
+  layout() {},
+  saveViewState() {
+    return this.savedState ?? null;
+  },
+  restoreViewState(s: unknown) {
+    this.restoredStates.push(s);
+  },
   onDidChangeModelContent(l: () => void) {
     this.model?.onDidChangeContent(l);
     return { dispose() {} };
@@ -101,6 +146,8 @@ const editor = {
   },
 };
 let separate = false;
+/** The models not disposed, by their URI. */
+const models = new Map<string, FakeModel>();
 const monaco = {
   Uri: { from: (o: unknown) => o },
   KeyMod: { CtrlCmd: 2048 },
@@ -113,7 +160,17 @@ const monaco = {
       public endColumn = 1,
     ) {}
   },
-  editor: { getModel: () => null, createModel: () => new FakeModel(), OverviewRulerLane: { Left: 1 } },
+  editor: {
+    getModel: (uri: unknown) => models.get(JSON.stringify(uri)) ?? null,
+    createModel: vi.fn((v: string, _language: unknown, uri: unknown) => {
+      const model = new FakeModel(v);
+      model.uri = JSON.stringify(uri);
+      models.set(model.uri, model);
+      return model;
+    }),
+    OverviewRulerLane: { Left: 1 },
+    EndOfLineSequence: { LF: 0, CRLF: 1 },
+  },
 };
 vi.mock('../plugins/monaco', () => ({
   setLanguage: vi.fn(),
@@ -126,9 +183,21 @@ vi.mock('../plugins/monaco', () => ({
 }));
 
 import { useStore } from '../state/store';
+import { useTerms } from '../state/terms';
 import type { MachineState } from '../lib/machine';
+import type { Layout } from '../term/layout';
 import { t } from '../i18n';
-import { CHECK_MS, EditorPane, loadText, versionOf } from '../plugins/files/EditorPane';
+import {
+  CHECK_MS,
+  EditorPane,
+  eolOf,
+  keepViewState,
+  keptViewState,
+  loadText,
+  resetViewStates,
+  versionOf,
+} from '../plugins/files/EditorPane';
+import { dropEdit } from '../unsaved';
 import { registerQuickDiff } from '../plugins/files/quickDiff';
 import { useGoneFiles } from '../plugins/files/gone';
 import { useSettings } from '../settings';
@@ -217,6 +286,10 @@ describe('EditorPane', () => {
     useStore.setState({ toasts: [] });
     editor.model = undefined;
     editor.save = undefined;
+    editor.savedState = undefined;
+    editor.restoredStates = [];
+    useTerms.setState({ machines: {} });
+    resetViewStates();
     stubFetch();
     const s = useStore.getState();
     s.setReadOnly(false);
@@ -229,6 +302,46 @@ describe('EditorPane', () => {
     await act(async () => root.unmount());
     host.remove();
     vi.unstubAllGlobals();
+  });
+
+  // The model's URI is the file's, which Monaco keeps the undo history of
+  // when its model is disposed; a second pane of the file has one of its own.
+  it('gives a file’s model the file’s URI unless another pane has it', async () => {
+    separate = true;
+    try {
+      const hosts = [document.createElement('div'), document.createElement('div')];
+      const roots = hosts.map((h) => {
+        document.body.append(h);
+        return createRoot(h);
+      });
+      const created = () => vi.mocked(monaco.editor.createModel).mock.calls.map((c) => (c[2] as { query: string }).query);
+      vi.mocked(monaco.editor.createModel).mockClear();
+      const render = async (i: number) => {
+        await act(async () =>
+          roots[i].render(
+            createElement(EditorPane, {
+              m: 'm',
+              pane: `view:v${i}`,
+              view: { id: `v${i}`, plugin: 'files', kind: 'editor', path: '/home/u/notes.txt' },
+              focused: false,
+            }),
+          ),
+        );
+        await flush();
+        await flush();
+      };
+      await render(0);
+      await render(1);
+      expect(created()).toEqual(['m=m', 'm=m&pane=view:v1']);
+      for (const r of roots) await act(async () => r.render(null));
+      expect(models.size).toBe(0);
+      await render(1);
+      expect(created()).toEqual(['m=m', 'm=m&pane=view:v1', 'm=m']);
+      for (const r of roots) await act(async () => r.unmount());
+      hosts.forEach((h) => h.remove());
+    } finally {
+      separate = false;
+    }
   });
 
   // The chord is each editor's own: with two panes mounted, Cmd+S in one
@@ -289,6 +402,25 @@ describe('EditorPane', () => {
     } finally {
       separate = false;
     }
+  });
+
+  // A search's match: the editor shows its line with the cursor at its
+  // column once the text is there, and again when asked again (reveal).
+  it('shows the line and column the view asks for', async () => {
+    editor.positions = [];
+    editor.revealed = [];
+    file = { text: 'a\nb\nneedle here\n', size: 16, mtime: 7000 };
+    const view = (reveal: number) => ({ id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/n.txt', line: 3, col: 2, reveal });
+    await act(async () => root.render(createElement(EditorPane, { m: 'm', pane: 'view:v1', view: view(1), focused: true })));
+    await flush();
+    await flush();
+    expect(editor.positions).toEqual([{ lineNumber: 3, column: 2 }]);
+    expect(editor.revealed).toEqual([3]);
+    // The same request, drawn again: nothing moves; a new one shows it again.
+    await act(async () => root.render(createElement(EditorPane, { m: 'm', pane: 'view:v1', view: view(1), focused: false })));
+    expect(editor.revealed).toEqual([3]);
+    await act(async () => root.render(createElement(EditorPane, { m: 'm', pane: 'view:v1', view: view(2), focused: false })));
+    expect(editor.revealed).toEqual([3, 3]);
   });
 
   it('reads the version from the ETag', () => {
@@ -469,6 +601,25 @@ describe('EditorPane', () => {
       expect(host.querySelector('.files-dirty')).toBeNull();
     });
 
+    it('makes the model with the file’s text, for Monaco to give it back the undo history it kept', async () => {
+      await renderNow();
+      expect(monaco.editor.createModel).toHaveBeenLastCalledWith('hello', undefined, expect.anything());
+      expect(editor.model?.sets).toBe(0);
+    });
+
+    it('loads a file again whose line ends changed by edits undo takes back', async () => {
+      await renderNow();
+      file = { text: 'hello\r\nthere\nyou\r\n', size: 19, mtime: 8000 };
+      await advance(CHECK_MS);
+      expect(editor.model?.getValue()).toBe('hello\r\nthere\r\nyou\r\n');
+      expect(editor.model?.edits).toBe(2);
+      expect(editor.model?.sets).toBe(0);
+      file = { text: 'hello\r\nthere\r\nyou\n', size: 19, mtime: 9000 };
+      await advance(CHECK_MS);
+      expect(editor.model?.edits).toBe(2);
+      expect(editor.model?.sets).toBe(0);
+    });
+
     it('keeps the text of a file removed on the machine, and marks it gone until it is back', async () => {
       const gone = () => !!useGoneFiles.getState().gone['m\n/home/u/notes.txt'];
       await renderNow();
@@ -597,5 +748,131 @@ describe('EditorPane', () => {
       await render('/home/u/other.txt');
       expect(editor.readOnly).toBe(false);
     });
+  });
+
+  describe('view state across tab switches', () => {
+    const layoutWith = (...views: string[]): Layout => {
+      const leaf = (id: string) => ({ view: { id, plugin: 'files', kind: 'editor' } });
+      const root = views.length === 2 ? { split: 'horizontal', ratio: 0.5, children: views.map(leaf) } : leaf(views[0] ?? 'other');
+      return {
+        workspaces: [{ id: 'w', tabs: [{ root, focused: `view:${views[0] ?? 'other'}` }], selected: 0 }],
+        selected: 0,
+      } as unknown as Layout;
+    };
+
+    afterEach(() => {
+      dropEdit('m', 'view:v1');
+      resetViewStates();
+    });
+
+    it('persists and restores ICodeEditorViewState across tab switches for clean and dirty files', async () => {
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v1', 'v2') } } });
+      const viewState = {
+        cursorState: [{ inSelectionMode: true, selectionStart: { lineNumber: 12, column: 3 }, position: { lineNumber: 12, column: 8 } }],
+        viewState: {
+          scrollTop: 340,
+          scrollTopWithoutViewZones: 340,
+          firstPosition: { lineNumber: 10, column: 1 },
+          firstPositionDeltaTop: 0,
+        },
+        contributionsState: {},
+      };
+      await render('/home/u/notes.txt');
+      editor.savedState = viewState;
+
+      // Switch away to another tab (pane unmounts, stays in layout).
+      await act(async () => root.unmount());
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toEqual(viewState);
+
+      // Switch back: view state is restored once ready.
+      root = createRoot(host);
+      await render('/home/u/notes.txt');
+      expect(editor.restoredStates).toEqual([viewState]);
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toBeUndefined();
+
+      // Dirty file also preserves view state alongside kept unsaved text.
+      const dirtyViewState = {
+        ...viewState,
+        viewState: { ...viewState.viewState, scrollTop: 620, scrollTopWithoutViewZones: 620 },
+      };
+      await act(async () => editor.model!.setValue('unsaved edit'));
+      editor.savedState = dirtyViewState;
+      await act(async () => root.unmount());
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toEqual(dirtyViewState);
+
+      root = createRoot(host);
+      await render('/home/u/notes.txt');
+      expect(editor.model?.getValue()).toBe('unsaved edit');
+      expect(editor.restoredStates).toEqual([viewState, dirtyViewState]);
+    });
+
+    it('cleans up view state when the tab or pane closes', async () => {
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v1', 'v2') } } });
+      const viewState = { cursorState: [], viewState: { scrollTop: 150 }, contributionsState: {} };
+      await render('/home/u/notes.txt');
+      editor.savedState = viewState;
+
+      // Unmount while still in layout -> kept.
+      await act(async () => root.unmount());
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toEqual(viewState);
+
+      // Closing the inactive tab/pane removes it from layout -> view state is cleaned up.
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v2') } } });
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toBeUndefined();
+
+      // Closing while mounted does not save view state.
+      root = createRoot(host);
+      await render('/home/u/notes.txt');
+      editor.savedState = viewState;
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v2') } } });
+      await act(async () => root.unmount());
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toBeUndefined();
+    });
+
+    it('does not restore a previous file’s view state when a preview pane opens another file', async () => {
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v1') } } });
+      const viewState = { cursorState: [], viewState: { scrollTop: 220 }, contributionsState: {} };
+      await render('/home/u/notes.txt');
+      editor.savedState = viewState;
+      await act(async () => root.unmount());
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toEqual(viewState);
+
+      root = createRoot(host);
+      await render('/home/u/other.txt');
+      expect(editor.restoredStates).toEqual([]);
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toBeUndefined();
+    });
+
+    it('restores view state when a mounted TextEditor changes path while status remains ready', async () => {
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v1') } } });
+      await render('/home/u/notes.txt');
+      const otherState = { cursorState: [], viewState: { scrollTop: 410 }, contributionsState: {} };
+      keepViewState('m', 'view:v1', '/home/u/other.txt', otherState as unknown as Parameters<typeof keepViewState>[3]);
+
+      // Same mounted root switches directly to /home/u/other.txt while status.kind was already 'ready'.
+      await render('/home/u/other.txt');
+      expect(editor.restoredStates).toEqual([otherState]);
+    });
+  });
+
+  it('forwards focus on the editor root into Monaco so escaping back to the pane works', async () => {
+    await render();
+    focusSpy.mockClear();
+    const rootEl = host.querySelector<HTMLElement>('.files-editor')!;
+    await act(async () => {
+      rootEl.focus();
+    });
+    expect(focusSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('eolOf', () => {
+  it('gives the line end Monaco makes a model’s', () => {
+    expect(eolOf('one line')).toBeUndefined();
+    expect(eolOf('a\nb\n')).toBe('\n');
+    expect(eolOf('a\r\nb\r\n')).toBe('\r\n');
+    expect(eolOf('a\r\nb\n')).toBe('\n');
+    expect(eolOf('a\r\nb\r\nc\n')).toBe('\r\n');
+    expect(eolOf('a\rb\r')).toBe('\r\n');
   });
 });

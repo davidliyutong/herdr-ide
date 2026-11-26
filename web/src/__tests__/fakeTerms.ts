@@ -1,4 +1,4 @@
-// A scripted core for the terminal protocol (/api/v1/term) behind the page's
+// A scripted hub for the terminal protocol (/api/v1/term) behind the page's
 // model (state/terms.ts): machines with terminal records and a layout
 // document, calls answered as a terminal core answers them, and every call
 // recorded.
@@ -13,12 +13,12 @@ export interface FakeMachine {
   version: number;
 }
 
-export class FakeCore {
+export class FakeHub {
   readonly machines = new Map<string, FakeMachine>();
   readonly calls: Array<{ m: string; method: string; params: Record<string, unknown> }> = [];
   readonly sent: Array<Record<string, unknown>> = [];
   private socket?: FakeSocket;
-  /** The number of the next terminal's address; a core never gives an address twice. */
+  /** The number of the next terminal's address; a terminal core never gives an address twice. */
   next = 1;
   model!: TermModel;
 
@@ -33,7 +33,7 @@ export class FakeCore {
     return { address, state: 'live', argv: ['/bin/zsh'], cwd: '/home/u', pid: 100, labels: {}, created_ms: 1, ...extra };
   }
 
-  /** Installs a model connected to this core as the page's. */
+  /** Installs a model connected to this hub as the page's. */
   install(): TermModel {
     const conn = new TermConnection(() => (this.socket = new FakeSocket(this)));
     this.model = new TermModel(conn);
@@ -47,7 +47,7 @@ export class FakeCore {
     this.socket?.deliver(msg);
   }
 
-  /** A terminal's event, as the core forwards it. */
+  /** A terminal's event, as the hub forwards it. */
   event(m: string, type: string, terminal: string, data: unknown = null) {
     this.push({ t: 'event', m, type, terminal, data });
   }
@@ -82,7 +82,7 @@ export class FakeCore {
             res({ name: 'layout', version: fm.version });
             return this.push({ t: 'event', m, type: 'doc', terminal: '', data: { name: 'layout', version: fm.version } });
           case 'terminal.run': {
-            const rec = FakeCore.term(`t${this.next++}`, { cwd: params.cwd ?? '/home/u', argv: params.argv ?? ['/bin/zsh'] });
+            const rec = FakeHub.term(`t${this.next++}`, { cwd: params.cwd ?? '/home/u', argv: params.argv ?? ['/bin/zsh'] });
             fm.terminals.push(rec);
             res(rec);
             return this.event(m, 'created', rec.address, rec);
@@ -110,12 +110,12 @@ class FakeSocket implements Socket {
   onclose: (() => void) | null = null;
   onmessage: ((ev: { data: unknown }) => void) | null = null;
 
-  constructor(private readonly core: FakeCore) {
+  constructor(private readonly hub: FakeHub) {
     queueMicrotask(() => this.onopen?.());
   }
 
   send(data: string | Uint8Array) {
-    if (typeof data === 'string') this.core.handle(JSON.parse(data));
+    if (typeof data === 'string') this.hub.handle(JSON.parse(data));
   }
 
   deliver(msg: Record<string, unknown>) {

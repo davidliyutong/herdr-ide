@@ -1,0 +1,1734 @@
+{
+  "agents": [
+    {
+      "id": "claude",
+      "title": "Claude Code",
+      "usageProvider": "claude",
+      "start": [
+        "claude"
+      ],
+      "newSession": [
+        "--session-id",
+        "{id}"
+      ],
+      "continueLatest": [
+        "claude",
+        "--continue"
+      ],
+      "resumeById": [
+        "claude",
+        "--resume",
+        "{id}"
+      ],
+      "transcript": "claude",
+      "chat": {
+        "adapter": "claude"
+      }
+    },
+    {
+      "id": "codex",
+      "title": "Codex",
+      "usageProvider": "codex",
+      "start": [
+        "codex"
+      ],
+      "continueLatest": [
+        "codex",
+        "resume",
+        "--last"
+      ],
+      "resumeById": [
+        "codex",
+        "resume",
+        "{id}"
+      ],
+      "transcript": "codex",
+      "chat": {
+        "adapter": "codex"
+      }
+    },
+    {
+      "id": "gemini",
+      "title": "Gemini CLI",
+      "start": [
+        "gemini"
+      ]
+    },
+    {
+      "id": "opencode",
+      "title": "OpenCode",
+      "usageProvider": "opencode",
+      "start": [
+        "opencode"
+      ]
+    },
+    {
+      "id": "kimi",
+      "title": "Kimi Code",
+      "usageProvider": "kimi",
+      "start": [
+        "kimi"
+      ],
+      "chat": {
+        "adapter": "acp"
+      }
+    },
+    {
+      "id": "grok",
+      "title": "Grok",
+      "usageProvider": "grok",
+      "start": [
+        "grok"
+      ],
+      "chat": {
+        "adapter": "acp"
+      }
+    },
+    {
+      "id": "cursor",
+      "title": "Cursor",
+      "start": [
+        "cursor"
+      ]
+    },
+    {
+      "id": "copilot",
+      "title": "GitHub Copilot",
+      "start": [
+        "copilot"
+      ]
+    },
+    {
+      "id": "qwen",
+      "title": "Qwen Code",
+      "start": [
+        "qwen"
+      ]
+    },
+    {
+      "id": "amp",
+      "title": "Amp",
+      "start": [
+        "amp"
+      ]
+    },
+    {
+      "id": "agy",
+      "title": "Antigravity",
+      "usageProvider": "antigravity"
+    },
+    {
+      "id": "cline",
+      "title": "Cline"
+    },
+    {
+      "id": "devin",
+      "title": "Devin"
+    },
+    {
+      "id": "droid",
+      "title": "Droid"
+    },
+    {
+      "id": "hermes",
+      "title": "Hermes"
+    },
+    {
+      "id": "kilo",
+      "title": "Kilo Code"
+    },
+    {
+      "id": "kiro",
+      "title": "Kiro"
+    },
+    {
+      "id": "letta",
+      "title": "Letta Code"
+    },
+    {
+      "id": "maki",
+      "title": "Maki"
+    },
+    {
+      "id": "muse",
+      "title": "Muse"
+    },
+    {
+      "id": "pi",
+      "title": "Pi"
+    },
+    {
+      "id": "qodercli",
+      "title": "Qoder CLI"
+    }
+  ],
+  "commands": [
+    {
+      "id": "app.commandPalette",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.keyboardShortcuts",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.settings",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.agentAttention",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.addMachine",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "app.fullDiskAccess",
+      "section": "app",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.switch",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.next",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.previous",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.new",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.edit",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.mute",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.unmute",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.close",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.closeOthers",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.new",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.rename",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.next",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.previous",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select1",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select2",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select3",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select4",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select5",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select6",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select7",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select8",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.select9",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.close",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.closeOthers",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.closeRight",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.pin",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.unpin",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.mute",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.unmute",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "browser.open",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "browser.reload",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "chat.new",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.splitRight",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.splitDown",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.close",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.zoom",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.leave",
+      "section": "pane",
+      "when": "editor"
+    },
+    {
+      "id": "pane.rename",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.actions",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusLeft",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusDown",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusUp",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusRight",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusNext",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.focusPrevious",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.back",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.forward",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "pane.undoClose",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "view.toggleSidebar",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.togglePanel",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.panel.files",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.zoomIn",
+      "section": "view",
+      "when": "always"
+    },
+    {
+      "id": "view.zoomOut",
+      "section": "view",
+      "when": "always"
+    },
+    {
+      "id": "view.zoomReset",
+      "section": "view",
+      "when": "always"
+    },
+    {
+      "id": "view.panel.vault",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.panel.usage",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.panel.git",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.panel.monitor",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.panel.search",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "find.open",
+      "section": "find",
+      "when": "terminal"
+    },
+    {
+      "id": "find.next",
+      "section": "find",
+      "when": "terminal"
+    },
+    {
+      "id": "find.previous",
+      "section": "find",
+      "when": "terminal"
+    },
+    {
+      "id": "code.open",
+      "section": "code",
+      "when": "terminal"
+    },
+    {
+      "id": "code.diff",
+      "section": "code",
+      "when": "terminal"
+    },
+    {
+      "id": "code.gitGraph",
+      "section": "code",
+      "when": "terminal"
+    },
+    {
+      "id": "git.graph",
+      "section": "code",
+      "when": "terminal"
+    }
+  ],
+  "i18n": [
+    "command.app.addMachine",
+    "command.app.agentAttention",
+    "command.app.commandPalette",
+    "command.app.fullDiskAccess",
+    "command.app.keyboardShortcuts",
+    "command.app.settings",
+    "command.browser.open",
+    "command.browser.reload",
+    "command.chat.new",
+    "command.code.diff",
+    "command.code.gitGraph",
+    "command.code.open",
+    "command.find.next",
+    "command.find.open",
+    "command.find.previous",
+    "command.git.graph",
+    "command.pane.actions",
+    "command.pane.back",
+    "command.pane.close",
+    "command.pane.focusDown",
+    "command.pane.focusLeft",
+    "command.pane.focusNext",
+    "command.pane.focusPrevious",
+    "command.pane.focusRight",
+    "command.pane.focusUp",
+    "command.pane.forward",
+    "command.pane.leave",
+    "command.pane.rename",
+    "command.pane.splitDown",
+    "command.pane.splitRight",
+    "command.pane.undoClose",
+    "command.pane.zoom",
+    "command.section.app",
+    "command.section.code",
+    "command.section.find",
+    "command.section.pane",
+    "command.section.tab",
+    "command.section.view",
+    "command.section.workspace",
+    "command.tab.close",
+    "command.tab.closeOthers",
+    "command.tab.closeRight",
+    "command.tab.mute",
+    "command.tab.new",
+    "command.tab.next",
+    "command.tab.pin",
+    "command.tab.previous",
+    "command.tab.rename",
+    "command.tab.select1",
+    "command.tab.select2",
+    "command.tab.select3",
+    "command.tab.select4",
+    "command.tab.select5",
+    "command.tab.select6",
+    "command.tab.select7",
+    "command.tab.select8",
+    "command.tab.select9",
+    "command.tab.unmute",
+    "command.tab.unpin",
+    "command.view.panel.files",
+    "command.view.panel.git",
+    "command.view.panel.monitor",
+    "command.view.panel.search",
+    "command.view.panel.usage",
+    "command.view.panel.vault",
+    "command.view.togglePanel",
+    "command.view.toggleSidebar",
+    "command.view.zoomIn",
+    "command.view.zoomOut",
+    "command.view.zoomReset",
+    "command.workspace.close",
+    "command.workspace.closeOthers",
+    "command.workspace.edit",
+    "command.workspace.mute",
+    "command.workspace.new",
+    "command.workspace.next",
+    "command.workspace.previous",
+    "command.workspace.switch",
+    "command.workspace.unmute",
+    "settings.appearance.colorTheme",
+    "settings.appearance.colorTheme.amber",
+    "settings.appearance.colorTheme.blue",
+    "settings.appearance.colorTheme.graphite",
+    "settings.appearance.colorTheme.rose",
+    "settings.appearance.colorTheme.teal",
+    "settings.appearance.colorTheme.violet",
+    "settings.appearance.colorTheme.vscode",
+    "settings.appearance.language",
+    "settings.appearance.language.auto",
+    "settings.appearance.language.en",
+    "settings.appearance.language.zh-CN",
+    "settings.appearance.theme",
+    "settings.appearance.theme.dark",
+    "settings.appearance.theme.light",
+    "settings.appearance.theme.system",
+    "settings.appearance.uiFontSize",
+    "settings.browser.forwardIdle",
+    "settings.browser.openLinks",
+    "settings.browser.openLinks.all",
+    "settings.browser.openLinks.external",
+    "settings.browser.openLinks.loopback",
+    "settings.chat.allowFullAccess",
+    "settings.chat.idleStopMinutes",
+    "settings.chat.maxChatMB",
+    "settings.chat.maxChats",
+    "settings.chat.maxLive",
+    "settings.chat.maxTotalMB",
+    "settings.chat.permissionMode",
+    "settings.chat.permissionMode.acceptEdits",
+    "settings.chat.permissionMode.default",
+    "settings.chat.permissionMode.full",
+    "settings.chat.permissionMode.plan",
+    "settings.chat.retentionDays",
+    "settings.codeServer.install",
+    "settings.codeServer.install.download",
+    "settings.codeServer.install.existing",
+    "settings.codeServer.install.push",
+    "settings.codeServer.path",
+    "settings.files.confirmTrash",
+    "settings.files.exclude",
+    "settings.files.followFocus",
+    "settings.files.showHidden",
+    "settings.files.sortOrder",
+    "settings.files.sortOrder.default",
+    "settings.files.sortOrder.filesFirst",
+    "settings.files.sortOrder.mixed",
+    "settings.files.sortOrder.modified",
+    "settings.files.sortOrder.type",
+    "settings.git.autoFetch",
+    "settings.git.changesView",
+    "settings.git.changesView.list",
+    "settings.git.changesView.tree",
+    "settings.git.confirmSync",
+    "settings.git.graphPageSize",
+    "settings.git.mixedLineEndings",
+    "settings.git.mixedLineEndings.keep",
+    "settings.git.mixedLineEndings.readOnly",
+    "settings.git.mixedLineEndings.unify",
+    "settings.git.untrackedChanges",
+    "settings.git.untrackedChanges.mixed",
+    "settings.git.untrackedChanges.separate",
+    "settings.group.behavior",
+    "settings.group.clipboard",
+    "settings.group.cursor",
+    "settings.group.text",
+    "settings.group.usageAlerts",
+    "settings.group.usageAntigravity",
+    "settings.group.usageClaude",
+    "settings.group.usageCodex",
+    "settings.group.usageDeepseek",
+    "settings.group.usageGrok",
+    "settings.group.usageKimi",
+    "settings.group.usageOpencode",
+    "settings.group.usageRefresh",
+    "settings.group.usageSpend",
+    "settings.group.vaultRun",
+    "settings.group.vaultSessions",
+    "settings.gui.display",
+    "settings.gui.display.auto",
+    "settings.gui.display.xvfb",
+    "settings.gui.enabled",
+    "settings.gui.gpu",
+    "settings.gui.gpu.all",
+    "settings.gui.gpu.vglrun",
+    "settings.gui.gpuPick",
+    "settings.gui.video",
+    "settings.history.capture",
+    "settings.history.days",
+    "settings.history.interval",
+    "settings.history.lines",
+    "settings.history.maxTerminals",
+    "settings.history.maxTotalMB",
+    "settings.layout.undoClose",
+    "settings.machines.download",
+    "settings.monitor.confirmKill",
+    "settings.monitor.refreshSeconds",
+    "settings.monitor.statusBar",
+    "settings.notifications.badge",
+    "settings.notifications.mutedAgents",
+    "settings.notifications.sound",
+    "settings.notifications.system",
+    "settings.performance.keptTerminals",
+    "settings.plugins.agents.enabled",
+    "settings.plugins.browser.enabled",
+    "settings.plugins.chat.enabled",
+    "settings.plugins.files.enabled",
+    "settings.plugins.git.enabled",
+    "settings.plugins.history.enabled",
+    "settings.plugins.monitor.enabled",
+    "settings.plugins.search.enabled",
+    "settings.plugins.usage.enabled",
+    "settings.plugins.vault.enabled",
+    "settings.plugins.vscode.browser",
+    "settings.plugins.vscode.enabled",
+    "settings.section.appearance",
+    "settings.section.browser",
+    "settings.section.chat",
+    "settings.section.codeServer",
+    "settings.section.colors",
+    "settings.section.files",
+    "settings.section.git",
+    "settings.section.gui",
+    "settings.section.history",
+    "settings.section.layout",
+    "settings.section.machines",
+    "settings.section.monitor",
+    "settings.section.notifications",
+    "settings.section.performance",
+    "settings.section.plugins",
+    "settings.section.terminal",
+    "settings.section.usage",
+    "settings.section.vault",
+    "settings.terminal.bell",
+    "settings.terminal.bell.none",
+    "settings.terminal.bell.sound",
+    "settings.terminal.bell.visual",
+    "settings.terminal.boldIsBright",
+    "settings.terminal.colorScheme.dark",
+    "settings.terminal.colorScheme.dark.default",
+    "settings.terminal.colorScheme.dark.dracula",
+    "settings.terminal.colorScheme.dark.gruvbox-dark",
+    "settings.terminal.colorScheme.dark.gruvbox-light",
+    "settings.terminal.colorScheme.dark.nord",
+    "settings.terminal.colorScheme.dark.one-dark",
+    "settings.terminal.colorScheme.dark.one-light",
+    "settings.terminal.colorScheme.dark.solarized-dark",
+    "settings.terminal.colorScheme.dark.solarized-light",
+    "settings.terminal.colorScheme.dark.tomorrow",
+    "settings.terminal.colorScheme.dark.tomorrow-night",
+    "settings.terminal.colorScheme.light",
+    "settings.terminal.colorScheme.light.default",
+    "settings.terminal.colorScheme.light.dracula",
+    "settings.terminal.colorScheme.light.gruvbox-dark",
+    "settings.terminal.colorScheme.light.gruvbox-light",
+    "settings.terminal.colorScheme.light.nord",
+    "settings.terminal.colorScheme.light.one-dark",
+    "settings.terminal.colorScheme.light.one-light",
+    "settings.terminal.colorScheme.light.solarized-dark",
+    "settings.terminal.colorScheme.light.solarized-light",
+    "settings.terminal.colorScheme.light.tomorrow",
+    "settings.terminal.colorScheme.light.tomorrow-night",
+    "settings.terminal.colors.dark.background",
+    "settings.terminal.colors.dark.cursor",
+    "settings.terminal.colors.dark.foreground",
+    "settings.terminal.colors.dark.palette",
+    "settings.terminal.colors.dark.selection",
+    "settings.terminal.colors.light.background",
+    "settings.terminal.colors.light.cursor",
+    "settings.terminal.colors.light.foreground",
+    "settings.terminal.colors.light.palette",
+    "settings.terminal.colors.light.selection",
+    "settings.terminal.copyOnSelect",
+    "settings.terminal.cursorBlink",
+    "settings.terminal.cursorStyle",
+    "settings.terminal.cursorStyle.bar",
+    "settings.terminal.cursorStyle.block",
+    "settings.terminal.cursorStyle.underline",
+    "settings.terminal.cursorWidth",
+    "settings.terminal.fontFamily",
+    "settings.terminal.fontSize",
+    "settings.terminal.fontWeight",
+    "settings.terminal.fontWeight.medium",
+    "settings.terminal.fontWeight.regular",
+    "settings.terminal.lineHeight",
+    "settings.terminal.mathHover",
+    "settings.terminal.optionIsMeta",
+    "settings.terminal.programClipboard",
+    "settings.terminal.programClipboard.ask",
+    "settings.terminal.programClipboard.auto",
+    "settings.terminal.programClipboard.off",
+    "settings.terminal.scrollback",
+    "settings.terminal.sshEnv",
+    "settings.usage.alerts",
+    "settings.usage.claudeKeychain",
+    "settings.usage.codexHomes",
+    "settings.usage.costRefresh",
+    "settings.usage.kimiRefresh",
+    "settings.usage.prices",
+    "settings.usage.providers.antigravity",
+    "settings.usage.providers.claude",
+    "settings.usage.providers.codex",
+    "settings.usage.providers.deepseek",
+    "settings.usage.providers.grok",
+    "settings.usage.providers.kimi",
+    "settings.usage.providers.opencode",
+    "settings.usage.refresh",
+    "settings.usage.refresh.1",
+    "settings.usage.refresh.15",
+    "settings.usage.refresh.2",
+    "settings.usage.refresh.30",
+    "settings.usage.refresh.5",
+    "settings.usage.refresh.60",
+    "settings.usage.refresh.adaptive",
+    "settings.usage.refresh.manual",
+    "settings.usage.refreshIdle",
+    "settings.usage.refreshOpen",
+    "settings.usage.refreshWorking",
+    "settings.usage.statusBar",
+    "settings.usage.thresholds",
+    "settings.vault.approvalTimeout",
+    "settings.vault.autoLock",
+    "settings.vault.passphraseDays",
+    "settings.vault.runMaxTimeout",
+    "settings.vault.runOutput",
+    "settings.vault.runTimeout",
+    "settings.vault.sessionIdle",
+    "settings.vault.sessionMax",
+    "settings.window.zoom"
+  ],
+  "keybindings": {
+    "linux": [
+      {
+        "key": "ctrl+shift+p",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+a",
+        "command": "app.agentAttention",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+k",
+        "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+alt+down",
+        "command": "workspace.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+alt+up",
+        "command": "workspace.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+t",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+tab",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+pagedown",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+tab",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+pageup",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+1",
+        "command": "tab.select1",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+2",
+        "command": "tab.select2",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+3",
+        "command": "tab.select3",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+4",
+        "command": "tab.select4",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+5",
+        "command": "tab.select5",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+6",
+        "command": "tab.select6",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+7",
+        "command": "tab.select7",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+8",
+        "command": "tab.select8",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+9",
+        "command": "tab.select9",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+w",
+        "command": "tab.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+d",
+        "command": "pane.splitRight",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+o",
+        "command": "pane.splitDown",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+enter",
+        "command": "pane.zoom",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b",
+        "command": "pane.leave",
+        "when": "editor"
+      },
+      {
+        "key": "alt+shift+left",
+        "command": "pane.focusLeft",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+down",
+        "command": "pane.focusDown",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+up",
+        "command": "pane.focusUp",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+right",
+        "command": "pane.focusRight",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+left",
+        "command": "pane.back",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+right",
+        "command": "pane.forward",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+z",
+        "command": "pane.undoClose",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+b",
+        "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+b",
+        "command": "view.togglePanel",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+e",
+        "command": "view.panel.files",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+minus",
+        "command": "view.zoomOut",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+0",
+        "command": "view.zoomReset",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+shift+g",
+        "command": "view.panel.git",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+f",
+        "command": "find.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+j",
+        "command": "code.open",
+        "when": "terminal"
+      }
+    ],
+    "linux-browser": [
+      {
+        "key": "ctrl+shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b",
+        "command": "pane.leave",
+        "when": "editor"
+      },
+      {
+        "key": "ctrl+shift+f",
+        "command": "find.open",
+        "when": "terminal"
+      }
+    ],
+    "mac": [
+      {
+        "key": "cmd+shift+p",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+a",
+        "command": "app.agentAttention",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+p",
+        "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+ctrl+down",
+        "command": "workspace.next",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+ctrl+up",
+        "command": "workspace.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+t",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+bracketright",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+tab",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+bracketleft",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+tab",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+1",
+        "command": "tab.select1",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+2",
+        "command": "tab.select2",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+3",
+        "command": "tab.select3",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+4",
+        "command": "tab.select4",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+5",
+        "command": "tab.select5",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+6",
+        "command": "tab.select6",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+7",
+        "command": "tab.select7",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+8",
+        "command": "tab.select8",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+9",
+        "command": "tab.select9",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+w",
+        "command": "tab.close",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+d",
+        "command": "pane.splitRight",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+d",
+        "command": "pane.splitDown",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+w",
+        "command": "pane.close",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+enter",
+        "command": "pane.zoom",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b",
+        "command": "pane.leave",
+        "when": "editor"
+      },
+      {
+        "key": "cmd+alt+left",
+        "command": "pane.focusLeft",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+alt+down",
+        "command": "pane.focusDown",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+alt+up",
+        "command": "pane.focusUp",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+alt+right",
+        "command": "pane.focusRight",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+bracketleft",
+        "command": "pane.back",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+bracketright",
+        "command": "pane.forward",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+z",
+        "command": "pane.undoClose",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+b",
+        "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+alt+b",
+        "command": "view.togglePanel",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+e",
+        "command": "view.panel.files",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "cmd+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "cmd+minus",
+        "command": "view.zoomOut",
+        "when": "always"
+      },
+      {
+        "key": "cmd+0",
+        "command": "view.zoomReset",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+shift+g",
+        "command": "view.panel.git",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+f",
+        "command": "view.panel.search",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+f",
+        "command": "find.open",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+g",
+        "command": "find.next",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+shift+g",
+        "command": "find.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+j",
+        "command": "code.open",
+        "when": "terminal"
+      }
+    ],
+    "mac-browser": [
+      {
+        "key": "cmd+k",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "cmd+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b",
+        "command": "pane.leave",
+        "when": "editor"
+      },
+      {
+        "key": "cmd+f",
+        "command": "find.open",
+        "when": "terminal"
+      }
+    ],
+    "windows": [
+      {
+        "key": "ctrl+shift+p",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+a",
+        "command": "app.agentAttention",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+k",
+        "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+pagedown",
+        "command": "workspace.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+pageup",
+        "command": "workspace.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+t",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+tab",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+tab",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+1",
+        "command": "tab.select1",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+2",
+        "command": "tab.select2",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+3",
+        "command": "tab.select3",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+4",
+        "command": "tab.select4",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+5",
+        "command": "tab.select5",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+6",
+        "command": "tab.select6",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+7",
+        "command": "tab.select7",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+8",
+        "command": "tab.select8",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+9",
+        "command": "tab.select9",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+w",
+        "command": "tab.close",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+equal",
+        "command": "pane.splitRight",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+minus",
+        "command": "pane.splitDown",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+enter",
+        "command": "pane.zoom",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b",
+        "command": "pane.leave",
+        "when": "editor"
+      },
+      {
+        "key": "alt+shift+left",
+        "command": "pane.focusLeft",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+down",
+        "command": "pane.focusDown",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+up",
+        "command": "pane.focusUp",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+right",
+        "command": "pane.focusRight",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+left",
+        "command": "pane.back",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+right",
+        "command": "pane.forward",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+z",
+        "command": "pane.undoClose",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+b",
+        "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+b",
+        "command": "view.togglePanel",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+e",
+        "command": "view.panel.files",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+minus",
+        "command": "view.zoomOut",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+0",
+        "command": "view.zoomReset",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+shift+g",
+        "command": "view.panel.git",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+f",
+        "command": "find.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+j",
+        "command": "code.open",
+        "when": "terminal"
+      }
+    ],
+    "windows-browser": [
+      {
+        "key": "ctrl+shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b",
+        "command": "pane.leave",
+        "when": "editor"
+      },
+      {
+        "key": "ctrl+shift+f",
+        "command": "find.open",
+        "when": "terminal"
+      }
+    ]
+  },
+  "settings": {
+    "appearance.colorTheme": "blue",
+    "appearance.language": "auto",
+    "appearance.theme": "system",
+    "appearance.uiFontSize": 13,
+    "browser.forwardIdle": 30,
+    "browser.openLinks": "loopback",
+    "chat.allowFullAccess": false,
+    "chat.idleStopMinutes": 30,
+    "chat.maxChatMB": 64,
+    "chat.maxChats": 500,
+    "chat.maxLive": 8,
+    "chat.maxTotalMB": 512,
+    "chat.permissionMode": "default",
+    "chat.retentionDays": 30,
+    "codeServer.install": "push",
+    "codeServer.path": "",
+    "files.confirmTrash": false,
+    "files.exclude": [
+      ".git",
+      ".svn",
+      ".hg",
+      "CVS",
+      ".DS_Store",
+      "Thumbs.db"
+    ],
+    "files.followFocus": true,
+    "files.showHidden": false,
+    "files.sortOrder": "default",
+    "git.autoFetch": 0,
+    "git.changesView": "list",
+    "git.confirmSync": false,
+    "git.graphPageSize": 300,
+    "git.mixedLineEndings": "keep",
+    "git.untrackedChanges": "mixed",
+    "gui.display": "auto",
+    "gui.enabled": true,
+    "gui.gpu": "vglrun",
+    "gui.gpuPick": false,
+    "gui.video": true,
+    "history.capture": false,
+    "history.days": 7,
+    "history.interval": 30,
+    "history.lines": 2000,
+    "history.maxTerminals": 32,
+    "history.maxTotalMB": 64,
+    "layout.undoClose": 5,
+    "machines.download": true,
+    "monitor.confirmKill": true,
+    "monitor.refreshSeconds": 2,
+    "monitor.statusBar": true,
+    "notifications.badge": true,
+    "notifications.mutedAgents": [
+      "droid"
+    ],
+    "notifications.sound": true,
+    "notifications.system": true,
+    "performance.keptTerminals": 12,
+    "plugins.agents.enabled": true,
+    "plugins.browser.enabled": true,
+    "plugins.chat.enabled": true,
+    "plugins.files.enabled": true,
+    "plugins.git.enabled": true,
+    "plugins.history.enabled": true,
+    "plugins.monitor.enabled": true,
+    "plugins.search.enabled": true,
+    "plugins.usage.enabled": true,
+    "plugins.vault.enabled": true,
+    "plugins.vscode.browser": false,
+    "plugins.vscode.enabled": false,
+    "terminal.bell": "visual",
+    "terminal.boldIsBright": false,
+    "terminal.colorScheme.dark": "default",
+    "terminal.colorScheme.light": "default",
+    "terminal.colors.dark.background": "#0a0a0a",
+    "terminal.colors.dark.cursor": "#f0f0f0",
+    "terminal.colors.dark.foreground": "#f0f0f0",
+    "terminal.colors.dark.palette": [
+      "#484f58",
+      "#ff7b72",
+      "#3fb950",
+      "#d29922",
+      "#58a6ff",
+      "#bc8cff",
+      "#39c5cf",
+      "#b1bac4",
+      "#6e7681",
+      "#ffa198",
+      "#56d364",
+      "#e3b341",
+      "#79c0ff",
+      "#d2a8ff",
+      "#56d4dd",
+      "#ffffff"
+    ],
+    "terminal.colors.dark.selection": "#3b4a6b",
+    "terminal.colors.light.background": "#ffffff",
+    "terminal.colors.light.cursor": "#0a0a0a",
+    "terminal.colors.light.foreground": "#0a0a0a",
+    "terminal.colors.light.palette": [
+      "#24292f",
+      "#cf222e",
+      "#116329",
+      "#7d4e00",
+      "#0969da",
+      "#8250df",
+      "#1b7c83",
+      "#6e7781",
+      "#57606a",
+      "#a40e26",
+      "#1a7f37",
+      "#9a6700",
+      "#218bff",
+      "#a475f9",
+      "#3192aa",
+      "#8c959f"
+    ],
+    "terminal.colors.light.selection": "#b6d4fe",
+    "terminal.copyOnSelect": false,
+    "terminal.cursorBlink": true,
+    "terminal.cursorStyle": "bar",
+    "terminal.cursorWidth": 1,
+    "terminal.fontFamily": "",
+    "terminal.fontSize": 13,
+    "terminal.fontWeight": "regular",
+    "terminal.lineHeight": 1.05,
+    "terminal.mathHover": true,
+    "terminal.optionIsMeta": false,
+    "terminal.programClipboard": "auto",
+    "terminal.scrollback": 10000,
+    "terminal.sshEnv": true,
+    "usage.alerts": true,
+    "usage.claudeKeychain": true,
+    "usage.codexHomes": [],
+    "usage.costRefresh": 15,
+    "usage.kimiRefresh": true,
+    "usage.prices": [],
+    "usage.providers.antigravity": true,
+    "usage.providers.claude": true,
+    "usage.providers.codex": true,
+    "usage.providers.deepseek": true,
+    "usage.providers.grok": true,
+    "usage.providers.kimi": true,
+    "usage.providers.opencode": true,
+    "usage.refresh": "adaptive",
+    "usage.refreshIdle": 30,
+    "usage.refreshOpen": 5,
+    "usage.refreshWorking": 10,
+    "usage.statusBar": true,
+    "usage.thresholds": [
+      "80",
+      "95"
+    ],
+    "vault.approvalTimeout": 60,
+    "vault.autoLock": 60,
+    "vault.passphraseDays": 14,
+    "vault.runMaxTimeout": 600,
+    "vault.runOutput": 64,
+    "vault.runTimeout": 120,
+    "vault.sessionIdle": 30,
+    "vault.sessionMax": 12,
+    "window.zoom": 100
+  }
+}

@@ -117,7 +117,7 @@
   color: var(--fg-mute);
   font-size: var(--fs-sm);
 }
-/* How often the core reads, beside Refresh. */
+/* How often the hub reads, beside Refresh. */
 .usage-interval {
   max-width: 9em;
   font-size: var(--fs-sm);
@@ -464,6 +464,69 @@
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
+.usage-daily-hover {
+  fill: var(--accent-soft);
+  pointer-events: none;
+}
+.usage-daily-tooltip {
+  position: absolute;
+  top: auto;
+  bottom: calc(100% + 6px);
+  width: max-content;
+  min-width: 176px;
+  max-width: 100%;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--float);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px var(--shadow);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  z-index: 40;
+}
+.usage-daily-tip-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.usage-daily-tip-date {
+  font-weight: 600;
+}
+.usage-daily-tip-total {
+  margin-left: auto;
+  font-weight: 600;
+}
+.usage-daily-tip-sub {
+  font-size: var(--fs-xs);
+}
+.usage-daily-tip-list,
+.usage-daily-tip-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.usage-daily-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-xs);
+}
+.usage-daily-tip-row i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
+.usage-daily-tip-val {
+  white-space: nowrap;
+}
 .usage-legend {
   display: flex;
   flex-wrap: wrap;
@@ -626,6 +689,55 @@
   border-top: 1px solid var(--line);
 }
 
+/* The status bar's item of the focused pane's agent session (SessionItem.tsx):
+   the service's mark, the model, the cost and the context in use; its card lists the
+   session's numbers in two columns, then the account's tightest window. */
+.usage-session-item .ai-logo {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.usage-session-cost,
+.usage-session-ctx,
+.usage-session-facts dd {
+  font-variant-numeric: tabular-nums;
+}
+.usage-session-model {
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
+}
+.usage-status-item .ai-logo {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.usage-session-ctx {
+  padding-left: 4px;
+  border-left: 1px solid var(--line);
+}
+.usage-session-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 0;
+}
+.usage-session-facts dt {
+  color: var(--fg-dim);
+}
+.usage-session-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+.usage-session-account {
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
 /* The settings page (SettingsPage.tsx): a row per provider, drawn as the
    settings' rows, that opens its settings, a page with a Back button and the provider's
    name. */
@@ -667,4 +779,110 @@
   font-size: var(--fs-lg);
   font-weight: 600;
   color: var(--fg);
+}
+
+/* ---- Settings › AI usage › Your prices (PricesEditor.tsx) ---- */
+.prices-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.prices-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.prices-head,
+.prices-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 2fr) repeat(4, minmax(56px, 1fr)) var(--ctl-sm);
+  gap: 4px;
+  align-items: center;
+}
+.prices-col-title {
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prices-row .settings-input {
+  width: 100%;
+  min-width: 0;
+}
+.prices-row.invalid .settings-input[aria-invalid] {
+  border-color: var(--error);
+}
+.prices-problem {
+  margin-top: 2px;
+}
+.prices-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.prices-actions > button svg,
+.prices-suggest svg {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.prices-unpriced {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.prices-suggest {
+  cursor: pointer;
+  color: var(--fg);
+}
+.prices-hint {
+  line-height: 1.4;
+}
+/* What a window has cost so far at API prices. */
+.usage-window-spend {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* Every model's use: its line, a bar of its kinds of tokens, their counts. */
+.usage-models {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.usage-models li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.usage-model-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-md);
+}
+.usage-model-line .muted {
+  font-size: var(--fs-sm);
+}
+.usage-model-name {
+  min-width: 0;
+}
+.usage-model-line .usage-rank-cost {
+  font-weight: 600;
+}
+.usage-model-kinds {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.usage-models-more {
+  align-self: flex-start;
+  margin-top: 4px;
 }

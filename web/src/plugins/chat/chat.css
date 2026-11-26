@@ -1,0 +1,415 @@
+/* The chat plugin: its pane (ChatPane.tsx), the Chats panel
+   (ChatsPanel.tsx) and the status bar's item (UsageItem.tsx). The
+   conversation itself is conversation/conversation.css. */
+
+/* ---- the pane ---- */
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg);
+}
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-width: 0;
+  height: var(--h-toolbar);
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.chat-head-icon,
+.chat-head .ai-logo {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.chat-agent {
+  flex: none;
+  font-weight: 600;
+  color: var(--fg);
+}
+.chat-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--fg);
+  cursor: default;
+}
+.chat-title-edit {
+  flex: 1;
+  min-width: 80px;
+}
+.chat-cwd {
+  flex: 1 1 0;
+  min-width: 0;
+  font-family: var(--mono);
+  color: var(--fg-mute);
+}
+.chat-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+.chat-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.chat-banner .lucide {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.chat-banner.error {
+  color: var(--error);
+}
+.chat-banner button {
+  margin-left: auto;
+}
+.chat-stderr {
+  flex: none;
+  max-height: 40%;
+  overflow: auto;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.chat-stderr pre {
+  margin: 4px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+}
+.chat-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  outline: none;
+}
+
+/* ---- the panel ---- */
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+.chat-panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  height: var(--h-toolbar);
+  padding: 0 4px 0 12px;
+}
+.chat-panel-title {
+  font-weight: 600;
+  font-size: var(--fs-md);
+}
+.chat-panel-empty {
+  padding: 8px 12px;
+}
+.chat-rows {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+}
+.chat-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.chat-row:hover,
+.chat-row:focus-within {
+  background: var(--bg-3);
+}
+.chat-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+}
+.chat-row-main:hover {
+  background: transparent;
+}
+.chat-row-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.chat-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat-row-icon {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.chat-row-state {
+  flex: none;
+}
+.chat-row-actions {
+  display: none;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+}
+.chat-row:hover .chat-row-actions,
+.chat-row:focus-within .chat-row-actions {
+  display: inline-flex;
+}
+.chat-more {
+  align-self: flex-start;
+  margin: 4px 12px;
+}
+.chat-host-outdated {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--fg-dim);
+}
+.chat-host-outdated > span {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.chat-archived {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  border-top: 1px solid var(--line);
+}
+.chat-archived-toggle {
+  align-self: stretch;
+  justify-content: flex-start;
+  gap: 4px;
+  margin: 2px 4px;
+  color: var(--fg-dim);
+}
+.chat-archived-toggle svg {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.chat-archived .chat-row-title {
+  color: var(--fg-dim);
+}
+
+/* ---- the status bar's item ---- */
+.chat-usage-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--ctl-sm);
+  padding: 0 6px;
+  color: var(--fg-dim);
+  line-height: 1;
+  white-space: nowrap;
+}
+.chat-usage-item .ai-logo,
+.chat-usage-item .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.chat-usage-item.warn {
+  color: var(--warning);
+}
+.chat-usage-item.out {
+  color: var(--error);
+}
+
+/* The chat panel's earlier sessions (Sessions.tsx): a section whose rows
+ * (components/tree TreeRow) follow each other in the flow instead of being
+ * placed by number, grouped by the agent that kept them. */
+.agent-sessions .tree-row {
+  position: relative;
+}
+.agent-sessions .tree-row:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+.agent-sessions-dir {
+  padding: 2px 12px 4px;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+}
+.agent-sessions-kind + .agent-sessions-kind {
+  margin-top: 4px;
+}
+.agent-sessions-kind-title {
+  padding: 4px 12px 2px;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.agent-session-icon {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-dim);
+}
+.agent-sessions-note {
+  padding: 4px 12px;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+}
+.agent-sessions-more {
+  margin: 2px 12px 4px;
+}
+
+/* ---- settings management/debug panel (SettingsExtra.tsx) ---- */
+.chat-manage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-manage-refresh {
+  margin-left: auto;
+}
+.chat-trusted-machine {
+  margin-left: auto;
+  min-width: 8rem;
+  height: var(--ctl-sm);
+  min-height: var(--ctl-sm);
+  font-size: var(--fs-sm);
+}
+.chat-trusted-machine + .chat-manage-refresh {
+  margin-left: 4px;
+}
+.chat-manage-hosts,
+.chat-trusted-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.chat-host-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+.chat-host-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.chat-host-icon {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-dim);
+}
+.chat-host-name {
+  font-weight: 600;
+}
+.chat-host-badge {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+}
+.chat-host-badge.st-running {
+  color: var(--done);
+  border-color: color-mix(in srgb, var(--done) 40%, transparent);
+}
+.chat-host-badge.st-error {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 40%, transparent);
+}
+.chat-host-badge.st-offline {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+}
+.chat-host-stop {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat-host-stats {
+  font-variant-numeric: tabular-nums;
+}
+.chat-host-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.chat-host-session,
+.chat-trusted-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.chat-host-session-icon,
+.chat-trusted-icon {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-dim);
+}
+.chat-host-session-info,
+.chat-trusted-info {
+  flex: 1;
+  min-width: 0;
+}
+.chat-host-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.chat-trusted-row button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

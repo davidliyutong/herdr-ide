@@ -1,4 +1,4 @@
-// What the file explorer does with files: changes through the core
+// What the file explorer does with files: changes through the hub
 // (api.ts) with the tree listed again after them, opening files (Quick
 // Look, the editor pane, VS Code, a terminal), the clipboard, downloads and
 // uploads, and the context menu that offers them. Nothing that changes
@@ -14,6 +14,7 @@ import { canDownload, startDownload, useDownloads } from '../../download';
 import { droppedItems, filesAreOn } from '../../drop';
 import { t } from '../../i18n';
 import { isMac, keyLabel } from '../../keys';
+import { renameKeyHint } from '../../rowKeys';
 import * as L from '../../term/layout';
 import { terms } from '../../state/terms';
 import { unsavedPanes, withView } from '../../state/panes';
@@ -26,13 +27,23 @@ import { recheckGone } from './gone';
 import { quickDiff } from './quickDiff';
 import { isPluginOn } from '../registry';
 import { settingValue } from '../../settings';
-import { chooseFiles, droppedEntries, localPaths, pickedFiles, uploadInto } from './upload';
+import {
+  chooseFiles,
+  clipboardLocalPaths,
+  clipboardRoots,
+  droppedEntries,
+  localPaths,
+  pickedFiles,
+  readEntries,
+  uploadInto,
+} from './upload';
 import {
   baseName,
   join,
   parentOf,
   relativePath,
   reloadDirs,
+  revealVisiblePath,
   select,
   setClipboard,
   setEdit,
@@ -54,6 +65,8 @@ export const treeKeys = {
   cut: () => keyLabel(`${mod}+x`),
   copy: () => keyLabel(`${mod}+c`),
   paste: () => keyLabel(`${mod}+v`),
+  open: () => (isMac ? keyLabel('cmd+o') : '↵'),
+  rename: () => renameKeyHint(),
   trash: () => keyLabel(isMac ? 'cmd+backspace' : 'delete'),
   remove: () => keyLabel(isMac ? 'cmd+shift+backspace' : 'shift+delete'),
 };
@@ -97,10 +110,14 @@ function editors(m: string): L.PluginView[] {
  * preview) unless this is a preview too. With side, the editor opens
  * split beside the focused pane instead (Open to the Side), unless that
  * pane's tab shows the file already. Media files show in the same editor,
- * as Quick Look shows them. */
-export function openEditor(m: string, path: string, o: { preview?: boolean; side?: boolean } = {}) {
+ * as Quick Look shows them. With line (1-based) and col, the editor
+ * shows that place with the cursor there (a search's match): `reveal`
+ * changes each time, so the same place is shown again after the user
+ * moved away. */
+export function openEditor(m: string, path: string, o: { preview?: boolean; side?: boolean; line?: number; col?: number } = {}) {
   const preview = !!o.preview && !o.side;
-  const view = { plugin: 'files', kind: 'editor', path };
+  const at = o.line && o.line > 0 ? { line: o.line, col: o.col && o.col > 0 ? o.col : 1, reveal: Date.now() } : {};
+  const view = { plugin: 'files', kind: 'editor', path, ...at };
   const tab = !o.side;
   if (editors(m).some((v) => v.path === path))
     return actions.openView(m, preview ? view : { ...view, preview: false }, { reuse: (v) => v.path === path, tab });
@@ -169,22 +186,20 @@ export function revealInExplorer(m: string, path: string) {
     setFollow(false);
     showRoot(m, parentOf(path));
   }
-  const root = useTree.getState().root!;
-  for (let d = parentOf(path); within(d, root) && d !== root; d = parentOf(d)) setExpanded(d, true);
-  select(path);
+  revealVisiblePath(path);
 }
 
 /** Show in Explorer of the editor pane. */
 export const reveal = revealInExplorer;
 
 /** Whether Reveal in Finder is offered for each machine's paths here, as
- * the core said: only for its own machine, to a page on its computer
- * (internal/plugins/files revealable). Unknown until asked (loadRevealable). */
+ * the hub said: only for its own machine, to a page on its computer
+ * (backend/features/files revealable). Unknown until asked (loadRevealable). */
 export const useRevealable = createStore<Record<string, boolean>>(() => ({}));
 const askingRevealable = new Set<string>();
 
-/** Asks the core, once per page, whether machine m's paths can be shown in
- * the system's file manager; another machine than the core's own cannot. */
+/** Asks the hub, once per page, whether machine m's paths can be shown in
+ * the system's file manager; another machine than the hub's own cannot. */
 export function loadRevealable(m: string | undefined) {
   if (!m || m in useRevealable.getState() || askingRevealable.has(m)) return;
   if (useStore.getState().machines[m]?.kind !== 'local') return useRevealable.setState({ [m]: false });
@@ -197,7 +212,7 @@ export function loadRevealable(m: string | undefined) {
 }
 
 /** Reveal in Finder (Reveal in File Manager elsewhere) for path, when the
- * core offers it for m: the system's file manager of the core's computer
+ * hub offers it for m: the system's file manager of the hub's computer
  * shows it. It runs a program there, so read-only mode has none. */
 export function revealEntries(m: string, path: string): MenuEntry[] {
   loadRevealable(m);
@@ -344,6 +359,37 @@ export async function dropFiles(m: string, dir: string, items: DataTransferItemL
   await uploadInto(m, dir, picked);
 }
 
+async function uploadRoots(m: string, dir: string, roots: Array<FileSystemEntry | File>) {
+  try {
+    const { picked, unreadable } = await readEntries(roots);
+    if (unreadable) toast(t('files.paste.unreadable', { n: unreadable }), picked.length ? 'info' : 'error');
+    if (!picked.length) return;
+    if (dir !== useTree.getState().root) setExpanded(dir, true);
+    await uploadInto(m, dir, picked);
+  } catch (e) {
+    toast(errorText(e));
+  }
+}
+
+/** Pastes locally copied files or clipboard items onto dir of machine m:
+ * copies in place on the desktop app's own machine when local paths exist,
+ * and uploads onto remote machines (or for non-file clipboard blobs). Must
+ * be called synchronously during the paste event so clipboardData entries are
+ * captured before the browser clears them. */
+export async function pasteFiles(m: string, dir: string, data: Pick<DataTransfer, 'items' | 'files'>) {
+  if (filesAreOn(m)) {
+    const { paths, fallback } = clipboardLocalPaths(data);
+    if (paths.length) {
+      if (dir !== useTree.getState().root) setExpanded(dir, true);
+      await copyInto(m, paths, dir);
+    }
+    if (fallback.length) await uploadRoots(m, dir, fallback);
+    return;
+  }
+  const roots = clipboardRoots(data);
+  if (roots.length) await uploadRoots(m, dir, roots);
+}
+
 /** Upload Files… and Upload Folder…: the browser's dialog, then the
  * upload into dir (in the desktop app, copies of its own machine's files
  * where they are). */
@@ -397,7 +443,7 @@ function openEntries(m: string, paths: readonly string[], o: FileMenuOptions): M
   const one = paths.length === 1 ? paths[0] : undefined;
   const out: MenuEntry[] = [];
   if (files.length) {
-    out.push({ label: t('files.open'), hint: '↵', run: () => void openFiles(m, files) });
+    out.push({ label: t('files.open'), hint: treeKeys.open(), run: () => void openFiles(m, files) });
     out.push({
       label: t('files.openToSide'),
       run: () => void files.reduce((p, f) => p.then(() => openToSide(m, f)), Promise.resolve<unknown>(undefined)),
@@ -481,7 +527,12 @@ export function menuFor(m: string, paths: string[], isDir: (p: string) => boolea
   if (target && !ro) {
     out.push('sep');
     if (paths.length === 1)
-      out.push({ label: t('files.rename'), hint: 'F2', icon: createElement(Pencil), run: () => setEdit({ kind: 'rename', path: target }) });
+      out.push({
+        label: t('files.rename'),
+        hint: treeKeys.rename(),
+        icon: createElement(Pencil),
+        run: () => setEdit({ kind: 'rename', path: target }),
+      });
     out.push({ label: t('files.trash'), hint: treeKeys.trash(), icon: createElement(Trash2), run: () => void trash(m, paths) });
     out.push({ label: t('files.deletePermanently'), hint: treeKeys.remove(), danger: true, run: () => void remove(m, paths) });
   }

@@ -14,7 +14,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: vi.fn() } }))
 vi.mock('../components/TerminalView', () => ({ TerminalView: () => null }));
 
 import { useStore } from '../state/store';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import type { MachineState } from '../lib/machine';
 import { Workspace } from '../components/Workspace';
 import { Sidebar } from '../components/Sidebar';
@@ -50,7 +50,7 @@ const layout = () => ({
   selected: 0,
 });
 
-let core: FakeCore;
+let hub: FakeHub;
 let host: HTMLDivElement;
 let root: Root;
 const fetchMock = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(new Response('{}', { status: 200 })));
@@ -63,15 +63,15 @@ beforeEach(async () => {
   fetchMock.mockClear();
   resetClosed();
   clearMulti();
-  core = new FakeCore();
-  const terms = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'].map((a) => FakeCore.term(a, { cwd: '/src' }));
-  core.machine('m', terms, layout());
-  core.install();
+  hub = new FakeHub();
+  const terms = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'].map((a) => FakeHub.term(a, { cwd: '/src' }));
+  hub.machine('m', terms, layout());
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setMachines([machine('m', 'local'), machine('gpu'), machine('db'), machine('web', 'ssh', 'disabled')]);
   s.selectMachine('m');
-  core.model.subscribe('m');
+  hub.model.subscribe('m');
   await settle();
   host = document.createElement('div');
   document.body.append(host);
@@ -98,7 +98,7 @@ const render = (c: () => React.ReactNode) =>
     ),
   );
 const tabs = () => [...host.querySelectorAll<HTMLElement>('.tab')];
-const tabNames = () => core.layout('m')!.workspaces[0].tabs.map((t) => t.name);
+const tabNames = () => hub.layout('m')!.workspaces[0].tabs.map((t) => t.name);
 // jsdom is no Mac: Ctrl toggles a row.
 const press = (el: HTMLElement, o: PointerEventInit = {}) =>
   act(async () => void el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1, ...o })));
@@ -115,7 +115,7 @@ describe('tabs selected together', () => {
     await render(() => <Workspace />);
     // Ctrl adds a tab without showing it; the tab shown is part of the selection.
     await press(tabs()[2], { ctrlKey: true });
-    expect(core.layout('m')!.workspaces[0].selected).toBe(0);
+    expect(hub.layout('m')!.workspaces[0].selected).toBe(0);
     expect(tabs().map((t) => t.classList.contains('multi'))).toEqual([true, false, true, false]);
     // Shift selects the tabs from the last one clicked; Ctrl adds more.
     await press(tabs()[3], { shiftKey: true });
@@ -133,7 +133,7 @@ describe('tabs selected together', () => {
     // Moving them: to the end of the other workspace, which is shown with the last of them.
     item(item(items, 'Move to Workspace').submenu!.filter(isItem), 'three').run!();
     await settle();
-    const l = core.layout('m')!;
+    const l = hub.layout('m')!;
     expect(l.workspaces[0].tabs.map((t) => t.name)).toEqual(['b']);
     expect(l.workspaces[2].tabs.map((t) => t.focused)).toEqual(['p6', 'p1', 'p3', 'p4']);
     expect(l.selected).toBe(2);
@@ -182,7 +182,7 @@ describe('tabs selected together', () => {
     // Enter shows the tab; F2 renames it; the menu key opens its menu.
     await key(tabs()[2], 'Enter');
     await settle();
-    expect(core.layout('m')!.workspaces[0].selected).toBe(2);
+    expect(hub.layout('m')!.workspaces[0].selected).toBe(2);
     await key(tabs()[2], 'F2');
     expect(useStore.getState().renaming).toEqual({ kind: 'tab', m: 'm', id: 'w1w1w1w1:2' });
     await act(async () => useStore.getState().setRenaming(undefined));
@@ -211,22 +211,22 @@ describe('workspaces and machines selected together', () => {
     await act(async () => rows()[1].click());
     await settle();
     expect(useMulti.getState().sel).toBeUndefined();
-    expect(core.layout('m')!.selected).toBe(1);
+    expect(hub.layout('m')!.selected).toBe(1);
     await act(async () => rows()[2].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
     expect(selectedIds({ kind: 'workspace', m: 'm' })).toEqual(['w2w2w2w2', 'w3w3w3w3']);
     const items = await menuOf(rows()[2]);
     expect(items.map((i) => i.label)).toEqual(['Close 2 Workspaces']);
-    const before = core.layout('m')!.workspaces;
+    const before = hub.layout('m')!.workspaces;
     items[0].run!();
     await settle();
     expect(useDialog.getState().current).toBeUndefined();
-    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['one']);
+    expect(hub.layout('m')!.workspaces.map((w) => w.name)).toEqual(['one']);
     expect(useStore.getState().toasts.at(-1)?.msg).toBe('2 workspaces closed.');
     // Their terminals run until the time to undo is over.
-    expect(core.calls.filter((c) => c.method === 'terminal.kill')).toEqual([]);
+    expect(hub.calls.filter((c) => c.method === 'terminal.kill')).toEqual([]);
     actions.undoClose();
     await settle();
-    expect(core.layout('m')!.workspaces).toEqual(before);
+    expect(hub.layout('m')!.workspaces).toEqual(before);
   });
 
   it('acts on several machines from their menu, asking once, and removes the SSH ones', async () => {
@@ -304,7 +304,7 @@ describe('workspaces and machines selected together', () => {
     await act(async () => useStore.getState().setRenaming(undefined));
     await key(rows()[1], 'Enter');
     await settle();
-    expect(core.layout('m')!.selected).toBe(1);
+    expect(hub.layout('m')!.selected).toBe(1);
     // Ctrl+A on a machine selects the machines.
     await key(heads()[1], 'a', { ctrlKey: true });
     expect(selectedIds({ kind: 'machine' })).toEqual(['m', 'gpu', 'db', 'web']);
@@ -330,7 +330,7 @@ describe('dragging a block', () => {
     actions.moveWorkspaces('m', ['w1w1w1w1', 'w3w3w3w3'], 2);
     actions.moveTabs('m', ['p1', 'p3'], 4);
     await settle();
-    const l = core.layout('m')!;
+    const l = hub.layout('m')!;
     expect(l.workspaces.map((w) => w.name)).toEqual(['two', 'one', 'three']);
     expect(l.selected).toBe(1);
     expect(l.workspaces[1].tabs.map((t) => t.name)).toEqual(['b', 'd', 'a', 'c']);

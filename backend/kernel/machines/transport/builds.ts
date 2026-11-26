@@ -1,0 +1,99 @@
+// The machine builds the hub deploys: the TypeScript machine side, which
+// is the hub's own program: one executable per platform holds the hub,
+// the machine side and that platform's herdr-core.
+// A release publishes each platform's as an archive
+// (<bin>-<platform>.tar.gz, the executable at <bin>-<platform>/<bin>) and
+// their SHA-256 in SHA256SUMS (release.ts). A machine keeps its build
+// under its home, shared by instances:
+//
+//   ~/<AGENT_DIR>/<version>/<bin>      the executable, version a digest of it
+//
+// where the Go program of earlier releases kept its own: a node of this
+// build takes over from one of those (docs/features/42-typescript-backend.md).
+import { HUB_BIN } from '#shared/lib/brand.ts';
+import type { OpenStream } from './tunnel.ts';
+
+/** A machine as the probe found it. */
+export interface MachineTarget {
+  os: string;
+  arch: string;
+  /** Linux's C library. */
+  libc?: 'glibc' | 'musl';
+}
+
+/** The digests of a TypeScript build for a platform. */
+export interface TSDigests {
+  /** The SHA-256 of the executable. */
+  exe: string;
+  /** The SHA-256 of the release's archive, when the manifest has it: then
+   * a machine can download it. */
+  archive?: string;
+  /** Where the digests came from, for the logs. */
+  source: string;
+}
+
+/** What the hub uploads: the release's archive, or the executable
+ * gzip-compressed (the hub's own). */
+export interface TSPayload {
+  kind: 'archive' | 'gz';
+  bytes: Buffer;
+}
+
+/** A TypeScript build for a machine's platform. */
+export interface TSBuild {
+  kind: 'ts';
+  /** The platform (MACHINE_KEYS). */
+  key: string;
+  /** The release's archive of the platform; absent for a build of no
+   * release (development, the end-to-end tests). */
+  url?: string;
+  /** The digests, from the release's manifest, which the hub verified
+   * itself (or from the hub's own executable); tunnel opens a stream
+   * through the machine for a hub that cannot reach the release, over
+   * which the hub speaks its own TLS. Fails with Unsupported
+   * build_unavailable. */
+  digests(o?: { signal?: AbortSignal; tunnel?: OpenStream }): Promise<TSDigests>;
+  /** What the hub uploads when the machine cannot download it, checked
+   * against d; fails with Unsupported build_unavailable. */
+  load(d: TSDigests, signal?: AbortSignal): Promise<TSPayload>;
+}
+
+export type MachineBuild = TSBuild;
+
+/** The machine build for a machine. */
+export type BuildSource = (t: MachineTarget, signal?: AbortSignal) => Promise<MachineBuild>;
+
+/** The platforms of the TypeScript executables and Bun's compile target of
+ * each: x64 Linux as baseline builds (processors without AVX2), musl's for
+ * Alpine. */
+export const MACHINE_TARGETS: Readonly<Record<string, string>> = {
+  'linux-amd64': 'bun-linux-x64-baseline',
+  'linux-arm64': 'bun-linux-arm64',
+  'linux-amd64-musl': 'bun-linux-x64-musl-baseline',
+  'linux-arm64-musl': 'bun-linux-arm64-musl',
+  'darwin-amd64': 'bun-darwin-x64',
+  'darwin-arm64': 'bun-darwin-arm64',
+};
+
+export const MACHINE_KEYS = Object.keys(MACHINE_TARGETS);
+
+/** The platform key of a machine: <os>-<arch>[-musl]. */
+export const machineKey = (t: MachineTarget): string => `${t.os}-${t.arch}${t.os === 'linux' && t.libc === 'musl' ? '-musl' : ''}`;
+
+/** The platform key of a Bun compile target ("" for Windows or none). */
+export function keyOfTarget(target: string): string {
+  return Object.entries(MACHINE_TARGETS).find(([, t]) => t === target || t === `${target}-baseline`)?.[0] ?? '';
+}
+
+/** A platform's release archive, and the executable in it. */
+export const archiveName = (key: string): string => `${HUB_BIN}-${key}.tar.gz`;
+export const archiveMember = (key: string): string => `${HUB_BIN}-${key}/${HUB_BIN}`;
+/** A platform's executable in a directory of builds (--agent-dir). */
+export const bareName = (key: string): string => `${HUB_BIN}-${key}`;
+
+/** The directory of a TypeScript build on a machine. */
+export const tsVersion = (exe: string): string => exe.slice(0, 16);
+
+/** The build a node of b tells its clients (NodeInfo.build): the start of
+ * the digest of its executable, as the node computes it from the file. */
+export const nodeBuild = (d: { exe: string }): string => d.exe.slice(0, 12);

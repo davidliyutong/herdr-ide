@@ -1,16 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Ellipsis, FolderPlus, ServerPlus, Settings } from 'lucide-react';
+import { BellOff, ChevronDown, ChevronRight, Ellipsis, FolderPlus, ServerPlus, Settings } from 'lucide-react';
 import { SIDEBAR_WIDTH, useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import { conn } from '../lib/conn';
-import { actions, attentionList, terminalPlace, workspaceTitle } from '../actions';
-import { aggregate, agentOf, agentStatus, codeText, shortPath, terminalTitle, type MachineState } from '../lib/machine';
-import * as L from '../term/layout';
+import {
+  actions,
+  attentionList,
+  attentionName,
+  attentionTitle,
+  focusAttention,
+  paneDirectory,
+  terminalPlace,
+  workspaceStatus,
+  workspaceTitle,
+} from '../actions';
+import { codeText, failureText, shortPath, type MachineState } from '../lib/machine';
+import { useViewStatusOf } from '../plugins/registry';
 import { StatusDot, statusLabel } from './StatusDot';
 import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { APP_NAME, storage } from '../brand';
 import { InlineEdit } from './InlineEdit';
+import { DeployProgress } from './DeployProgress';
 import { startMachineDrag, startWorkspaceDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
 import { machineMenu, machinesMenu, sidebarMenu, workspaceMenu, workspacesMenu } from '../menus';
@@ -300,8 +311,14 @@ function onInboxKey(e: React.KeyboardEvent<HTMLElement>) {
 }
 
 function Inbox() {
-  // Recomputed on every change of the terminals; the lists are small.
+  // Recomputed on every change of the terminals and of the plugins' panes'
+  // statuses (a chat's); the lists are small.
   useTerms((s) => s.machines);
+  useViewStatusOf(() =>
+    attentionList()
+      .map((i) => `${i.m} ${i.terminal} ${i.status} ${attentionName(i)}`)
+      .join('\n'),
+  );
   const machines = useStore((s) => s.machines);
   const all = attentionList();
   const items = all.filter((i) => i.status === 'blocked' || i.status === 'done');
@@ -328,12 +345,16 @@ function Inbox() {
         </span>
       </div>
       {items.length === 0 && <div className="muted small pad">{t('sidebar.noPending')}</div>}
-      {items.map(({ m, terminal, record, status }) => {
+      {items.map((item) => {
+        const { m, terminal, status } = item;
         // Where the agent is (workspace and tab, which a long machine name
         // must not cut off), its terminal's title, its machine; the
-        // directory is in the tooltip.
-        const title = terminalTitle(record, terminal);
-        const where = [terminalPlace(m, terminal), title, machines[m]?.label].filter(Boolean).join(' · ');
+        // directory is in the tooltip. A plugin's pane (a chat) goes by its
+        // title, said once (attentionName).
+        const where = item.unopened
+          ? [machines[m]?.label].filter(Boolean).join(' · ')
+          : [terminalPlace(m, terminal), !item.view && attentionTitle(item), machines[m]?.label].filter(Boolean).join(' · ');
+        const dir = item.unopened ? item.unopened.directory : paneDirectory(m, item.view ? { view: item.view } : { terminal });
         return (
           <div
             key={`${m} ${terminal}`}
@@ -345,15 +366,15 @@ function Inbox() {
             onKeyDown={(e) => {
               if (e.key !== 'Enter' && e.key !== ' ') return;
               e.preventDefault();
-              actions.focusPane(m, terminal);
+              focusAttention(item);
             }}
-            title={[where, shortPath(terms.directory(m, terminal), machines[m]?.info?.home)].filter(Boolean).join('\n')}
-            onClick={() => actions.focusPane(m, terminal)}
+            title={[where, shortPath(dir, machines[m]?.info?.home)].filter(Boolean).join('\n')}
+            onClick={() => focusAttention(item)}
           >
             <StatusDot status={status} />
             <div className="inbox-text">
               <div className="inbox-title">
-                {agentOf(record) ?? title} · {statusLabel(status)}
+                {attentionName(item)} · {statusLabel(status)}
               </div>
               <div className="muted small ellipsis">{where}</div>
             </div>
@@ -366,7 +387,7 @@ function Inbox() {
 
 /** Why a machine is not connected, as its tooltip says it. */
 function machineProblem(m: MachineState): string {
-  return [m.code && codeText(m.code), m.error].filter(Boolean).join('\n');
+  return [m.code && codeText(m.code), m.failure && failureText(m.failure), m.error].filter(Boolean).join('\n');
 }
 
 function MachineItem({ m }: { m: MachineState }) {
@@ -389,6 +410,8 @@ function MachineItem({ m }: { m: MachineState }) {
   const busy = useStore((s) => s.hcBusy[m.id] === true);
   const mt = useTerms((s) => s.machines[m.id]);
   const layout = mt?.layout;
+  // The workspaces' dots follow the plugins' panes' statuses too.
+  useViewStatusOf(() => layout?.workspaces.map((w) => workspaceStatus(m.id, w) ?? '').join());
   const backend = mt?.backend;
   const followed = terms.isSubscribed(m.id);
   const sel = useMulti((s) => s.sel);
@@ -476,7 +499,9 @@ function MachineItem({ m }: { m: MachineState }) {
           {m.status !== 'ready' && (
             <div className={`machine-status ms-${m.status}`}>
               {t(`machine.${m.status}` as MessageKey)}
+              {m.status === 'connecting' && m.deploy && <DeployProgress deploy={m.deploy} />}
               {m.code && <div className="small">{codeText(m.code)}</div>}
+              {m.failure && <div className="small">{failureText(m.failure)}</div>}
               {m.error && <div className="small ellipsis2">{m.error}</div>}
               {m.status === 'disabled' && !readOnly && (
                 <div className="row">
@@ -524,7 +549,7 @@ function MachineItem({ m }: { m: MachineState }) {
             <div className="muted small pad">{t('workspace.hcStarting', { machine: m.label })}</div>
           )}
           {layout?.workspaces.map((w, i) => {
-            const agg = aggregate(L.workspaceTerminals(w).map((a) => agentStatus(mt?.terminals[a])));
+            const agg = workspaceStatus(m.id, w);
             const selected = selM === m.id && layout.selected === i;
             const editing = renaming === w.id;
             const name = workspaceTitle(m.id, w);
@@ -586,6 +611,7 @@ function MachineItem({ m }: { m: MachineState }) {
                 ) : (
                   <span className="ellipsis ws-name">{name}</span>
                 )}
+                {w.muted && <BellOff className="ws-muted" aria-label={t('workspace.muted')} />}
                 {agg && (
                   <span className="ws-meta">
                     <StatusDot status={agg} />

@@ -5,20 +5,24 @@
 import { en as filesEn } from '../plugins/files/i18n/en';
 import { en as gitEn } from '../plugins/git/i18n/en';
 import { en as monitorEn } from '../plugins/monitor/i18n/en';
+import { en as searchEn } from '../plugins/search/i18n/en';
 import { en as usageEn } from '../plugins/usage/i18n/en';
 import { en as vaultEn } from '../plugins/vault/i18n/en';
 import { en as browserEn } from '../plugins/browser/i18n/en';
+import { en as agentsEn } from '../plugins/agents/i18n/en';
+import { en as chatEn } from '../plugins/chat/i18n/en';
+import { en as historyEn } from '../plugins/history/i18n/en';
+import { en as conversationEn } from '../conversation/i18n/en';
 
 export const en = {
   'desktop.failed': 'The desktop app could not start or lost its server.',
   'desktop.failureHelp': 'Quit and reopen the app. Check that its local port is free and the bundled server can run. Details:',
   'desktop.quit': 'Quit',
-  'desktop.badPort': 'The configured port is not valid.',
   'desktop.badInstance': 'The development instance must be lowercase letters, digits and dashes.',
-  'desktop.coreTimeout': 'The server did not start within 30 seconds.',
-  'desktop.coreExited': 'The server exited while starting.',
-  'desktop.coreBadReady': 'The server reported an unexpected address.',
-  'desktop.coreLost': 'The server stopped unexpectedly.',
+  'desktop.hubTimeout': 'The server did not start within 30 seconds.',
+  'desktop.hubExited': 'The server exited while starting.',
+  'desktop.hubFailed': 'The server could not start.',
+  'desktop.hubLost': 'The server stopped unexpectedly, again after each restart.',
   'desktop.rendererGone': 'The window’s page stopped.',
   // The desktop app's menu (desktop/src/menu.ts).
   'desktop.menu.about': 'About {app}',
@@ -129,6 +133,9 @@ export const en = {
   'gui.status.open': 'Connected',
   'gui.status.reconnecting': 'Reconnecting…',
   'gui.status.gone': 'The window was closed',
+  'gui.viewOnly': 'View only: another connection controls the program windows',
+  'gui.takeControl': 'Take Control',
+  'gui.state.viewOnly': 'View only',
   'gui.stats.browser':
     'Browser: {fps} frames/s · {kb} kB/frame · {mbps} Mbit/s · decode {decode} ms · draw {draw} ms · skipped {skipped}/s',
   'gui.stats.machine':
@@ -191,6 +198,11 @@ export const en = {
   'machine.auth_required': 'Sign-in required',
   'machine.error': 'Error',
   'machine.disabled': 'Disabled',
+  'machine.deploy.probe': 'Checking the machine…',
+  'machine.deploy.download': 'The machine is downloading its node…',
+  'machine.deploy.upload': 'Uploading the node: {sent} of {total}',
+  'machine.deploy.install': 'Installing the node on the machine…',
+  'machine.deploy.start': 'Starting the node…',
 
   'machine.enableFailed': 'Could not change the machine: {detail}',
   'machine.removed': 'Removed {machine}.',
@@ -206,6 +218,14 @@ export const en = {
     'Its ssh target is refused (it starts with “-” or holds whitespace, control characters or shell characters such as $ ; |), so it is never connected. Rename or remove it, or correct the target in the machines file and restart.',
   'machine.code.local_unsupported':
     'The local machine needs Linux or macOS: on Windows its terminals, files and VS Code are not available. Add SSH machines (Linux or macOS) to work on them; a WSL distribution running an ssh server is one.',
+  'machine.failure.platform_unsupported':
+    'There is no machine build for this machine’s system and processor: the machine side runs on Linux and macOS, on x86-64 and arm64.',
+  'machine.failure.cpu_unsupported':
+    'This machine’s processor lacks SSE4.2, which the machine build needs (a virtual machine given QEMU’s default processor model is one: give it the host’s).',
+  'machine.failure.libs_missing':
+    'The machine build for musl needs libstdc++ and libgcc on this machine. On Alpine: apk add libstdc++ libgcc.',
+  'machine.failure.build_unavailable':
+    'The machine build could not be had: the machine could not download it from the release, and this computer has it neither in its machine build directory (--agent-dir) nor in its cache, nor could download it. Put the release’s machine build for this machine into that directory, or let this computer or the machine reach the release.',
   'machine.gone': 'the machine is no longer there.',
   'machine.localOnly': 'the local machine cannot be changed this way.',
   'machine.notSaved': 'the machines file could not be saved.',
@@ -218,6 +238,8 @@ export const en = {
   'command.workspace.previous': 'Previous Workspace',
   'command.workspace.new': 'New Workspace…',
   'command.workspace.edit': 'Edit Workspace…',
+  'command.workspace.mute': 'Mute Workspace',
+  'command.workspace.unmute': 'Unmute Workspace',
   'command.workspace.close': 'Close Workspace',
   'command.tab.new': 'New Tab',
   'command.tab.rename': 'Rename Tab',
@@ -242,8 +264,11 @@ export const en = {
   'command.tab.closeRight': 'Close Tabs to the Right',
   'command.tab.pin': 'Pin Tab',
   'command.tab.unpin': 'Unpin Tab',
+  'command.tab.mute': 'Mute Tab',
+  'command.tab.unmute': 'Unmute Tab',
   'command.pane.rename': 'Rename Pane',
   'command.pane.actions': 'Pane Actions…',
+  'command.pane.leave': 'Focus App Chrome',
   'command.view.toggleSidebar': 'Toggle Sidebar',
   'command.view.zoomIn': 'Zoom In',
   'command.view.zoomOut': 'Zoom Out',
@@ -270,7 +295,6 @@ export const en = {
   'confirm.disableMachine':
     'Its connection ends and VS Code there stops. Its terminals keep running there. Enable it again from the sidebar.',
   'confirm.disableStopCore': 'Also stop its terminal service (ends every terminal there)',
-  'confirm.close': 'Close',
   'confirm.removeMachineTitle': 'Remove {machine}?',
   'confirm.removeMachine': 'The machine {target} is removed from this app. Nothing on it is deleted, and its terminals keep running.',
   'confirm.remove': 'Remove',
@@ -465,6 +489,7 @@ export const en = {
   'sidebar.machines': 'Machines and workspaces',
   'workspace.tabs': 'Tabs',
   'workspace.pinned': 'Pinned',
+  'workspace.muted': 'Muted: no sounds or notifications',
 
   'workspace.waiting': 'Waiting for machines…',
   'workspace.machineStatus': '{machine}: {status}',
@@ -631,6 +656,10 @@ export const en = {
   'settings.notifications.system': 'System notifications',
   'settings.notifications.system.desc':
     'A system notification when an agent needs input or finishes while this window is in the background.',
+  'settings.notifications.permission.allow': 'Allow browser notifications',
+  'settings.notifications.permission.denied':
+    'Notifications are blocked in your browser settings. Allow them for this site to receive system notifications.',
+  'settings.notifications.permission.unavailable': 'Browser notifications are unavailable in this context (requires HTTPS or localhost).',
   'settings.notifications.badge': 'Badge count',
   'settings.notifications.badge.desc': 'The number of agents waiting for input, on the app’s icon and in the window title.',
   'settings.notifications.mutedAgents': 'Silent agents',
@@ -686,6 +715,10 @@ export const en = {
   'command.find.next': 'Find Next',
   'command.find.previous': 'Find Previous',
   'settings.section.performance': 'Performance',
+  'settings.section.machines': 'Machines',
+  'settings.machines.download': 'Machines download their build',
+  'settings.machines.download.desc':
+    'A machine that lacks the machine build of this version downloads it from the release itself (checked by its digest), sparing this computer’s upload. Off, or when it cannot, this computer uploads it over ssh.',
   'settings.performance.keptTerminals': 'Terminals kept in the background',
   'settings.performance.keptTerminals.desc':
     'Terminals that stay connected after you switch away, so they come back at once where you left them. Each takes memory; 0 keeps none.',
@@ -698,7 +731,7 @@ export const en = {
   'perf.process.page': 'Window',
   'perf.process.gpu': 'GPU process',
   'perf.process.helper': 'Helper',
-  'perf.process.core': 'Core',
+  'perf.process.core': 'Server',
   'perf.note.desktop': 'CPU is the share of one processor. Programs in terminals and VS Code are not counted.',
   'perf.note.browser':
     'The window’s memory is its scripts’; a browser does not tell a page its CPU or GPU use. Programs in terminals and VS Code are not counted.',
@@ -906,7 +939,7 @@ export const en = {
   'eol.readOnly': '{name} mixes line endings (LF and CRLF): it opens read-only (Settings › Git).',
   'settings.plugins.vault.enabled': 'Variable vault',
   'settings.plugins.vault.enabled.desc':
-    'Keep API keys and other variables encrypted on the core’s computer and let coding agents (Claude Code, Codex…) on your machines read them through an MCP server, with your approval.',
+    'Keep API keys and other variables encrypted on the server’s computer and let coding agents (Claude Code, Codex…) on your machines read them through an MCP server, with your approval.',
   'command.view.panel.vault': 'Show Variable Vault',
   'settings.plugins.usage.enabled': 'AI usage',
   'command.view.panel.usage': 'Show AI Usage',
@@ -924,6 +957,22 @@ export const en = {
   'settings.plugins.monitor.enabled.desc':
     'Live CPU, memory, per-GPU, network and disk usage on Cmd+hover or in the status bar, plus a searchable Task Manager with tree view.',
   'command.view.panel.monitor': 'Show Task Manager',
+  // search plugin
+  'settings.plugins.search.enabled': 'Project Search',
+  'settings.plugins.search.enabled.desc':
+    'A Search panel that finds text in the files of a folder on the machines (ripgrep when there is one).',
+  'command.view.panel.search': 'Show Search',
+  // agents plugin
+  'settings.plugins.agents.enabled': 'Coding agents',
+  'settings.plugins.agents.enabled.desc':
+    'The session of each coding agent in a terminal (Claude Code, Codex), found on its machine: its usage in the status bar, and the agent back in its own conversation after the terminal core starts again.',
+  // chat plugin
+  'settings.plugins.chat.enabled': 'Agent chats',
+  'settings.plugins.chat.enabled.desc': 'Conversations with coding agents that a machine runs without a terminal, drawn by the app.',
+  // terminal history plugin
+  'settings.plugins.history.enabled': 'Terminal history',
+  'settings.plugins.history.enabled.desc':
+    'Terminal output that machines keep on their disks while Keep snapshots of terminal output is on for them, shown after their terminal core started again.',
   // unsaved changes
   'unsaved.title': 'Unsaved Changes',
   'unsaved.one': 'Do you want to save the changes you made to {name}?',
@@ -939,9 +988,14 @@ export const en = {
   ...filesEn,
   ...gitEn,
   ...monitorEn,
+  ...searchEn,
   ...usageEn,
   ...vaultEn,
   ...browserEn,
+  ...agentsEn,
+  ...chatEn,
+  ...historyEn,
+  ...conversationEn,
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -7,10 +7,28 @@ import { guiPlugin } from './gui';
 import { vscodePlugin } from './vscode';
 import { browserPlugin } from './browser';
 import { filesPlugin } from './files';
+import { searchPlugin } from './search';
 import { usagePlugin } from './usage';
 import { vaultPlugin } from './vault';
 import { gitPlugin } from './git';
 import { monitorPlugin } from './monitor';
+import { agentsPlugin } from './agents';
+import { chatPlugin } from './chat';
+import { historyPlugin } from './history';
 
 setPanelCommand((panel) => ({ run: () => togglePanel(panel.id) }));
-definePlugins([transfersPlugin, guiPlugin, vscodePlugin, browserPlugin, filesPlugin, gitPlugin, monitorPlugin, usagePlugin, vaultPlugin]);
+definePlugins([
+  transfersPlugin,
+  guiPlugin,
+  vscodePlugin,
+  browserPlugin,
+  filesPlugin,
+  searchPlugin,
+  gitPlugin,
+  monitorPlugin,
+  usagePlugin,
+  vaultPlugin,
+  agentsPlugin,
+  chatPlugin,
+  historyPlugin,
+]);

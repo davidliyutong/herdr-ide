@@ -1,5 +1,5 @@
 // Windows of programs on machines (docs/features/14-gui-windows.md). The
-// core sends each machine's display state; a window that appeared while
+// hub sends each machine's display state; a window that appeared while
 // this page was open is "unseen" until it is opened, and marked on its
 // terminal's pane.
 
@@ -34,6 +34,8 @@ export interface GuiState {
   vulkan_gpu?: number;
   /** New panes' programs see only the GPUs of their CUDA_VISIBLE_DEVICES. */
   pick?: boolean;
+  /** Another connection controls the windows; this one views them. */
+  view_only?: boolean;
   windows: GuiWindow[];
 }
 

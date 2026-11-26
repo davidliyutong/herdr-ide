@@ -1,5 +1,5 @@
 // The vault's file dialogs: exporting variables into a file encrypted
-// under a passphrase of its own, and importing one. The core opens the
+// under a passphrase of its own, and importing one. The hub opens the
 // vault's values and seals them into the file, and opens a file and saves
 // its values, so no value reaches the page; the page holds the file
 // (ciphertext) and the passphrases typed, in memory only. Exporting is a

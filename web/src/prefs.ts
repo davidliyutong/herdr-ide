@@ -1,6 +1,6 @@
 // What the UI reads from the settings (settings.ts), typed and named for its
 // users: `usePrefs((s) => s.prefs.theme)` in components, `getPrefs()`
-// elsewhere. The values are the core's (shared by every client of the core);
+// elsewhere. The values are the hub's (shared by every client of the hub);
 // setPref saves one there. Pure per-device state (the sidebar, the selected
 // machine, transfer history) stays in the browser (state/store.ts).
 

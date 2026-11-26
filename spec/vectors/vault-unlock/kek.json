@@ -1,0 +1,23 @@
+{
+  "about": "Key-encryption keys (HKDF-SHA256, 32 bytes) of the vault's unlock entries. enclave: ikm = Z (the P-256 ECDH secret of the entry's ephemeral key and the Secure Enclave key, 32 bytes) ‖ shellSecret (32), salt = ephPub ‖ sePub (X9.63 uncompressed, 65 bytes each), info \"vault-unlock enclave\". hello: ikm = the Windows Hello RSA PKCS#1 v1.5 signature of the challenge ‖ shellSecret, salt = challenge (32), info \"vault-unlock hello\". prf: ikm = the WebAuthn PRF output (first, 32 bytes), salt = the entry's PRF salt (32), info \"vault-unlock prf\". All base64url without padding. sePriv and ephPriv are given only to check Z.",
+  "enclave": {
+    "sePriv": "FRwjKjE4P0ZNVFtiaXB3foWMk5qhqK-2vcTL0tng5-4",
+    "ephPriv": "TVRbYmlwd36FjJOaoaivtr3Ey9LZ4Ofu9fwDChEYHyY",
+    "sePub": "BC809ATbooLmkgqihbMZH5091MnBZZ-ibfA1No64B1ZLx8Jt1aWnGB0VT_q25UJOJapm3Nwdl7Tsr7jDUdn6sQg",
+    "ephPub": "BNXhgON0eRe1YcDkfdZ6NlZRKYfwaMZKrkICggwAv8qJkw4fLQNrqhu_7QpyOpRGMy_1CRLuA726wDO671d0wqQ",
+    "z": "Myf44lG-n5KTBIVz8CV7Q-VKYZ6mCWOUxht4e0e6pes",
+    "shellSecret": "KC82PURLUllgZ251fIOKkZifpq20u8LJ0Nfe5ezz-gE",
+    "kek": "cwYlEKNN3fc3M555lKJtXMgJjNRtlzKoe29ZdAfhFIw"
+  },
+  "hello": {
+    "signature": "AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dzj6vH4_wYNFBsiKTA3PkVMU1phaG92fYSLkpmgp661vMPK0djf5u30-wIJEBceJSwzOkFIT1ZdZGtyeYCHjpWco6qxuL_GzdTb4unw9_4FDBMaISgvNj1ES1JZYGdudXyDipGYn6attLvCydDX3uXs8_oBCA8WHSQrMjlAR05VXGNqcXh_ho2Um6KpsLe-xczT2uHo7_b9BAsSGSAnLjU8Q0pRWF9mbXR7gomQl56lrLO6wcjP1t3k6_L5AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK-2vcTL0tng5-71_A",
+    "challenge": "Y2pxeH-GjZSboqmwt77FzNPa4ejv9v0ECxIZICcuNTw",
+    "shellSecret": "KC82PURLUllgZ251fIOKkZifpq20u8LJ0Nfe5ezz-gE",
+    "kek": "8PHngievczHQkf8aj-f2TUzWU59oMEYrVplpXYfCBEs"
+  },
+  "prf": {
+    "output": "Nz5FTFNaYWhvdn2Ei5KZoKeutbzDytHY3-bt9PsCCRA",
+    "salt": "QklQV15lbHN6gYiPlp2kq7K5wMfO1dzj6vH4_wYNFBs",
+    "kek": "3PjUTPWqKX4HXfOWsuFS01m9aO_MWtHtAhN8TDW0gnM"
+  }
+}

@@ -1,10 +1,14 @@
 // The plugins the app has and which of them are on (api.ts).
-import { createElement } from 'react';
+import { createElement, useSyncExternalStore, type MouseEvent } from 'react';
 import { create } from 'zustand';
+import { PluginBoundary } from '../components/PluginBoundary';
 import { riskDialog } from '../dialog';
 import { t } from '../i18n';
+import { statusRank, type AgentStatus } from '../lib/machine';
 import { builtinDefaults, setSetting, useSettings, type Client, type Section } from '../settings';
-import type { CommandDef, NewTabItem, PaletteItem, PanelDef, PaneViewDef, PluginDef } from './api';
+import type { NotificationTarget } from '../shell';
+import type { PluginView } from '../term/layout';
+import type { CommandDef, NewTabItem, PaletteItem, PanelDef, PaneViewDef, PluginDef, TerminalHeaderProps, UnopenedAgent } from './api';
 
 let plugins: PluginDef[] = [];
 
@@ -29,7 +33,7 @@ export const allPlugins = (): readonly PluginDef[] => plugins;
  * (browserRisk). */
 export const browserSetting = (p: PluginDef): string => `plugins.${p.id}.browser`;
 
-/** The setting that turns p on for this kind of client (the core's
+/** The setting that turns p on for this kind of client (the hub's
  * verdict on this page, settings.ts Client): the browsers' own for a
  * plugin with browserRisk in a browser; undefined when it is always on. */
 export function enableSetting(p: PluginDef, client: Client = useSettings.getState().client): string | undefined {
@@ -39,7 +43,7 @@ export function enableSetting(p: PluginDef, client: Client = useSettings.getStat
 }
 
 /** The value of p's switch for every machine without one of its own (the
- * app's value), on when the core has none; true for plugins always on. */
+ * app's value), on when the hub has none; true for plugins always on. */
 export function pluginSwitch(p: PluginDef, values = useSettings.getState().values, client = useSettings.getState().client): boolean {
   const key = enableSetting(p, client);
   if (!key) return true;
@@ -87,13 +91,13 @@ export async function setPluginSwitch(id: string, on: boolean): Promise<string |
 /** The plugins that are on. */
 export const activePlugins = (): PluginDef[] => plugins.filter((p) => pluginOn(p));
 
-/** The settings section of p: the one it names, else the one the core
+/** The settings section of p: the one it names, else the one the hub
  * says is its (Section.plugin). */
 export function pluginSection(p: PluginDef, sections: readonly Section[] = useSettings.getState().sections): string | undefined {
   return p.settings?.section ?? sections.find((s) => s.plugin === p.id)?.id;
 }
 
-/** The id of the plugin a settings section belongs to: the core's word
+/** The id of the plugin a settings section belongs to: the hub's word
  * for it (Section.plugin), else the plugin naming it. */
 export function sectionPlugin(section: string, sections: readonly Section[] = useSettings.getState().sections): string | undefined {
   return sections.find((s) => s.id === section)?.plugin ?? plugins.find((p) => p.settings?.section === section)?.id;
@@ -113,6 +117,24 @@ export function useActivePlugins(): PluginDef[] {
 /** Whether the plugin of this id is on, for components. */
 export function usePluginOn(id: string): boolean {
   return useActivePlugins().some((p) => p.id === id);
+}
+
+/** The buttons the plugins that are on add to a terminal pane's header
+ * (PaneHeader.tsx), each plugin's in its error boundary; nothing when no
+ * plugin that is on has any. A press leaves the keyboard where it is. */
+export function TerminalHeaderActions(props: TerminalHeaderProps) {
+  const list = useActivePlugins().flatMap((p) => (p.headerActions ?? []).map((component, i) => ({ p, component, i })));
+  if (!list.length) return null;
+  return createElement(
+    'span',
+    {
+      className: 'pane-plugin-actions',
+      onMouseDown: (e: MouseEvent) => (e.target as HTMLElement).closest('button') && e.preventDefault(),
+    },
+    list.map(({ p, component, i }) =>
+      createElement(PluginBoundary, { key: `${p.id}:${i}`, plugin: t(p.title), compact: true, children: createElement(component, props) }),
+    ),
+  );
 }
 
 /** The panels of the plugins that are on. */
@@ -198,10 +220,155 @@ export function newTabGroups(m: string): NewTabItem[][] {
     .filter((items) => items.length > 0);
 }
 
-/** Hands a message of a plugin's core side to the plugin, when it is on. */
+/** Hands a message of a plugin's hub side to the plugin, when it is on. */
 export function pluginMessage(plugin: string, m: string, data: unknown) {
   const p = activePlugins().find((x) => x.id === plugin);
   p?.onMessage?.(m, data);
+}
+
+/** A plugin's viewStatus while the plugin is on. */
+function statusOwner(id: string) {
+  const p = plugins.find((x) => x.id === id);
+  return p?.viewStatus && pluginOn(p) ? { p, def: p.viewStatus } : undefined;
+}
+
+const warned = new Set<string>();
+
+/** Runs a plugin's viewStatus member: one that throws counts as none (and
+ * is said once in the console), so the views that show statuses, outside
+ * any plugin's error boundary, keep going. */
+function guarded<T>(p: { id: string }, what: string, f: () => T): T | undefined {
+  try {
+    return f();
+  } catch (e) {
+    if (!warned.has(`${p.id}.${what}`)) {
+      warned.add(`${p.id}.${what}`);
+      console.warn(`plugin ${p.id}: viewStatus.${what}`, e);
+    }
+    return undefined;
+  }
+}
+
+/** The agent status of a plugin's pane, as its plugin has it
+ * (ViewStatusDef.status): undefined for a plugin without one or off, and
+ * for what is no status. */
+export function viewStatus(m: string, view: PluginView): AgentStatus | undefined {
+  const o = statusOwner(view.plugin);
+  const s = o && guarded(o.p, 'status', () => o.def.status(m, view));
+  return typeof s === 'string' && Object.hasOwn(statusRank, s) ? s : undefined;
+}
+
+/** The pane of machine m an agent notification without a terminal points
+ * to (its data, /ws agent): the first answer of a plugin that is on
+ * (ViewStatusDef.paneOf), when it is a view:<id> key. */
+export function viewPaneOf(m: string, data: Record<string, unknown>): string | undefined {
+  for (const p of activePlugins()) {
+    const def = p.viewStatus;
+    if (!def?.paneOf) continue;
+    const pane = guarded(p, 'paneOf', () => def.paneOf!(m, data));
+    if (typeof pane === 'string' && pane.startsWith('view:')) return pane;
+  }
+  return undefined;
+}
+
+/** Tells a pane's plugin that the user saw the pane while its status was
+ * done (ViewStatusDef.seen; seen.ts). */
+export function viewSeen(m: string, view: PluginView) {
+  const o = statusOwner(view.plugin);
+  if (o?.def.seen) guarded(o.p, 'seen', () => o.def.seen!(m, view));
+}
+
+/** Conversations/agents on machine m from active plugins that have no open pane. */
+export function viewUnopened(m: string): Array<UnopenedAgent & { plugin: string }> {
+  const out: Array<UnopenedAgent & { plugin: string }> = [];
+  for (const p of activePlugins()) {
+    const def = p.viewStatus;
+    if (!def?.unopened) continue;
+    const list = guarded(p, 'unopened', () => def.unopened!(m));
+    if (!Array.isArray(list)) continue;
+    for (const item of list) out.push({ ...item, plugin: p.id });
+  }
+  return out;
+}
+
+/** Routes a chat notification click without an open pane to the plugin that owns it. */
+export function viewOpenTarget(target: Extract<NotificationTarget, { kind: 'chat' }>): boolean {
+  for (const p of activePlugins()) {
+    const def = p.viewStatus;
+    if (!def?.openTarget) continue;
+    guarded(p, 'openTarget', () => void def.openTarget!(target));
+    return true;
+  }
+  return false;
+}
+
+// One subscription to each plugin's statuses serves every listener: taken
+// with the first listener, given back with the last, taken again when the
+// plugins change. Turning a plugin that has statuses on or off changes them
+// too.
+const statusListeners = new Set<() => void>();
+let statusSubs: Array<() => void> = [];
+let statusOff: Array<() => void> = [];
+
+function statusChanged() {
+  for (const f of [...statusListeners]) f();
+}
+
+function subscribeStatuses() {
+  for (const off of statusSubs) off();
+  statusSubs = plugins.flatMap((p) => {
+    const def = p.viewStatus;
+    return def ? [guarded(p, 'subscribe', () => def.subscribe(statusChanged)) ?? (() => {})] : [];
+  });
+}
+
+/** The plugins with statuses that are on, as one string. */
+const statusPlugins = () =>
+  activePlugins()
+    .filter((p) => p.viewStatus)
+    .map((p) => p.id)
+    .join();
+
+/** Calls fn whenever the status of a plugin's pane may have changed
+ * (viewStatus); returns an unsubscribe. */
+export function onViewStatus(fn: () => void): () => void {
+  statusListeners.add(fn);
+  if (statusListeners.size === 1) {
+    subscribeStatuses();
+    let on = statusPlugins();
+    statusOff = [
+      usePluginList.subscribe(() => {
+        subscribeStatuses();
+        on = statusPlugins();
+        statusChanged();
+      }),
+      useSettings.subscribe(() => {
+        const now = statusPlugins();
+        if (now === on) return;
+        on = now;
+        statusChanged();
+      }),
+    ];
+  }
+  return () => {
+    if (!statusListeners.delete(fn) || statusListeners.size) return;
+    for (const off of [...statusSubs, ...statusOff]) off();
+    statusSubs = [];
+    statusOff = [];
+  };
+}
+
+/** A React hook: what f makes of the plugins' panes' statuses (for the
+ * views that aggregate them), made again whenever they may have changed;
+ * the component draws again only when that changed (Object.is), so f
+ * returns a string or a number. */
+export function useViewStatusOf<T extends string | number | undefined>(f: () => T): T {
+  return useSyncExternalStore(onViewStatus, f);
+}
+
+/** A React hook: the status of a plugin's pane (viewStatus), kept current. */
+export function useViewStatus(m: string, view: PluginView): AgentStatus | undefined {
+  return useViewStatusOf(() => viewStatus(m, view));
 }
 
 /** What the app shows about a plugin's pane: its drawer's title and path,

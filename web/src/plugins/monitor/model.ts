@@ -1,7 +1,7 @@
 // Pure formatting, tree-building, sorting and filtering helpers for the
 // System Monitor & Task Manager plugin.
 import { match, type MatchRange } from '../../lib/match';
-import type { GPUMetric, ProcessInfo } from './api';
+import type { GPUMetric, ProcessInfo, Sensors, TempSensor } from './api';
 
 export type SortKey = 'cpu' | 'mem' | 'pid' | 'name';
 export type SortDir = 'asc' | 'desc';
@@ -69,6 +69,44 @@ export function peakGpuPct(gpus: readonly GPUMetric[] | undefined): number | und
     if (v !== undefined && (max === undefined || v > max)) max = v;
   }
   return max;
+}
+
+/**
+ * Severity of a temperature: hot at or above the hardware's high or critical
+ * threshold, warn within 10 °C of its high one (15 °C of a critical one when
+ * it has no high one). Without thresholds: warn from 80 °C, hot from 90 °C.
+ */
+export function tempLevel(t: TempSensor): MetricLevel {
+  const { tempC, highC, critC } = t;
+  if ((critC !== undefined && tempC >= critC) || (highC !== undefined && tempC >= highC)) return 'hot';
+  if (highC !== undefined) return tempC >= highC - 10 ? 'warn' : 'ok';
+  if (critC !== undefined) return tempC >= critC - 15 ? 'warn' : 'ok';
+  if (tempC >= 90) return 'hot';
+  if (tempC >= 80) return 'warn';
+  return 'ok';
+}
+
+/** Rounded degrees Celsius. */
+export function formatTemp(c: number): string {
+  return `${Math.round(c)}°C`;
+}
+
+/** The hottest temperature of a sample, if it has any. */
+export function hottestTemp(sensors: Sensors | undefined): TempSensor | undefined {
+  let max: TempSensor | undefined;
+  for (const t of sensors?.temps ?? []) if (!max || t.tempC > max.tempC) max = t;
+  return max;
+}
+
+/** Sensors grouped by chip, in the order the machine sent them (sorted by chip). */
+export function groupByChip<T extends { chip: string }>(items: readonly T[] | undefined): { chip: string; items: T[] }[] {
+  const out: { chip: string; items: T[] }[] = [];
+  for (const it of items ?? []) {
+    const last = out[out.length - 1];
+    if (last && last.chip === it.chip) last.items.push(it);
+    else out.push({ chip: it.chip, items: [it] });
+  }
+  return out;
 }
 
 export interface ProcessTreeNode {

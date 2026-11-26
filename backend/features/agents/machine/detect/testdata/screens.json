@@ -1,0 +1,318 @@
+[
+  {
+    "agent": "claude",
+    "name": "a turn in progress",
+    "screen": [
+      "⏺ Reading the test files…",
+      "",
+      "✻ Thinking… (12s · ↑ 1.2k tokens · esc to interrupt)",
+      "",
+      "──────────────────────────────────────",
+      "❯ ",
+      "──────────────────────────────────────",
+      "  ? for shortcuts"
+    ],
+    "want": "working"
+  },
+  {
+    "agent": "claude",
+    "name": "the prompt",
+    "screen": [
+      "⏺ Done: the tests pass.",
+      "",
+      "──────────────────────────────────────",
+      "❯ ",
+      "──────────────────────────────────────",
+      "  ? for shortcuts"
+    ],
+    "want": "idle"
+  },
+  {
+    "agent": "claude",
+    "name": "a permission dialog",
+    "screen": [
+      " Bash command",
+      "",
+      "   rm -rf build",
+      "   Remove the build directory",
+      "",
+      " Do you want to proceed?",
+      " ❯ 1. Yes",
+      "   2. Yes, and don't ask again for rm commands in /src",
+      "   3. No, and tell Claude what to do differently (esc)"
+    ],
+    "want": "blocked"
+  },
+  {
+    "agent": "claude",
+    "name": "the transcript viewer",
+    "screen": [
+      "⏺ Earlier output",
+      "  Showing detailed transcript · ctrl+o to toggle"
+    ],
+    "want": "unknown",
+    "skip": true
+  },
+  {
+    "agent": "claude",
+    "name": "a spinner in the title",
+    "screen": [
+      "text"
+    ],
+    "title": "⠂ Claude Code",
+    "want": "working"
+  },
+  {
+    "agent": "codex",
+    "name": "a spinner in the title",
+    "screen": [
+      "› Explain this"
+    ],
+    "title": "⠋ codex",
+    "want": "working"
+  },
+  {
+    "agent": "codex",
+    "name": "an approval in the title",
+    "screen": [
+      "› "
+    ],
+    "title": "Action Required",
+    "want": "blocked"
+  },
+  {
+    "agent": "codex",
+    "name": "a confirmation on screen",
+    "screen": [
+      "Allow command?",
+      "  rm -rf build",
+      "Press enter to confirm or esc to cancel"
+    ],
+    "want": "blocked"
+  },
+  {
+    "agent": "codex",
+    "name": "its title at rest",
+    "screen": [
+      "› "
+    ],
+    "title": "codex",
+    "want": "idle"
+  },
+  {
+    "agent": "gemini",
+    "name": "working",
+    "screen": [
+      "⠼ Reading files (esc to cancel, 4s)"
+    ],
+    "want": "working"
+  },
+  {
+    "agent": "gemini",
+    "name": "an edit to allow",
+    "screen": [
+      "╭──────╮",
+      "│ Apply this change?",
+      "│ ● 1. Yes, allow once",
+      "╰──────╯"
+    ],
+    "want": "blocked"
+  },
+  {
+    "agent": "gemini",
+    "name": "the prompt",
+    "screen": [
+      ">   Type your message or @path/to/file"
+    ],
+    "want": "idle"
+  },
+  {
+    "agent": "opencode",
+    "name": "working",
+    "screen": [
+      "  ■■■■⬝⬝⬝⬝  esc to interrupt"
+    ],
+    "want": "working"
+  },
+  {
+    "agent": "opencode",
+    "name": "a permission",
+    "screen": [
+      "△ Permission required",
+      "  bash: rm -rf build"
+    ],
+    "want": "blocked"
+  },
+  {
+    "agent": "opencode",
+    "name": "the prompt",
+    "screen": [
+      "  > ",
+      "  enter send"
+    ],
+    "want": "idle"
+  },
+  {
+    "agent": "kimi",
+    "name": "thinking",
+    "screen": [
+      "⠋ Thinking..."
+    ],
+    "want": "working"
+  },
+  {
+    "agent": "kimi",
+    "name": "a command to approve",
+    "screen": [
+      "Run this command?",
+      "  ls -la",
+      "▶ Approve once",
+      "  Reject",
+      "↑↓ select · 1/2 choose · ↵ confirm"
+    ],
+    "want": "blocked"
+  },
+  {
+    "agent": "kimi",
+    "name": "the prompt",
+    "screen": [
+      "✨ "
+    ],
+    "want": "idle"
+  },
+  {
+    "agent": "grok",
+    "name": "a tool running",
+    "screen": [
+      "⠋ Reading src/main.rs [stop]"
+    ],
+    "want": "working"
+  },
+  {
+    "agent": "grok",
+    "name": "a permission",
+    "screen": [
+      "Allow running ls?",
+      "↑↓:select  enter:confirm  ctrl+o:yolo  ctrl+c:cancel"
+    ],
+    "want": "blocked"
+  },
+  {
+    "agent": "grok",
+    "name": "the prompt",
+    "screen": [
+      "> ",
+      "ctrl+.:shortcuts"
+    ],
+    "want": "idle"
+  },
+  {
+    "agent": "cursor",
+    "name": "working",
+    "screen": [
+      "⬢ Generating…",
+      "  ctrl+c to stop"
+    ],
+    "want": "working"
+  },
+  {
+    "agent": "cursor",
+    "name": "a command to run",
+    "screen": [
+      "Run this command?",
+      "  npm test",
+      " → Run (once) (y) (enter)",
+      "   Skip (esc or n)"
+    ],
+    "want": "blocked"
+  },
+  {
+    "agent": "cursor",
+    "name": "the prompt",
+    "screen": [
+      "→ Plan, search, build anything"
+    ],
+    "want": "idle"
+  },
+  {
+    "agent": "copilot",
+    "name": "working",
+    "screen": [
+      "◉ Thinking (Esc to cancel)"
+    ],
+    "want": "working"
+  },
+  {
+    "agent": "copilot",
+    "name": "a selection",
+    "screen": [
+      "Do you want to run this command?",
+      "❯ 1. Yes",
+      "  2. No",
+      "↑↓ to navigate · Enter to select · Esc to cancel"
+    ],
+    "want": "blocked"
+  },
+  {
+    "agent": "copilot",
+    "name": "the prompt",
+    "screen": [
+      "> Type @ to mention files"
+    ],
+    "want": "idle"
+  },
+  {
+    "agent": "qwen",
+    "name": "working",
+    "screen": [
+      "⠼ Reticulating splines… (12s · esc to cancel)"
+    ],
+    "want": "working"
+  },
+  {
+    "agent": "qwen",
+    "name": "a tool to confirm",
+    "screen": [
+      "Shell command execution",
+      "Do you want to proceed?",
+      "● 1. Yes, allow once",
+      "  2. No"
+    ],
+    "want": "blocked"
+  },
+  {
+    "agent": "qwen",
+    "name": "the prompt",
+    "screen": [
+      ">   Type your message or @path/to/file"
+    ],
+    "want": "idle"
+  },
+  {
+    "agent": "amp",
+    "name": "working",
+    "screen": [
+      "╰ amp thinking ──────── esc to cancel"
+    ],
+    "want": "working"
+  },
+  {
+    "agent": "amp",
+    "name": "a command to approve",
+    "screen": [
+      "Run this command?",
+      "  rm -rf build",
+      "Approve  Deny with feedback"
+    ],
+    "want": "blocked"
+  },
+  {
+    "agent": "amp",
+    "name": "its title at rest",
+    "screen": [
+      "> "
+    ],
+    "title": "src - amp - main",
+    "want": "idle"
+  }
+]

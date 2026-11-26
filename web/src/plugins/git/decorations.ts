@@ -29,10 +29,6 @@ export const MARK_COLOR: Record<Mark, string> = {
 /** What git ignores: the muted text color (design token color.muted). */
 export const IGNORED_COLOR = 'var(--ds-color-muted)';
 
-/** The git directory's name in a top level (a directory, or a file in a
- * linked worktree or submodule). */
-const GIT_DIR = '.git';
-
 const LETTER: Record<Mark, string> = { conflict: '!', deleted: 'D', modified: 'M', renamed: 'R', added: 'A', untracked: 'U' };
 
 /** How a file of the status shows in the explorer (both sides counted). */
@@ -81,7 +77,7 @@ function markIndex(files: readonly StatusFile[]): MarkIndex {
       let names = ix.dirs.get(dir);
       if (!names) ix.dirs.set(dir, (names = new Map()));
       const prev = names.get(parts[i]);
-      names.set(parts[i], { mark: more(prev?.mark, mark), file: i === parts.length - 1 && !f.path.endsWith('/') });
+      names.set(parts[i], { mark: more(prev?.mark, mark), file: i === parts.length - 1 && !f.path.endsWith('/') && !f.submodule });
     }
   }
   markIndexes.set(files, ix);
@@ -119,10 +115,10 @@ const within = (p: string, dir: string) => p === dir || p.startsWith(dir === '/'
 /** p relative to dir (p within dir; '' for dir itself). */
 const below = (p: string, dir: string) => (p === dir ? '' : p.slice(dir === '/' ? 1 : dir.length + 1));
 
-/** Whether rel (relative to a top level) is the git directory, inside it,
- * or inside a folder git ignores. */
+/** Whether rel (relative to a top level) is inside a folder git ignores.
+ * The git directory is none: git never lists it as ignored, and it has no
+ * color, as in VS Code. */
 function ignoredWhole(rel: string, ix: IgnoredIndex | undefined): boolean {
-  if (rel === GIT_DIR || rel.startsWith(GIT_DIR + '/')) return true;
   if (!ix) return false;
   for (let p = rel; p; p = p.slice(0, Math.max(0, p.lastIndexOf('/')))) if (ix.folders.has(p)) return true;
   return false;
@@ -133,8 +129,8 @@ function ignoredWhole(rel: string, ix: IgnoredIndex | undefined): boolean {
  * machine m. Changes come from every repository dir is in or that is
  * below it; what is ignored from the innermost repository dir is in (a
  * repository inside another rules its own files). names gives the
- * entries of dir, for a dir whose every entry is ignored (the git
- * directory or a folder git ignores, whose contents git does not list).
+ * entries of dir, for a dir whose every entry is ignored (a folder git
+ * ignores, whose contents git does not list).
  */
 export function decorate(repos: readonly DecoratedRepo[], dir: string, names?: () => readonly string[]): Record<string, FileDecoration> {
   const d = trim(dir);
@@ -171,7 +167,6 @@ export function decorate(repos: readonly DecoratedRepo[], dir: string, names?: (
     return out;
   }
   for (const name of ix?.dirs.get(rel) ?? []) dim(name);
-  if (rel === '') dim(GIT_DIR);
   return out;
 }
 

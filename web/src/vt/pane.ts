@@ -1,8 +1,8 @@
-// One terminal of a machine's terminal core in the page: the core's stream
+// One terminal of a machine's terminal core in the page: the hub's stream
 // feeds libghostty-vt (terminal.ts), whose screen a renderer draws
 // (renderer.ts), and the browser's keys, text, pastes, mouse and focus go
 // back as the bytes the program asked for (input.ts). Output is
-// acknowledged to the core once it was drawn, so a busy program runs at the
+// acknowledged to the hub once it was drawn, so a busy program runs at the
 // speed the page draws; the terminal's own answers (device attributes,
 // colors, cursor position) go back as automatic input.
 //
@@ -28,6 +28,7 @@ import { mathAt } from '../terminal/math';
 import { renderMath } from '../terminal/mathRender';
 import { openMenu } from '../contextMenu';
 import { surfaceMenu } from '../menus';
+import { onPrelude, preludeOf, type Prelude } from '../state/preludes';
 
 /** A formula in the terminal and the cells it covers. */
 export interface ShownMath {
@@ -66,9 +67,58 @@ const PAINT_ONE_CREDIT = 192 * 1024;
 // starting again answers unavailable for a moment) is tried again.
 const ATTACH_RETRY_MS = 1500;
 const ATTACH_RETRIES = 5;
+// A prelude (state/preludes.ts) that appears, changes or goes while the
+// pane is attached is shown by attaching again: once, when its changes
+// have paused this long.
+const PRELUDE_SETTLE_MS = 50;
+// Input sent while the pane attaches again to show a prelude waits for the
+// new stream, up to this many bytes.
+const SEND_QUEUE_MAX = 64 * 1024;
 
-/** Where a terminal's stream comes from: the core's terminal protocol
- * (term/connection.ts), or a PTY of the core host (components/AuthDialog.tsx). */
+// What the pane writes after a prelude's bytes (replay). They are output a
+// machine saved of a program, as untrusted as any program's: every state
+// they may have set is brought back to the one of a new emulator
+// (vt/terminal.ts makes each with libghostty-vt's defaults and grapheme
+// clusters on), so that none of it reaches the live terminal, also when
+// the core sends no first paint (it drops one above 4 MiB), which resets
+// much of it.
+const PRELUDE_RESET = [
+  // A sequence the bytes cut short ends (CAN), and a hyperlink left open
+  // is closed: every cell written after it would link to its target, and a
+  // link is opened before the text's own.
+  '\x18\x1b]8;;\x1b\\\x1b[0m',
+  // The main screen, however the alternate one was entered (its content
+  // is not kept), and there the same, a soft reset (margins, origin,
+  // wrapping, insert, character sets, a visible cursor) and plain styles.
+  '\x1b[?1049l\x1b[?1047l\x1b[?47l\x1b]8;;\x1b\\\x1b[!p\x1b[0m',
+  // The alternate screen has a cursor and keyboard flags of its own: the
+  // same there, while it is empty (entering it clears it).
+  '\x1b[?1049h\x1b]8;;\x1b\\\x1b[!p\x1b[0m\x1b[<99u\x1b[=0;1u\x1b[?1049l',
+  // Keys as a new emulator encodes them: no kitty keyboard flags (every
+  // pushed set popped), no modifyOtherKeys, normal cursor and keypad keys,
+  // Backspace sending DEL, Alt as an ESC prefix, the keypad following Num
+  // Lock.
+  '\x1b[<99u\x1b[=0;1u\x1b[>4;0m\x1b[?1l\x1b[?66l\x1b[?67l\x1b[?1035h\x1b[?1036h\x1b[?1039l',
+  // Nothing reported that the live program did not ask for: the mouse in
+  // any encoding, focus, pastes bracketed, the color scheme, the size in
+  // band; no synchronized output held; and the wheel as arrow keys on the
+  // alternate screen, as new.
+  '\x1b[?9l\x1b[?1000l\x1b[?1001l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l\x1b[?1004l\x1b[?2004l' +
+    '\x1b[?2031l\x1b[?2048l\x1b[?2026l\x1b[?1007h',
+  // The display and the other modes: no reverse video, no slow scroll, no
+  // autorepeat, no switching to 132 columns, grapheme clusters as wide as
+  // Unicode has them, no local echo (SRM set), a line feed that only moves
+  // down (LNM reset).
+  '\x1b[?5l\x1b[?4l\x1b[?8l\x1b[?40l\x1b[?2027h\x1b[12h\x1b[20l',
+  // The theme's palette, foreground, background and cursor colors, and
+  // the cursor's style of the settings.
+  '\x1b]104\x07\x1b]110\x07\x1b]111\x07\x1b]112\x07\x1b[0 q',
+].join('');
+
+const utf8 = new TextEncoder();
+
+/** Where a terminal's stream comes from: the hub's terminal protocol
+ * (term/connection.ts), or a PTY of the hub host (components/AuthDialog.tsx). */
 export interface TermLink {
   readonly connected: boolean;
   attach(o: AttachOptions, handler: StreamHandler): Promise<number>;
@@ -88,6 +138,9 @@ export interface PaneOptions {
   connection: TermLink;
   /** Calls fn when the connection comes or goes. */
   onConnection(fn: (up: boolean) => void): () => void;
+  /** Calls fn with the pid of the terminal's program now and whenever it
+   * changes, undefined while the terminal is not live (setProgram). */
+  onProgram?(fn: (pid: number | undefined) => void): () => void;
   readOnly(): boolean;
   /** Keys of the page's keybindings: true when one ran. */
   appKey(ev: KeyboardEvent): boolean;
@@ -113,6 +166,9 @@ export interface PaneOptions {
   onFind(text?: string): void;
   /** The stream ended for good: the program's end, with how. */
   onClosed(reason: string, exitCode?: number): void;
+  /** The terminal has another program after its stream ended for good
+   * (setProgram): what onClosed showed goes, and the pane attaches again. */
+  onReopen?(): void;
   onBell(): void;
   /** The program's title changed. */
   onTitle?(title: string): void;
@@ -200,6 +256,7 @@ export class TermPane {
   private blinkTimer?: number;
   private held = false;
   private heldSince = 0;
+  private holdTimer?: number;
   /** An attach's first paint is on its way: nothing is drawn. */
   private painting = false;
   /** The emulator's first paint is over and the view went back where it
@@ -229,8 +286,29 @@ export class TermPane {
   private lastPointer?: { x: number; y: number; popover?: boolean };
   private offConnection: () => void;
   private offFind: () => void;
+  private readonly offPrelude: () => void;
+  private readonly offProgram: () => void;
+  /** The prelude the emulator was given (state/preludes.ts): another one
+   * is shown by attaching again. */
+  private preludeShown?: Prelude;
+  private preludeTimer?: number;
+  /** A prelude is being written into the emulator: what it answers,
+   * reports or rings is not the program's. */
+  private replaying = false;
+  /** Input sent while the pane attaches again for a prelude, and its size:
+   * sent on the new stream once it is there (send). */
+  private queue?: Uint8Array[];
+  private queued = 0;
   private findQuery = '';
+  /** The stream ended for good (the program's end): nothing attaches until
+   * the terminal has another program (setProgram). */
   private closedFor = false;
+  /** The pid of the terminal's program while its record says it is live
+   * (setProgram); the program the stream was attached to; the one whose
+   * stream ended for good. */
+  private program?: number;
+  private streamProgram?: number;
+  private endedProgram?: number;
   private lastBar = '';
   private readonly measureCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
   /** Rendering with Canvas 2D was asked for (no WebGL2, or the context was lost). */
@@ -262,6 +340,8 @@ export class TermPane {
       this.attach();
     });
     this.offFind = useFind.subscribe((st, prev) => this.findChanged(st, prev));
+    this.offPrelude = onPrelude(o.m, o.address, () => this.preludeChanged());
+    this.offProgram = o.onProgram?.((pid) => this.setProgram(pid)) ?? (() => {});
     panes.add(this);
     this.install();
     void loadVt().then((vt) => {
@@ -388,26 +468,38 @@ export class TermPane {
     // history, and the view goes back where it was (scrollMemory.ts).
     this.noteScroll();
     this.viewed = false;
+    this.held = false;
+    this.cancelHoldTimer();
     this.term?.dispose();
+    // What a prelude written into it would answer, report or ring is dropped.
     const term = new Terminal(this.vt, this.grid.cols, this.grid.rows, {
-      reply: (data) => this.stream !== undefined && !this.o.readOnly() && this.o.connection.write(this.stream, data, true),
+      reply: (data) =>
+        !this.replaying && this.stream !== undefined && !this.o.readOnly() && this.o.connection.write(this.stream, data, true),
       // Not for a bell of the history painted, nor of a terminal not shown.
       bell: () => !this.painting && !this.hidden && this.o.onBell(),
-      title: (s) => this.o.onTitle?.(s),
-      clipboard: (text) => !this.o.readOnly() && programCopied(this.o.m, text),
+      title: (s) => !this.replaying && this.o.onTitle?.(s),
+      clipboard: (text) => !this.replaying && !this.o.readOnly() && programCopied(this.o.m, text),
       dark: () => this.appearance.theme === 'dark',
       hold: (held) => {
+        if (this.replaying || this.held === held) return;
         this.held = held;
         this.heldSince = performance.now();
-        if (!held) this.schedule();
+        if (!held) {
+          this.cancelHoldTimer();
+          this.schedule();
+        }
       },
     });
     if (this.metrics) term.resize(this.grid.cols, this.grid.rows, this.metrics.cw, this.metrics.ch);
     this.configure(term);
     this.term = term;
     this.frame = newFrame(this.grid.cols, this.grid.rows);
+    this.cursorAt = '';
+    this.startBlink();
     this.renderer?.invalidate();
     this.painting = true;
+    this.preludeShown = preludeOf(this.o.m, this.o.address);
+    if (this.preludeShown) this.replay(term, this.preludeShown);
     const paintLimit = performance.now() + PAINT_MAX_MS;
     this.paintBytes = 0;
     this.awaitPaint(paintLimit);
@@ -446,9 +538,15 @@ export class TermPane {
             if (this.term !== term) return;
             this.stream = undefined;
             this.unacked = 0;
+            this.dropQueue();
+            const program = this.streamProgram ?? this.program;
+            this.streamProgram = undefined;
             if (reason === 'disconnected') return; // attached again when the connection is back
             this.closedFor = true;
+            this.endedProgram = program;
             this.o.onClosed(reason, exitCode);
+            // Another program may be known already.
+            this.reopen();
           },
         },
       )
@@ -458,15 +556,24 @@ export class TermPane {
           if (this.disposed || this.term !== term) return this.o.connection.detach(s);
           this.attachFailures = 0;
           this.stream = s;
+          this.streamProgram = this.program;
           if (!observe && (this.grid.cols !== term.cols || this.grid.rows !== term.rows))
             this.o.connection.resize(s, this.grid.cols, this.grid.rows);
           if (this.focused) this.o.connection.focus(s, true);
           // The theme or font may have changed while attaching.
           if (!observe && JSON.stringify(this.display()) !== this.sentDisplay) this.configure(term);
+          // What was typed while it attached again for a prelude.
+          const queue = this.queue ?? [];
+          this.dropQueue();
+          for (const bytes of queue) this.o.connection.write(s, bytes);
           this.o.onAttached?.();
+          // A prelude that changed while attaching is shown by attaching again.
+          if (preludeOf(this.o.m, this.o.address) !== this.preludeShown) this.preludeChanged();
         },
         () => {
           this.attaching = false;
+          // What was typed for it goes: the stream may come much later, or never.
+          this.dropQueue();
           // No first paint comes: the remembered view waits for the next
           // emulator, which an empty one must not take.
           if (this.term === term) {
@@ -499,6 +606,110 @@ export class TermPane {
       },
       Math.max(0, at - performance.now()),
     );
+  }
+
+  /** Writes a prelude (state/preludes.ts) into a new emulator before the
+   * first byte of its stream, at the grid the output was painted at when
+   * the prelude says (its paint pushed its history up by as many rows as
+   * that grid has: on a taller screen the rows below them would stay on it,
+   * for the first paint to clear): its output; then PRELUDE_RESET (the main
+   * screen, an alternate screen's content not kept, and every state the
+   * output set as a new emulator has it); its note, dim, on the line below
+   * the last row of the screen with something on it (also when the output's
+   * cursor was above it, as an agent's input box has it); and as many
+   * newlines as the screen has rows, which move every row up to that one
+   * into the scrollback. The cursor is left at the top of the blank
+   * screen, so that going back to the pane's grid neither pulls rows of
+   * the scrollback onto a taller screen nor pushes blank rows into it from
+   * a shorter one (libghostty-vt keeps the rows around the cursor), nor
+   * does a resize the core sends an observer before its first paint. The
+   * first paint clears only the screen, so the prelude stays above the
+   * terminal's own history. */
+  private replay(term: Terminal, p: Prelude) {
+    this.replaying = true;
+    const live = { cols: term.cols, rows: term.rows };
+    try {
+      if (p.cols && p.rows) term.resize(p.cols, p.rows);
+      term.write(p.bytes);
+      term.write(utf8.encode(PRELUDE_RESET));
+      const rows = term.rows;
+      let last = this.lastContentRow(term);
+      let tail = '';
+      if (p.note) {
+        tail = last + 1 < rows ? `\x1b[${last + 2};1H\x1b[2K` : `\x1b[${rows};1H\r\n`;
+        tail += `\x1b[2m${p.note}\x1b[0m`;
+        last = Math.min(last + 1, rows - 1);
+      } else if (last >= 0) tail = `\x1b[${last + 1};1H`;
+      // From row `last`, rows - 1 - last newlines reach the bottom and the
+      // others scroll rows 0 to last away.
+      if (last >= 0) tail += '\n'.repeat(rows);
+      term.write(utf8.encode(`${tail}\x1b[H`));
+      term.resize(live.cols, live.rows);
+    } finally {
+      this.replaying = false;
+    }
+  }
+
+  /** The last row of the screen with something on it (a character, or a
+   * background color), -1 for none. Read into the pane's frame, which is
+   * the emulator's new one: later updates go on from it. */
+  private lastContentRow(term: Terminal): number {
+    term.update(this.frame);
+    for (let y = this.frame.rows - 1; y >= 0; y--) {
+      const r = this.frame.lines[y];
+      for (let x = 0; x < r.codes.length; x++) if ((r.codes[x] !== 0 && r.codes[x] !== 32) || r.bg[x] !== -1) return y;
+    }
+    return -1;
+  }
+
+  /** The terminal's prelude appeared, changed or went: once its changes
+   * paused, an attached pane attaches again to show what it is now (the
+   * core keeps the program's stream meanwhile, so the program sees
+   * nothing, and what is typed meanwhile waits for the new stream); one
+   * attaching checks again once attached, and one not attached shows it
+   * when it attaches. */
+  private preludeChanged() {
+    if (this.disposed) return;
+    window.clearTimeout(this.preludeTimer);
+    this.preludeTimer = window.setTimeout(() => {
+      if (this.disposed || this.closedFor || this.attaching || this.stream === undefined) return;
+      if (preludeOf(this.o.m, this.o.address) === this.preludeShown) return;
+      this.o.connection.detach(this.stream);
+      this.stream = undefined;
+      this.unacked = 0;
+      this.queue = [];
+      this.queued = 0;
+      this.attach();
+      if (!this.attaching) this.dropQueue();
+    }, PRELUDE_SETTLE_MS);
+  }
+
+  private dropQueue() {
+    this.queue = undefined;
+    this.queued = 0;
+  }
+
+  /** The pid of the terminal's program, as its record says (onProgram):
+   * undefined unless the terminal is live. A pane whose stream ended for
+   * good attaches again once the terminal has another program than the
+   * stream had (the terminal core started a new shell at its address after
+   * it started again); one whose terminal finished, or still runs the
+   * program that ended, stays as it is. */
+  setProgram(pid: number | undefined) {
+    this.program = pid;
+    // Attached before the record was known: the stream is the program's.
+    if (pid !== undefined && this.stream !== undefined && this.streamProgram === undefined) this.streamProgram = pid;
+    this.reopen();
+  }
+
+  private reopen() {
+    const pid = this.program;
+    if (this.disposed || !this.closedFor || pid === undefined || pid === this.endedProgram) return;
+    this.closedFor = false;
+    this.endedProgram = undefined;
+    this.attachFailures = 0;
+    this.o.onReopen?.();
+    this.attach();
   }
 
   /** The rows a frame shows, as text. */
@@ -543,11 +754,14 @@ export class TermPane {
    * pane stays attached and its emulator takes the output, so it is shown
    * as it was left, but it draws nothing, keeps the size it had and gives
    * up what it draws with (a WebGL context, of which a page has few, and
-   * its glyphs' texture), made again when it is shown. */
+   * its glyphs' texture), made again when it is shown. A kept pane that
+   * was never attached does not attach while kept. */
   setShown(shown: boolean) {
     if (this.hidden === !shown || this.disposed) return;
     this.hidden = !shown;
+    this.startBlink();
     if (shown) return this.setAppearance(this.appearance);
+    this.cancelHoldTimer();
     this.hideMath();
     if (this.renderer) {
       this.renderer.dispose();
@@ -568,10 +782,29 @@ export class TermPane {
 
   private schedule() {
     if (this.raf !== undefined || this.disposed) return;
+    if (!this.hidden && !this.painting && this.renderer && this.waitForHold()) return;
     this.raf = requestAnimationFrame(() => {
       this.raf = undefined;
       this.draw();
     });
+  }
+
+  private cancelHoldTimer() {
+    window.clearTimeout(this.holdTimer);
+    this.holdTimer = undefined;
+  }
+
+  /** A held screen needs one deadline. Output still returns credit. */
+  private waitForHold(): boolean {
+    if (!this.held) return false;
+    const left = HOLD_MS - (performance.now() - this.heldSince);
+    if (left <= 0) return false;
+    this.ack();
+    this.holdTimer ??= window.setTimeout(() => {
+      this.holdTimer = undefined;
+      this.schedule();
+    }, Math.ceil(left));
+    return true;
   }
 
   private draw() {
@@ -582,15 +815,7 @@ export class TermPane {
     if (this.painting || this.hidden) return this.ack();
     const r = this.renderer;
     if (!r) return;
-    if (this.held && performance.now() - this.heldSince < HOLD_MS) {
-      // The program holds the screen: draw once it lets go.
-      this.ack();
-      this.raf = requestAnimationFrame(() => {
-        this.raf = undefined;
-        this.draw();
-      });
-      return;
-    }
+    if (this.waitForHold()) return;
     const changed = term.update(this.frame);
     this.cursorMoved();
     if (changed && useFind.getState().terminal === this.o.address && useFind.getState().m === this.o.m && this.findQuery) {
@@ -650,23 +875,21 @@ export class TermPane {
    * arrow key, or followed while typing, never goes dark. */
   private cursorMoved() {
     const c = this.frame.cursor;
-    const at = `${c.x} ${c.y} ${c.visible}`;
+    const at = `${c.x} ${c.y} ${c.visible} ${c.blinking}`;
     if (at === this.cursorAt) return;
     this.cursorAt = at;
-    if (!this.focused || !c.blinking) return;
     this.startBlink();
     this.frame.dirty.add(c.y);
   }
 
   private startBlink() {
     window.clearInterval(this.blinkTimer);
+    this.blinkTimer = undefined;
     this.blinkOn = true;
-    if (!this.focused) return;
+    const c = this.frame.cursor;
+    if (!this.focused || this.hidden || !c.visible || !c.blinking) return;
     this.blinkTimer = window.setInterval(() => {
-      if (!this.frame.cursor.blinking) {
-        if (this.blinkOn) return;
-        this.blinkOn = true;
-      } else this.blinkOn = !this.blinkOn;
+      this.blinkOn = !this.blinkOn;
       this.frame.dirty.add(this.frame.cursor.y);
       this.schedule();
     }, 600);
@@ -678,9 +901,13 @@ export class TermPane {
     this.textarea.focus({ preventScroll: true });
   }
 
-  /** Sends bytes to the program (not in read-only mode). */
+  /** Sends bytes to the program (not in read-only mode). While the pane
+   * attaches again for a prelude they wait for the new stream, up to
+   * SEND_QUEUE_MAX bytes (what does not fit is dropped, as is everything
+   * when that attach fails or the pane goes); otherwise without a stream
+   * they are dropped. */
   send(bytes: Uint8Array, user = true) {
-    if (!bytes.length || this.stream === undefined || this.o.readOnly()) return;
+    if (!bytes.length || (this.stream === undefined && !this.queue) || this.o.readOnly()) return;
     if (user) {
       userInput();
       if (this.term && !this.term.atBottom) {
@@ -688,7 +915,10 @@ export class TermPane {
         this.schedule();
       }
     }
-    this.o.connection.write(this.stream, bytes);
+    if (this.stream !== undefined) return this.o.connection.write(this.stream, bytes);
+    if (!this.queue || this.queued + bytes.length > SEND_QUEUE_MAX) return;
+    this.queue.push(bytes.slice());
+    this.queued += bytes.length;
   }
 
   /** Pastes text as the program asked for pastes (bracketed or not). */
@@ -1295,11 +1525,16 @@ export class TermPane {
     this.noteScroll();
     if (this.stream !== undefined) this.o.connection.detach(this.stream);
     this.stream = undefined;
+    this.dropQueue();
     this.offConnection();
     this.offFind();
+    this.offPrelude();
+    this.offProgram();
+    window.clearTimeout(this.preludeTimer);
     this.ro.disconnect();
     this.dprQuery?.removeEventListener('change', this.onDprChange);
     if (this.raf !== undefined) cancelAnimationFrame(this.raf);
+    this.cancelHoldTimer();
     window.clearInterval(this.blinkTimer);
     window.clearTimeout(this.mathTimer);
     window.clearTimeout(this.autoTimer);

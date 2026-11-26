@@ -24,7 +24,7 @@ import './vault.css';
 type Tab = 'variables' | 'log' | 'connect';
 
 /** Why the vault did not load (its file of another version or unreadable,
- * the core unreachable), with a retry: a file moved away or put back is
+ * the hub unreachable), with a retry: a file moved away or put back is
  * opened at the next load. */
 function LoadError({ code }: { code: string }) {
   const [busy, setBusy] = useState(false);

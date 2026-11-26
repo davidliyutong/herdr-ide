@@ -45,6 +45,7 @@ function whoText(a: VaultAccess, label: (m: string) => string): string {
  * machine (or pages) and outcome. */
 export function AccessLog() {
   const log = useVault((s) => s.log);
+  const session = useVault((s) => s.session);
   const machines = useStore((s) => s.machines);
   const [machine, setMachine] = useState('');
   const [outcome, setOutcome] = useState('');
@@ -84,7 +85,7 @@ export function AccessLog() {
       {!shown.length ? (
         <div className="empty-note">
           <History />
-          {log.length ? t('vault.noMatch') : t('vault.log.empty')}
+          {log.length ? t('vault.noMatch') : session ? t('vault.log.empty') : t('vault.log.needsSession')}
         </div>
       ) : (
         <div className="vault-log">

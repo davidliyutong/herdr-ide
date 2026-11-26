@@ -1,8 +1,10 @@
-// The core's machines as /ws and GET /api/machines report them, the agent
+// The hub's machines as /ws and GET /api/machines report them, the agent
 // states of their terminals, and helpers shared by the views that show them.
 
 import { hasMessage, t, type MessageKey } from '../i18n';
 import { displayName, statusOf, type TerminalRecord } from '../term/protocol';
+import { isSessionId } from '../conversation/kinds';
+import { formatSize } from './files';
 
 /** What a coding agent in a terminal is doing (docs/features/25-agent-detection.md). */
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
@@ -20,11 +22,34 @@ export interface AgentInfo {
 
 export type MachineStatus = 'connecting' | 'ready' | 'auth_required' | 'error' | 'disabled';
 
-/** The core's connection to a machine's terminal core (docs/features/22). */
+/** The hub's connection to a machine's terminal core (docs/features/22). */
 export interface MachineHC {
   state: 'starting' | 'ready' | 'error';
   code?: string;
   version?: string;
+}
+
+/** What a connecting machine's dial is doing (the hub's State.deploy):
+ * probing it, the machine downloading its build, the hub uploading it
+ * (sent of total bytes), the machine installing it, starting its node. */
+export interface MachineDeploy {
+  step: 'probe' | 'download' | 'upload' | 'install' | 'start';
+  sent?: number;
+  total?: number;
+}
+
+/** The share of an upload done, 0-100; undefined for a step whose length
+ * is not known. */
+export function deployPercent(d: MachineDeploy): number | undefined {
+  if (d.step !== 'upload' || !d.total) return undefined;
+  return Math.min(100, Math.max(0, Math.floor(((d.sent ?? 0) / d.total) * 100)));
+}
+
+/** What a deploy step says; an unknown step (a newer hub) says nothing. */
+export function deployText(d: MachineDeploy): string {
+  if (d.step === 'upload' && d.total) return t('machine.deploy.upload', { sent: formatSize(d.sent ?? 0), total: formatSize(d.total) });
+  const key = `machine.deploy.${d.step}`;
+  return hasMessage(key) ? t(key as MessageKey) : '';
 }
 
 export interface MachineState {
@@ -35,11 +60,17 @@ export interface MachineState {
   enabled: boolean;
   status: MachineStatus;
   /** Why a machine in error is never connected: invalid_target for a
-   * stored ssh target the core refuses (machines.ValidTarget),
+   * stored ssh target the hub refuses (machines.ValidTarget),
    * local_unsupported for the local machine where no agent runs
    * (Windows). */
   code?: string;
   error?: string;
+  /** Why the machine build could not be deployed (platform_unsupported,
+   * cpu_unsupported, libs_missing, build_unavailable); the hub tries
+   * again. */
+  failure?: string;
+  /** What its dial is doing, while connecting. */
+  deploy?: MachineDeploy;
   platform?: string;
   info?: AgentInfo;
   hc?: MachineHC;
@@ -49,8 +80,8 @@ export interface MachineState {
 /** Printable ASCII a target may hold besides letters and digits. */
 const targetPunct = new Set('#%+,-./:=@[]^_~');
 
-/** Whether an ssh target is one the core takes (machines.ValidTarget; the
- * vectors of design/testdata/machines/targets.json): at most 255 bytes of
+/** Whether an ssh target is one the hub takes (machines.ValidTarget; the
+ * vectors of spec/vectors/machines/targets.json): at most 255 bytes of
  * UTF-8, not starting with "-", of ASCII letters, digits and
  * # % + , - . / : = @ [ ] ^ _ ~ and Unicode letters, marks and numbers. */
 export function validTarget(t: string): boolean {
@@ -64,16 +95,20 @@ export function validTarget(t: string): boolean {
   return true;
 }
 
-/** An agent's status change in a terminal of a machine's terminal core. */
+/** An agent's status change in a terminal of a machine's terminal core,
+ * or, with terminal "", in a pane of a plugin (a chat), which members of
+ * the plugin's own name (chat) and the plugin finds (ViewStatusDef.paneOf). */
 export interface AgentStatusEvent {
   terminal: string;
   agent_status: AgentStatus;
   agent?: string | null;
   display_agent?: string | null;
   title?: string | null;
+  [member: string]: unknown;
 }
 
-// Status priority for aggregation and attention ordering.
+// Status priority for aggregation and attention ordering, of terminals'
+// agents and plugins' panes (plugins/api.ts ViewStatusDef) alike.
 export const statusRank: Record<AgentStatus, number> = { blocked: 4, done: 3, working: 2, idle: 1, unknown: 0 };
 
 const statuses = new Set<string>(Object.keys(statusRank));
@@ -81,6 +116,16 @@ const statuses = new Set<string>(Object.keys(statusRank));
 /** The agent detected in a terminal, if any. */
 export function agentOf(r: TerminalRecord | undefined): string | undefined {
   return typeof r?.agent === 'string' && r.agent ? r.agent : undefined;
+}
+
+/** The session of the agent detected in a terminal, and how the machine
+ * found it (agentproto's session sources: argv, pid, fd, start, hook,
+ * guess); undefined when none is known or the id is not a session id. */
+export function agentSession(r: TerminalRecord | undefined): { id: string; source: string } | undefined {
+  const id = r?.agent_session;
+  if (!isSessionId(id)) return undefined;
+  const source = r?.agent_session_source;
+  return { id, source: typeof source === 'string' ? source : '' };
 }
 
 /** What a terminal's agent is doing: the detected state, else what the
@@ -120,5 +165,11 @@ export function aggregate(list: Array<AgentStatus | undefined>): AgentStatus | u
  * the code. */
 export function codeText(code: string): string {
   const k = `machine.code.${code}`;
+  return hasMessage(k) ? t(k as MessageKey) : code;
+}
+
+/** What to do about a deployment failure (MachineState.failure). */
+export function failureText(code: string): string {
+  const k = `machine.failure.${code}`;
   return hasMessage(k) ? t(k as MessageKey) : code;
 }

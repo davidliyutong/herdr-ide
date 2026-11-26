@@ -96,6 +96,7 @@ export const en = {
   'git.discardAll': 'Discard All Changes',
   'git.openDiff': 'Open Changes',
   'git.openFile': 'Open File',
+  'git.openRepo': 'Open Repository',
   'git.files': '{n} files',
   'git.discard.title': 'Discard changes',
   'git.discard.message': 'Discard the changes of {what}? This cannot be undone.',

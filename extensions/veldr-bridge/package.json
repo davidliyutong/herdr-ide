@@ -1,0 +1,100 @@
+{
+  "name": "veldr-bridge",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "0.1.0",
+  "publisher": "veldr",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "veldr.sendToAgent",
+        "title": "%command.sendToAgent%",
+        "category": "veldr"
+      },
+      {
+        "command": "veldr.download",
+        "title": "%command.download%",
+        "category": "veldr"
+      },
+      {
+        "command": "veldr.reconnect",
+        "title": "%command.reconnect%",
+        "category": "veldr"
+      },
+      {
+        "command": "veldr.leave",
+        "title": "%command.leave%",
+        "category": "veldr"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "veldr.sendToAgent",
+          "group": "veldr@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "veldr.sendToAgent",
+          "group": "veldr@1"
+        },
+        {
+          "command": "veldr.download",
+          "group": "veldr@2"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "veldr.sendToAgent",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "veldr.closePane",
+        "key": "ctrl+w",
+        "mac": "cmd+w",
+        "when": "!editorIsOpen && !multipleEditorGroups"
+      },
+      {
+        "command": "veldr.leave",
+        "key": "ctrl+alt+shift+b",
+        "mac": "ctrl+b",
+        "when": "!terminalFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --outfile=dist/extension.js",
+    "package": "pnpm run build && vsce package --no-dependencies --allow-missing-repository -o veldr-bridge.vsix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "prettier": "^3.6.2"
+  },
+  "l10n": "./l10n",
+  "packageManager": "pnpm@12.8.1"
+}

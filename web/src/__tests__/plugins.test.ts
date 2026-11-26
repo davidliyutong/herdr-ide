@@ -2,7 +2,7 @@
 //
 // The plugin framework: plugins on and off by their setting, the right
 // sidebar's rail and panels, commands that plugins run, their panes and
-// their messages from the core.
+// their messages from the hub.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -89,7 +89,21 @@ describe('plugins', () => {
   });
 
   it('are on unless their setting is false; the built-in ones are listed', () => {
-    expect(saved.map((p) => p.id)).toEqual(['transfers', 'gui', 'vscode', 'browser', 'files', 'git', 'monitor', 'usage', 'vault']);
+    expect(saved.map((p) => p.id)).toEqual([
+      'transfers',
+      'gui',
+      'vscode',
+      'browser',
+      'files',
+      'search',
+      'git',
+      'monitor',
+      'usage',
+      'vault',
+      'agents',
+      'chat',
+      'history',
+    ]);
     expect(pluginOn(git)).toBe(true);
     setValue('plugins.git.enabled', false);
     expect(pluginOn(git)).toBe(false);

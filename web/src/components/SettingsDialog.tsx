@@ -1,4 +1,4 @@
-// Settings dialog, rendered from the definitions the core serves
+// Settings dialog, rendered from the definitions the hub serves
 // (/api/settings, settings.ts), laid out as VS Code's: a scope bar (the
 // user's settings, then each machine's own), a list of sections (the
 // advanced ones last) and the section's settings, a search across them, a
@@ -20,7 +20,7 @@ import { hasMessage, t } from '../i18n';
 import { openMenu, type MenuEntry } from '../contextMenu';
 import { actions } from '../actions';
 import { isMac, useKeys } from '../keybindings';
-import { codeText, type MachineState } from '../lib/machine';
+import { codeText, failureText, type MachineState } from '../lib/machine';
 import { conn } from '../lib/conn';
 import {
   resetSetting,
@@ -33,8 +33,10 @@ import {
   type SettingValue,
 } from '../settings';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
+import { DeployProgress } from './DeployProgress';
 import { FontPicker } from './settings/FontPicker';
 import { desktopShell } from '../shell';
+import { notificationPermission, onPermissionChange, requestNotifyPermission } from '../notify';
 import { ZOOM_KEY } from '../zoom';
 import { colorKeys, ThemeColors, schemeLabel } from './settings/Colors';
 import { ThemePicker } from './settings/ThemePicker';
@@ -44,7 +46,7 @@ import { PluginHeader, PluginsPage } from './settings/PluginsPage';
 import { Performance } from './settings/Performance';
 import { Picker, type PickerItem } from './Picker';
 import { useReturnFocus } from './useDismiss';
-import { acceptRisk, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
+import { acceptRisk, allPlugins, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
 import type { PluginDef, PluginSettingsDef } from '../plugins/api';
 
 export function settingLabel(key: string): string {
@@ -408,7 +410,7 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
 }
 
 /** Opens settings.json (or keybindings.json) in a VS Code pane of the
- * core's own machine, where the file is; without one (a core on Windows,
+ * hub's own machine, where the file is; without one (a hub on Windows,
  * read-only mode) it copies the file's path. */
 function OpenFileButton({ file, which }: { file: string; which: 'settings' | 'keys' }) {
   const local = useStore((s) => s.order.map((id) => s.machines[id]).find((m) => m?.kind === 'local' && m.status === 'ready' && !m.code));
@@ -566,7 +568,9 @@ function SettingRow({
     if (JSON.stringify(v) === JSON.stringify(machine ? own : value)) return;
     // VS Code's switch for browsers asks to accept its risk first.
     if (v === true && !(await acceptRisk(d.key))) return;
-    done(await setSetting(d.key, v, machine?.id));
+    const err = await setSetting(d.key, v, machine?.id);
+    done(err);
+    if (!err && d.key === 'notifications.system' && v === true) void requestNotifyPermission({ force: true });
   };
   const reset = () => void save(undefined);
   const menu = (): MenuEntry[] => [
@@ -606,6 +610,7 @@ function SettingRow({
           <Control d={d} value={value} disabled={disabled} onChange={save} />
         )}
       </div>
+      {!machine && d.key === 'notifications.system' && <NotificationPermissionStatus enabled={value === true} />}
       {locked && (
         <div className="settings-locked small">
           <Lock /> {t('settings.lockedByFlag', { flag: `--${d.flag ?? d.key}` })}
@@ -645,6 +650,9 @@ function Control({
   disabled: boolean;
   onChange(v: SettingValue): void;
 }) {
+  // A plugin's own control for the setting (PluginSettingsDef.controls).
+  const Own = allPlugins().find((p) => p.settings?.controls?.[d.key])?.settings?.controls?.[d.key];
+  if (Own) return <Own d={d} value={value} disabled={disabled} onChange={onChange} />;
   switch (d.type) {
     case 'bool':
       return (
@@ -1053,7 +1061,9 @@ function MachinePage({ m, readOnly }: { m: MachineState; readOnly: boolean }) {
             <button onClick={() => void actions.setMachineEnabled(m.id, false)}>{t('menu.disableMachine')}</button>
           )}
         </div>
+        {m.status === 'connecting' && m.deploy && <DeployProgress deploy={m.deploy} />}
         {m.code && <div className="setting-desc">{codeText(m.code)}</div>}
+        {m.failure && <div className="setting-desc">{failureText(m.failure)}</div>}
       </div>
       {!m.code && (
         <>
@@ -1083,6 +1093,24 @@ export function valueLabel(d: Pick<SettingDef, 'key' | 'type'>, v: SettingValue)
   if (d.type === 'bool') return t(v ? 'settings.on' : 'settings.off');
   if (d.type === 'enum') return optionLabel(d.key, String(v));
   return Array.isArray(v) ? v.join(', ') : String(v);
+}
+
+/** Shows browser Notification permission status and an explicit grant action when needed. */
+function NotificationPermissionStatus({ enabled }: { enabled: boolean }) {
+  const [, setTick] = useState(0);
+  useEffect(() => onPermissionChange(() => setTick((n) => n + 1)), []);
+  const perm = notificationPermission();
+  if (perm === 'desktop' || perm === 'granted') return null;
+  if (perm === 'unsupported') return <div className="setting-desc">{t('settings.notifications.permission.unavailable')}</div>;
+  if (perm === 'denied') return <div className="error small">{t('settings.notifications.permission.denied')}</div>;
+  if (!enabled) return null;
+  return (
+    <div className="setting-control">
+      <button type="button" onClick={() => void requestNotifyPermission({ force: true })}>
+        {t('settings.notifications.permission.allow')}
+      </button>
+    </div>
+  );
 }
 
 export { colorKeys };

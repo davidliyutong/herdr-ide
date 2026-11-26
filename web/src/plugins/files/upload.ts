@@ -10,8 +10,8 @@
 
 import { choiceDialog } from '../../dialog';
 import { desktopShell } from '../../shell';
-import { filesAreOn } from '../../drop';
 import { t } from '../../i18n';
+import { uploadName } from '../../lib/files';
 import { shortPath } from '../../lib/machine';
 import { useStore } from '../../state/store';
 import { uploadPlaced, useTransfers, type PlacedUpload } from '../../transfers';
@@ -40,6 +40,11 @@ const toast = (msg: string, kind: 'error' | 'info' = 'error') => useStore.getSta
  * are gone after it), the folders read after; items that could not be
  * read are counted. */
 export function droppedEntries(items: ArrayLike<DataTransferItem>): Promise<{ picked: Picked[]; unreadable: number }> {
+  return readEntries(itemRoots(items));
+}
+
+/** Extracts FileSystemEntry or File roots synchronously from DataTransferItemList. */
+export function itemRoots(items: ArrayLike<DataTransferItem>): Array<FileSystemEntry | File> {
   const roots: Array<FileSystemEntry | File> = [];
   for (const item of Array.from(items)) {
     if (item.kind !== 'file') continue;
@@ -48,7 +53,61 @@ export function droppedEntries(items: ArrayLike<DataTransferItem>): Promise<{ pi
     if (entry) roots.push(entry);
     else if (file) roots.push(file);
   }
-  return readEntries(roots);
+  return roots;
+}
+
+/** Extracts FileSystemEntry or File roots synchronously from a clipboard
+ * DataTransfer, checking `items` first and falling back to `files`. */
+export function clipboardRoots(data: Pick<DataTransfer, 'items' | 'files'>): Array<FileSystemEntry | File> {
+  const fromItems = data.items?.length ? itemRoots(data.items) : [];
+  if (fromItems.length) return fromItems;
+  return Array.from(data.files ?? []);
+}
+
+/** Whether clipboard DataTransfer carries any files or file items. */
+export function hasClipboardFiles(data: Pick<DataTransfer, 'items' | 'files'> | null | undefined): boolean {
+  if (!data) return false;
+  if (data.files && data.files.length > 0) return true;
+  if (data.items) {
+    for (const item of Array.from(data.items)) if (item.kind === 'file') return true;
+  }
+  return false;
+}
+
+/** Separates clipboard items into local disk paths (when the desktop app
+ * knows them) and fallback FileSystemEntry/File items (e.g. clipboard images). */
+export function clipboardLocalPaths(data: Pick<DataTransfer, 'items' | 'files'>): {
+  paths: string[];
+  fallback: Array<FileSystemEntry | File>;
+} {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  const fallback: Array<FileSystemEntry | File> = [];
+  const takeFile = (f: File) => {
+    const p = desktopShell?.pathForFile(f) ?? '';
+    if (p) {
+      if (!seen.has(p)) {
+        seen.add(p);
+        paths.push(p);
+      }
+      return true;
+    }
+    return false;
+  };
+  if (data.items?.length) {
+    for (const item of Array.from(data.items)) {
+      if (item.kind !== 'file') continue;
+      const entry = item.webkitGetAsEntry?.();
+      const file = item.getAsFile();
+      if (file && takeFile(file)) continue;
+      if (entry) fallback.push(entry);
+      else if (file) fallback.push(file);
+    }
+  }
+  if (!paths.length && !fallback.length && data.files?.length) {
+    for (const f of Array.from(data.files)) if (!takeFile(f)) fallback.push(f);
+  }
+  return { paths, fallback };
 }
 
 /** Reads entries (files, folders with their contents) into Picked, at
@@ -78,8 +137,21 @@ export async function readEntries(roots: Array<FileSystemEntry | File>): Promise
     for (const c of children) await walk(c, `${rel}/${c.name}`);
   };
   for (const r of roots) {
-    if (r instanceof File) picked.push({ rel: r.name, file: r });
-    else await walk(r, r.name);
+    if (picked.length > MAX_PICKED) break;
+    if (r instanceof File) {
+      // Chromium/Electron may expose a copied directory as a 0-byte File when
+      // webkitGetAsEntry() is null; slicing rejects for unreadable handles.
+      if (r.size === 0 && !r.type && typeof r.slice === 'function') {
+        try {
+          const slice = r.slice(0, 1);
+          if (typeof slice?.arrayBuffer === 'function') await slice.arrayBuffer();
+        } catch {
+          unreadable++;
+          continue;
+        }
+      }
+      picked.push({ rel: uploadName(r), file: r });
+    } else await walk(r, r.name);
   }
   return { picked, unreadable };
 }
@@ -287,7 +359,3 @@ export function localPaths(files: readonly File[]): string[] {
   }
   return [...out];
 }
-
-/** Whether uploads to m are copies on this computer (the desktop app's
- * own machine). */
-export const copiesInPlace = filesAreOn;

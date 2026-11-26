@@ -2,417 +2,163 @@
 
 ## Context
 
-Terminals are the primary surface, but reviewing an agent's work needs code
-browsing, diffs, Git history and media previews, and users want VS Code
-extensions such as Git Graph. VS Code must open on demand beside the
-terminals, on the machine of the pane it comes from, at its working
-directory, without covering them: a panel laid over the panes on a window
-that is not wide enough hides the terminals, and with them the keys and
-buttons that would close it. VS Code is therefore a pane like a terminal,
-with its share of the split tree.
+Terminals are the primary surface, but reviewing an agent's work needs code browsing, diffs, Git history and media previews, and users want VS Code extensions such as Git Graph. VS Code must open on demand beside the terminals, on the machine of the pane it comes from, at its working directory.
+
+A panel laid over the panes would hide the terminals on a narrow window, together with the keys and buttons that close it. VS Code is therefore a pane like a terminal, with its share of the split tree.
 
 ## Goals / non-goals
 
-Goals: real VS Code with extensions on every machine; opened from panes and
-terminal links, as a tab or beside the pane it came from, and moved,
-maximized and closed as any pane; back after a reload; works without
-internet on machines; costs nothing when not used.
+Goals:
 
-Non-goals: replacing the terminal as the main surface; syncing VS Code
-settings between machines; the app's keys inside VS Code beyond those VS
-Code leaves (and `pane.close`, below).
+- real VS Code with extensions on every machine;
+- opened from panes and terminal links, as a tab or beside the pane it came from, and moved, maximized and closed as any pane;
+- back after a reload;
+- works without internet on machines;
+- costs nothing when not used.
+
+Non-goals: replacing the terminal as the main surface; syncing VS Code settings between machines; the app's keys inside VS Code beyond those VS Code leaves.
 
 ## Design
 
-**A plugin** (`vscode`, [27](27-plugins.md); `web/src/plugins/vscode`,
-`internal/plugins/vscode`) **with a switch per kind of client.** VS Code's
-windows are served on the UI's own origin, so any script in them (an
-extension, a webview, a page an extension opens) can do whatever the page
-can: type into the terminals of every machine, read and change their
-files, use the vault while it is unlocked on that page. VS Code is
-therefore off by default, and each kind of client has its own switch
-([08](08-web-access-and-security.md)):
+### A plugin with a switch per kind of client
 
-- `plugins.vscode.enabled`, the desktop app's windows: the Plugins page of
-  the app turns it on and off without asking, as any plugin's switch.
-- `plugins.vscode.browser`, browsers: turning it on, on the Plugins page,
-  from the **Turn It On…** of a VS Code pane or from its row in the
-  settings' search, first shows a dialog that says what VS Code's scripts
-  can reach and why, that it applies to every browser opening this core
-  until turned off, and that the desktop app's switch is separate; its
-  **Enable** works only once **I understand the risk…** is ticked. The
-  setting is the acceptance, kept in the settings file until turned off;
-  turning it off asks nothing.
+VS Code is the plugin `vscode` ([27](27-plugins.md); `web/src/plugins/vscode`, `backend/features/vscode`). Its windows are served on the UI's own origin, so any script in them (an extension, a webview) can do what the page can: type into every machine's terminals, read and change files, use the unlocked vault. VS Code is therefore off by default, with one switch per kind of client ([08](08-web-access-and-security.md)):
 
-A desktop user who opens the same core in a browser therefore finds VS
-Code off there and must accept the risk in the browser. The core tells the
-desktop app's requests by the token of its launch
-([16](16-desktop-packaging.md)) and applies the requesting client's
-switch; `GET /api/settings` says which one the page is (`client`), and the
-UI shows and follows that switch (`enableSetting` in
-`web/src/plugins/registry.ts`), not the preload's `desktopShell`. Off for a
-client, nothing offers VS Code there: the panes' buttons and menus, the
-links' "open in VS Code", the file explorer's and Quick Look's items and
-the commands (`code.open`, `code.diff`, `code.gitGraph`, then disabled)
-go, a path opened from a terminal shows in Quick Look instead, the layer
-closes its windows and a VS Code pane (kept in the layout) says VS Code is
-off with a button that turns it on. The core refuses that client
-code-server's status, start, proxy (its WebSockets included) and the
-bridge's commands with `404 plugin_disabled`, so nothing is fetched or
-started on a machine for it, and sends VS Code's bridge messages
-(`bridge.*`) only to pages whose switch is on; stopping a code-server
-still works. Turning a switch off also acts on what runs: every proxied
-request and WebSocket of that kind of client is closed, also those of
-VS Code windows open in other browsers, and the bridge's commands it sent
-end; once both are off, a code-server preparation under way ends too (an
-upload's stream is closed, a machine's download stops), so code-server
-stops after `--code-server-idle` without connections
-(`TestVSCodeOffEndsItsWork`). A request checks its client's switch again
-once it took the context its work follows, so one that passed the
-route's check just before the switch went off starts nothing that
-outlives it (`TestVSCodeWorkTakenOnlyWhileOn`). While VS Code is off for
-its kind of client the page unregisters every service worker of the
-UI's origin (the UI registers none; code-server and its webviews do), so
-nothing VS Code's content left keeps running there
-(`web/src/plugins/vscode/workers.ts`).
+- `plugins.vscode.enabled`: the desktop app's windows, toggled like any plugin;
+- `plugins.vscode.browser`: browsers; turning it on first shows a dialog explaining the risk, whose **Enable** works only once the risk is acknowledged. The setting is the acceptance.
 
-**Provisioning** (`internal/codeserver`, agent `codeserver.go`)
+The hub tells the desktop app's requests by its launch token ([16](16-desktop-packaging.md)) and applies the requesting client's switch; `GET /api/settings` reports the page's `client` so the UI follows the same switch (`enableSetting` in `web/src/plugins/registry.ts`).
 
-- The `codeServer.install` setting (settings dialog, also per machine in
-  its scope, or `--code-server-install` for every machine) picks how a
-  machine gets code-server; `codeServer.path` names an installed one, also
-  per machine:
-  - `push` (default): the release for the machine's platform is resolved on
-    the core host ([09](09-air-gapped-installs.md)), uploaded through the
-    agent and unpacked into `~/.herdr-ide/code-server/<version>` (shared by
-    instances);
-  - `download`: the agent fetches the same release URL with the machine's
-    curl or wget (its proxy and CA settings apply), checks the digest the
-    core sends and unpacks it into the same place;
-  - `existing`: the agent runs a code-server already on the machine (the
-    `codeServer.path` setting or `--code-server-path`, an absolute or `~/`
-    path, else `PATH` and the usual install locations); the core's requests
-    then carry its path (`Header.Bin`).
-  `download` and `existing` fall back to `push` (logged); `--offline` skips
-  `download`. A change applies the next time code-server starts on a
-  machine, since a running process is reused.
-- The bundled Node is run once after unpacking; if it fails (old glibc), the
-  error is reported and the rest of herdr-ide keeps working.
-- Extensions are installed from VSIX files uploaded by the core: the
-  embedded bridge extension and the default extensions (Git Graph). Markers
-  in the extensions directory skip reinstallation.
-- Start flags: unix socket only (`--socket … --socket-mode 600`), `--auth
-  none` (the socket directory is private), `--disable-proxy`, telemetry and
-  update checks off, workspace trust off, `--reconnection-grace-time 300`,
-  `--idle-timeout-seconds 3600`.
+While off for a client:
 
-**Proxy** (`internal/server/codeserver.go`)
+- the UI offers no VS Code entry points; a path opened from a terminal shows in Quick Look; a VS Code pane in the layout says VS Code is off and offers to turn it on;
+- the hub refuses code-server's status, start, proxy and bridge commands with `404 plugin_disabled`, and sends `bridge.*` messages only to pages whose switch is on;
+- the page unregisters every service worker of the UI's origin (`web/src/plugins/vscode/workers.ts`), so nothing VS Code left keeps running.
 
-- `/m/<machine>/code/…` is reverse-proxied to the agent's `cs.sock` through a
-  yamux stream (`dial-unix`), WebSockets included; the prefix is stripped and
-  the Host header preserved (code-server compares Origin with Host).
-- While code-server is being prepared, a VS Code pane shows a page that
-  polls `/api/m/<machine>/code/status` and translates the phase codes, or
-  the error that stopped it.
+Turning a switch off also ends running work: the client kind's proxied requests and WebSockets close (in every browser), pending bridge commands end, and with both switches off any code-server preparation stops. A request re-checks the switch once it holds the context its work follows, so none that raced the switch outlives it.
 
-**VS Code panes** (`web/src/term/layout.ts`, `web/src/actions.ts`,
-`web/src/codeFrames.ts`, `web/src/components/CodeLayer.tsx`)
+### Provisioning
 
-- A VS Code pane is a leaf `{"code": {"id", "folder"}}` of a tab's split
-  tree in the machine's layout document
-  ([22](22-terminal-protocol.md)), named `code:<id>` there: VS Code of that
-  machine for the folder (`""`: the one code-server opens). Like a
-  terminal's it can be split beside (the new terminal starts in its
-  folder), dragged by its header to swap with another pane or to move
-  beside one, into another tab or a new tab, maximized, closed (which ends
-  nothing) and be a tab's only pane; every client shows it, and it is back
-  after a reload. A preview of a file is a pane the same way
-  ([06](06-quick-look-and-files.md)).
-- Where VS Code opens:
+`backend/features/vscode/provision.ts` and `artifacts.ts`; the agent's side is `backend/features/vscode/machine.ts` (`machine/`), which answers op `code-server`. The `codeServer.install` setting (global, per machine, or `--code-server-install`) picks how a machine gets code-server:
 
-  | From | Opens | Reuses |
-  | --- | --- | --- |
-  | **Open in VS Code** (`code.open`: a terminal header's button, the pane menu, the palette, `cmd+j` in the desktop app on macOS, `ctrl+shift+j` in the desktop app elsewhere) | a new tab of the selected workspace, for the terminal's directory (the focused pane's for the key), else the workspace's folder; on a VS Code pane with the keyboard in the page, the pane focused before it instead (below) | the workspace's VS Code pane for that folder, in any tab: it is selected |
-  | **Show Changes in VS Code** (`code.diff`), **Open Git Graph** (`code.gitGraph`) | a split to the right of the pane they came from, then runs the command there | the VS Code pane of that tab for that folder |
-  | cmd/ctrl+click on a file in a terminal, **Open … in VS Code** in its menu | the file at its line in a VS Code pane of the terminal's workspace, else in a split beside the terminal, for the terminal's directory or the workspace's when the file is below it, else for the file's directory | of the workspace's VS Code panes: one of the terminal's tab whose folder holds the file, then one of another tab that holds it, then any of the terminal's tab, then any |
+- `push` (default): the release is resolved on the hub host ([09](09-air-gapped-installs.md)), uploaded through the agent with the digest the hub verified it by and unpacked into `~/.veldr/code-server/<version>-<os>-<arch>` (shared by instances); the machine side checks the digest before it unpacks anything;
+- `download`: the agent fetches the same release with the machine's curl or wget and checks the digest the hub sends;
+- `existing`: the agent runs a code-server already on the machine (`codeServer.path` or `--code-server-path`, else `PATH` and the usual locations).
 
-  A pane opened or reused this way is shown and gets the keyboard. The Git
-  plugin ([31](31-git.md)) shows changes, diffs and the graph without VS
-  Code (**Show Source Control**, **Show Git Graph**); these commands stay
-  for VS Code's own views.
-- Each VS Code pane on screen is a same-origin iframe of its own
-  (`/m/<machine>/code/?folder=`), a VS Code window. Moving an iframe in the
-  document reloads it, so the iframes live in one layer over the panes and
-  are placed over their pane's body (`.code-slot`), following its size and
-  place; moving the pane, maximizing it, or switching tab, workspace or
-  machine only places the iframe elsewhere or hides it. The layer covers
-  the workspace's area of the page (not the sidebar or the status bar) and
-  clips to it; iframes are placed relative to it, so they move with the
-  workspace when the sidebar opens or changes width, and one not placed
-  again yet cannot draw over the sidebar. The window resizing, the layer
-  resizing and a slot resizing place them again. The layer lies
-  above the panes' bodies and below the split handles, a header's menu,
-  dialogs and menus.
-- An iframe is made when its pane comes on screen, so a layout with many
-  VS Code panes starts no window for those not shown. A window off screen
-  stays loaded, so coming back is instant, for 10 minutes and among the 3
-  off screen used most recently; then it is unmounted, which closes its
-  connection and lets the core stop that machine's idle code-server. A pane
-  closed in the layout (by any client) unmounts its window at once; one of
-  a machine whose layout is not read keeps it until it expires.
-- Pressing a VS Code pane (its header or VS Code itself) gives it the
-  keyboard and makes it its tab's focused pane, as a terminal pane is made.
-- The header: VSCodium's mark (`web/src/assets/vscodium`, MIT, recolored
-  to the text's color), the folder's name (its tooltip names the
-  machine and the folder), the folder's path, and **Reload VS Code**, the
-  split buttons, maximize, the pane's menu on narrow panes, close. The menu
-  has these and **Stop VS Code on <machine>**, which stops that machine's
-  code-server (freeing its memory there): this page's VS Code panes of the
-  machine then say so and offer to start it again, which loads them again.
-  A tab holding no terminal shows the pane's mark and folder name in the
-  tab bar instead of its number.
-- A disabled machine's windows are unmounted and its VS Code panes say so;
-  enabling the machine loads them again. In read-only mode, where the proxy
-  refuses VS Code, a VS Code pane says that VS Code is not available.
-- Keys typed in VS Code are VS Code's, and the page runs none of its own
-  bindings for them. VS Code keeps its own keys:
-  `cmd+j` there shows or hides its bottom panel, `cmd+p` and
-  `cmd+shift+p` are its own. In the desktop app on macOS a key VS Code
-  leaves reaches the application menu, whose commands then act on the
-  VS Code pane that has the keyboard, as on a terminal pane
-  ([04](04-layout-and-keyboard.md)). The page takes no key from VS Code:
-  `cmd+w` closes VS Code's editor. In a window without editors (and one
-  editor group), where VS Code would close its window, the bridge
-  extension binds `cmd+w` (`ctrl+w` elsewhere) to `closePane`: the core
-  passes it to the pages as `bridge.close {m, window, folders}`, and the
-  page whose iframe of that window has the keyboard closes its pane, as
-  `pane.close` would (`closeWindowPane`; nothing while a dialog is open
-  or in read-only mode). So `cmd+w` held closes the editors, then the
-  pane.
-- The keyboard goes back from VS Code to the page with the bridge
-  extension's **Give the Keyboard Back** (`ctrl+b` on macOS,
-  `ctrl+alt+shift+b` elsewhere, where `ctrl+b` is VS Code's sidebar; not
-  while VS Code's terminal has the keyboard, where the key stays the
-  shell's, e.g. tmux's prefix; VS Code's Keyboard Shortcuts rebind it):
-  the core passes it to the pages as `bridge.leave {m, window, folders}`,
-  and the page whose iframe of that window has the keyboard moves it to
-  that pane's header (`leaveWindowPane`; nothing while a dialog is open).
-  There the page's keys work: **Open in VS Code** (`cmd+j`) on a VS Code
-  pane hides VS Code again, showing the pane focused before it (Pane
-  Back), as VS Code's own `cmd+j` hides its panel; without a pane before
-  it, it stays. So `cmd+j` in a terminal shows VS Code, and `ctrl+b`,
-  `cmd+j` there go back.
+`download` and `existing` fall back to `push`; `--offline` skips `download`. A change applies the next time code-server starts.
 
-**Theme** (`theme` WebSocket message, `bridgeHub.setTheme`)
+The hub resolves and verifies each artifact independently. Concurrent requests for the same file serialize, and transient HTTP and transfer failures are retried up to twice within the original download deadline.
 
-- The browser sends the light/dark kind in use (`{t: "theme", kind}`) on
-  connect and when it changes. The core keeps the last one and sends it to
-  every bridge window, and to each window when it connects.
-- The extension switches `workbench.colorTheme` to the user's
-  `workbench.preferredLightColorTheme` / `preferredDarkColorTheme` unless
-  the current theme is already of that kind, so a chosen theme is kept.
-  VS Code's settings are per instance (`cs-data` in the instance's
-  directory on the machine), so all browsers of one core share the last
-  choice. The loading page reads the language and theme from the embedding
-  page.
+The node publishes staged releases under its code-server lifecycle lock. A healthy server using the same installed release keeps its files while it runs. Overlapping installs of identical archives share unpacking and publication. A later reinstall can replace the stopped server's files. Idle release checks for other hubs' open or connecting sockets under the same lock immediately before stopping the server.
 
-**Bridge** (`extensions/herdr-ide-bridge`, `internal/server/bridge.go`)
+The bundled Node is run once after unpacking; if it fails (old glibc), the error is reported and the rest of the product keeps working. An archive with an entry that would leave the release (an absolute path, `..`, a link pointing out) is refused whole; unpacking it does not hold the node's one thread ([42](42-typescript-backend.md#the-machine-side)). Extensions (the bridge extension and the defaults, Git Graph) are installed from VSIX files uploaded by the hub.
 
-- The extension runs in code-server's extension host on the machine and
-  connects to `$HERDR_IDE_BRIDGE_SOCKET`, which the agent tunnels to the core.
-  It announces its window (a random id per extension host), its workspace
-  folders and whether it has the keyboard, and says when it gets the
-  keyboard. Each iframe is a window of its own; the core tells the pages
-  which window got the keyboard (`bridge.focus`), and the page whose iframe
-  has the keyboard, in the window that has it, learns which window that
-  iframe shows when the folders match.
-- The core routes UI commands (`openFile` (path, line, column), `openDiff`
-  (multi-file "View Changes"), `gitGraph` (repository root), `openMedia`,
-  `reveal`) to a window: the one the page names, else, for an iframe the
-  page has just created (`fresh`), the first window of that folder that
-  connects after the request, else the window showing the folder (waiting
-  up to 60 s for the iframe to load, accepting a containing folder after a
-  grace period, the window used last among several). Its reply names the
-  window, which the page keeps for that iframe. So a command reaches the
-  pane it was meant for, also when other panes or other browsers show the
-  same folder.
-- **Send to Agent** in the editor sends `@file:lines` plus the selection;
-  the core adds the sending window's id and folders (`bridge.send`). The
-  page whose VS Code pane shows that window (known, or the pane whose iframe
-  has the keyboard in the page that has it) pastes it, unsubmitted, into an
-  agent of the pane's tab, else of the pane's workspace (those waiting for
-  input first), else into the workspace's terminal focused last on that
-  page; never into another workspace's (another project's agent): without
-  one a note names the workspace. A window of no pane of the page with the
-  keyboard (VS Code opened on its own) sends to the focused terminal on that
-  machine, else its agent waiting for input; other pages ignore it.
-- **Download (folders as zip)** in the explorer's menu (several entries can be
-  selected) sends their paths; the core passes them to the browsers as
-  `bridge.download` with the window's id, and the page showing that window
-  (else the page with the focus) downloads them through
-  `/api/m/<machine>/download`: one file as itself, folders and several
-  entries as one zip ([06](06-quick-look-and-files.md)). A VS Code window
-  opened on its own has no app page, so nothing downloads there; VS Code's
-  own **Download…** remains.
+code-server listens only on a unix socket (`--socket-mode 600`) with `--auth none` (the socket directory is private) and `--disable-proxy`; telemetry, update checks and workspace trust are off, and it exits by itself after an hour unused (`--idle-timeout-seconds`).
 
-**Downloads in VS Code**
+### Proxy
 
-- VS Code's own **Download…** saves a file up to 32 MB as a plain browser
-  download, and folders and larger files through the File System Access API
-  into a folder the user picks. Only Chromium-based browsers have that API,
-  and only on `localhost` or HTTPS; elsewhere VS Code cannot save folders. The
-  desktop app grants the API to the core's frames
-  ([16](16-desktop-packaging.md)).
-- The bridge's **Download (folders as zip)** works in every browser and needs
-  no permission: the browser streams the response from the core.
+`backend/features/vscode/proxy.ts`, `relay.ts`. `/m/<machine>/code/…` is reverse-proxied, WebSockets included, to the agent's `cs.sock` through a yamux stream; the prefix is stripped and the Host header kept (code-server compares Origin with Host). While code-server is being prepared, the pane shows a page (`loading.ts`) that polls `/api/m/<machine>/code/status` and shows the phase or the error.
+
+### VS Code panes
+
+`web/src/term/layout.ts`, `web/src/actions.ts`, `web/src/codeFrames.ts`, `web/src/components/CodeLayer.tsx`.
+
+A VS Code pane is a leaf `{"code": {"id", "folder"}}` of a tab's split tree in the machine's layout document ([22](22-terminal-protocol.md)). Like a terminal's it can be split, dragged, maximized, closed (which ends nothing) and be a tab's only pane; every client shows it. File previews are panes the same way ([06](06-quick-look-and-files.md)).
+
+Where VS Code opens:
+
+| From | Opens | Reuses |
+| --- | --- | --- |
+| **Open in VS Code** (`code.open`: header button, menu, palette, `cmd+j` / `ctrl+shift+j` in the desktop app) | a new tab for the terminal's directory, else the workspace's folder | the workspace's VS Code pane for that folder, in any tab |
+| **Show Changes in VS Code** (`code.diff`), **Open Git Graph** (`code.gitGraph`) | a split to the right of the source pane, then runs the command | the tab's VS Code pane for that folder |
+| cmd/ctrl+click on a file in a terminal | the file at its line, in a VS Code pane whose folder holds it, else a split beside the terminal | the closest such pane: same tab first, then any |
+
+The Git plugin ([31](31-git.md)) shows changes and the graph without VS Code; these commands remain for VS Code's own views.
+
+**One window per pane, in a layer.** Each VS Code pane on screen is a same-origin iframe (`/m/<machine>/code/?folder=`), one VS Code window. Moving an iframe in the DOM reloads it, so all iframes live in one layer over the workspace area and are positioned over their pane's slot (`.code-slot`). Moving, maximizing or switching tab, workspace or machine only repositions or hides them. The layer clips to the workspace area and sits below split handles, menus and dialogs.
+
+**Bounded windows.** An iframe is made when its pane comes on screen. A window off screen stays loaded for instant return, but only for 10 minutes and only the 3 used most recently; then it is unmounted, which lets the machine's idle code-server stop. A pane closed in the layout unmounts its window at once.
+
+**Header.** VSCodium's mark (`web/src/assets/vscodium`, MIT), the folder's name and path, **Reload VS Code**, split, maximize and close. The menu adds **Stop VS Code on <machine>**, which stops that machine's code-server to free its memory. A disabled machine's windows are unmounted; in read-only mode the proxy refuses VS Code and the pane says so.
+
+### Keys
+
+Keys typed in VS Code are VS Code's (`cmd+p`, `cmd+shift+p`, `cmd+j`, `cmd+w` close its editors). In the desktop app on macOS, a key VS Code leaves reaches the application menu, whose commands act on the focused VS Code pane ([04](04-layout-and-keyboard.md)).
+
+The bridge extension adds two keybindings that hand control back:
+
+- `cmd+w` / `ctrl+w` in a window with no editor open (where VS Code would close its window) runs `closePane`: the hub sends `bridge.close` and the page whose iframe has the keyboard closes that pane (not the only pane of a pinned tab). Holding `cmd+w` closes the editors, then the pane.
+- **Give the Keyboard Back** (`ctrl+b` on macOS, `ctrl+alt+shift+b` elsewhere; not while VS Code's terminal is focused) sends `bridge.leave`, and the page moves the keyboard to that pane's header. There **Open in VS Code** (`cmd+j`) returns to the pane focused before, as VS Code's `cmd+j` hides its panel.
+
+### Theme
+
+The browser sends its light/dark kind (`{t: "theme", kind}`) on connect and on change; the hub keeps the last one and sends it to every bridge window (`Bridge.setTheme`). The extension switches to the user's preferred light or dark VS Code theme unless the current theme already matches. VS Code's settings are per instance on the machine, so all browsers of one hub share them.
+
+### Bridge
+
+`extensions/veldr-bridge`, `backend/features/vscode/bridge.ts`.
+
+The extension runs in code-server's extension host on the machine and connects to `$VELDR_BRIDGE_SOCKET`, which the agent tunnels to the hub. It announces its window (a random id), its folders and keyboard focus. The extension host cannot see the page's URL, so a page learns which window its iframe shows by matching the window that reports focus with the iframe that has the keyboard.
+
+The hub routes UI commands (`openFile`, `openDiff`, `gitGraph`, `openMedia`, `reveal`) to a window chosen in this order:
+
+1. the window the page names;
+2. for a just-created iframe (`fresh`), the first window of that folder to connect after the request;
+3. a window showing the folder, the one used last first (waiting for the iframe to load, then accepting a containing folder).
+
+The reply names the window, which the page keeps for that iframe, so a command reaches the intended pane even when several show the same folder.
+
+**Send to Agent** in the editor sends `@file:lines` plus the selection (`bridge.send`, with the window's id and folders). The page showing that window pastes it, unsubmitted, into an agent of the pane's tab, else of its workspace (those waiting for input first), else the workspace's last focused terminal. It never goes to another workspace.
+
+**Download (folders as zip)** in the explorer's menu sends the paths (`bridge.download`); the page showing that window (else the focused page) downloads them through `/api/m/<machine>/download`, folders and several entries as one zip ([06](06-quick-look-and-files.md)). Unlike VS Code's own **Download…**, which needs the File System Access API for folders and large files (Chromium on a secure origin only), it works in every browser.
 
 ## Alternatives considered
 
 | Option | Why not |
 | --- | --- |
-| On by default, with one switch for every client, as earlier versions had | VS Code's scripts run with the page's access; a user should choose that, and a desktop user's choice should not reach the browsers that open the same core ([08](08-web-access-and-security.md)). |
-| Official `code serve-web` | Microsoft Marketplace and Pylance, but the server build is fetched by the CLI at runtime, licensing limits redistribution, and the user chose code-server (Open VSX). |
+| On by default, one switch for every client | VS Code's scripts run with the page's access; a desktop user's choice should not reach browsers. |
+| Official `code serve-web` | Server build fetched at runtime, redistribution limited; code-server uses Open VSX. |
 | openvscode-server | No macOS builds. |
 | Remote-SSH from desktop VS Code | Not in the browser; no integration with panes. |
-| Driving the iframe from the page | VS Code exposes no command API to the embedding page; the extension host runs on the machine. |
-| Reverse ssh socket forward for the bridge | Replaced by the agent's listener tunnelled over the existing yamux session. |
-| Only VS Code's own Download… | Needs the File System Access API for folders and files over 32 MB: Chromium only, on a secure origin, and a permission the desktop app has to grant. |
-| Routing a download to the exact page of the VS Code window | The extension host does not know which page shows its window; the page learns it when the window reports the keyboard while its pane's iframe has it, and the page with the focus decides otherwise. |
-| A panel docked beside or below the panes | On a narrow window it covered the terminals, the keys that would close it (the terminal could not take them) and its own close button; a pane takes its share of the tab and covers nothing. The plugins' right sidebar ([27](27-plugins.md)) holds small panels only, takes a column of its own on wide windows and hides with Escape on narrow ones; what is large opens as a pane. |
-| The iframe inside its pane's element | Moving the pane, switching tabs or workspaces re-parents or unmounts the element, and VS Code reloads; the layer keeps every iframe where it is in the document. |
-| One VS Code window per machine and folder, shared by the panes showing it | Two panes of one folder can be on screen together in a tab, and an iframe has one place; one window per pane also tells which pane a command or a Send to Agent is for. |
-| Telling the extension its pane through the iframe's URL | The extension host runs on the machine and sees neither the page's URL nor its storage; the window's focus, which it does see, is matched with the iframe that has the keyboard. |
-| Keeping every VS Code window loaded | Each is a whole workbench in the browser, and its connection keeps code-server from stopping when idle; windows off screen are bounded by time and count instead. |
-| Taking every app key from VS Code, or `cmd+w` alone, as earlier versions did | VS Code's own keys (`cmd+p`, `cmd+shift+p`, `cmd+j`, `cmd+1…9`, `cmd+w`) are what its users expect there; a page that took `cmd+w` closed the whole pane where they meant to close an editor. |
+| Driving the iframe from the page | VS Code exposes no command API to the embedding page. |
+| Reverse ssh socket forward for the bridge | The agent's listener over the existing yamux session needs no extra forwarding. |
+| Only VS Code's own Download… | Folders and large files need the File System Access API: Chromium, secure origin, a permission. |
+| Routing a download to the exact page of the window | The extension host cannot know its page; focus matching plus the focused page suffice. |
+| A panel docked beside or below the panes | Covered the terminals and its own close controls on narrow windows; a pane covers nothing. |
+| The iframe inside its pane's element | Re-parenting reloads VS Code; the layer keeps iframes in place. |
+| One window per machine and folder, shared by panes | Two panes of one folder can be on screen; per-pane windows also target commands. |
+| Telling the extension its pane through the iframe's URL | The extension host sees neither the page's URL nor its storage. |
+| Keeping every window loaded | Each is a full workbench and keeps code-server from idling out. |
+| Taking app keys (or `cmd+w`) from VS Code | Users expect VS Code's keys there; `cmd+w` closed the pane instead of an editor. |
+
 ## Failure modes
 
-- **code-server crashes or the agent reconnects** → proxy errors invalidate
-  the ready state; the next request runs Ensure again.
-- **Something on the socket does not serve VS Code** (for example a
-  code-server whose installation directory was moved or deleted: it accepts
-  connections and answers `/healthz`, but every page is 404) → before reusing
-  a running code-server the agent requests `/`; on an error status it stops
-  the recorded process, or the socket's peer process group when there is no
-  pid file, and starts a new one.
-- **No window for the folder** → the bridge waits, then falls back to a
-  window containing the folder, then reports an error; a fresh pane's
-  command waits up to 60 s for its window.
-- **The page does not know a pane's window yet** (its iframe never had the
-  keyboard) → the page gives the pane the keyboard and waits up to 1.5 s
-  for the window to report it, then the core goes by folder, the window
-  used last first.
-- **A window off screen was unmounted** (10 minutes, or more than 3) →
-  showing its pane loads it again; code-server restores its editors, and
-  starts again first if it was stopped as idle.
-- **The layout document starts over** (the terminal core's state was
-  removed) → its VS Code panes go with it; their windows are unmounted.
-- **Two agents of one instance on a machine** (a reconnect while the old
-  session's agent lingers, or two cores of the same instance) → the newest
-  agent takes the bridge socket over, so VS Code reaches the session that
-  works; the other serves it again once it is free (the newer agent gone),
-  checking every 2 s. Bridge connections to the old agent end with it, and
-  the extension connects again. Separate instances keep two cores apart.
+- **code-server crashes or the agent reconnects** → proxy errors reset the ready state; the next request prepares code-server again.
+- **The socket answers but does not serve VS Code** (e.g. its installation directory was removed) → before reusing a running code-server the agent requests `/`; on an error status it stops that process and starts a new one.
+- **No window for the folder** → the bridge waits, falls back to a window containing the folder, then reports an error.
+- **The page does not know a pane's window yet** → the page gives the pane the keyboard and waits briefly for the window to report it, then the hub routes by folder.
+- **A window off screen was unmounted** → showing its pane loads it again; code-server restores its editors (and restarts if it idled out).
+- **The layout document starts over** → its VS Code panes and windows go.
+- **Two agents of one instance on a machine** (a reconnect while the old agent lingers) → the newest takes over the bridge socket; the other takes it back once free. The extension reconnects.
+- **An archive that would leave the release** → refused; nothing is written outside the release.
 
 ## Security
 
-VS Code runs on the UI's origin: its extensions and webviews, and the files
-and extensions on the machines that feed them, have the page's access to
-every machine. That is why it is off by default, why browsers turn it on
-only after the user accepted that risk, and why the desktop app's switch
-does not turn it on in browsers (above; [08](08-web-access-and-security.md)).
-Serving code-server from an origin of its own would close the risk, at the
-cost of a second host name or port in every deployment.
+VS Code runs on the UI's origin: its extensions and webviews, and the files on the machines that feed them, have the page's access to every machine. Hence off by default, an explicit risk acceptance in browsers, and a desktop switch that does not reach browsers ([08](08-web-access-and-security.md)). Serving code-server from its own origin would remove the risk at the cost of a second host name or port in every deployment.
 
-The socket directory is 0700 and the socket 0600; `--auth none` is safe only
-because nothing else can connect. The proxy strips the proxy-secret header
-and the desktop app's cookie and adds `X-Frame-Options: SAMEORIGIN`. From
-code-server's answers it drops `Service-Worker-Allowed` (code-server
-allows `/` for its service worker, whose scope would then take in the
-UI's own pages and outlast VS Code's switch; a worker now stays below its
-script's path, and code-server's own PWA worker is not registered) and
-every `Set-Cookie` that names the desktop app's cookie.
-Read-only mode refuses VS Code.
-Window ids are random per extension host and broadcast to every page; a
-command naming one goes through the same guarded, audited
-`POST /api/m/{id}/bridge` as one naming a folder, which read-only mode
-refuses.
-
-code-server's port proxy (`/proxy/<port>/`, `/absproxy/<port>/`) is off: it
-would serve whatever listens on a port of the machine, including another
-user's service on a shared machine, with the UI's origin, where its scripts
-could open `/ws` and type into every pane. code-server is started with
-`--disable-proxy`, and the core refuses those paths (any case) itself, which
-also covers a code-server started by an earlier build that is still reused.
-VS Code's "open in browser" links for forwarded ports therefore do not work.
+- The socket directory is 0700 and the socket 0600; `--auth none` is safe only because nothing else can connect.
+- The proxy strips the proxy-secret header and the cookie that marked the desktop app's requests while it ran the hub as a child (none is set now) and adds `X-Frame-Options: SAMEORIGIN`.
+- From code-server's responses it drops `Service-Worker-Allowed` (which would let a worker's scope cover the UI's pages and outlast the switch) and any `Set-Cookie` naming that cookie.
+- code-server's port proxy (`/proxy/<port>/`, `/absproxy/<port>/`) is off (`--disable-proxy`) and the hub also refuses those paths: it would serve any service on the machine, including another user's, on the UI's origin. VS Code's "open in browser" links for forwarded ports therefore do not work.
+- Bridge commands go through the guarded, audited `POST /api/m/{id}/bridge`; read-only mode refuses it and VS Code altogether.
 
 ## Testing
 
-- The switches: `internal/server/plugins_test.go`
-  (`TestCodeRoutesFollowTheirClientsSwitch`: every route of VS Code per
-  client and token, `TestVSCodeOffEndsItsWork`,
-  `TestVSCodeWorkTakenOnlyWhileOn`,
-  `TestVSCodeSettingOfEarlierVersions`: a settings file with only
-  `plugins.vscode.enabled` loads as the desktop app's switch),
-  `internal/server/client_test.go` (the client reported, the cookie kept
-  from code-server, and code-server's `Service-Worker-Allowed` and
-  `Set-Cookie` of that cookie dropped, bridge messages per switch),
-  `web/src/__tests__/vscodeWorkers.test.ts` (service workers unregistered
-  while VS Code is off for the page's client),
-  `web/src/__tests__/vscodeRisk.test.ts` (off by default; the risk dialog
-  in a browser, Enable only once ticked, Cancel changing nothing, none in
-  the desktop app or when turning off; each page following its client's
-  switch).
-- `internal/codeserver/artifacts_test.go` (resolution and verification),
-  `internal/codeserver/manager_test.go` (`TestInstallMode`,
-  `TestRecordDigest`).
-- `internal/agent/codeserver_test.go`: finding an installed code-server
-  (`TestCodeServerExistingBin`), verified machine downloads
-  (`TestCodeServerDownload`), start flags (`TestCodeServerArgsDisableProxy`),
-  a listener that does not serve VS Code replaced
-  (`TestCodeServerReplacesBrokenListener`).
-- `internal/agent/vault_test.go`: the bridge socket (with the vault's) served
-  by the newest of two agents of one instance, kept when the older exits,
-  served by the other again when the newest exits first, removed with the
-  last (`TestSocketsFollowTheNewestAgent`).
-- `internal/server/server_test.go`: bridge window selection
-  (`TestBridgePick`; `TestBridgeTargets`: a named window, the window used
-  last, a fresh pane's window that connects after the request although
-  others show the folder), idle tracking (`TestCodeServerIdleTracking`),
-  theme broadcast (`TestBridgeTheme`), refused port proxy paths
-  (`TestCodeServerPortProxyRefused`), the sending window's folders and id
-  in `bridge.send` and `bridge.focus` (`TestBridgeSendToAgent`);
-  `internal/server/download_test.go` (`TestBridgeDownload`:
-  `bridge.download` to browsers, with the window's id).
-- `design/testdata/layout/views.json`: VS Code panes in the layout
-  document (open, split, swap, move, close, kept by pruning, unknown
-  shapes kept as nodes).
-- `web/src/__tests__/codePanes.test.ts`: where each entry point opens
-  VS Code and which pane it reuses, previews, splitting and closing a
-  VS Code pane, stopping and reloading; the windows (one per pane on
-  screen, kept off screen, expiry and limit, closed panes, machines without
-  VS Code), their placement over the pane, learning a pane's window, the
-  commands' window or `fresh`, where Send to Agent goes; the browser keys of
-  the earlier panel dropped. `web/src/__tests__/desktop.test.ts`: Open in VS Code
-  by the menu, the menu's commands acting on the VS Code pane that has the
-  keyboard, VS Code's keys left to it, `bridge.close` closing only the
-  pane whose iframe has the keyboard, and `bridge.leave` moving the
-  keyboard to that pane's header, where Open in VS Code shows the pane
-  focused before it; `internal/server/download_test.go`
-  (`TestBridgeClose`, also `bridge.leave`). `paneHeader.test.ts` (a VS Code
-  pane's header), `tabLabels.test.ts` (a VS Code tab's label).
-- `web/src/__tests__/download.test.ts` (only the focused page downloads),
-  `desktop/src/policy.test.ts` (the File System Access permission).
+- Switches: `backend/features/vscode/hub.test.ts` (`routes follow their client's switch`, `a switch turned off ends its work`, `a switch turned off ends its requests and bridge commands in flight`, `preparations end with the last switch`), `backend/features/vscode/work.test.ts` (work taken only while its client's switch is on, ended when it goes off), `backend/kernel/hub.test.ts` (`browserRisk`, `enabledFor`: `plugins.vscode.enabled` is the desktop app's switch only), `backend/features/vscode/proxy.test.ts` (the desktop app's cookie, header filtering), `bridge.test.ts` (bridge messages per switch), `web/src/__tests__/vscodeRisk.test.ts`, `web/src/__tests__/vscodeWorkers.test.ts`.
+- Provisioning: `backend/features/vscode/artifacts.test.ts`, `provision.test.ts` (the upload's digest); the machine side's `backend/features/vscode/machine.test.ts` (existing binary, verified downloads, start flags, replacing a broken listener, through the wire with a stand-in for code-server, and uploads checked before unpacking, archives leaving the release refused, release kept for another hub, the node's end, hand-over and orphans, extensions and markers, retention, the node's thread kept free) and, in `make it` with `E2E_CODE_SERVER_SEED`, `integration.test.ts` (a real release started on its socket only).
+- Bridge socket ownership between agents: `machine.test.ts` (`the bridge socket`: the hub that last opened VS Code, the newest agent taking it over).
+- Bridge routing, idle tracking, theme, refused port proxy, Send to Agent, close/leave and downloads: `backend/features/vscode/bridge.test.ts` (`pick`, `targets`, `theme`, `send to agent, focus`, `close, leave, download`), `proxy.test.ts` (`idle tracking`, `the port proxy is refused`), `hub.test.ts` (`idle code-servers are released`).
+- Layout: `spec/vectors/layout/views.json`.
+- UI: `web/src/__tests__/codePanes.test.ts` (entry points, reuse, windows' lifetime and placement, command targeting, Send to Agent), `desktop.test.ts` (menu and keys), `paneHeader.test.ts`, `tabLabels.test.ts`, `download.test.ts`; `desktop/src/policy.test.ts` (File System Access permission).
 
-VS Code's
-own Download… was traced in code-server 4.144.0: up to 32 MB it is a blob
-download, which reaches Electron's `will-download`. The fallback from `existing` to
-`push` and the theme switch in both directions were verified with
-code-server 4.144.0 in Chrome.
-Provisioning, Git Graph through the bridge and arm64 installs were verified
-on a macOS host and an arm64 Linux VM. VS Code panes were verified with
-code-server 4.144.0 in headless Chrome (a tab, the changes and Git Graph in
-a split, a cmd+click at a line, a swap by dragging, maximizing, a reload,
-two panes of one folder with a command reaching the one it was meant for,
-Send to Agent, headers at 1400, 800 and 600 px) and in the desktop app on
-macOS (an image preview's and Git Graph's webviews; `cmd+j` and `cmd+w`
-with VS Code's iframe focused).
+Verified manually with code-server 4.144.0 in Chrome, headless Chrome and the desktop app on macOS, on a macOS host and an arm64 Linux VM: provisioning, the `existing` → `push` fallback, theme switching, Git Graph through the bridge, panes (splits, drag, maximize, reload, two panes of one folder) and the keys `cmd+j` and `cmd+w` in VS Code's iframe.

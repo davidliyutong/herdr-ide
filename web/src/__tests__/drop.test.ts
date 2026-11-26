@@ -66,7 +66,7 @@ function dragEvent(type: string, items: DataTransferItem[]) {
 /** Upload replies; a directory named /readonly takes no file. */
 vi.stubGlobal('XMLHttpRequest', FakeXhr);
 function answer(url: string): [number, unknown] {
-  const q = new URL(url, 'http://core').searchParams;
+  const q = new URL(url, 'http://hub').searchParams;
   const dir = q.get('dir') ?? '/home/u/uploads';
   if (dir === '/readonly') return [502, { error: 'agent fs.write: open /readonly/.tmp-1: permission denied' }];
   return [200, { name: q.get('name'), size: 0, path: `${dir}/${q.get('name')}` }];
@@ -76,10 +76,10 @@ const uploads = () => FakeXhr.requests.map((r) => r.url);
 let store: typeof import('../state/store');
 let drop: typeof import('../drop');
 let fake: typeof import('./fakeTerms');
-let core: import('./fakeTerms').FakeCore;
+let hub: import('./fakeTerms').FakeHub;
 let Sidebar: typeof import('../components/Sidebar').Sidebar;
 /** The folders terminals were started in, by machine. */
-const runs = () => core.calls.filter((c) => c.method === 'terminal.run').map((c) => [c.m, c.params.cwd]);
+const runs = () => hub.calls.filter((c) => c.method === 'terminal.run').map((c) => [c.m, c.params.cwd]);
 let root: Root | undefined;
 let host: HTMLDivElement;
 
@@ -92,10 +92,10 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  core = new fake.FakeCore();
-  core.machine('local');
-  core.machine('ws2');
-  core.install();
+  hub = new fake.FakeHub();
+  hub.machine('local');
+  hub.machine('ws2');
+  hub.install();
   FakeXhr.reset();
   FakeXhr.reply = answer;
   store.useStore.setState({
@@ -153,7 +153,7 @@ describe('dropped folders', () => {
     await act(fake.settle);
     // Each a workspace without a name of its own, shown with its folder's,
     // the last one selected.
-    const layout = core.layout('local')!;
+    const layout = hub.layout('local')!;
     expect(layout.workspaces.slice(1).map((w) => [w.name, w.cwd, workspaceTitle(w)])).toEqual([
       ['', '/Users/u/Projects/app', 'app'],
       ['', '/Users/u/Projects/lib', 'lib'],

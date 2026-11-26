@@ -1,0 +1,64 @@
+{
+  "note": "Gates: contains are case-insensitive, regexes all match, line regexes match a line each; all, any and not nest; the highest priority wins (the first rule among equals) and no match reads idle. Manifests the parser refuses, and ones it takes",
+  "manifest": "id = \"test\"\n[[rules]]\nid = \"low\"\nstate = \"working\"\npriority = 10\ncontains = [\"BUSY\"]\n[[rules]]\nid = \"high\"\nstate = \"blocked\"\npriority = 20\nregion = \"bottom_non_empty_lines(2)\"\nline_regex = ['^\\s*\\? ']\nany = [{ contains = [\"yes\"] }, { regex = ['(?i)allow'] }]\nnot = [{ contains = [\"ignore me\"] }]\n[[rules]]\nid = \"same\"\nstate = \"idle\"\npriority = 20\ncontains = [\"busy\"]\n",
+  "cases": [
+    {
+      "screen": "busy\n",
+      "want": "idle",
+      "rule": "same"
+    },
+    {
+      "screen": "Busy\n? Allow it\n",
+      "want": "blocked",
+      "rule": "high"
+    },
+    {
+      "screen": "? allow\nlast\n",
+      "want": "blocked",
+      "rule": "high"
+    },
+    {
+      "screen": "nothing here\n",
+      "want": "idle",
+      "rule": ""
+    },
+    {
+      "screen": "? yes\nignore me\nbusy\n",
+      "want": "idle",
+      "rule": "same"
+    },
+    {
+      "screen": "",
+      "want": "idle",
+      "rule": ""
+    }
+  ],
+  "bad": [
+    "id = \"x\"",
+    "rules = []",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"idle\"\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"idle\"\nregion = \"middle\"\ncontains = [\"a\"]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"idle\"\nregex = ['(']\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"idle\"\nline_regex = ['a{2,1}']\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"idle\"\ncontains = [\"a\"]\nunknown_field = 1\n",
+    "id = \"x\"\nunknown = \"y\"\n[[rules]]\nid = \"r\"\ncontains = [\"a\"]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\ncontains = [\"a\"]\nany = [{ contains = [\"b\"], other = 1 }]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"idle\"\nskip_state_update = true\ncontains = [\"a\"]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nskip_state_update = true\nvisible_idle = true\ncontains = [\"a\"]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"done\"\ncontains = [\"a\"]\n",
+    "id = \"x\"\n[[rules]]\nid = \"  \"\ncontains = [\"a\"]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nstate = 1\ncontains = [\"a\"]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nnot = [{ contains = [\"a\"] }]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\ncontains = [\"a\"]\nany = [{ }]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nall = [{ all = [{ all = [{ all = [{ all = [{ all = [{ all = [{ all = [{ all = [{ contains = [\"a\"] }] }] }] }] }] }] }] }] }]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\ncontains = [\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\",\"10\",\"11\",\"12\",\"13\",\"14\",\"15\",\"16\",\"17\",\"18\",\"19\",\"20\",\"21\",\"22\",\"23\",\"24\",\"25\",\"26\",\"27\",\"28\",\"29\",\"30\",\"31\",\"32\",\"33\"]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\ncontains = [\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\ncontains = [\"a\"]\n[[rules]]\nid = \"r\"\ncontains = [\"a\"\n"
+  ],
+  "good": [
+    "id = \"x\"\n[[rules]]\nid = \"r\"\ncontains = [\"a\"]\nnot = [{ not = [{ contains = [\"b\"] }] }]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nall = [{ all = [{ all = [{ all = [{ all = [{ all = [{ all = [{ all = [{ contains = [\"a\"] }] }] }] }] }] }] }] }]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\ncontains = [\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"]\n",
+    "id = \"x\"\n[[rules]]\nid = \"r\"\nregion = \"osc_title\"\nregex = ['\\p{Alphabetic}\\u00e9\\u{1F600}']\n"
+  ]
+}

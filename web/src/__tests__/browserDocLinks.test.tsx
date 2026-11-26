@@ -34,16 +34,16 @@ import { resetFrames } from '../plugins/browser/frames';
 import { PluginPane } from '../components/PluginPane';
 import { Markdown } from '../markdown/Markdown';
 import { t } from '../i18n';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { click, fakeBrowserApi, flush, json } from './browserHarness';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-let core: FakeCore;
+let hub: FakeHub;
 let open: ReturnType<typeof vi.spyOn>;
 let host: HTMLDivElement;
 let root: Root;
-const views = () => L.pluginViews(core.model.layout('a')!.workspaces[0], 'browser', 'page').map((v) => v.view);
+const views = () => L.pluginViews(hub.model.layout('a')!.workspaces[0], 'browser', 'page').map((v) => v.view);
 const set = (key: string, value: unknown) =>
   useSettings.setState((s) => ({ values: { ...s.values, [key]: { value, source: 'global' } } }) as Partial<typeof s>);
 
@@ -62,7 +62,7 @@ const TEXT = [
 /** The browser pane of the view the click opened, rendered as the
  * workspace draws it, with the frame layer. */
 async function mountView(): Promise<Root> {
-  const [v] = L.pluginViews(core.model.layout('a')!.workspaces[0], 'browser', 'page');
+  const [v] = L.pluginViews(hub.model.layout('a')!.workspaces[0], 'browser', 'page');
   const el = document.createElement('div');
   document.body.append(el);
   const r = createRoot(el);
@@ -107,18 +107,18 @@ beforeEach(async () => {
   set('browser.openLinks', 'loopback');
   resetGrants();
   useForwards.setState({ forwards: [], available: true });
-  core = new FakeCore();
-  core.machine('a', [FakeCore.term('s1')], {
+  hub = new FakeHub();
+  hub.machine('a', [FakeHub.term('s1')], {
     version: 1,
     workspaces: [{ id: 'w1', name: '', cwd: '', tabs: [{ root: { terminal: 's1' }, focused: 's1' }], selected: 0 }],
     selected: 0,
   });
-  core.install();
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setMachines([{ id: 'a', label: 'a', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
   s.selectMachine('a');
-  core.model.subscribe('a');
+  hub.model.subscribe('a');
   await settle();
   host = document.createElement('div');
   document.body.append(host);
@@ -150,7 +150,7 @@ describe('a web link of a machine’s document', () => {
     await show({ m: 'a', dir: '/home/u' });
     expect(await press('Install guide')).toBe(true);
     expect(views()).toMatchObject([{ url: 'http://localhost:2375/containers/json', m: 'a', port: 2375 }]);
-    // The click is no request for the port: nothing is asked of the core.
+    // The click is no request for the port: nothing is asked of the hub.
     expect(forwardGranted('a', 2375)).toBe(false);
     expect(calls).toEqual([]);
     expect(open).not.toHaveBeenCalled();

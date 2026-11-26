@@ -1,25 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { APP_SLUG } from '../../web/src/brand';
-import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow } from './platform';
+import { APP_DOMAIN, APP_SLUG } from '../../web/src/brand';
+import { APP_ID, hubResources, reverseDomain, foldersOf, keyPlatform, quitsWithLastWindow } from './platform';
 
 test('the keybindings, the last window and the app id by platform', () => {
   assert.equal(keyPlatform('darwin'), 'mac');
-  assert.equal(keyPlatform('win32'), 'pc');
-  assert.equal(keyPlatform('linux'), 'pc');
+  assert.equal(keyPlatform('win32'), 'windows');
+  assert.equal(keyPlatform('linux'), 'linux');
   assert.equal(quitsWithLastWindow('darwin'), false);
   assert.equal(quitsWithLastWindow('win32'), true);
   assert.equal(quitsWithLastWindow('linux'), true);
-  assert.equal(APP_ID, `dev.${APP_SLUG}.desktop`);
+  // The domain reversed, label by label.
+  assert.equal(reverseDomain('example.app'), 'app.example');
+  assert.equal(reverseDomain('a.example.org'), 'org.example.a');
+  assert.equal(APP_ID, `${reverseDomain(APP_DOMAIN)}.desktop`);
 });
 
-test("the core is the app's resource, or scripts/build.sh's in development", () => {
-  assert.equal(coreBinary('darwin', 'arm64', '/App/Resources', '/repo'), join('/App/Resources', 'bin', APP_SLUG));
-  assert.equal(coreBinary('win32', 'x64', 'C:/App/resources', '/repo'), join('C:/App/resources', 'bin', `${APP_SLUG}.exe`));
-  assert.equal(coreBinary('linux', 'x64', undefined, '/repo'), join('/repo', 'dist', `${APP_SLUG}-linux-amd64`));
-  assert.equal(coreBinary('win32', 'x64', undefined, '/repo'), join('/repo', 'dist', `${APP_SLUG}-windows-amd64.exe`));
-  assert.equal(coreBinary('darwin', 'arm64', undefined, '/repo'), join('/repo', 'dist', `${APP_SLUG}-darwin-arm64`));
+test("the hub executable and Stage 1 machine archives are in the app's bundle, or dist/ in development", () => {
+  assert.deepEqual(hubResources('/App/Contents/Resources', '/repo', 'darwin', 'arm64'), {
+    hub: join('/App/Contents/Resources', '..', 'Helpers', APP_SLUG),
+    machines: join('/App/Contents/Resources', 'machines'),
+  });
+  assert.deepEqual(hubResources('/opt/app/resources', '/repo', 'linux', 'x64'), {
+    hub: join('/opt/app/resources', 'bin', APP_SLUG),
+    machines: join('/opt/app/resources', 'machines'),
+  });
+  assert.deepEqual(hubResources('C:\\App\\resources', 'C:\\repo', 'win32', 'x64'), {
+    hub: join('C:\\App\\resources', 'bin', `${APP_SLUG}.exe`),
+    machines: join('C:\\App\\resources', 'machines'),
+  });
+  assert.deepEqual(hubResources(undefined, '/repo', 'darwin', 'arm64'), {
+    hub: join('/repo', 'dist', `${APP_SLUG}-darwin-arm64`),
+    machines: join('/repo', 'dist', 'release'),
+  });
+  assert.deepEqual(hubResources(undefined, '/repo', 'win32', 'x64'), {
+    hub: join('/repo', 'dist', `${APP_SLUG}-windows-amd64.exe`),
+    machines: join('/repo', 'dist', 'release'),
+  });
 });
 
 test(

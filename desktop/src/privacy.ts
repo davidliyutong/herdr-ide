@@ -5,6 +5,7 @@
 // list) and quit and open the app again. The page names nothing: the shell
 // opens one fixed URL, a path it works out itself, and its own bundle.
 
+import * as nodeFs from 'node:fs';
 import { join, resolve } from 'node:path';
 import { APP_SLUG } from '../../web/src/brand';
 import type { Platform } from './platform';
@@ -13,11 +14,35 @@ import type { Platform } from './platform';
 export const FULL_DISK_ACCESS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles';
 
 /** The terminal core's executable of an instance on this computer: the
- * agent's ~/.<slug>[-<instance>]/hc/herdr-core (internal/brand.DataDir,
- * internal/agent/hc.go). macOS gives the programs of its terminals what
- * this file was granted. */
-export function terminalCoreExecutable(home: string, instance: string): string {
-  return join(home, `.${APP_SLUG}${instance ? `-${instance}` : ''}`, 'hc', 'herdr-core');
+ * agent's ~/.<slug>[-<instance>]/hosts/<host>/hc/herdr-core
+ * (backend/shared/lib/brand.ts dataDir, shared/host/hostdirs.ts, machine/hc.ts), of
+ * this host's directory: the most recently changed of the instance's
+ * hosts' (a renamed Mac has another host directory); '' for none. macOS
+ * gives the programs of its terminals what this file was granted. */
+export function terminalCoreExecutable(
+  home: string,
+  instance: string,
+  fs: Pick<typeof import('node:fs'), 'readdirSync' | 'statSync'> = nodeFs,
+): string {
+  const hosts = join(home, `.${APP_SLUG}${instance ? `-${instance}` : ''}`, 'hosts');
+  let best = '';
+  let at = -1;
+  let names: string[];
+  try {
+    names = fs.readdirSync(hosts);
+  } catch {
+    return '';
+  }
+  for (const name of names) {
+    const p = join(hosts, name, 'hc', 'herdr-core');
+    try {
+      const st = fs.statSync(p);
+      if (st.isFile() && st.mtimeMs > at) [best, at] = [p, st.mtimeMs];
+    } catch {
+      // no executable of this host
+    }
+  }
+  return best;
 }
 
 /** The .app bundle of a packaged app's executable (…/X.app/Contents/MacOS/X),
@@ -74,9 +99,10 @@ export function privacyActions(o: PrivacyOptions, effects: PrivacyEffects) {
       else effects.openExternal(FULL_DISK_ACCESS_URL);
     },
     revealTerminalCore() {
-      if (!mac || !effects.exists(o.executable)) return;
-      if (o.log) o.log(`reveal ${o.executable}`);
-      else effects.showItemInFolder(o.executable);
+      const exe = o.executable;
+      if (!mac || !exe || !effects.exists(exe)) return;
+      if (o.log) o.log(`reveal ${exe}`);
+      else effects.showItemInFolder(exe);
     },
     relaunch() {
       if (!mac) return;

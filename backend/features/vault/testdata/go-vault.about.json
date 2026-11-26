@@ -1,0 +1,25 @@
+{
+  "about": "Made by the store of the Go program (removed since) at now: vaults it wrote open in the TypeScript store. Its passphrase, values, the WebAuthn credential's private key (PKCS#8) and PRF output, the enclave entry's Secure Enclave key (spec/vectors/vault-unlock), the export file's passphrase.",
+  "enclave": {
+    "sePriv": "FRwjKjE4P0ZNVFtiaXB3foWMk5qhqK-2vcTL0tng5-4",
+    "shellSecret": "KC82PURLUllgZ251fIOKkZifpq20u8LJ0Nfe5ezz-gE"
+  },
+  "export": {
+    "passphrase": "export passphrase 12"
+  },
+  "now": "2026-11-20T10:00:00.123456789Z",
+  "passphrase": "correct horse battery",
+  "values": {
+    "EMPTY": "",
+    "GITHUB_TOKEN": "ghp_secret",
+    "OPENAI_KEY": "sk-ü-🔑"
+  },
+  "webauthn": {
+    "credential": "Y3JlZGVudGlhbC1pZC0wMTIz",
+    "origin": "http://localhost:7780",
+    "pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgDTXAhPo-Pv-hmndu9eScQ-MxrthAZoXNrUSGoMpHwuehRANCAATfgc5e-gBuzMmENK5zgVQ1xC8UM-08IK6BUYY1a7sjjH3_r4uuDb--oLmk_eD-xncQpAbuBBaJx5o4iPd6NO_3",
+    "prfOutput": "BTetnTZnc1A5ni-ZpHly4Er4kTw3OhL73gpWGeE6p2Q",
+    "prfSalt": "SmZebZSkwxa1spycC0X2ACjfTnTxh1uO_4poDkAC0lA",
+    "rpId": "localhost"
+  }
+}

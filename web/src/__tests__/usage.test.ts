@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 //
-// The AI usage plugin: ordering accounts, the core's alerts shown once per
+// The AI usage plugin: ordering accounts, the hub's alerts shown once per
 // browser, the cost report's sums, and the panel and status bar item drawn
-// from a stubbed core.
+// from a stubbed hub.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -20,14 +20,21 @@ import { applySnapshot, costStale, fetchCost, fetchSnapshot, setView, useUsage }
 import {
   costOf,
   daily,
-  dailyTokens,
+  dailyDetails,
   equivalents,
   rank,
   rankTokens,
   sortAccounts,
+  modelBreakdown,
+  shortModel,
   tightest,
+  tightestFor,
   tokenKinds,
+  windowApplies,
+  windowSpend,
+  type CostReport,
   type CostRow,
+  type CostSlot,
   type UsageAccount,
   type UsageAlert,
   type UsageSnapshot,
@@ -69,7 +76,7 @@ describe('usage model', () => {
     expect(tightest(snapshot([past]))!.window.usedPct).toBe(30);
   });
 
-  it('shows each alert of the core once in a browser: again in a snapshot, another page or after a reload', () => {
+  it('shows each alert of the hub once in a browser: again in a snapshot, another page or after a reload', () => {
     const alert = (id: string, at = now): UsageAlert => ({
       id,
       kind: 'threshold',
@@ -147,6 +154,75 @@ describe('usage model', () => {
   });
 });
 
+describe('usage windows of an agent', () => {
+  it('follows the service, machine and model of the focused agent', () => {
+    const claude = account('claude:a', [30, 50], {
+      windows: [
+        { kind: 'session', usedPct: 30, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', usedPct: 50, resetsAt: now + 86400, windowSec: 604800 },
+        { kind: 'model', label: 'Opus', usedPct: 90, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    const codex = account('codex:b', [95], { machines: ['box'] });
+    const s = snapshot([claude, codex]);
+    expect(tightest(s)!.account.key).toBe('codex:b');
+    expect(windowApplies(claude.windows[2], 'claude-opus-4-6-20260101')).toBe(true);
+    expect(windowApplies(claude.windows[2], 'claude-sonnet-4-6')).toBe(false);
+    expect(windowApplies(claude.windows[2])).toBe(false);
+    expect(tightestFor(s, 'claude', 'local', 'claude-opus-4-6')!.window.usedPct).toBe(90);
+    expect(tightestFor(s, 'claude', 'local', 'claude-sonnet-4-6')!.window.usedPct).toBe(50);
+    expect(tightestFor(s, 'claude', 'local')!.window.usedPct).toBe(50);
+    // Read on another machine only: that account.
+    expect(tightestFor(s, 'codex', 'local')!.account.key).toBe('codex:b');
+    expect(tightestFor(s, 'grok', 'local')).toBeUndefined();
+    expect(shortModel('claude-opus-4-6-20260101')).toBe('opus-4-6');
+    expect(shortModel('gpt-5.5')).toBe('gpt-5.5');
+  });
+
+  it('sums the spend of a window since it started, and the whole window at that rate', () => {
+    const a = account('claude:a', [20], {
+      windows: [{ kind: 'session', usedPct: 20, resetsAt: now + 3600, windowSec: 5 * 3600 }],
+      machines: ['local', 'box'],
+    });
+    const start = now + 3600 - 5 * 3600;
+    const slot = (at: number, over: Partial<CostSlot> = {}): CostSlot => ({
+      at,
+      provider: 'claude',
+      machine: 'local',
+      tokens: 1000,
+      requests: 2,
+      cost: 1,
+      priced: true,
+      ...over,
+    });
+    const rep = {
+      generatedAt: now,
+      days: 7,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [],
+      recentSince: now - 8 * 86400,
+      recent: [
+        slot(start - 900), // before the window
+        slot(start - 300), // most of it in the window
+        slot(start + 600, { machine: 'box', priced: false }),
+        slot(start + 1200, { provider: 'codex' }),
+        slot(start + 1800, { machine: 'other' }),
+      ],
+    } satisfies CostReport;
+    const s = windowSpend(rep, a, a.windows[0], now)!;
+    expect(s).toMatchObject({ cost: 2, tokens: 2000, requests: 4, priced: false });
+    expect(s.full).toEqual({ cost: 10, tokens: 10000 });
+    // A model's window, a window that started before the slots, none at all.
+    expect(windowSpend(rep, a, { ...a.windows[0], kind: 'model', label: 'Opus' }, now)).toBeUndefined();
+    expect(windowSpend({ ...rep, recentSince: now }, a, a.windows[0], now)).toBeUndefined();
+    expect(windowSpend({ ...rep, recent: undefined }, a, a.windows[0], now)).toBeUndefined();
+    // Under 5% used: no estimate of the whole.
+    expect(windowSpend(rep, a, { ...a.windows[0], usedPct: 3 }, now)!.full).toBeUndefined();
+  });
+});
+
 describe('usage tokens', () => {
   const today = new Date(2026, 10, 16, 12);
   const row = (day: string, model: string, over: Partial<CostRow> = {}): CostRow => ({
@@ -171,6 +247,25 @@ describe('usage tokens', () => {
     row('2026-08-01', 'known'),
   ];
 
+  it('breaks the days down by service and model, with their kinds', () => {
+    const more = [...rows, row('2026-11-16', 'known', { provider: 'claude', cost: 5 })];
+    const byCost = modelBreakdown(more, 7, today);
+    expect(byCost.map((m) => `${m.provider}/${m.name}`)).toEqual(['claude/known', 'codex/known', 'codex/new-model']);
+    expect(byCost[1]).toMatchObject({
+      input: 100,
+      cached: 50,
+      cacheWrite: 20,
+      output: 30,
+      reasoning: 10,
+      total: 200,
+      requests: 2,
+      cost: 1,
+    });
+    expect(byCost[2].unpriced).toBe(true);
+    expect(modelBreakdown(more, 7, today, 'tokens')[0].name).toBe('new-model');
+    expect(modelBreakdown(more, 7, today).some((m) => m.total === 400)).toBe(false);
+  });
+
   it('sums the kinds, with reasoning inside the output', () => {
     expect(tokenKinds(rows, 7, today)).toEqual({
       input: 1100,
@@ -184,13 +279,17 @@ describe('usage tokens', () => {
   });
 
   it('gives a series per day, unpriced rows included', () => {
-    const d = dailyTokens(rows, 3, today);
-    expect(d.map((x) => [x.day, x.total])).toEqual([
-      ['2026-11-14', 0],
-      ['2026-11-15', 1100],
-      ['2026-11-16', 200],
+    const det = dailyDetails(
+      [...rows, row('2026-11-16', 'claude-opus-4-6', { provider: 'claude', cost: 2.5, input: 50, cached: 0, cacheWrite: 0, output: 10 })],
+      3,
+      today,
+    );
+    expect(det[2].cost).toBe(3.5);
+    expect(det[2].kinds.total).toBe(260);
+    expect(det[2].byProvider.map((p) => [p.provider, p.cost, p.tokens])).toEqual([
+      ['claude', 2.5, 60],
+      ['codex', 1, 200],
     ]);
-    expect(d[2].cached).toBe(50);
   });
 
   it('ranks by tokens and marks the model without a price', () => {
@@ -325,7 +424,7 @@ describe('usage panel and status item', () => {
     const left = [...host.querySelectorAll<HTMLButtonElement>('.usage-meta [role=radio]')].find((b) => b.textContent === 'Remaining')!;
     await act(async () => left.click());
     expect(card.querySelector('.usage-pct')!.textContent).toBe('10% left');
-    // Refresh asks the core.
+    // Refresh asks the hub.
     await act(async () => host.querySelector<HTMLButtonElement>('.usage-refresh')!.click());
     expect(calls).toContain('POST /api/p/usage/refresh');
     // A wallet in another currency says which.
@@ -384,7 +483,7 @@ describe('usage panel and status item', () => {
     expect(spend.textContent).toContain('deepseek-v4-flash');
   });
 
-  it('does not keep the core asking from a hidden page', async () => {
+  it('does not keep the hub asking from a hidden page', async () => {
     vi.useFakeTimers();
     const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     try {
@@ -500,7 +599,7 @@ describe('usage panel and status item', () => {
     expect(host.querySelector('.usage-big')!.textContent).toBe('~$12.50');
     expect(host.querySelectorAll('.usage-daily g')).toHaveLength(30);
     expect(host.querySelector('.usage-daily rect')!.getAttribute('fill')).toBe('var(--usage-claude)');
-    expect(host.querySelector('.usage-rank li')!.textContent).toContain('claude-opus-4-6');
+    expect(host.querySelector('.usage-models li')!.textContent).toContain('claude-opus-4-6');
     expect(host.querySelector('.usage-spend .callout.error')!.textContent).toContain('offline');
     // A service's own spend.
     await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!.click());
@@ -517,9 +616,26 @@ describe('usage panel and status item', () => {
     const legend = host.querySelector('.usage-kind-legend')!.textContent!;
     expect(legend).toContain('input 4.0k');
     expect(legend).toContain('output 1.0k (reasoning 300)');
-    expect([...host.querySelectorAll('.usage-daily title')].pop()!.textContent).toContain('5.0k (input 4.0k');
-    const first = host.querySelector('.usage-rank li')!;
+    // No native SVG <title> tooltips (avoids hover delay); hovering shows the custom tooltip at once.
+    expect(host.querySelectorAll('.usage-daily title')).toHaveLength(0);
+    const bars = host.querySelectorAll('.usage-daily g');
+    await act(async () => {
+      bars[bars.length - 1].dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    const tip = host.querySelector('.usage-daily-tooltip')!;
+    expect(tip).not.toBeNull();
+    expect(tip.textContent).toContain('5.0k');
+    expect(tip.textContent).toContain('input');
+    expect(tip.textContent).toContain('4.0k');
+    expect(tip.textContent).toContain('reasoning 300');
+    await act(async () => {
+      host.querySelector('.usage-daily-box')!.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+    });
+    expect(host.querySelector('.usage-daily-tooltip')).toBeNull();
+    // Every model by tokens, with its kinds.
+    const first = host.querySelector('.usage-models li')!;
     expect(first.textContent).toContain('mystery-1');
+    expect(first.querySelector('.usage-model-kinds')!.textContent).toContain('requests');
     expect(first.textContent).toContain('no price');
     expect(host.querySelectorAll('.usage-noprice')).toHaveLength(1);
     expect(useUsage.getState().metric).toBe('tokens');
@@ -598,5 +714,112 @@ describe('usage panel and status item', () => {
     expect(useUsage.getState().costLoading).toBe(false);
     expect(useUsage.getState().cost?.rows).toHaveLength(1);
     expect(costStale()).toBe(false);
+  });
+
+  it('shows immediate custom daily tooltip with breakdown on bar hover and pointer move', async () => {
+    await act(async () => root.render(createElement(UsagePanel)));
+    await act(async () => {});
+    const svg = host.querySelector<SVGSVGElement>('.usage-daily')!;
+    const box = host.querySelector<HTMLElement>('.usage-daily-box')!;
+    const bars = host.querySelectorAll('.usage-daily g');
+    const lastDay = bars[bars.length - 1].getAttribute('data-day')!;
+    const firstDay = bars[0].getAttribute('data-day')!;
+
+    // Hovering the today bar immediately displays date, cost, tokens, requests and provider/kind breakdown.
+    await act(async () => {
+      bars[bars.length - 1].dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    const tip = host.querySelector('.usage-daily-tooltip')!;
+    expect(tip.getAttribute('role')).toBe('tooltip');
+    expect(tip.textContent).toContain(lastDay);
+    expect(tip.textContent).toContain('$12.50');
+    expect(tip.textContent).toContain('5.0k tokens');
+    expect(tip.textContent).toContain('4 requests');
+    expect(tip.textContent).toContain('Claude');
+
+    // Moving the pointer over an empty day column immediately shows that date without lag.
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 300,
+      bottom: 72,
+      width: 300,
+      height: 72,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    });
+    await act(async () => {
+      svg.dispatchEvent(new MouseEvent('mousemove', { clientX: 2, bubbles: true }));
+    });
+    expect(host.querySelector('.usage-daily-tooltip')!.textContent).toContain(firstDay);
+    expect(host.querySelector('.usage-daily-tooltip')!.textContent).toContain('No usage');
+
+    await act(async () => {
+      box.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+    });
+    expect(host.querySelector('.usage-daily-tooltip')).toBeNull();
+  });
+
+  it('includes disabled machines in usage statistics, machine rankings and accounts', async () => {
+    const today = new Date();
+    const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    useStore
+      .getState()
+      .setMachines([
+        { id: 'local', label: 'This Mac', kind: 'local', enabled: true, status: 'ready', updated_at: now } as MachineState,
+        { id: 'gpu', label: 'Disabled GPU', kind: 'ssh', enabled: false, status: 'disabled', updated_at: now } as MachineState,
+      ]);
+    useUsage.setState({
+      snapshot: snapshot([account('claude:b', [40], { machines: ['local', 'gpu'] })]),
+      cost: {
+        generatedAt: now,
+        days: 90,
+        weekHours: 168,
+        monthHours: 750,
+        machines: { local: { files: 1 }, gpu: { files: 2 } },
+        rows: [
+          {
+            day,
+            provider: 'claude',
+            model: 'claude-opus-4-6',
+            machine: 'local',
+            input: 100,
+            cached: 0,
+            cacheWrite: 0,
+            output: 50,
+            requests: 1,
+            cost: 2.0,
+            priced: true,
+          },
+          {
+            day,
+            provider: 'claude',
+            model: 'claude-opus-4-6',
+            machine: 'gpu',
+            input: 200,
+            cached: 0,
+            cacheWrite: 0,
+            output: 100,
+            requests: 2,
+            cost: 5.5,
+            priced: true,
+          },
+        ],
+      },
+    });
+    await act(async () => root.render(createElement(UsagePanel)));
+    expect(host.querySelector('.usage-big')!.textContent).toBe('~$7.50');
+    const byMachine = [...host.querySelectorAll('.usage-spend [role="radio"]')].find((b) => b.textContent === 'Machines')!;
+    await act(async () => (byMachine as HTMLButtonElement).click());
+    const ranks = [...host.querySelectorAll('.usage-rank li')].map((li) => li.textContent);
+    expect(ranks[0]).toContain('Disabled GPU');
+    expect(ranks[0]).toContain('$5.50');
+    expect(ranks[1]).toContain('This Mac');
+    expect(ranks[1]).toContain('$2.00');
+    // Account card still lists the disabled machine label.
+    await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!.click());
+    expect(host.querySelector('.usage-machines')!.textContent).toContain('Disabled GPU');
+    useStore.getState().setMachines([]);
   });
 });

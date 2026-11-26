@@ -1,7 +1,7 @@
-// The design tokens' sizes (design/tokens.json `size`) in CSS pixels at the
+// The design tokens' sizes (spec/tokens.json `size`) in CSS pixels at the
 // UI font size in use, for code that lays out by number (virtual lists),
 // where CSS uses the same sizes in rem (--h-row and the others).
-import tokens from '../../../design/tokens.json';
+import tokens from '../../../spec/tokens.json';
 import { usePrefs } from '../prefs';
 
 type SizeName = keyof typeof tokens.size;

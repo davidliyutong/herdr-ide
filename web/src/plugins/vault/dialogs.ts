@@ -42,7 +42,7 @@ export function saveFile(text: string, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-/** The largest export file the core reads (MaxExportFile). */
+/** The largest export file the hub reads (MaxExportFile). */
 export const MAX_FILE = 16 << 20;
 
 /** The least length of an export's passphrase (MinExportPassphrase). */

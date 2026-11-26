@@ -56,7 +56,7 @@ const dataImage = /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/]*={0,2}$/
  * `blob:` URL as written, a relative reference as the file route of the
  * base's machine; undefined for the rest. A remote image would tell its
  * server who reads the text, and a path from the root (`/api/...`) would let
- * the text make the page send requests to the core. */
+ * the text make the page send requests to the hub. */
 export function imageSource(src: string, base?: MarkdownBase): string | undefined {
   if (dataImage.test(src)) return src;
   if (/^blob:/i.test(src)) return src;

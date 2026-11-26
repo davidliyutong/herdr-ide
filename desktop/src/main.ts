@@ -4,8 +4,11 @@ import {
   dialog,
   ipcMain,
   Menu,
+  MessageChannelMain,
   nativeTheme,
+  Notification,
   powerMonitor,
+  safeStorage,
   session,
   shell,
   systemPreferences,
@@ -16,8 +19,9 @@ import {
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import registry from '../../design/generated/registry.json';
-import tokens from '../../design/tokens.json';
+import { electronPort, refuseChannel, type ElectronPort } from '../../backend/hosts/desktop/bridge';
+import registry from '../../spec/generated/registry.json';
+import tokens from '../../spec/tokens.json';
 import { APP_NAME, APP_SLUG } from '../../web/src/brand';
 import { detectLocale, translate } from '../../web/src/i18n';
 import type { MessageKey } from '../../web/src/i18n/en';
@@ -25,24 +29,30 @@ import type { OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
 import { closeGuard, isCloseAnswer, parseUnsaved, type CloseGuard } from './closeGuard';
 import {
-  CoreProcess,
-  coreArgs,
-  coreEnv,
-  coreInstance,
-  corePort,
+  channelHead,
+  HubHost,
+  hubEnv,
+  hubInstance,
   DesktopError,
-  desktopCookie,
-  desktopToken,
   ENV_PREFIX,
+  isChannelId,
+  nodeInstance,
+  stdioChild,
   verifyKey,
-} from './core';
+  type HubSpawner,
+} from './hub';
+import { enclaveFor, helperPath, helperRunner, runBounded } from './enclave';
 import { FolderQueue } from './folders';
-import { followCore, type ShellSettings } from './follow';
+import { followHub, type ShellSettings } from './follow';
 import { menuCommands, menuTemplate, parseDisabled, type Binding } from './menu';
-import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
+import { createNotifications } from './notifications';
+import { APP_ORIGIN } from './origin';
+import { APP_ID, hubResources, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
 import {
   allowGuestPermission,
   allowPermission,
+  APP_PARTITION,
+  appWindowPreferences,
   BROWSER_PARTITION,
   guestMayNavigate,
   guestPreferences,
@@ -51,12 +61,14 @@ import {
   isInternal,
   mainWindowPreferences,
   popupGate,
-  webPreferences,
 } from './policy';
+import { serveApp } from './protocol';
 import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
 import { macTrafficLightPosition, windowFrameOptions } from './titlebar';
+import { codeIdentity, instanceFiles, KEYCHAIN_RECORD, keychainMigration, runTool, safeStorageItem, securityKeychain } from './keychain';
+import { UNLOCK_FILE, unlockStore, type Prepared } from './unlockStore';
 import { verifier, type Verifier } from './verify';
-import { helloFor, HELLO_TIMEOUT_MS, POWERSHELL_ARGS, powershellPath, type RunPowerShell } from './windowsHello';
+import { helloFor, helloKeysFor, HELLO_TIMEOUT_MS, POWERSHELL_ARGS, powershellPath, type RunPowerShell } from './windowsHello';
 
 const platform = process.platform as Platform;
 app.setName(APP_NAME);
@@ -66,10 +78,10 @@ if (platform === 'win32') app.setAppUserModelId(APP_ID);
 app.enableSandbox();
 const devValue = process.env[`${ENV_PREFIX}DESKTOP_DEV`];
 const dev = !app.isPackaged || !!devValue;
-// The core's instance; a name refused is reported once the app is ready.
+// The hub's instance; a name refused is reported once the app is ready.
 let instance: string | DesktopError;
 try {
-  instance = coreInstance(dev, devValue);
+  instance = hubInstance(dev, devValue);
 } catch (error) {
   instance = error as DesktopError;
 }
@@ -84,11 +96,15 @@ if (!app.commandLine.hasSwitch('user-data-dir')) {
 // app's directory when Electron runs it unpackaged.
 const leadingArgs = process.defaultApp ? 2 : 1;
 
-const core = new CoreProcess();
+// The hub, once the app is ready (hub.ts).
+let hub: HubHost | undefined;
 let mainWindow: BrowserWindow | undefined;
 // The main window's page asks about unsaved changes before it closes.
 let guard: CloseGuard | undefined;
-let origin = '';
+// The origin of the app's pages, which only its session serves.
+const origin = APP_ORIGIN;
+// The hub served once: windows may open.
+let serving = false;
 let quitting = false;
 // Quit was chosen while the main window was open: it closes first.
 let quitAfterClose = false;
@@ -96,7 +112,7 @@ let stopped = false;
 let systemShutdown = false;
 let reportingError = false;
 let stopFollowing = () => {};
-// The keybindings of this platform: its defaults until the core's are read.
+// The keybindings of this platform: its defaults until the hub's are read.
 const keys = keyPlatform(platform);
 let bindings = registry.keybindings[keys] as Binding[];
 // appearance.language: "auto" follows the system's languages.
@@ -112,6 +128,33 @@ let uiFontSize = tokens.font.root;
 let disabled = new Set<string>();
 // Folders opened with the app, until the page takes them.
 const folders = new FolderQueue();
+// Native OS notifications (Electron Notification API), queued click routing.
+const notifications = createNotifications({
+  isSupported: () => Notification.isSupported(),
+  create: (opts) => new Notification(opts),
+  showMain,
+});
+
+/** macOS: the step that gives safeStorage's keychain item to this build
+ * when another build made it, before the vault's unlock store first uses
+ * safeStorage (keychain.ts). A development run (Electron's own executable,
+ * which rebuilding the app does not change) only records that it made the
+ * item, so that a packaged build moves it; an explicit --user-data-dir
+ * (isolated runs) leaves the item and the instances' files alone. */
+function keychainStep(): (() => Promise<Prepared>) | undefined {
+  if (platform !== 'darwin' || app.commandLine.hasSwitch('user-data-dir')) return undefined;
+  const appData = app.getPath('appData');
+  return keychainMigration({
+    move: app.isPackaged,
+    safe: safeStorage,
+    // The bundle of Contents/MacOS/<executable>, which a restored item trusts.
+    keychain: securityKeychain(safeStorageItem(app.getName()), join(process.execPath, '..', '..', '..'), runTool),
+    identity: () => codeIdentity(runTool, process.pid),
+    own: join(app.getPath('userData'), UNLOCK_FILE),
+    files: () => instanceFiles(appData),
+    record: join(appData, KEYCHAIN_RECORD),
+  });
+}
 
 function t(key: MessageKey, vars?: Record<string, string>): string {
   return translate(detectLocale(language === 'auto' ? null : language, app.getPreferredSystemLanguages()), key, vars);
@@ -128,13 +171,13 @@ async function fail(error: unknown) {
   console.error(error);
   // Stop before showing a modal dialog, including after a startup timeout.
   stopFollowing();
-  await core.stop();
+  await hub?.stop();
   if (quitting) return;
   await dialog.showMessageBox({
     type: 'error',
     title: APP_NAME,
     message: t('desktop.failed'),
-    detail: `${t('desktop.failureHelp')}\n\n${describe(error)}\n${core.diagnostics}`,
+    detail: `${t('desktop.failureHelp')}\n\n${describe(error)}\n${hub?.diagnostics ?? ''}`,
     buttons: [t('desktop.quit')],
   });
   app.quit();
@@ -147,7 +190,7 @@ function openExternal(url: string) {
 // Install on every window, including program windows and standalone VS Code.
 app.on('web-contents-created', (_event, contents) => {
   // A webview attaches only in the main window's own page, and only as the
-  // browser panes' guest, at an address that is not the core's (policy.ts
+  // browser panes' guest, at an address that is not the hub's (policy.ts
   // guestPreferences).
   contents.on('will-attach-webview', (event, prefs, params) => {
     const ok =
@@ -159,7 +202,7 @@ app.on('web-contents-created', (_event, contents) => {
   });
   if (contents.getType() === 'webview') {
     // A guest is a web page of the browser pane: it follows http(s) links
-    // itself, never to the core's own address, and a popup becomes a new
+    // itself, never to the hub's own address, and a popup becomes a new
     // browser tab in the page, a few at a time (policy.ts popupGate). Its
     // scripts never hand anything to the system's browser, and it gets no
     // menu.
@@ -189,8 +232,10 @@ app.on('web-contents-created', (_event, contents) => {
     if (isMainFrame && !isInternal(url, origin)) event.preventDefault();
   });
   contents.setWindowOpenHandler(({ url }) => {
+    // The app's other windows (program windows, VS Code's own): its
+    // session, and the channels to the hub in each frame.
     if (isInternal(url, origin)) {
-      return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { ...webPreferences } } };
+      return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: appWindowPreferences(join(__dirname, 'frames.cjs')) } };
     }
     openExternal(url);
     return { action: 'deny' };
@@ -201,7 +246,7 @@ app.on('web-contents-created', (_event, contents) => {
  * running, opens it again. */
 function showMain() {
   if (!mainWindow) {
-    if (origin && !quitting) createWindow();
+    if (serving && !quitting) createWindow();
     return;
   }
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -251,7 +296,7 @@ function applyWindowButtons() {
   }
 }
 
-// The core's settings and keybindings: the theme becomes the title bar's and
+// The hub's settings and keybindings: the theme becomes the title bar's and
 // native controls' (also when it differs from the system's appearance), the
 // language the menu's, the zoom the windows'.
 function applySettings(s: ShellSettings) {
@@ -270,11 +315,18 @@ function applyBindings(b: Binding[]) {
   buildMenu();
 }
 
-// Messages count only from the top frame of the main window showing the core.
+// Messages count only from the top frame of the main window showing the hub.
 function fromMainPage(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   const frame = event.senderFrame;
   return (
-    !!mainWindow && !!frame && event.sender === mainWindow.webContents && frame === event.sender.mainFrame && isInternal(frame.url, origin)
+    !!mainWindow &&
+    !!frame &&
+    event.sender === mainWindow.webContents &&
+    frame === event.sender.mainFrame &&
+    // The document's origin, not only its URL's: a sandboxed document at
+    // a URL of the app's is of an opaque origin.
+    frame.origin === origin &&
+    isInternal(frame.url, origin)
   );
 }
 
@@ -305,11 +357,25 @@ ipcMain.on(channels.fullScreenQuery, (event) => {
   }
 });
 
+ipcMain.handle(channels.notifySupported, (event) => (fromMainPage(event) ? notifications.supported() : false));
+ipcMain.handle(channels.notifyShow, (event, opts: unknown) => (fromMainPage(event) ? notifications.show(opts) : false));
+ipcMain.on(channels.notifyClose, (event, tag: unknown) => {
+  if (fromMainPage(event)) notifications.close(tag);
+});
+ipcMain.on(channels.notifyClickWanted, (event, wanted: unknown) => {
+  if (!fromMainPage(event)) return;
+  const contents = event.sender;
+  notifications.takenBy(wanted === true ? (target) => contents.send(channels.notifyClick, target) : undefined);
+});
+
 // Full Disk Access (macOS): the page asks; what opens is the shell's own.
 const privacy = privacyActions(
   {
     platform,
-    executable: terminalCoreExecutable(app.getPath('home'), typeof instance === 'string' ? instance : ''),
+    // Looked up at each request: the agent installs it after the app started.
+    get executable() {
+      return terminalCoreExecutable(app.getPath('home'), typeof instance === 'string' ? nodeInstance(instance) : '');
+    },
     bundle: app.isPackaged ? bundleOf(process.execPath) : '',
     pid: process.pid,
     dev,
@@ -349,52 +415,46 @@ ipcMain.handle(channels.metrics, (event) =>
 );
 
 // The system's prompt for the variable vault (verify.ts). The verifier
-// exists once the core runs, with the key of this launch, which only this
+// exists once the hub runs, with the key of this launch, which only this
 // process holds.
 let verify: Verifier | undefined;
 ipcMain.handle(channels.verifyAvailable, async (event) => (fromMainPage(event) && verify ? await verify.available() : null));
 ipcMain.handle(channels.verifyProve, async (event, nonce: unknown) => (fromMainPage(event) && verify ? await verify.prove(nonce) : null));
+ipcMain.handle(channels.verifyCanUnlock, async (event) => (fromMainPage(event) && verify ? await verify.canUnlock() : false));
+ipcMain.handle(channels.verifyUnlock, async (event, nonce: unknown) => (fromMainPage(event) && verify ? await verify.unlock(nonce) : null));
+ipcMain.handle(channels.verifyEnroll, async (event, nonce: unknown) => (fromMainPage(event) && verify ? await verify.enroll(nonce) : null));
 
 /** Runs PowerShell with the script on stdin (Windows Hello). */
 const runPowerShell: RunPowerShell = (script, env) =>
-  new Promise((resolve, reject) => {
-    const child = spawn(powershellPath(process.env.SystemRoot), POWERSHELL_ARGS, {
-      env: { ...process.env, ...env },
-      stdio: 'pipe',
-      shell: false,
-      windowsHide: true,
-    });
-    let out = '';
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error('timeout'));
-    }, HELLO_TIMEOUT_MS);
-    child.stdout.on('data', (data: Buffer) => {
-      out = (out + data.toString()).slice(-4096);
-    });
-    child.on('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve(out);
-      else reject(new Error(`exit ${code}`));
-    });
-    child.stdin.on('error', () => {});
-    child.stdin.end(script);
+  runBounded(powershellPath(process.env.SystemRoot), POWERSHELL_ARGS, script, {
+    env: { ...process.env, ...env },
+    timeoutMs: HELLO_TIMEOUT_MS,
+    maxOutput: 64 * 1024,
   });
 
-/** What the core says a nonce of the vault's proofs is for. */
+/** What the hub says a nonce of the vault's proofs is for: asked of the
+ * hub directly, as the desktop client. */
 async function proofPurpose(nonce: string): Promise<unknown> {
-  const res = await session.defaultSession.fetch(`${origin}/api/p/vault/proof/${encodeURIComponent(nonce)}`, {
-    credentials: 'include',
-    signal: AbortSignal.timeout(5000),
-  });
+  if (!hub) return undefined;
+  const res = await hub.fetch(`/api/p/vault/proof/${encodeURIComponent(nonce)}`, { signal: AbortSignal.timeout(5000) });
   return res.ok ? await res.json() : undefined;
 }
 
-/** The page's background (color.background in design/tokens.json), shown before it paints. */
+// A channel to the hub for a frame of the app's origin (frames.ts): the
+// main process checks the frame and builds the request from what it knows
+// of it, hands one end to the hub and the other to the frame. A request
+// it refuses gets a channel that is closed at once.
+ipcMain.on(channels.openChannel, (event, id: unknown, path: unknown, protocols: unknown) => {
+  const frame = event.senderFrame;
+  if (!frame || !isChannelId(id)) return;
+  const head = channelHead(frame.origin, path, protocols);
+  const { port1, port2 } = new MessageChannelMain();
+  if (head && hub) void hub.connect(head, port1);
+  else refuseChannel(electronPort(port1), 'refused');
+  frame.postMessage(channels.channelPort, id, [port2]);
+});
+
+/** The page's background (color.background in spec/tokens.json), shown before it paints. */
 function windowBackground(): string {
   return tokens.color.background[nativeTheme.shouldUseDarkColors ? 'dark' : 'light'];
 }
@@ -412,7 +472,7 @@ function createWindow() {
     // Linux takes the window's icon from the window (macOS and Windows from
     // the application).
     ...(platform === 'linux' && { icon: join(app.getAppPath(), 'assets', 'icon.png') }),
-    webPreferences: { ...mainWindowPreferences, preload: join(__dirname, 'preload.cjs') },
+    webPreferences: mainWindowPreferences(join(__dirname, 'preload.cjs')),
   });
   mainWindow = win;
   const g = closeGuard({
@@ -440,7 +500,10 @@ function createWindow() {
   // Folders opened from now on wait for the next page, which asks for them;
   // this runs before that page can.
   win.webContents.on('did-start-navigation', (details) => {
-    if (details.isMainFrame && !details.isSameDocument) folders.takenBy(undefined);
+    if (details.isMainFrame && !details.isSameDocument) {
+      folders.takenBy(undefined);
+      notifications.takenBy(undefined);
+    }
   });
   // What a page said of its unsaved changes goes with it, once another one
   // is there (a navigation that never commits keeps it).
@@ -452,6 +515,7 @@ function createWindow() {
   });
   win.webContents.on('render-process-gone', (_event, details) => {
     folders.takenBy(undefined);
+    notifications.takenBy(undefined);
     g.reset();
     if (!quitting) void fail(new DesktopError('desktop.rendererGone', details.reason));
   });
@@ -495,16 +559,17 @@ function createWindow() {
     if (guard === g) guard = undefined;
     nativeTheme.off('updated', onTheme);
     folders.takenBy(undefined);
+    notifications.takenBy(undefined);
     mainWindow = undefined;
     // Program windows do not keep the app open.
     if (quitAfterClose || quitsWithLastWindow(platform)) app.quit();
   });
-  void win.loadURL(origin).catch(fail);
+  void win.loadURL(`${origin}/`).catch(fail);
 }
 
 app.on('before-quit', (event) => {
   // The main window closes first, so a page with unsaved changes can keep
-  // the app (will-prevent-unload) before the core stops; quitting goes on
+  // the app (will-prevent-unload) before the hub stops; quitting goes on
   // once it has closed.
   if (!stopped && !systemShutdown && mainWindow && !mainWindow.isDestroyed()) {
     event.preventDefault();
@@ -514,15 +579,16 @@ app.on('before-quit', (event) => {
   }
   quitting = true;
   stopFollowing();
+  notifications.closeAll();
   if (stopped) return;
   if (systemShutdown) {
-    // Delaying a logout, restart or shutdown would cancel it. Stop the core
+    // Delaying a logout, restart or shutdown would cancel it. Stop the hub
     // and let it clean up on its own.
-    void core.stop();
+    void hub?.stop();
     return;
   }
   event.preventDefault();
-  void core.stop().then(() => {
+  void (hub?.stop() ?? Promise.resolve()).then(() => {
     stopped = true;
     app.quit();
   });
@@ -594,25 +660,62 @@ if (!app.requestSingleInstanceLock()) {
       // Windows and Linux show these in About (macOS reads its bundle).
       app.setAboutPanelOptions({ applicationName: APP_NAME, applicationVersion: app.getVersion() });
       buildMenu();
-      const port = corePort(process.env[`${ENV_PREFIX}DESKTOP_PORT`] || (dev ? '7791' : '7781'));
-      const binary = coreBinary(platform, process.arch, app.isPackaged ? process.resourcesPath : undefined, join(app.getAppPath(), '..'));
-      // The token of this launch: on the core's stdin, and in this
-      // session's cookie for the core's origin before the page loads, so
-      // the core tells the app's windows from browsers (core.ts).
-      const token = desktopToken();
-      // The key of the system's prompts: to the core in the hello, and to
-      // nothing else.
+      // The key of the system's prompts: to the hub in its start
+      // message, and to nothing else.
       const key = verifyKey();
-      origin = await core.start(
-        binary,
-        coreArgs(instance, port),
-        port,
-        coreEnv(process.env, app.getPath('home'), platform),
-        app.getPath('home'),
-        () => void fail(new DesktopError('desktop.coreLost')),
-        token,
-        key,
+      const home = app.getPath('home');
+      const resources = hubResources(
+        app.isPackaged ? process.resourcesPath : undefined,
+        join(app.getAppPath(), '..'),
+        platform,
+        process.arch,
       );
+      // Development only: overrides for the hub executable, payloads,
+      // machine builds and code-server seed of a test run.
+      const devPath = (name: string) => (dev ? process.env[`${ENV_PREFIX}${name}`] || undefined : undefined);
+      const seed = devPath('SEED_DIR');
+      const hubBin = devPath('HUB_BIN') ?? resources.hub;
+      const spawner: HubSpawner = {
+        fork: () =>
+          stdioChild(
+            spawn(hubBin, ['desktop'], {
+              stdio: ['pipe', 'pipe', 'pipe'],
+              env: hubEnv(process.env, home, platform),
+              cwd: home,
+              windowsHide: true,
+            }),
+            (end) => electronPort(end as ElectronPort),
+          ),
+        pair: () => {
+          const { port1, port2 } = new MessageChannelMain();
+          return [port1, port2];
+        },
+        port: (end) => electronPort(end as ElectronPort),
+      };
+      const host = new HubHost({
+        spawner,
+        start: {
+          instance,
+          nodeInstance: nodeInstance(instance),
+          localOnly: instance !== 'desktop',
+          origin,
+          verifyKey: key,
+          payload: devPath('DESKTOP_PAYLOAD'),
+          web: devPath('WEB_DIR'),
+          agentDir: devPath('AGENT_DIR') ?? resources.machines,
+          seedDirs: seed ? [seed] : undefined,
+        },
+        lost: (error) => void fail(error),
+        log: (text) => process.stderr.write(text),
+      });
+      hub = host;
+      (globalThis as { __hubPid?: () => number | undefined }).__hubPid = () => hub?.pid;
+      // The app's windows live in a session of their own, where the app's
+      // origin is the hub's: the handler is there before a page loads.
+      const ses = session.fromPartition(APP_PARTITION);
+      serveApp(ses, host);
+      await host.start();
+      serving = true;
       if (quitting) return;
       verify = verifier(key, {
         platform,
@@ -621,9 +724,15 @@ if (!app.requestSingleInstanceLock()) {
         hello: helloFor(runPowerShell),
         purpose: proofPurpose,
         t,
+        // The vault's unlock key: the Secure Enclave helper inside the app
+        // on macOS, Hello keys on Windows, and this install's secret in the
+        // user data.
+        ...(platform === 'darwin' && {
+          enclave: enclaveFor(helperRunner(helperPath(app.isPackaged ? process.resourcesPath : undefined, app.getAppPath()))),
+        }),
+        ...(platform === 'win32' && { helloKeys: helloKeysFor(runPowerShell) }),
+        unlockStore: unlockStore(app.getPath('userData'), safeStorage, { prepare: keychainStep() }),
       });
-      const ses = session.defaultSession;
-      await ses.cookies.set(desktopCookie(origin, token));
       ses.setPermissionRequestHandler((contents, permission, callback, details) => {
         callback(allowPermission(permission, details.requestingUrl, contents.getURL(), origin));
       });
@@ -631,14 +740,13 @@ if (!app.requestSingleInstanceLock()) {
         return allowPermission(permission, requestingOrigin, contents?.getURL() || '', origin);
       });
       // The browser panes' guests live in their own partition, so they share
-      // nothing with the app. The desktop cookie above is set in the default
-      // session only: that separation keeps a guest from being taken for the
-      // app by the core. A guest gets no permission but full screen; downloads
-      // keep Electron's save dialog (no will-download handler saves by itself).
+      // nothing with the app, and the app's origin is not the hub's there.
+      // A guest gets no permission but full screen; downloads keep
+      // Electron's save dialog (no will-download handler saves by itself).
       const guests = session.fromPartition(BROWSER_PARTITION);
       guests.setPermissionRequestHandler((_contents, permission, callback) => callback(allowGuestPermission(permission)));
       guests.setPermissionCheckHandler((_contents, permission) => allowGuestPermission(permission));
-      stopFollowing = followCore(origin, keys, { bindings: applyBindings, settings: applySettings });
+      stopFollowing = followHub(host, keys, { bindings: applyBindings, settings: applySettings });
       createWindow();
     })
     .catch(fail);

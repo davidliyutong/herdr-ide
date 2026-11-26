@@ -1,0 +1,1048 @@
+{
+ "argv": [
+  "--output-format",
+  "stream-json",
+  "--verbose",
+  "--input-format",
+  "stream-json",
+  "--include-partial-messages",
+  "--permission-prompt-tool",
+  "stdio",
+  "--setting-sources=user,project,local",
+  "--session-id=11111111-1111-4111-8111-111111111111",
+  "--permission-mode=default"
+ ],
+ "env": {
+  "CLAUDE_AGENT_SDK_VERSION": "0.3.323",
+  "CLAUDE_CODE_ENTRYPOINT": "veldr",
+  "CLAUDE_CODE_SDK_READS_SESSION_STATE": "1",
+  "KEEP_ME": "1"
+ },
+ "events": [
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0001/0",
+   "update": {
+    "_meta": {
+     "veldr": {
+      "estimatedTokens": 50
+     }
+    },
+    "content": {
+     "text": "",
+     "type": "text"
+    },
+    "messageId": "msg_0001",
+    "sessionUpdate": "agent_thought_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0001/0",
+   "update": {
+    "_meta": {
+     "veldr": {
+      "estimatedTokens": 50
+     }
+    },
+    "content": {
+     "text": "",
+     "type": "text"
+    },
+    "messageId": "msg_0001",
+    "sessionUpdate": "agent_thought_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "toolu_0001",
+   "update": {
+    "kind": "edit",
+    "rawInput": {},
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Write",
+    "toolCallId": "toolu_0001"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0001",
+   "update": {
+    "content": [
+     {
+      "newText": "Create `hello.txt` in the current directory containing `hi`.\n",
+      "oldText": null,
+      "path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
+      "type": "diff"
+     }
+    ],
+    "kind": "edit",
+    "locations": [
+     {
+      "path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md"
+     }
+    ],
+    "rawInput": {
+     "content": "Create `hello.txt` in the current directory containing `hi`.\n",
+     "file_path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
+    "toolCallId": "toolu_0001"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "toolu_0002",
+   "update": {
+    "kind": "other",
+    "rawInput": {},
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "ToolSearch",
+    "toolCallId": "toolu_0002"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0001",
+   "update": {
+    "content": [
+     {
+      "newText": "Create `hello.txt` in the current directory containing `hi`.\n",
+      "oldText": null,
+      "path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
+      "type": "diff"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0001"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0002",
+   "update": {
+    "kind": "other",
+    "rawInput": {
+     "max_results": 1,
+     "query": "select:ExitPlanMode"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "ToolSearch",
+    "toolCallId": "toolu_0002"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0002",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0002"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "toolu_0003",
+   "update": {
+    "kind": "switch_mode",
+    "rawInput": {},
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "ExitPlanMode",
+    "toolCallId": "toolu_0003"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0003",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "Create `hello.txt` in the current directory containing `hi`.\n",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "kind": "switch_mode",
+    "rawInput": {
+     "plan": "Create `hello.txt` in the current directory containing `hi`.\n",
+     "planFilePath": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "ExitPlanMode",
+    "toolCallId": "toolu_0003"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0003",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "User has approved your plan. You can now start coding. Start with updating your todo list if applicable\n\nYour plan has been saved to: /home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md\nYou can refer back to it if needed during implementation.\n\n## Approved Plan:\nCreate `hello.txt` in the current directory containing `hi`.\n",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0003"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0003/0",
+   "update": {
+    "_meta": {
+     "veldr": {
+      "estimatedTokens": 50
+     }
+    },
+    "content": {
+     "text": "",
+     "type": "text"
+    },
+    "messageId": "msg_0003",
+    "sessionUpdate": "agent_thought_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0003/0",
+   "update": {
+    "_meta": {
+     "veldr": {
+      "estimatedTokens": 50
+     }
+    },
+    "content": {
+     "text": "",
+     "type": "text"
+    },
+    "messageId": "msg_0003",
+    "sessionUpdate": "agent_thought_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "toolu_0004",
+   "update": {
+    "kind": "execute",
+    "rawInput": {},
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Bash",
+    "toolCallId": "toolu_0004"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0004",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "printf 'hi' \u003e hello.txt \u0026\u0026 cat hello.txt \u0026\u0026 echo \u0026\u0026 pwd \u0026\u0026 ls -l hello.txt",
+     "description": "Create hello.txt with hi and verify contents"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Create hello.txt with hi and verify contents",
+    "toolCallId": "toolu_0004"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0004",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "Do not create the file yet. Stop and wait for my next message.",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "failed",
+    "toolCallId": "toolu_0004"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": "Understood. I've",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " stopped and ha",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": "ven't created `hello.tx",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": "t`. The pl",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": "an was approved, but you",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": "'ve",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " as",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": "ked me to wait,",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " so I'll hold until",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " your next message.",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0004/0",
+   "update": {
+    "_meta": {
+     "veldr": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "Understood. I've stopped and haven't created `hello.txt`. The plan was approved, but you've asked me to wait, so I'll hold until your next message.",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "toolu_0005",
+   "update": {
+    "kind": "execute",
+    "rawInput": {},
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Bash",
+    "toolCallId": "toolu_0005"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0005",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "printf 'hi' \u003e hello.txt \u0026\u0026 cat hello.txt \u0026\u0026 echo \u0026\u0026 pwd \u0026\u0026 ls -l hello.txt",
+     "description": "Create hello.txt with hi and verify contents"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Create hello.txt with hi and verify contents",
+    "toolCallId": "toolu_0005"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0005",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "hi\n/work\n-rw-r--r--@ 1 user  wheel  2 11月 22 19:38 hello.txt",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0005"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": "I created `hello.txt",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": "` in the current directory (`",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": "/work",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": "`). It",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": " contains `hi` with no",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": " trailing newline, and it",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": " is",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": " 2 bytes. I",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": " confirmed the contents by",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": " reading the file back",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": ".",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0006/0",
+   "update": {
+    "_meta": {
+     "veldr": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "I created `hello.txt` in the current directory (`/work`). It contains `hi` with no trailing newline, and it is 2 bytes. I confirmed the contents by reading the file back.",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  }
+ ],
+ "permissions": [
+  {
+   "Kind": "plan",
+   "ToolCall": {
+    "content": [
+     {
+      "content": {
+       "text": "Create `hello.txt` in the current directory containing `hi`.\n",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "kind": "switch_mode",
+    "rawInput": {
+     "plan": "Create `hello.txt` in the current directory containing `hi`.\n",
+     "planFilePath": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md"
+    },
+    "status": "pending",
+    "title": "ExitPlanMode",
+    "toolCallId": "toolu_0003"
+   },
+   "Options": [
+    {
+     "optionId": "plan:default",
+     "name": "Approve",
+     "kind": "allow_once"
+    },
+    {
+     "optionId": "plan:acceptEdits",
+     "name": "Approve and accept edits",
+     "kind": "allow_once"
+    },
+    {
+     "optionId": "reject_once",
+     "name": "Keep planning",
+     "kind": "reject_once"
+    }
+   ],
+   "Parent": ""
+  },
+  {
+   "Kind": "command",
+   "ToolCall": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "printf 'hi' \u003e hello.txt \u0026\u0026 cat hello.txt \u0026\u0026 echo \u0026\u0026 pwd \u0026\u0026 ls -l hello.txt",
+     "description": "Create hello.txt with hi and verify contents"
+    },
+    "status": "pending",
+    "title": "Create hello.txt with hi and verify contents",
+    "toolCallId": "toolu_0004"
+   },
+   "Options": [
+    {
+     "optionId": "allow_once",
+     "name": "Allow",
+     "kind": "allow_once"
+    },
+    {
+     "optionId": "allow_session",
+     "name": "Allow for this session",
+     "kind": "allow_always"
+    },
+    {
+     "optionId": "reject_once",
+     "name": "Reject",
+     "kind": "reject_once"
+    }
+   ],
+   "Parent": ""
+  }
+ ],
+ "wrote": [
+  {
+   "type": "control_request",
+   "request_id": "req_1",
+   "request": {
+    "subtype": "initialize"
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_2",
+   "request": {
+    "detail": "summary",
+    "subtype": "get_context_usage"
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_3",
+   "request": {
+    "mode": "plan",
+    "subtype": "set_permission_mode"
+   }
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "text": "Plan creating hello.txt containing 'hi' in the current directory. Keep the plan to one line, then call ExitPlanMode.",
+      "type": "text"
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "11111111-1111-4111-8111-111111111111",
+   "uuid": "<uuid-1>",
+   "origin": {
+    "kind": "human"
+   }
+  },
+  {
+   "type": "control_response",
+   "response": {
+    "subtype": "success",
+    "request_id": "00000000-0000-4000-8000-000000000044",
+    "response": {
+     "behavior": "allow",
+     "updatedInput": {
+      "plan": "Create `hello.txt` in the current directory containing `hi`.\n",
+      "planFilePath": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md"
+     }
+    }
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_4",
+   "request": {
+    "mode": "default",
+    "subtype": "set_permission_mode"
+   }
+  },
+  {
+   "type": "control_response",
+   "response": {
+    "subtype": "success",
+    "request_id": "00000000-0000-4000-8000-000000000078",
+    "response": {
+     "behavior": "deny",
+     "message": "The user declined this tool use."
+    }
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_5",
+   "request": {
+    "detail": "summary",
+    "subtype": "get_context_usage"
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_6",
+   "request": {
+    "mode": "acceptEdits",
+    "subtype": "set_permission_mode"
+   }
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "text": "Now create hello.txt as planned.",
+      "type": "text"
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "11111111-1111-4111-8111-111111111111",
+   "uuid": "<uuid-2>",
+   "origin": {
+    "kind": "human"
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_7",
+   "request": {
+    "detail": "summary",
+    "subtype": "get_context_usage"
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_8",
+   "request": {
+    "mode": "default",
+    "subtype": "set_permission_mode"
+   }
+  }
+ ],
+ "chat": {
+  "id": "",
+  "kind": "",
+  "title": "",
+  "cwd": "",
+  "sessionId": "11111111-1111-4111-8111-111111111111",
+  "state": "",
+  "status": "",
+  "created": "0001-01-01T00:00:00Z",
+  "updated": "0001-01-01T00:00:00Z",
+  "seq": 0,
+  "seen": 0,
+  "agentVersion": "2.1.330",
+  "config": [
+   {
+    "id": "mode",
+    "name": "Mode",
+    "category": "mode",
+    "type": "select",
+    "currentValue": "default",
+    "options": [
+     {
+      "value": "default",
+      "name": "Ask"
+     },
+     {
+      "value": "acceptEdits",
+      "name": "Accept edits"
+     },
+     {
+      "value": "plan",
+      "name": "Plan"
+     },
+     {
+      "value": "full",
+      "name": "Full access",
+      "full": true
+     }
+    ]
+   },
+   {
+    "id": "model",
+    "name": "Model",
+    "category": "model",
+    "type": "select",
+    "currentValue": "haiku",
+    "options": [
+     {
+      "value": "default",
+      "name": "Default (recommended)",
+      "description": "Opus 5.5 · Best for everyday, complex tasks"
+     },
+     {
+      "value": "opus",
+      "name": "Opus 5.5",
+      "description": "For complex work and everyday tasks"
+     },
+     {
+      "value": "fable",
+      "name": "Fable 5.2",
+      "description": "For your toughest challenges"
+     },
+     {
+      "value": "sonnet",
+      "name": "Sonnet 5.5",
+      "description": "Most efficient for simpler tasks"
+     },
+     {
+      "value": "haiku",
+      "name": "Haiku 5.5",
+      "description": "Fastest for quick answers"
+     },
+     {
+      "value": "claude-fable-5-1",
+      "name": "Fable 5.1",
+      "description": "Most capable for your hardest and longest-running tasks"
+     },
+     {
+      "value": "claude-haiku-4-5-20251001",
+      "name": "Haiku 4.5",
+      "description": "Fastest for quick answers"
+     },
+     {
+      "value": "claude-sonnet-5",
+      "name": "Sonnet 5",
+      "description": "Efficient for routine tasks"
+     },
+     {
+      "value": "claude-opus-5",
+      "name": "Opus 5",
+      "description": "Best for everyday, complex tasks"
+     },
+     {
+      "value": "claude-fable-5",
+      "name": "Fable 5",
+      "description": "Most capable for your hardest and longest-running tasks"
+     },
+     {
+      "value": "claude-opus-4-8",
+      "name": "Opus 4.8",
+      "description": "Best for everyday, complex tasks"
+     },
+     {
+      "value": "claude-opus-4-7",
+      "name": "Opus 4.7",
+      "description": "Best for everyday, complex tasks"
+     },
+     {
+      "value": "claude-opus-4-6",
+      "name": "Opus 4.6",
+      "description": "Best for everyday, complex tasks"
+     },
+     {
+      "value": "claude-sonnet-4-6",
+      "name": "Sonnet 4.6",
+      "description": "Efficient for routine tasks"
+     }
+    ]
+   },
+   {
+    "id": "effort",
+    "name": "Effort",
+    "category": "thought_level",
+    "type": "select",
+    "currentValue": "default",
+    "options": [
+     {
+      "value": "default",
+      "name": "default"
+     },
+     {
+      "value": "low",
+      "name": "low"
+     },
+     {
+      "value": "medium",
+      "name": "medium"
+     },
+     {
+      "value": "high",
+      "name": "high"
+     },
+     {
+      "value": "xhigh",
+      "name": "xhigh"
+     },
+     {
+      "value": "max",
+      "name": "max"
+     }
+    ]
+   }
+  ],
+  "commands": [
+   {
+    "name": "user-skill-1",
+    "description": "\u003credacted\u003e"
+   },
+   {
+    "name": "user-skill-2",
+    "description": "\u003credacted\u003e"
+   },
+   {
+    "name": "user-skill-3",
+    "description": "\u003credacted\u003e"
+   }
+  ],
+  "usage": {
+   "used": 34122,
+   "size": 1000000,
+   "percentage": 3,
+   "cost": {
+    "amount": 0.12140724,
+    "currency": "USD"
+   }
+  },
+  "capabilities": {
+   "images": true,
+   "compact": true,
+   "queue": true,
+   "plan": true,
+   "questions": true,
+   "effort": true,
+   "model": true,
+   "cancelQueued": true
+  }
+ },
+ "echoes": 2,
+ "unknown": 0
+}

@@ -28,6 +28,8 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Bell,
+  BellOff,
   Play,
   Plus,
   Power,
@@ -275,7 +277,7 @@ export function machineMenu(m: string): MenuEntry[] {
   const s = useStore.getState();
   const st = s.machines[m];
   if (s.readOnly || !st) return [];
-  // A machine with a code (a target the core refuses, the local machine
+  // A machine with a code (a target the hub refuses, the local machine
   // where no agent runs) is never connected: it can be renamed or removed
   // only.
   const usable = !st.code;
@@ -437,6 +439,7 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
   const isCurrent = c?.m === m && c.ws?.id === ws && c.tabIndex === index;
   const n = w.tabs.length;
   const pinned = !!w.tabs[index]?.pinned;
+  const muted = !!w.tabs[index]?.muted;
   // Close Others and Close to the Right leave pinned tabs.
   const others = w.tabs.some((x, i) => i !== index && !x.pinned);
   const right = w.tabs.some((x, i) => i > index && !x.pinned);
@@ -461,6 +464,12 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
       hint: hintIf(isCurrent, pinned ? 'tab.unpin' : 'tab.pin'),
       icon: pinned ? <PinOff /> : <Pin />,
       run: () => actions.pinTab(m, ws, index, !pinned),
+    },
+    {
+      label: t(muted ? 'command.tab.unmute' : 'command.tab.mute'),
+      hint: hintIf(isCurrent, muted ? 'tab.unmute' : 'tab.mute'),
+      icon: muted ? <Bell /> : <BellOff />,
+      run: () => actions.muteTab(m, ws, index, !muted),
     },
     'sep',
     { label: t('command.tab.new'), hint: hint('tab.new'), icon: <Plus />, run: () => void actions.newTab(m, ws) },
@@ -504,6 +513,7 @@ export function workspaceMenu(m: string, ws: string): MenuEntry[] {
   const n = layout.workspaces.length;
   const c = current();
   const isCurrent = c?.m === m && c.ws?.id === ws;
+  const muted = !!layout.workspaces[i]?.muted;
   const move = (by: -1 | 1) => () =>
     terms.mutate(m, (l) => {
       const now = l.workspaces.findIndex((w) => w.id === ws);
@@ -515,6 +525,12 @@ export function workspaceMenu(m: string, ws: string): MenuEntry[] {
       hint: hintIf(isCurrent, 'workspace.edit'),
       icon: <Pencil />,
       run: () => void actions.editWorkspace(m, ws),
+    },
+    {
+      label: t(muted ? 'command.workspace.unmute' : 'command.workspace.mute'),
+      hint: hintIf(isCurrent, muted ? 'workspace.unmute' : 'workspace.mute'),
+      icon: muted ? <Bell /> : <BellOff />,
+      run: () => actions.muteWorkspace(m, ws, !muted),
     },
     'sep',
     { label: t('command.tab.new'), hint: hintIf(isCurrent, 'tab.new'), icon: <Plus />, run: () => void actions.newTab(m, ws) },

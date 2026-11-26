@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import tokens from '../../../design/tokens.json';
+import tokens from '../../../spec/tokens.json';
 import { builtinDefaults } from '../settings';
 import { accentAttribute, colorThemes, DEFAULT_COLOR_THEME } from '../themes';
 import { sizePx } from '../lib/sizes';
 
 describe('design tokens', () => {
-  // The terminal colors' settings default to the tokens' (scripts/tokens
-  // writes the core's defaults).
+  // The terminal colors' settings default to the tokens' (backend/scripts/tokens.ts
+  // writes the hub's defaults).
   for (const kind of ['dark', 'light'] as const) {
     it(`are the ${kind} terminal colors' defaults`, () => {
       const token = tokens.terminal[kind];
@@ -24,8 +24,8 @@ describe('design tokens', () => {
     expect(tokens.terminal.light.background).toBe(tokens.color.background.light);
   });
 
-  // The color theme setting defaults to the tokens' first theme (the core
-  // offers them all: internal/uisettings).
+  // The color theme setting defaults to the tokens' first theme (the hub
+  // offers them all: backend/kernel/config/ui).
   it('defaults to the first color theme', () => {
     expect(builtinDefaults['appearance.colorTheme']).toBe(DEFAULT_COLOR_THEME);
   });
@@ -33,7 +33,7 @@ describe('design tokens', () => {
   it('selects a theme other than the default by data-accent', () => {
     expect(accentAttribute(DEFAULT_COLOR_THEME)).toBeUndefined();
     expect(accentAttribute('vscode')).toBe('vscode');
-    // A theme a newer core knows shows the default.
+    // A theme a newer hub knows shows the default.
     expect(accentAttribute('no-such-theme')).toBeUndefined();
     expect(accentAttribute(undefined)).toBeUndefined();
   });

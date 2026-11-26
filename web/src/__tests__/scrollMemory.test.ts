@@ -68,7 +68,7 @@ describe('scroll memory', () => {
     const same = history(rows);
     expect(findPlace(was, same)).toBe(1335);
     expect(same.read).toBe(1);
-    // The core's history is cut at the top and 105 rows came since.
+    // The terminal core's history is cut at the top and 105 rows came since.
     const cut = history([...rows.slice(240), ...numbered(9000, 9104)]);
     const offset = findPlace(was, cut);
     expect(cut.rowsAt(offset)[0]).toBe('row 1336');

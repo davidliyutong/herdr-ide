@@ -3,12 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, api: () => Promise.resolve({}) } }));
 
-import registry from '../../../design/generated/registry.json';
+import registry from '../../../spec/generated/registry.json';
 import { resolveTheme } from '../appearance';
 import { dropZone } from '../paneDrag';
 import { matchesSearch, problemText, valueLabel } from '../components/SettingsDialog';
 import { hasMessage } from '../i18n';
-import { applySettings, builtinDefaults, legacyImports, setSetting, useSettings, type SettingState } from '../settings';
+import { applySettings, builtinDefaults, setSetting, useSettings, type SettingState } from '../settings';
 import { getPrefs, usePrefs } from '../prefs';
 
 describe('resolveTheme', () => {
@@ -34,9 +34,9 @@ describe('dropZone', () => {
 });
 
 describe('translations', () => {
-  // design/generated/registry.json lists the keys of every setting, option,
-  // section and command the core registers.
-  it('has every label the core’s registry needs', () => {
+  // spec/generated/registry.json lists the keys of every setting, option,
+  // section and command the hub registers.
+  it('has every label the hub’s registry needs', () => {
     expect(registry.i18n.length).toBeGreaterThan(80);
     for (const k of registry.i18n) expect(hasMessage(k), k).toBe(true);
   });
@@ -64,7 +64,7 @@ describe('settings store', () => {
     expect(p.colors.dark.background).toBe('#0a0a0a');
   });
 
-  it('follows the core’s pushes', () => {
+  it('follows the hub’s pushes', () => {
     applySettings({
       values: values({ 'terminal.fontSize': 15, 'terminal.colors.dark.foreground': '#ff0000' }),
       problems: [{ key: 'x', code: 'unknown' }],
@@ -77,7 +77,7 @@ describe('settings store', () => {
     expect(getPrefs().termFontSize).toBe(15);
   });
 
-  it('shows a change at once and keeps the core’s answer', async () => {
+  it('shows a change at once and keeps the hub’s answer', async () => {
     const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({ values: values({ [body.key]: 16 }), problems: [] }), { status: 200 });
@@ -92,7 +92,7 @@ describe('settings store', () => {
     expect(fetch.mock.calls[1][1]?.body).toBe('{"key":"terminal.optionIsMeta","value":true}');
   });
 
-  it('reports the core’s error codes and shows the value before', async () => {
+  it('reports the hub’s error codes and shows the value before', async () => {
     vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ error: 'locked' }), { status: 409 }));
     expect(await setSetting('terminal.fontSize', 18)).toBe('Fixed by a command-line flag');
     expect(getPrefs().termFontSize).toBe(13);
@@ -100,31 +100,6 @@ describe('settings store', () => {
       throw new Error('offline');
     });
     expect(await setSetting('terminal.fontSize', 18)).toBe('Could not reach the server');
-  });
-});
-
-describe('browser settings of earlier versions', () => {
-  it('moves values the core does not have yet', () => {
-    const stored: Record<string, string> = {
-      theme: 'light',
-      termFontSize: '30.5',
-      optionIsMeta: 'true',
-      locale: '',
-      dockPosition: 'left',
-      uiFontSize: '99',
-    };
-    const got = legacyImports((k) => stored[k] ?? null, values({ 'terminal.optionIsMeta': false }));
-    expect(got).toEqual([
-      { name: 'locale', key: 'appearance.language', value: undefined },
-      { name: 'theme', key: 'appearance.theme', value: 'light' },
-      { name: 'uiFontSize', key: 'appearance.uiFontSize', value: 20 },
-      { name: 'termFontSize', key: 'terminal.fontSize', value: 30.5 },
-      // The VS Code panel's place, a setting no more: dropped.
-      { name: 'dockPosition', key: '', value: undefined },
-      // Set on the core already: the core's value stays.
-      { name: 'optionIsMeta', key: 'terminal.optionIsMeta', value: undefined },
-    ]);
-    expect(legacyImports(() => null, values())).toEqual([]);
   });
 });
 

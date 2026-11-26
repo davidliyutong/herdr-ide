@@ -1,13 +1,12 @@
-// The settings of the core and of the user interfaces (internal/settings):
-// definitions and values from GET /api/settings, kept current by the core's
+// The settings of the hub and of the user interfaces (backend/kernel/config/settings):
+// definitions and values from GET /api/settings, kept current by the hub's
 // "settings" pushes on /ws, changed with PUT and DELETE. The settings dialog
 // renders itself from the definitions; prefs.ts reads the values the UI
-// uses. Until the core answers, the defaults of design/generated/registry.json
+// uses. Until the hub answers, the defaults of spec/generated/registry.json
 // apply (the same build's registry).
 
 import { create } from 'zustand';
-import registry from '../../design/generated/registry.json';
-import { storage } from './brand';
+import registry from '../../spec/generated/registry.json';
 import { hasMessage, t } from './i18n';
 
 export type SettingType = 'bool' | 'number' | 'string' | 'enum' | 'color' | 'list';
@@ -59,10 +58,10 @@ export interface Section {
   plugin?: string;
 }
 
-/** The kind of client this page is, as the core tells from its requests
+/** The kind of client this page is, as the hub tells from its requests
  * (the desktop app's windows carry the token of its launch): which switch
  * of a plugin with one per kind of client applies here (plugins/api.ts
- * browserRisk). A browser until the core answers. */
+ * browserRisk). A browser until the hub answers. */
 export type Client = 'browser' | 'desktop';
 
 interface SettingsStore {
@@ -76,7 +75,7 @@ interface SettingsStore {
   client: Client;
 }
 
-/** The built-in defaults: what the UI uses before the core answers. */
+/** The built-in defaults: what the UI uses before the hub answers. */
 export const builtinDefaults = registry.settings as Record<string, SettingValue>;
 
 function defaultValues(): Record<string, SettingState> {
@@ -96,7 +95,7 @@ export const useSettings = create<SettingsStore>(() => ({
   client: 'browser',
 }));
 
-/** A setting's global value: the core's, else the built-in default. */
+/** A setting's global value: the hub's, else the built-in default. */
 export function settingValue(key: string): SettingValue | undefined {
   return useSettings.getState().values[key]?.value ?? builtinDefaults[key];
 }
@@ -171,7 +170,7 @@ async function change(
 
 /** Saves a value, globally or as a machine's own; resolves to an error
  * message, or undefined. A global value shows at once and is replaced by
- * the core's answer. */
+ * the hub's answer. */
 export function setSetting(key: string, value: SettingValue, machine?: string): Promise<string | undefined> {
   const s = useSettings.getState();
   const cur = s.values[key];
@@ -187,70 +186,4 @@ export function resetSetting(key: string, machine?: string): Promise<string | un
   const q = new URLSearchParams({ key });
   if (machine) q.set('machine', machine);
   return change('DELETE', `/api/settings?${q}`);
-}
-
-/** Browser settings of earlier versions, kept in localStorage under these
- * names, and the settings that took their place. */
-export const legacyPrefs: Record<string, { key: string; parse(raw: string): SettingValue | undefined }> = {
-  locale: { key: 'appearance.language', parse: (r) => (['en', 'zh-CN'].includes(r) ? r : undefined) },
-  theme: { key: 'appearance.theme', parse: (r) => (['system', 'dark', 'light'].includes(r) ? r : undefined) },
-  uiFontSize: { key: 'appearance.uiFontSize', parse: (r) => num(r, 11, 20, true) },
-  termFontSize: { key: 'terminal.fontSize', parse: (r) => num(r, 6, 40, false) },
-  termFontWeight: { key: 'terminal.fontWeight', parse: (r) => (['regular', 'medium'].includes(r) ? r : undefined) },
-  // The VS Code panel's place, gone with the panel: dropped.
-  dockPosition: { key: '', parse: () => undefined },
-  optionIsMeta: { key: 'terminal.optionIsMeta', parse: bool },
-  programClipboard: { key: 'terminal.programClipboard', parse: (r) => (['auto', 'ask', 'off'].includes(r) ? r : undefined) },
-  mathHover: { key: 'terminal.mathHover', parse: bool },
-  notifySound: { key: 'notifications.sound', parse: bool },
-  notifySoundMuted: {
-    key: 'notifications.mutedAgents',
-    parse: (r) =>
-      r
-        .split(/[\s,]+/)
-        .map((x) => x.trim().toLowerCase())
-        .filter(Boolean),
-  },
-};
-
-function num(raw: string, min: number, max: number, integer: boolean): number | undefined {
-  const n = Number(raw);
-  if (raw === '' || !Number.isFinite(n)) return;
-  return Math.min(max, Math.max(min, integer ? Math.round(n) : n));
-}
-
-function bool(raw: string): boolean | undefined {
-  return raw === 'true' ? true : raw === 'false' ? false : undefined;
-}
-
-/** The values a browser kept before settings moved to the core, for the
- * settings still at their defaults there. */
-export function legacyImports(
-  get: (name: string) => string | null,
-  values: Record<string, SettingState>,
-): { name: string; key: string; value?: SettingValue }[] {
-  const out: { name: string; key: string; value?: SettingValue }[] = [];
-  for (const [name, l] of Object.entries(legacyPrefs)) {
-    const raw = get(name);
-    if (raw === null) continue;
-    const v = l.parse(raw);
-    const cur = values[l.key];
-    // Only a value the core does not have yet; the old key goes either way.
-    const take = v !== undefined && cur?.source === 'default' && JSON.stringify(v) !== JSON.stringify(cur.value);
-    out.push({ name, key: l.key, value: take ? v : undefined });
-  }
-  return out;
-}
-
-/** Moves the browser settings of earlier versions to the core once: each
- * value the core still has at its default is saved there, then the old key
- * is removed. Nothing happens in read-only mode (the keys stay for a later
- * writable session). */
-export async function importLegacyPrefs() {
-  const s = useSettings.getState();
-  if (!s.loaded || s.readOnly) return;
-  for (const { name, key, value } of legacyImports(storage.get, s.values)) {
-    if (value !== undefined && (await setSetting(key, value)) !== undefined) continue;
-    storage.remove(name);
-  }
 }

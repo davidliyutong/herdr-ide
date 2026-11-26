@@ -2,134 +2,82 @@
 
 ## Context
 
-herdr-ide starts processes and writes files on shared machines that it does
-not otherwise manage. Several cores may connect to the same machine, agents
-can be killed abruptly, browsers keep hidden iframes open, and code-server
-holds hundreds of megabytes per instance. Left alone, this exhausts memory
-and disk on machines the user shares with others.
+veldr starts processes and writes files on shared machines it does not otherwise manage. Several hubs may connect to the same machine, agents can be killed abruptly, browsers keep hidden iframes open, and code-server holds hundreds of megabytes per instance. Left alone, this exhausts memory and disk on machines the user shares with others.
 
 ## Goals / non-goals
 
-Goals: every process has an owner and an end; every file has a retention
-rule; nothing depends on the core shutting down cleanly; two cores never
-destroy each other's state.
+Goals:
 
-Non-goals: CPU or memory quotas; managing the programs users start in
-terminals (they belong to the user and run in the terminal core).
+- every process has an owner and an end;
+- every file has a retention rule;
+- nothing depends on the hub shutting down cleanly;
+- two hubs never destroy each other's state.
+
+Non-goals: CPU or memory quotas; managing the programs users start in terminals (they belong to the user and run in the terminal core).
 
 ## Design
 
-**Processes**
+The per-resource table (what starts each process or file, its limits and how it is reclaimed) is in [deployment](../deployment.md#remote-resources); the paths are in [reference](../reference.md#files-and-directories). This section gives the rules behind it.
 
-| Process | Owner | Ends when |
-| --- | --- | --- |
-| agent | its ssh session | stdin closes, or yamux keepalive (15 s interval, 30 s timeout) fails |
-| desktop core | Electron main process | parent stdin closes: the app quits (on Windows and Linux also by closing its main window) or crashes; no signal is sent on any system, and the shell kills that child only if it has not exited 20 s later |
-| terminal core (herdr-core, session `herdr-ide[-<instance>]`) | the user's account: herdr-core runs it detached from the agent (a systemd user service, a launchd job), started when a client first subscribes to the machine's terminals ([02](02-multi-machine-transport.md)) | the user stops it from the machine's menu (`hc` action `stop`, which ends its programs); not with the agent or the core, so programs survive disconnects. A restart hands the programs to its successor |
-| terminals of the web UI's layout (started with `keep: true`) | the user's layout document on the machine | their pane is closed (after the time to undo), they are killed, their program exits, or the terminal core ends; after a restart of the machine herdr-core gives each a new shell, and the page replaces those that ended with the core ([33](33-workspace-restore.md)) |
-| core's connection to the terminal core, agent detection | the core, while a client is subscribed to the machine's terminals | 10 s after the last subscriber left, or with the agent; no process of their own |
-| streams kept for terminals' sizes: the last stream that set a live terminal's size, left attached to the terminal core when its client lets go of it ([22](22-terminal-protocol.md)) | the core's connection to the terminal core, at most one per live terminal without a viewer | the terminal's next viewer that sets the size has attached, the terminal is removed or finishes, or that connection ends; no process of their own |
-| code-server | the agent recorded in `run/cs.pid` | idle for `--code-server-idle` (default 20 min, counted by the core's proxy: no WebSocket open), the owning agent exits, the user stops it (**Stop VS Code on `<machine>`** in a VS Code pane's menu), or 1 h without connections (code-server's own `--idle-timeout-seconds`) |
-| VS Code extension host | code-server | 5 min after its window disconnects (`--reconnection-grace-time`) |
-| curl / wget (machine downloads) | the agent's `download` request | the download finishes, fails, or runs 20 min |
-| ssh ControlMaster (cores on Linux and macOS; Windows' OpenSSH has none) | OpenSSH | 10 min unused (`ControlPersist`), or its ServerAlive checks fail (1 min). When a session through it lost the agent while ssh kept running, or a connection probe through it timed out, the core tells it to take no new sessions (`ssh -O stop`); it then ends with the sessions still open through it, which may belong to other instances of the user |
-| Xvfb, or Xwayland for a GPU display | itself (own session, see [14](14-gui-windows.md)) | 1 min after its last client (programs, the agent's window manager, the display keeper) disconnected (`-terminate`, armed by one connection right after start); not with the agent, so programs survive disconnects. xorg-server before 21.1: when its last client leaves; a server that never got a client stays until an agent attaches. Also ended by the agent to start one of the other kind, only while no program is connected |
-| the GPU display's compositor (`herdr-ide gui-wl`) | itself (own session), started by the agent with its Xwayland | its Xwayland exits or never starts (the other end of their socket pair closes) |
-| display keeper (`herdr-ide gui-keep`) | itself (own session, one per instance by `run/gui-keep.lock`) | the instance's terminal core no longer runs (checked every 5 s; a core restarted within 30 s is followed), or the display ends; so Xvfb ends soon after the terminal core and its programs |
-| video encoder | the agent's window manager (own process group) | 5 s without frames, the window no longer watched, resized or gone, video turned off, or the agent exits |
-| `apt-get download xvfb` | the agent's `install` request | the download finishes, fails, or runs 5 min |
+**Every process has an owner that ends it.**
 
-- **Ownership** (`internal/agent/codeserver.go`): `cs.pid` holds the process
-  id and the owning agent's pid. An agent stops only the process it owns on
-  exit, adopts a running process whose owner died, and a new agent stops any
-  orphan whose owner is gone at startup.
-- **VS Code windows off screen**: each VS Code pane on screen is its own
-  iframe and VS Code window, created only when its pane is on screen. The
-  iframes live in a layer over the panes and are placed over their pane,
-  so moving a pane or switching tab, workspace or machine never reloads
-  VS Code. A window off screen stays loaded for 10 min, and at most 3 such
-  windows stay (the oldest go first); then it is unmounted, which closes
-  its WebSocket so the idle timer can run. A pane closed in the layout
-  (by any client) unmounts its window at once, and the windows of disabled
-  and removed machines go too (`web/src/codeFrames.ts`,
-  `web/src/components/CodeLayer.tsx`).
+- The agent belongs to its ssh session: it exits when stdin closes or the yamux keepalive fails ([02](02-multi-machine-transport.md)).
+- The desktop hub belongs to the Electron shell and stops when its stdin closes ([16](16-desktop-packaging.md)).
+- Downloads (curl/wget, `apt-get download`) belong to the request that started them and have a time limit.
+- The hub's connection to a terminal core, and agent detection over it, last while a client is subscribed, plus a short grace period.
+- The video encoder belongs to the agent's window manager and ends when its window is no longer watched or stops changing.
 
-**Files**
+**What the user's programs depend on outlives the agent.** The terminal core (herdr-core, session `veldr[-<instance>]-<host id>`) runs detached from the agent as a user service, so programs survive disconnects and hub restarts. The user ends it from the machine's menu ([21](21-terminal-core.md)). Terminals of the layout are kept by the layout document and end when their pane closes ([33](33-workspace-restore.md)). The virtual display (Xvfb or Xwayland, [14](14-gui-windows.md)) also runs in its own session; a display keeper (`veldr gui-keep`, one per instance) holds it while the terminal core runs, and the display exits about a minute after its last client, so it ends soon after the terminal core and its programs.
 
-| Path | Retention |
-| --- | --- |
-| `uploads/` | 7 days (pruned at agent start) |
-| `cs-data/logs/` | 7 days |
-| `hc/herdr-core` | one file per instance, verified and replaced whole by the next install; a running terminal core keeps the executable it started from |
-| `hc/.fetch-*` | removed when the install ends; left by a killed agent, removed by the next install after 1 h |
-| `run/hc.sock`, `run/cs.sock`, `run/bridge.sock` | sockets of the processes above, 0600 in the 0700 run directory |
-| herdr-core's state (`~/.local/state/herdr-core/herdr-ide[-<instance>]/`) | herdr-core's own (terminal records, saved screens, logs); kept until the user removes it |
-| `agent/<build>/` | removed after 14 days unused; running agents touch their directory |
-| `code-server/<version>/` | removed after 14 days unused; touched on start |
-| `code-server/.download-*`, `.install-*` | removed when the download or install ends; left by a killed agent, removed with unused versions after 14 days |
-| `xvfb/<version>/` | removed after 14 days unused when another version is unpacked; touched on start |
-| `gpupick/<sha256 prefix>/` | removed after 14 days unused when another build is installed; touched when a display's status is read; `gpupick/.fetch-*` of an install that did not finish after 1 h |
-| `xvfb/.fetch-*` | removed when the install ends; left by a killed agent, removed by the next agent after 1 h |
-| `video/<digest prefix>/` | removed after 14 days unused when another build is installed |
-| `run/gui.json`, `run/xauth`, `run/xauth.server` | kept: the reserved display stays valid for panes; the cookie is replaced at each start of the display |
-| download cache (core host) | kept; legacy caches after renames are removed |
-| settings, keybindings and machines files (core host) | one file each per instance, replaced whole on change |
+**The chat host is a hidden terminal of the terminal core** (`veldr chat-host`, [37](37-agent-chats.md)). The agent starts it when the hub opens a connection to it and none serves, so it ends with the terminal core and its signals. It exits 60 s after its last agent process and connection, and at most 30 s after it began to stop; a hub of a newer build replaces it only while no chat works or waits. The coding agents it runs each have a process group of their own and stop when idle (`chat.idleStopMinutes`), beyond `chat.maxLive`, or when their chat closes: input closed, SIGTERM, then SIGKILL after a grace.
 
-Directories are per instance except `agent/`, `code-server/`, `xvfb/`,
-`gpupick/` and `video/`, which are shared and therefore never deleted while
-recently used.
-The full list of paths is in [reference](../reference.md#files-and-directories).
+**code-server has an owner and several ends** (`backend/features/vscode/machine/process.ts`).
+
+- `cs.pid` in the runtime directory holds the process id and the owning agent's pid.
+- An agent stops only the process it owns on exit.
+- An agent adopts a running process whose owner died, and at startup stops an orphan whose owner is gone.
+- The hub's proxy stops it after `--code-server-idle` (20 min by default) without an open WebSocket; code-server's own idle timeout (1 h) covers a killed agent.
+
+**Hidden VS Code windows let go.** Each VS Code pane on screen is its own iframe in a layer over the panes, so moving panes or switching tabs never reloads it. A window off screen stays loaded for 10 min, and at most 3 such windows stay; then it is unmounted, closing its WebSocket so the idle timer can run. A closed pane, or a disabled or removed machine, unmounts its windows at once (`web/src/codeFrames.ts`, `web/src/components/CodeLayer.tsx`).
+
+**Files.** Retention is by age (`backend/machine/housekeeping.ts` prunes at agent start and every 24 h; Xvfb packages, gpupick libraries and video encoders when another build is installed):
+
+- uploads, staging files and logs: 7 days;
+- shared versioned directories (`agent/`, `code-server/`, `gpupick/`, `video/`, and the host's `hosts/<host>/xvfb/`): 14 days unused; running agents and starts touch their directory, so a version another hub uses is not deleted;
+- partial downloads and installs left by a killed agent: removed after 1 h;
+- `hosts/<host>/hc/herdr-core`: one file per instance and host, replaced whole by the next install;
+- the chat host's journal (`chat-<host>.db`): within the `chat.*` limits per chat, in total and in days after a chat closed; its log restarts at 1 MiB with one old file kept;
+- databases and logs are named per host (`machine-<host>.db`, [38](38-sqlite-state.md)), since a data directory may be on a home shared by several hosts; other hosts' go after 30 days unused;
+- other hosts' directories (`hosts/<host>/`, [40](40-shared-homes.md)): emptied but for `hc/` after 30 days unused, removed after 180;
+- herdr-core's own state, the display's reserved files and the hub host's files (settings, keybindings, machines, download cache): kept, replaced whole on change.
+
+Directories are per instance except the shared versioned ones above; sockets, locks and pid files are in the host-local runtime directory.
 
 ## Alternatives considered
 
 | Option | Why not |
 | --- | --- |
-| Delete other versions immediately | Two cores with different builds or code-server versions would delete each other's files on every connect. |
+| Delete other versions immediately | Two hubs with different builds would delete each other's files on every connect. |
 | One code-server per browser window | Multiplies memory use. |
-| Keep code-server until the agent exits | Agents live as long as the core is connected, often days. |
-| Rely on the core's clean shutdown | Cores crash, laptops sleep, networks drop. |
-| Terminal core owned by the agent, ending with it | Every network drop or core restart would end the user's programs; herdr-core runs it apart, and the user ends it. |
-| Xvfb kept for hours after its last client | Holds memory on shared machines long after the terminal core and its programs ended; the display keeper holds it while the terminal core, whose programs use it, runs. |
+| Keep code-server until the agent exits | Agents live as long as the hub is connected, often days. |
+| Rely on the hub's clean shutdown | Hubs crash, laptops sleep, networks drop. |
+| Terminal core owned by the agent | Every network drop or hub restart would end the user's programs. |
+| Xvfb kept for hours after its last client | Holds memory long after the terminal core ended; the keeper ties it to the terminal core instead. |
 
 ## Failure modes
 
-- **Agent killed with SIGKILL** → its code-server survives until the next
-  agent reaps it or its own 1 h idle timeout.
-- **Core stopped** → remote agents end with their ssh sessions; the local
-  agent runs inside the core, so the core waits (up to 15 s) for it to stop
-  the code-server it started before exiting. The terminal cores and their
-  programs keep running; the next core of the instance finds them.
-- **A terminal core nobody uses any more** (the machine was removed, the
-  instance is no longer run) → it keeps running with its programs until
-  the user stops it from the machine's menu or with herdr-core's
-  `server stop` for that session and socket
-  ([deployment](../deployment.md#remote-resources)).
-- **A code-server nobody tracks answers on the socket** (pid file lost, data
-  directory moved under it) → replaced when VS Code is next opened
-  ([05](05-vscode-panes.md)).
-- **Two cores, same instance** → one code-server; either core's idle stop
-  affects both, and the other restarts it on its next request.
+- **Agent killed with SIGKILL**: its code-server survives until the next agent reaps it or its own 1 h idle timeout.
+- **Hub stopped**: its agent sessions end with their ssh sessions or socket connections, and each stops the code-server it started; a node without clients ends 15 s later ([39](39-nodes.md)). Terminal cores and their programs keep running; the next hub of the instance finds them.
+- **A terminal core nobody uses any more** (machine removed, instance no longer run): it runs until the user stops it from the machine's menu or with `veldr node stop --terminal-core` on the machine ([deployment](../deployment.md#remote-resources)).
+- **An untracked code-server answers on the socket** (pid file lost): replaced when VS Code is next opened ([05](05-vscode-panes.md)).
+- **Two hubs, same instance**: they share one code-server; either hub's idle stop affects both, and the other restarts it on its next request. They share one chat host too, which an older build never replaces.
+- **A chat host nobody uses** (machine removed, hub gone): its agents stop when idle and it exits a minute after the last.
 
 ## Testing
 
-- `internal/agent/lifecycle_test.go`: orphan reaping
-  (`TestReapOrphanedCodeServer`), owner-only stop on exit
-  (`TestStopAllOnlyOwnProcess`), upload pruning and legacy directory
-  migration (`TestHousekeepingAndMigration`).
-- `internal/server/server_test.go`: code-server idle detection with open
-  connections and grace for untracked machines
-  (`TestCodeServerIdleTracking`).
-- `web/src/__tests__/codePanes.test.ts`: a VS Code window per pane on
-  screen, kept off screen until it expires or more than 3 are, and gone
-  at once when its pane closed or its machine has no VS Code.
-- `internal/agent/hc_test.go` (`TestHCInstallStartAndPipe`: an install
-  that fails leaves no partial file, a newer build replaces the old one);
-  `internal/server/term_test.go` (`TestHCLifecycle`: a stopped terminal
-  core stays stopped while clients are subscribed).
-- `internal/agent/guikeep_test.go` (`TestKeeperHoldsDisplay`: the keeper
-  holds the display while the terminal core runs, one per instance),
-  `internal/agent/gui_test.go` (`TestGUIHousekeeping`: unfinished Xvfb
-  installs removed after 1 h), `internal/agent/guivideo_test.go`
-  (`TestInstallVideo`: other encoder builds and unfinished installs go).
-
-Stop and pid-file cleanup were verified on a live instance.
+- `backend/features/vscode/machine.test.ts`: orphan reaping, owner-only stop; `backend/machine/housekeeping.test.ts`: upload pruning, other hosts' directories.
+- `backend/features/vscode/proxy.test.ts` (`idle tracking`) and `hub.test.ts` (`idle code-servers are released`): idle detection with open connections.
+- `web/src/__tests__/codePanes.test.ts`: VS Code windows kept off screen until they expire or exceed 3, gone when their pane closes.
+- `backend/machine/agent.test.ts` and `backend/features/terminals/terminals.test.ts` (`the terminal core’s lifecycle from the UI`): herdr-core installs and a stopped terminal core staying stopped.
+- `backend/features/gui/machine/display.test.ts`, `machine.test.ts`: the display keeper, unfinished Xvfb installs, old encoder builds.
+- `backend/features/chat/machine/host/host.test.ts` (idle exit and stop, `chat.maxLive`, shutdown, agents' groups ended on the terminal core's signals), `backend/features/chat/machine.test.ts` (handover, never a downgrade, a stuck host killed), `backend/shared/store/host.test.ts` (other hosts' files pruned).

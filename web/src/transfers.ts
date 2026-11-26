@@ -4,7 +4,7 @@
 // (the last HISTORY_MAX, in localStorage; names and paths, no contents).
 //
 // The files of one paste or drop are queued together and sent one after the
-// other. A cancelled upload aborts its request; the core then closes its
+// other. A cancelled upload aborts its request; the hub then closes its
 // stream to the agent, which removes the temporary file it was writing, so
 // nothing of it is left on the machine. Once the whole body is sent the
 // agent is finishing the file, and it can no longer be cancelled.

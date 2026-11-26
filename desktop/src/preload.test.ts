@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import './fakeWindow';
 import type { DesktopShell, OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
 import { answers, exposed, invoked, onDisk, receive, sent } from './fakeElectron';
@@ -10,6 +11,7 @@ const common = [
   'answerClose',
   'browser',
   'metrics',
+  'notifications',
   'onCloseRequest',
   'onCommand',
   'onOpenFolders',
@@ -19,8 +21,8 @@ const common = [
   'verifyUser',
 ];
 
-test('the page gets only the desktopShell bridge, with these functions', () => {
-  assert.deepEqual(Object.keys(exposed), ['desktopShell']);
+test('the page gets its channels and the desktopShell bridge, with these functions', () => {
+  assert.deepEqual(Object.keys(exposed), ['desktopChannels', 'desktopShell']);
   assert.deepEqual(Object.keys(shell).sort(), process.platform === 'darwin' ? [...common, 'privacy', 'titlebar'].sort() : common);
   for (const platform of ['win32', 'linux']) assert.deepEqual(Object.keys(desktopShellFor(platform)).sort(), common);
 });
@@ -153,7 +155,7 @@ test('metrics passes on processes with a kind, as amounts and short text', async
 
 test('verifyUser asks the main process and passes on only what has the right form', async () => {
   const { verifyUser } = shell;
-  assert.deepEqual(Object.keys(verifyUser!).sort(), ['available', 'prove']);
+  assert.deepEqual(Object.keys(verifyUser!).sort(), ['available', 'canUnlock', 'enroll', 'prove', 'unlock']);
   for (const [got, want] of [
     ['touchid', 'touchid'],
     ['hello', 'hello'],
@@ -190,6 +192,94 @@ test('verifyUser asks the main process and passes on only what has the right for
   for (const platform of ['win32', 'linux', 'darwin']) assert.ok(desktopShellFor(platform).verifyUser);
 });
 
+test('the unlock key: only true is true, and only an id and a relay, a MAC and a relay, of their forms pass', async () => {
+  const verifyUser = shell.verifyUser!;
+  for (const [got, want] of [
+    [true, true],
+    [false, false],
+    ['true', false],
+    [1, false],
+    [null, false],
+    [new Error('no handler'), false],
+  ] as const) {
+    answers.set(channels.verifyCanUnlock, got);
+    assert.equal(await verifyUser.canUnlock(), want);
+  }
+  const id = 'E'.repeat(22);
+  const relay = 'r'.repeat(100);
+  const mac = 'ab'.repeat(32);
+  const n = 'n'.repeat(43);
+  for (const [got, want] of [
+    [
+      { id, relay },
+      { id, relay },
+    ],
+    // This install has no entry: exactly 'none', nothing like it.
+    ['none', 'none'],
+    ['None', null],
+    ['none ', null],
+    [{ none: true }, null],
+    [
+      { id, relay: 'x'.repeat(8192) },
+      { id, relay: 'x'.repeat(8192) },
+    ],
+    [{ id, relay: 'x'.repeat(8193) }, null],
+    [{ id, relay: '' }, null],
+    [{ id, relay: relay + '=' }, null],
+    [{ id, relay: relay + '+' }, null],
+    [{ id: 'E'.repeat(21), relay }, null],
+    [{ id: 'E'.repeat(23), relay }, null],
+    [{ id: 'E'.repeat(21) + '/', relay }, null],
+    [{ id, relay, extra: 1 }, null],
+    [{ id }, null],
+    [{ id: 5, relay }, null],
+    [[id, relay], null],
+    [null, null],
+    ['text', null],
+    [new Error('refused'), null],
+  ] as const) {
+    answers.set(channels.verifyUnlock, got);
+    assert.deepEqual(await verifyUser.unlock(n), want, JSON.stringify(got));
+  }
+  for (const [got, want] of [
+    [
+      { mac, relay },
+      { mac, relay },
+    ],
+    [{ mac: mac.toUpperCase(), relay }, null],
+    [{ mac: mac + 'a', relay }, null],
+    [{ mac, relay: 'x'.repeat(8193) }, null],
+    [{ mac, relay: 'not/base64url' }, null],
+    [{ mac, relay, id: 'x' }, null],
+    [{ relay }, null],
+    [mac, null],
+    [undefined, null],
+    [new Error('refused'), null],
+  ] as const) {
+    answers.set(channels.verifyEnroll, got);
+    assert.deepEqual(await verifyUser.enroll(n), want, JSON.stringify(got));
+  }
+  // The answer is a copy: nothing else of the main process's object goes on.
+  const answer = { id, relay };
+  answers.set(channels.verifyUnlock, answer);
+  assert.notEqual(await verifyUser.unlock(n), answer);
+  // Only a string nonce goes on, and nothing else with it.
+  invoked.length = 0;
+  for (const bad of [undefined, null, 5, {}, ['x']]) {
+    assert.equal(await verifyUser.unlock(bad as unknown as string), null);
+    assert.equal(await verifyUser.enroll(bad as unknown as string), null);
+  }
+  assert.deepEqual(invoked, []);
+  await verifyUser.unlock(n);
+  await verifyUser.enroll(n);
+  await verifyUser.canUnlock();
+  assert.deepEqual(invoked, [
+    { channel: channels.verifyUnlock, args: [n] },
+    { channel: channels.verifyEnroll, args: [n] },
+    { channel: channels.verifyCanUnlock, args: [] },
+  ]);
+});
+
 test('browser.onOpen delivers http(s) addresses only, while it listens', () => {
   const got: string[] = [];
   const off = shell.browser!.onOpen((url) => got.push(url));
@@ -210,4 +300,82 @@ test('browser.onOpen delivers http(s) addresses only, while it listens', () => {
   off();
   receive(channels.browserOpen, 'https://example.com/b');
   assert.deepEqual(got, ['https://example.com/a', 'http://localhost:3000']);
+});
+
+test('notifications validates options and targets in both directions', async () => {
+  const notifications = shell.notifications!;
+  assert.deepEqual(Object.keys(notifications).sort(), ['close', 'onClick', 'show', 'supported']);
+
+  answers.set(channels.notifySupported, true);
+  assert.equal(await notifications.supported(), true);
+  answers.set(channels.notifySupported, 'yes');
+  assert.equal(await notifications.supported(), false);
+  answers.set(channels.notifySupported, new Error('ipc failed'));
+  assert.equal(await notifications.supported(), false);
+
+  invoked.length = 0;
+  answers.set(channels.notifyShow, true);
+  assert.equal(
+    await notifications.show({
+      title: '  Agent blocked  ',
+      body: 'gpu · 1',
+      tag: 'm|t1',
+      silent: true,
+      urgency: 'critical',
+      target: { kind: 'chat', machine: 'm', chat: 'c1', agent: 'claude' },
+    }),
+    true,
+  );
+  assert.deepEqual(invoked, [
+    {
+      channel: channels.notifyShow,
+      args: [
+        {
+          title: 'Agent blocked',
+          body: 'gpu · 1',
+          tag: 'm|t1',
+          silent: true,
+          urgency: 'critical',
+          target: { kind: 'chat', machine: 'm', chat: 'c1', agent: 'claude' },
+        },
+      ],
+    },
+  ]);
+
+  // Invalid payloads are dropped before crossing IPC.
+  invoked.length = 0;
+  for (const bad of [
+    { title: '   ' },
+    { title: 'ok', extra: 1 },
+    { title: 'ok', urgency: 'high' },
+    { title: 'ok', target: { kind: 'pane', machine: 'm', pane: 't1', extra: 1 } },
+  ]) {
+    assert.equal(await notifications.show(bad as unknown as Parameters<typeof notifications.show>[0]), false);
+  }
+  assert.deepEqual(invoked, []);
+
+  sent.length = 0;
+  notifications.close('m|t1');
+  notifications.close('bad\ntag');
+  notifications.close('');
+  assert.deepEqual(sent, [{ channel: channels.notifyClose, value: 'm|t1' }]);
+
+  sent.length = 0;
+  const clicks: unknown[] = [];
+  const off = notifications.onClick((target) => clicks.push(target));
+  assert.deepEqual(sent, [{ channel: channels.notifyClickWanted, value: true }]);
+  receive(channels.notifyClick, { kind: 'pane', machine: 'm', pane: 't1' });
+  receive(channels.notifyClick, { kind: 'chat', machine: 'm', chat: 'c1' });
+  receive(channels.notifyClick, { kind: 'bad', machine: 'm' });
+  receive(channels.notifyClick, { kind: 'pane', machine: 'm', pane: 't1', extra: 1 });
+  off();
+  receive(channels.notifyClick, { kind: 'panel', panel: 'usage' });
+  assert.deepEqual(clicks, [
+    { kind: 'pane', machine: 'm', pane: 't1' },
+    { kind: 'chat', machine: 'm', chat: 'c1' },
+  ]);
+  assert.deepEqual(sent, [
+    { channel: channels.notifyClickWanted, value: true },
+    { channel: channels.notifyClickWanted, value: false },
+  ]);
 });

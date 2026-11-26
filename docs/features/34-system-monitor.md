@@ -2,151 +2,65 @@
 
 ## Context
 
-Working across several local and remote SSH machines makes it easy to lose
-sight of which host is CPU-bound, running out of RAM, holding VRAM on a
-specific GPU, or saturating disk and network I/O. Checking that usually meant
-opening a terminal and running `htop`, `nvidia-smi`, `df`, and `iftop` on each
-machine in turn.
-
-The System Monitor & Task Manager plugin (`monitor`) puts both an at-a-glance
-resource dashboard and an interactive, searchable process tree right inside
-the IDE without requiring root privileges or extra binaries on remote hosts.
+Across several machines it is easy to lose sight of which host is CPU-bound, short of memory, holding a GPU's memory, or saturating disk or network. Checking meant running `htop`, `nvidia-smi`, `df` and `iftop` on each machine. The `monitor` plugin shows a resource dashboard and a searchable process tree in the UI, without root or extra binaries on the machines.
 
 ## Goals / non-goals
 
-- **Dashboard mode** in two places rendering the exact same live card:
-  - Holding **⌘** (Ctrl/Meta on Windows and Linux) and hovering a machine row
-    in the left sidebar shows that machine's live CPU, memory, per-GPU,
-    network and disk usage.
-  - A bottom-right status bar indicator shows live CPU, memory and peak GPU
-    usage for the active machine and opens the same dashboard card floating
-    upward on hover or click.
-- **Task Manager mode** (inspired by Tern): a right-sidebar panel that can
-  also be opened as a workspace pane or tab, displaying a windowed process
-  list with parent-child **Tree View** and **Flat List**, live fuzzy search
-  (preserving ancestor context in Tree View), sorting (by subtree CPU/RSS in
-  Tree View), process inspection, and guarded process signaling (`SIGTERM`,
-  `SIGKILL`, `SIGSTOP`, `SIGCONT`).
-- On-demand polling only: no permanent background daemon or files written on
-  machines; polling runs only while a dashboard card, status item or Task
-  Manager is visible and pauses when the tab is hidden.
-- Non-goal: historical telemetry storage on disk or alerting rules across
-  days.
+- **Dashboard**: one live card (CPU, memory, per-GPU, network, disk), shown by holding **⌘** (Ctrl or Meta on Windows and Linux) while hovering a machine in the left sidebar, and from a status bar item (CPU, memory, peak GPU of the active machine) that opens it upward.
+- **Task Manager**: a right-sidebar panel, also openable as a pane or tab, with a tree or flat process list, fuzzy search (keeping ancestors in the tree), sorting (by subtree CPU/RSS in the tree), details, and guarded signals.
+- Polling only while a card, status item or Task Manager is visible; nothing runs or is written on machines otherwise.
+- Non-goals: stored history, alerting.
 
 ## Design
 
-### Machine side (`internal/agent/plugin/monitor`)
+### Machine side (`backend/features/monitor/machine.ts`)
 
-Registered under plugin id `monitor` (`internal/agent/plugins_monitor.go`,
-`//go:build unix`), handling three actions of the agent's `plugin` op:
+Plugin id `monitor` (Linux and macOS: `machine/linux.ts`, `machine/darwin.ts`), three actions of the agent's `plugin` op:
 
-- `metrics`: returns CPU usage (overall, cores, load averages, per-core on
-  Linux), memory and swap, **per-GPU** stats (index, name, vendor, compute
-  utilization, VRAM used/total/percent, temperature, power draw/limit),
-  network Rx/Tx throughput and totals (plus per-interface rates), disk read/
-  write I/O throughput, and mounted filesystem capacities.
-  - **Linux**: reads `/proc/stat`, `/proc/loadavg`, `/proc/uptime`,
-    `/proc/meminfo`, `/proc/net/dev`, `/proc/diskstats`, and `/proc/mounts` +
-    `syscall.Statfs` directly with zero shell invocations. On the first
-    sample it takes two `/proc/stat` readings 100 ms apart so the very first
-    hover already shows live CPU utilization. Per-GPU metrics come from
-    `nvidia-smi` (CSV, bounded to 3 s) and AMD/Intel `/sys/class/drm` sysfs
-    nodes.
-  - **macOS**: runs `sysctl`, `vm_stat`, `top -l 1 -n 0 -s 0`, `netstat -ibn`,
-    `ioreg -r -d 1 -w 0 -c IOAccelerator` (Apple Silicon / discrete GPU
-    utilization and memory), `ioreg -r -c IOBlockStorageDriver -w 0`, and
-    `df -kP` (consolidating APFS `/System/Volumes/Data` into `/`)
-    concurrently with a 3 s timeout.
-- `processes`: returns the process table (`pid`, `ppid`, `name`, `command`
-  truncated to 512 bytes, `user`, `cpuPct`, `memPct`, `rssBytes`, normalized
-  `state`, `elapsed`, and per-PID `gpuMemBytes` on NVIDIA Linux hosts). Linux
-  reads `/proc/<pid>` directly and computes instantaneous interval CPU% from
-  tick deltas; macOS reads `ps -axww`.
-- `signal`: sends an allowlisted POSIX signal (`TERM`, `KILL`, `INT`, `HUP`,
-  `STOP`, `CONT`) directly via `syscall.Kill`, refusing `pid <= 1` and the
-  agent's own PID.
+- `metrics`: CPU (overall, per core, load), memory and swap, per-GPU utilization, memory, temperature and power, network and disk throughput, filesystem capacities, hardware temperatures and fans.
+  - Linux reads independent `/proc` files concurrently and uses `/sys/class/drm` and `statfs` without a shell. The first sample takes two `/proc/stat` readings 100 ms apart so the first hover already shows CPU use. It keeps the process's clock tick rate, briefly reuses the user name table, and caches resolution of `nvidia-smi` (3 s execution bound).
+  - macOS runs `sysctl`, `vm_stat`, `top`, `netstat`, `ioreg` and `df` concurrently with a 3 s timeout.
+  - Hardware sensors (`sensors`, left out when a machine has none): temperatures (`temps`: `chip`, `label`, `tempC`, the hardware's `highC` and `critC` when it reports them) and fans (`fans`: `chip`, `label`, `rpm`, `minRpm`, `maxRpm`), sorted by chip, then label, numbers inside by value ("Core 2" before "Core 10").
+    - Linux reads `/sys/class/hwmon/hwmon*`: `name` is the chip (a second chip of the same name gets its directory appended, as two NVMe drives), `tempN_input` (millidegrees) with `_label`, `_max`, `_crit`, and `fanN_input` (RPM) with `_label`, `_min`, `_max`; a sensor without a label is named by its file (`temp1`). A stopped fan stays with 0 RPM. Without hwmon temperatures (some ARM boards, virtual machines) the thermal zones supply them (`type`, `temp`; the lowest `hot` or `passive` trip point as high, `critical` as critical). Temperatures outside −50…200 °C are the error values of unconnected inputs and are skipped. Plain file reads, no root.
+    - macOS shows the battery's temperature only (`ioreg -rn AppleSmartBattery -w0`, about 10 ms, `Temperature` in hundredths of a degree). Die temperatures and fans are behind the SMC and IOHID, which need private IOKit/SMC bindings or `powermetrics` as root: a Mac shows no fans, and a desktop Mac no sensors.
+    - Bounds: 128 temperatures and 128 fans, from at most 64 hwmon directories and 64 thermal zones. The Linux scan runs beside the `/proc` reads and a sample waits at most 1 s for it. On timeout the scan stops between reads. A stuck file leaves that sample without sensors, and the next scan waits for the outstanding read to return.
+- `processes`: the process table (command truncated to 512 bytes, CPU%, memory, state, elapsed time, per-process GPU memory on NVIDIA Linux). Linux reads `/proc/<pid>` and computes interval CPU% from tick deltas; macOS reads `ps`.
+- `signal`: sends an allowlisted signal (`TERM`, `KILL`, `INT`, `HUP`, `STOP`, `CONT`) with `process.kill` (`machine/signal.ts`), refusing `pid <= 1` and the agent's own pid.
 
-### Core side (`internal/plugins/monitor`)
+Each node shares an in-flight metrics sample and an in-flight process sample across its hubs. A successful sample is reused for 750 ms so nearby polls measure the same interval. Cancelling one request leaves the sample available to other callers.
 
-Mounts three machine routes below `/api/m/{id}/p/monitor/`:
+### Hub side (`backend/features/monitor`)
 
-- `GET /api/m/{id}/p/monitor/metrics`
-- `GET /api/m/{id}/p/monitor/processes`
-- `POST /api/m/{id}/p/monitor/signal` (`Mutating: true`, `Audit: "signal"`,
-  recording `pid` and `signal` in the audit log; refused in `--read-only`).
-
-Settings (`internal/plugins/monitor/settings.go`, section `monitor`):
-
-- `monitor.refreshSeconds` (default `2`, range `1–30`)
-- `monitor.statusBar` (default `true`)
-- `monitor.confirmKill` (default `true`)
-
-Command (`internal/keybindings/commands.go`): `view.panel.monitor`.
+Routes below `/api/m/{id}/p/monitor/`: `GET metrics`, `GET processes`, `POST signal` (mutating, audited with `pid` and `signal`). Settings (`settings.ts`): `monitor.refreshSeconds` (2, 1–30), `monitor.statusBar`, `monitor.confirmKill`. Command: `view.panel.monitor`.
 
 ### Web UI (`web/src/plugins/monitor`)
 
-- `DashboardCard.tsx`: shared live dashboard card (CPU + sparkline + load,
-  Memory + swap, per-item GPU cards, Network Rx/Tx + active interfaces,
-  Disk I/O + mounts, Refresh and Task Manager actions).
-- `StatusItem.tsx`: renders both the bottom-right status bar button (with its
-  upward-floating `.gui-menu.monitor-popover` using `useHoverOpen` and
-  `useDismiss`) and the `MachineHoverMonitor` portal overlay that detects
-  ⌘+hover (Ctrl/Meta on Windows/Linux) on `[data-machine-head]` rows in the
-  left sidebar. Because it discovers machine rows via data attributes,
-  `Sidebar.tsx` imports nothing from the plugin. Pointer movement from a
-  sidebar row to the floating card is protected by a virtual aiming-triangle
-  corridor (`pointInSafeCorridor`), a zero-gap left hover bridge, a close
-  grace delay, and delayed switching across sibling machine rows when aiming
-  diagonally toward the open card.
-- `TaskManagerPanel.tsx`: right-sidebar panel (also openable in a pane/tab
-  via **Open in Pane**, drag-to-pane, or the new-tab menu). Uses container
-  queries (`@container`) so compact columns expand to include User and State
-  when opened as a wider pane. Built with `lib/windowed.ts` for smooth
-  scrolling over thousands of processes, `lib/match.ts` + `Highlight` for
-  fuzzy search, cycle-safe parent-child tree building with subtree CPU/RSS
-  rollups, keyboard navigation, right-click context menu, and a selected
-  process detail footer.
+- `DashboardCard.tsx`: the shared card. Its last section, **Sensors**, shown only when the machine reports some, has the hottest temperature in its head, the temperatures by chip in two columns, then the fans by chip, scrolling past 180 px. A temperature is a warning within 10 °C of its high threshold (15 °C of its critical one without a high one) and hot at or above either; without thresholds from 80 °C and 90 °C. The sidebar's hover card is the same card; the status bar item shows no sensors.
+- `StatusItem.tsx`: the status bar item and the ⌘+hover overlay. The overlay finds machine rows by `[data-machine-head]`, so `Sidebar.tsx` imports nothing from the plugin. Moving the pointer from a row to the card is kept from closing it or switching rows by an aiming corridor (`pointInSafeCorridor`) and a short grace delay.
+- `TaskManagerPanel.tsx`: the panel; container queries add columns when it is wide. A windowed list (`lib/windowed.ts`) keeps thousands of processes smooth; the tree is built cycle-safe with subtree rollups.
 
 ## Alternatives considered
 
 | Alternative | Why not |
 | --- | --- |
-| Always-on background streaming across all machines | Wastes SSH bandwidth and CPU on idle remote servers; on-demand polling while visible keeps remote overhead near zero. |
-| Adding a third-party Go system-metrics library | Adds transitive dependencies and `THIRD_PARTY_NOTICES.md` maintenance for metrics already cleanly available in `/proc`, `/sys`, `sysctl`, `vm_stat`, `ioreg`, and `nvidia-smi`. |
-| Coupling `Sidebar.tsx` directly to the monitor plugin | Breaks plugin isolation and risks import cycles; listening on `[data-machine-head]` in the plugin's own overlay unmounts cleanly when the plugin is disabled. |
+| Always-on streaming from every machine | Wastes ssh bandwidth and CPU on idle machines; polling while visible keeps the cost near zero. |
+| A third-party metrics library | More dependencies and notices for numbers `/proc`, `/sys` and the macOS tools already give. |
+| `Sidebar.tsx` importing the plugin | Breaks plugin isolation and risks import cycles; the plugin's own overlay unmounts cleanly when disabled. |
 
 ## Failure modes
 
-- Machine offline or disconnected: metrics and process actions fail with
-  `offline` (409); the dashboard card and Task Manager show the machine's
-  status without breaking other machines.
-- Missing `nvidia-smi` or unsupported GPU driver: GPU probing fails silently
-  and reports an empty GPU list while CPU, memory, network and disk metrics
-  continue normally.
-- Process exits before signaling: `syscall.Kill` returns `ESRCH`, mapped to
-  `not_found` (404) and displayed as a translated toast.
-- Plugin disabled: routes return `404 plugin_disabled`, the status bar item,
-  ⌘+hover overlay and Task Manager rail button unmount.
+- Machine offline: `offline` (409); other machines are unaffected.
+- No `nvidia-smi` or an unsupported driver: an empty GPU list; the other metrics continue.
+- Process gone before a signal: `ESRCH` becomes `not_found` (404), shown as a toast.
+- Plugin disabled: routes answer `404 plugin_disabled`; the status item, overlay and panel unmount.
 
 ## Security
 
-Process signaling (`POST /api/m/{id}/p/monitor/signal`) is a mutating route:
-refused in `--read-only`, subject to the core's Host/Origin and proxy-secret
-guards, audited as `monitor.signal` with `pid` and `signal`, limited to an
-allowlist of six POSIX signals (`TERM`, `KILL`, `INT`, `HUP`, `STOP`, `CONT`),
-invoked via `syscall.Kill` with no shell, and refuses `pid <= 1` and the
-agent's own PID. Metrics and process reads run without shells and truncate
-command lines to 512 bytes. See [SECURITY.md](../../SECURITY.md).
+`POST /api/m/{id}/p/monitor/signal` is a mutating route: refused in `--read-only`, behind the hub's Host/Origin and proxy-secret guards, audited as `monitor.signal` with `pid` and `signal`. The agent allows only six signals, uses no shell, and refuses `pid <= 1` and its own pid. Metric and process reads never go through a shell (commands are run directly). See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-- `internal/agent/plugin/monitor/monitor_test.go`: Linux `/proc` parsers,
-  `nvidia-smi` multi-GPU and compute-app CSV parsers, macOS `vm_stat`/
-  `sysctl`/`top`/`ioreg`/`df`/`ps` parsers, live host collection, and signal
-  guardrails (`pid <= 1`, self PID, invalid signal, live child `SIGTERM`).
-- `internal/plugins/monitor/monitor_test.go`: route patterns, mutating/audit
-  flags, and `invalid_pid` rejection.
-- `web/src/__tests__/monitor.test.ts`: formatters, cycle-safe process tree
-  building, subtree sorting, search with dimmed ancestor preservation, status
-  bar upward popover, left-sidebar ⌘+hover overlay, and Task Manager tree/
-  flat/search/signal interactions.
+- `backend/features/monitor/machine.test.ts` and `machine/parsers.test.ts`: the Linux and macOS parsers, live collection, signal guards.
+- `backend/features/monitor/machine/sensors.test.ts`: hwmon and thermal zone trees in a temporary directory (labels, thresholds, duplicate chips, stopped fans, error values, the fallback, the bound), the 1 s budget against a hung scan, the macOS battery's `ioreg` output.
+- `backend/features/monitor/monitor.test.ts`: routes, mutating/audit flags, `invalid_pid` (`signal params`).
+- `web/src/__tests__/monitor.test.ts`: formatting, tree building and sorting, temperature levels and the sensors section, search, the status item, the ⌘+hover overlay, Task Manager interactions.

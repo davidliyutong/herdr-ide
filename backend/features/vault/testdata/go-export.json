@@ -1,0 +1,14 @@
+{
+  "format": "veldr-vault-export",
+  "version": 1,
+  "kdf": {
+    "alg": "argon2id",
+    "salt": "pITHQi7ALzqC1U6aCO1T0A==",
+    "time": 1,
+    "memory": 8192,
+    "threads": 2
+  },
+  "cipher": "aes-256-gcm",
+  "nonce": "8ixy8zTyqWcuXxip",
+  "ciphertext": "j8nDu62owuBbDcOp8bEUahUHHar5ymNiFa+nx30vGu+ju637jGL44G+zEslxkm4Xe/5zoB/IgO6cbCYURELyEWfi28tvUrVi0JQMT7VNI+gkcXAQaNb9YW4JXzldK27vmnq3p8YDr40EM7f3B76WbnwWIVAWt4TF7Y6K90IBkQz7LL4i/jpNyX+hTzGw6CxZr6g8wEkpeDQg0v7U0WVOWdHpwnJxYll9bnQLojy2B9NMe3IVy5JhiDB7SYk3ucDgFlBhuc2iXl28j7fKRkKzQfkWdo9QR/Vpm6sJekQWGkHeoRI9cYHiLzYVa7s12yiBvIuM2JNod6CSzHhb3WLdwLcx22XzO1j6HPVMlac9cT87UlJ7YWD4MYRoHQDUPI+dN5y0i8u6eYZn09E8XIRzJEomF3LkJKSDq6GDXiN//H7muPh1u3tB85C6R0hK2tIXdC/5PWdmXjDaK9xomjMaAXnR36oTMuJiSWY+MwfvCEQDZ9y3ebITVeGdy/Giz1foNT0KxY4vhrBcyTuP3Wp28mqQLxfNwzorQDG3kEdr+CiiIimjrPz+jUIA88uzELDZ3BKb5MZSBE9wN0ZFrCMItma85fd93iY0m/jyd44stun1rF6sWy00ILCJIslXJ9QAiCzXdbWeH6mMgtEA76rZL8C33HJFNAfFZk5w0c86+3u5AW5RQNvrc3IAGzuG6e3BpQGJnsSW6bZYTR1+dxXCZzUU"
+}

@@ -32,7 +32,7 @@ export function StrengthBar({ value }: { value: string }) {
   );
 }
 
-/** A passphrase's length in characters (as the core counts them). */
+/** A passphrase's length in characters (as the hub counts them). */
 export function chars(s: string): number {
   return [...s].length;
 }

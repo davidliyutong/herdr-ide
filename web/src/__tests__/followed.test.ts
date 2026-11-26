@@ -9,7 +9,7 @@ import { useStore } from '../state/store';
 import { terms } from '../state/terms';
 import { FOLLOWED_KEY, rememberFollowed } from '../state/followed';
 import type { MachineState } from '../lib/machine';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 
 const machine = (id: string, status: string) => ({ id, label: id, kind: 'ssh', status }) as unknown as MachineState;
 const saved = () => JSON.parse(storage.get(FOLLOWED_KEY) ?? '[]') as string[];
@@ -17,10 +17,10 @@ const saved = () => JSON.parse(storage.get(FOLLOWED_KEY) ?? '[]') as string[];
 describe('followed machines', () => {
   beforeEach(() => {
     storage.remove(FOLLOWED_KEY);
-    const core = new FakeCore();
-    core.machine('a', [], undefined);
-    core.machine('b', [], undefined);
-    core.install();
+    const hub = new FakeHub();
+    hub.machine('a', [], undefined);
+    hub.machine('b', [], undefined);
+    hub.install();
     useStore.getState().setMachines([]);
   });
 

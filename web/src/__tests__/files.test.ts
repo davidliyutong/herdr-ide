@@ -2,7 +2,7 @@
 //
 // The file explorer's panel (plugins/files): the tree's rows, its root
 // following the focused terminal, expanding, the filter, the keyboard, the
-// context menu's changes (the core's routes they call), polling, and
+// context menu's changes (the hub's routes they call), polling, and
 // read-only mode.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,12 +16,14 @@ import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import { useMenu, isItem, type MenuItem } from '../contextMenu';
 import { useDialog } from '../dialog';
+import { isRenameKey, renameKeyHint } from '../rowKeys';
 import { t } from '../i18n';
 import { FilesPanel, followedDir } from '../plugins/files/FilesPanel';
 import {
   crumbs,
   excluded,
   fromSettings,
+  getScrollMemory,
   poll,
   polledDirs,
   relativePath,
@@ -46,7 +48,7 @@ import { definePlugins } from '../plugins/registry';
 import { filesPlugin } from '../plugins/files';
 import { MAX_BACKOFF_MS, startPolling } from '../plugins/files/poller';
 import { decorationsOf, registerFileDecorations } from '../plugins/files/decorations';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import type { RemoteStat } from '../lib/files';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -68,6 +70,17 @@ let tree: Record<string, RemoteStat[]>;
 let mtimes: Record<string, number>;
 /** Directories whose listing fails. */
 let failList: Set<string>;
+/** Directories whose listing waits for the promise (hold). */
+let held = new Map<string, Promise<void>>();
+/** Holds directory p's listings until the function returned is called. */
+const hold = (p: string): (() => void) => {
+  let release!: () => void;
+  held.set(p, new Promise((r) => (release = r)));
+  return () => {
+    held.delete(p);
+    release();
+  };
+};
 /** Answers of the plugin's changes, by action, instead of {paths: []}. */
 let answers: Record<string, (body: unknown) => { status: number; json: unknown }>;
 const calls: Array<{ method: string; url: string; body?: unknown }> = [];
@@ -81,6 +94,8 @@ function stubFetch() {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } });
     if (url.pathname === '/api/m/m/list') {
       const p = url.searchParams.get('path')!;
+      const gate = held.get(p);
+      if (gate) await gate;
       if (failList.has(p)) return json({ error: 'input/output error' }, 404);
       if (!tree[p]) return json({ error: 'no such directory' }, 404);
       // An empty directory's entries came as null.
@@ -319,7 +334,7 @@ describe('file tree rows', () => {
 describe('FilesPanel', () => {
   let host: HTMLDivElement;
   let root: Root;
-  let core: FakeCore;
+  let hub: FakeHub;
   const rows = () => [...host.querySelectorAll<HTMLElement>('.files-row')].map((r) => r.dataset.path ?? '(new)');
   const row = (p: string) => host.querySelector<HTMLElement>(`.files-row[data-path="${p}"]`)!;
   const treeEl = () => host.querySelector<HTMLElement>('.files-tree')!;
@@ -328,6 +343,44 @@ describe('FilesPanel', () => {
       treeEl().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, ...o }));
     });
   const flush = () => act(async () => settle());
+  /** Opens a tab of its own for a new terminal in cwd. */
+  const openTab = async (id: string, cwd: string) => {
+    const terminals = hub.machines.get('m')!.terminals;
+    terminals.push(FakeHub.term(id, { cwd }));
+    await act(async () => {
+      hub.push({ t: 'snapshot', m: 'm', terminals });
+      hub.model.mutate('m', (l) => {
+        const ws = l.workspaces[0];
+        return { ...l, workspaces: [{ ...ws, tabs: [...ws.tabs, { root: { terminal: id }, focused: id }], selected: ws.tabs.length }] };
+      });
+    });
+    await flush();
+  };
+  /** Makes el scroll as a browser does, clientHeight high: its scroll
+   * position stays within its rows (layout clamps it when they get shorter,
+   * before a read of it returns), and a scroll event follows each move. */
+  const scrollLikeBrowser = (el: HTMLElement, clientHeight: number) => {
+    let top = 0;
+    const move = (v: number) => {
+      const height = parseFloat(el.querySelector<HTMLElement>('.files-rows')!.style.height) || 0;
+      const was = top;
+      top = Math.max(0, Math.min(v, height - clientHeight));
+      if (top !== was) setTimeout(() => el.dispatchEvent(new Event('scroll')));
+    };
+    Object.defineProperty(el, 'clientHeight', { configurable: true, value: clientHeight });
+    Object.defineProperty(el, 'scrollTop', {
+      configurable: true,
+      get: () => {
+        move(top);
+        return top;
+      },
+      set: move,
+    });
+    // Layout happens whether or not anything reads the position.
+    new MutationObserver(() => move(top)).observe(el, { subtree: true, childList: true, attributes: true });
+  };
+  /** The height of a row of the tree. */
+  const rowHeight = () => parseFloat(host.querySelector<HTMLElement>('.files-rows')!.style.height) / treeRows(useTree.getState()).length;
   const menuItem = (label: string) => useMenu.getState().menu?.entries.find((e): e is MenuItem => isItem(e) && e.label === label);
   const confirm = async (ok: boolean) => {
     const req = useDialog.getState().current;
@@ -344,21 +397,22 @@ describe('FilesPanel', () => {
     };
     mtimes = {};
     failList = new Set();
+    held = new Map();
     answers = {};
     calls.length = 0;
     stubFetch();
-    core = new FakeCore();
-    core.machine('m', [FakeCore.term('p1', { cwd: '/home/u/src' })], {
+    hub = new FakeHub();
+    hub.machine('m', [FakeHub.term('p1', { cwd: '/home/u/src' })], {
       version: 2,
       workspaces: [{ id: 'w1w1w1w1', name: 'one', cwd: '', tabs: [{ root: { terminal: 'p1' }, focused: 'p1' }], selected: 0 }],
       selected: 0,
     });
-    core.install();
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([{ id: 'm', label: 'm', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
     s.selectMachine('m');
-    core.model.subscribe('m');
+    hub.model.subscribe('m');
     await settle();
     useTree.setState({
       m: undefined,
@@ -447,7 +501,7 @@ describe('FilesPanel', () => {
     expect(changes()[1]).toEqual(['remove', { paths: ['/home/u/src/main.go'] }]);
   });
 
-  it("offers the context menu's changes, which call the core", async () => {
+  it("offers the context menu's changes, which call the hub", async () => {
     await act(async () => {
       row('/home/u/src/main.go').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1, clientY: 1 }));
     });
@@ -477,7 +531,7 @@ describe('FilesPanel', () => {
     });
     await act(async () => menuItem(t('files.cut'))!.run!());
     await key('ArrowUp');
-    await key('v', { metaKey: true, ctrlKey: true });
+    await act(async () => treeEl().dispatchEvent(new Event('paste', { bubbles: true, cancelable: true })));
     await flush();
     expect(changes()[2]).toEqual(['move', { paths: ['/home/u/src/main.go'], dir: '/home/u/src/lib' }]);
     expect(useTree.getState().clipboard).toBeUndefined();
@@ -772,7 +826,10 @@ describe('FilesPanel', () => {
     await key('End');
     await key('c', { metaKey: true, ctrlKey: true });
     useTree.setState({ cursor: '/elsewhere/gone', selection: [] });
-    await key('v', { metaKey: true, ctrlKey: true });
+    const kev = new KeyboardEvent('keydown', { key: 'v', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true });
+    await act(async () => treeEl().dispatchEvent(kev));
+    expect(kev.defaultPrevented).toBe(false);
+    await act(async () => treeEl().dispatchEvent(new Event('paste', { bubbles: true, cancelable: true })));
     await flush();
     expect(changes()).toEqual([['copy', { paths: ['/home/u/src/main.go'], dir: '/home/u/src' }]]);
   });
@@ -811,15 +868,219 @@ describe('FilesPanel', () => {
     // The move fails: the clipboard stays.
     answers.move = () => ({ status: 400, json: { error: 'failed', message: 'cross-device' } });
     await act(async () => row('/home/u/src/lib').click());
-    await key('v', { metaKey: true, ctrlKey: true });
+    await act(async () => treeEl().dispatchEvent(new Event('paste', { bubbles: true, cancelable: true })));
     await flush();
     expect(changes()).toEqual([['move', { paths: [main], dir: '/home/u/src/lib' }]]);
     expect(useTree.getState().clipboard).toEqual({ m: 'm', paths: [main], cut: true });
     // Some fail: those stay.
     useTree.setState({ clipboard: { m: 'm', paths: [main, '/home/u/src/.hidden'], cut: true } });
     answers.move = () => ({ status: 200, json: { paths: ['/home/u/src/lib/main.go'], failed: { '/home/u/src/.hidden': 'exists' } } });
-    await key('v', { metaKey: true, ctrlKey: true });
+    await act(async () => treeEl().dispatchEvent(new Event('paste', { bubbles: true, cancelable: true })));
     await flush();
     expect(useTree.getState().clipboard).toEqual({ m: 'm', paths: ['/home/u/src/.hidden'], cut: true });
+  });
+
+  it('auto-reveals, highlights and scrolls to the active editor file within the root', async () => {
+    tree['/home/u/src/lib/deep'] = [f('target.ts')];
+    tree['/home/u/src/lib'] = [d('deep'), f('a.go'), f('b.go')];
+    const items = Array.from({ length: 30 }, (_, i) => f(`z${i}.txt`));
+    tree['/home/u/src'] = [d('lib'), ...items, f('main.go')];
+    await act(async () => showRoot('m', '/home/u'));
+    await act(async () => showRoot('m', '/home/u/src'));
+    await flush();
+
+    const el = treeEl();
+    Object.defineProperty(el, 'clientHeight', { value: 110, configurable: true });
+
+    // Switch to a tab showing a nested editor file: parent dirs expand, row is highlighted & scrolled into view.
+    hub.model.mutate('m', (l) => ({
+      ...l,
+      workspaces: [
+        {
+          ...l.workspaces[0],
+          tabs: [
+            l.workspaces[0].tabs[0],
+            { root: { view: { id: 'ed1', plugin: 'files', kind: 'editor', path: '/home/u/src/lib/deep/target.ts' } }, focused: 'view:ed1' },
+            { root: { view: { id: 'ed2', plugin: 'files', kind: 'editor', path: '/home/u/src/main.go' } }, focused: 'view:ed2' },
+            { root: { view: { id: 'ed3', plugin: 'files', kind: 'editor', path: '/etc/hosts' } }, focused: 'view:ed3' },
+          ],
+          selected: 1,
+        },
+      ],
+    }));
+    await flush();
+    await flush();
+
+    expect(useTree.getState().expanded['/home/u/src/lib']).toBe(true);
+    expect(useTree.getState().expanded['/home/u/src/lib/deep']).toBe(true);
+    expect(useTree.getState().selection).toEqual(['/home/u/src/lib/deep/target.ts']);
+    expect(row('/home/u/src/lib/deep/target.ts').dataset.active).toBe('true');
+    expect(row('/home/u/src/lib/deep/target.ts').className).toContain('active');
+
+    // Switch to another editor tab further down the list: scrolls into view and moves highlight.
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 2));
+    await flush();
+    expect(useTree.getState().selection).toEqual(['/home/u/src/main.go']);
+    expect(row('/home/u/src/main.go').dataset.active).toBe('true');
+    expect(el.scrollTop).toBeGreaterThan(0);
+
+    // An editor file outside the current root does not hijack the root.
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 3));
+    await flush();
+    expect(useTree.getState().root).toBe('/home/u/src');
+    expect(useTree.getState().follow).toBe(true);
+
+    // If the user later navigates root into an ancestor of that active file, it auto-reveals.
+    tree['/etc'] = [f('hosts')];
+    await act(async () => showRoot('m', '/etc'));
+    await flush();
+    expect(useTree.getState().selection).toEqual(['/etc/hosts']);
+    expect(row('/etc/hosts').dataset.active).toBe('true');
+  });
+
+  it('persists and restores File Explorer UI state across tab and panel switches', async () => {
+    const many = Array.from({ length: 40 }, (_, i) => f(`f${String(i).padStart(2, '0')}.txt`));
+    tree['/home/u/src'] = [d('lib'), ...many, f('main.go')];
+    tree['/home/u/other'] = [f('o.txt')];
+    await act(async () => showRoot('m', '/home/u'));
+    await act(async () => showRoot('m', '/home/u/src'));
+    await flush();
+
+    await act(async () => row('/home/u/src/lib').click());
+    await flush();
+    await act(async () => setFilter('f2'));
+    await key('End');
+    const selectedBefore = useTree.getState().selection;
+    expect(selectedBefore).toEqual(['/home/u/src/f29.txt']);
+
+    // Simulate user scrolling in the tree.
+    const el = treeEl();
+    Object.defineProperty(el, 'scrollHeight', { value: 2000, configurable: true });
+    el.scrollTop = 180;
+    await act(async () => el.dispatchEvent(new Event('scroll', { bubbles: true })));
+
+    // 1) Unmount and remount on the same root (e.g. panel switch or pane-mounted explorer tab switch).
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await act(async () => root.render(createElement(FilesPanel)));
+    await flush();
+    expect(useTree.getState()).toMatchObject({
+      expanded: { '/home/u/src/lib': true },
+      selection: selectedBefore,
+      cursor: '/home/u/src/f29.txt',
+      filter: 'f2',
+    });
+    expect(treeEl().scrollTop).toBe(180);
+
+    // 2) Switch to a terminal tab in a different directory, then switch back to the first tab.
+    await openTab('p2', '/home/u/other');
+    expect(useTree.getState().root).toBe('/home/u/other');
+    expect(useTree.getState().selection).toEqual([]);
+    expect(useTree.getState().filter).toBe('');
+
+    // Switch back to Tab 0 (/home/u/src): expanded dirs, selection, cursor, filter and scroll are restored.
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 0));
+    await flush();
+    expect(useTree.getState()).toMatchObject({
+      root: '/home/u/src',
+      expanded: { '/home/u/src/lib': true },
+      selection: selectedBefore,
+      cursor: '/home/u/src/f29.txt',
+      filter: 'f2',
+    });
+    expect(treeEl().scrollTop).toBe(180);
+  });
+
+  it('remembers where the user scrolled a directory, not where the browser clamped it under the next one', async () => {
+    tree['/home/u/src'] = Array.from({ length: 80 }, (_, i) => f(`f${String(i).padStart(2, '0')}.txt`));
+    tree['/home/u/other'] = Array.from({ length: 20 }, (_, i) => f(`o${String(i).padStart(2, '0')}.txt`));
+    await act(async () => showRoot('m', '/home/u'));
+    await act(async () => showRoot('m', '/home/u/src'));
+    await flush();
+    const el = treeEl();
+    scrollLikeBrowser(el, 200);
+
+    el.scrollTop = 700;
+    await flush();
+    expect(el.scrollTop).toBe(700);
+
+    // Another tab's terminal is in a shorter directory: its rows cannot
+    // reach 700, so the browser clamps the position under them.
+    await openTab('p2', '/home/u/other');
+    expect(useTree.getState().root).toBe('/home/u/other');
+    expect(treeEl()).toBe(el);
+    expect(el.scrollTop).toBe(0);
+    el.scrollTop = 150;
+    await flush();
+
+    // Back, the directory's listing comes after the browser clamped the
+    // other's 150 to 0 under its missing rows (and told so with a scroll
+    // event); once listed, it is where the user left it.
+    let release = hold('/home/u/src');
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 0));
+    await flush();
+    expect(useTree.getState().root).toBe('/home/u/src');
+    expect(el.scrollTop).toBe(0);
+    release();
+    await flush();
+    expect(el.scrollTop).toBe(700);
+    release = hold('/home/u/other');
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 1));
+    await flush();
+    expect(el.scrollTop).toBe(0);
+    release();
+    await flush();
+    expect(el.scrollTop).toBe(150);
+  });
+
+  it('restores the scroll position once the rows reach it, and does not take the clamped restore for the user’s', async () => {
+    tree['/home/u/src'] = [d('lib'), ...Array.from({ length: 30 }, (_, i) => f(`f${String(i).padStart(2, '0')}.txt`))];
+    tree['/home/u/src/lib'] = Array.from({ length: 50 }, (_, i) => f(`l${String(i).padStart(2, '0')}.txt`));
+    tree['/home/u/other'] = [f('o.txt')];
+    await act(async () => showRoot('m', '/home/u'));
+    await act(async () => showRoot('m', '/home/u/src'));
+    await flush();
+    await act(async () => row('/home/u/src/lib').click());
+    await flush();
+    const el = treeEl();
+    scrollLikeBrowser(el, 200);
+    const h = rowHeight();
+    // Below what the directory's own 31 rows can show in a view 200 high.
+    const top = 29 * h;
+    el.scrollTop = top;
+    await flush();
+    expect(el.scrollTop).toBe(top);
+
+    await openTab('p2', '/home/u/other');
+    // Back, with lib's listing late: the directory's rows alone do not
+    // reach the position; the tree waits for lib's.
+    const release = hold('/home/u/src/lib');
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 0));
+    await flush();
+    expect(useTree.getState().dirs['/home/u/src']?.entries).toHaveLength(31);
+    expect(el.scrollTop).toBeLessThan(top);
+    release();
+    await flush();
+    expect(el.scrollTop).toBe(top);
+
+    // lib got shorter meanwhile: the restore stops at the end of the rows,
+    // and the directory still remembers where the user had it.
+    tree['/home/u/src/lib'] = [f('a.go'), f('b.go')];
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 1));
+    await flush();
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 0));
+    await flush();
+    expect(el.scrollTop).toBe(33 * h - 200);
+    expect(getScrollMemory('m', '/home/u/src')).toBe(top);
+  });
+
+  it('uses platform-native rename keys: Enter on macOS and F2 on Windows/Linux', () => {
+    expect(renameKeyHint(true)).toBe('↩');
+    expect(renameKeyHint(false)).toBe('F2');
+    expect(isRenameKey({ key: 'Enter' }, true)).toBe(true);
+    expect(isRenameKey({ key: 'F2' }, true)).toBe(false);
+    expect(isRenameKey({ key: 'F2' }, false)).toBe(true);
+    expect(isRenameKey({ key: 'Enter' }, false)).toBe(false);
+    expect(isRenameKey({ key: 'Enter', metaKey: true }, true)).toBe(false);
   });
 });

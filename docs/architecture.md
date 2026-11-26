@@ -1,317 +1,151 @@
 # Architecture
 
 ```
-browser (React, wasm + WebGL)  ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
-desktop app (Electron shell)                            ├─ machines: registry + connection state machine
-                                                        ├─ settings, keybindings (files on the core host)
-                                                        ├─ server: event channel, terminal protocol, files, code-server proxy, bridge hub
-                                                        ├─ gui: virtual displays per machine, window list, frame routing
-                                                        └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide agent`)
+browser (React, wasm + WebGL)  ──WebSocket + HTTP──▶  hub (TypeScript on Bun, `veldr`; `serve` on CLI, `desktop` over stdio in the desktop app)
+desktop app (Electron shell) ──stdio mux, no TCP───▶  ├─ kernel: guards, event channel, machines (registry + connection state machine)
+                                                        ├─ settings, keybindings (files on the hub host)
+                                                        ├─ features: terminals, files, VS Code proxy and bridge, program windows, plugins
+                                                        └─ one ssh session per machine ──yamux──▶ agent (the machine side, served by `veldr node`)
                                                                                                     ├─ herdr-core in a session of its own (raw pipe to its API socket)
-                                                                                                    ├─ agent detection in its terminals
+                                                                                                    ├─ agent detection in its terminals, with the agents' sessions
                                                                                                     ├─ files (stat/list/range read/upload/zip)
                                                                                                     ├─ code-server (unix socket only)
                                                                                                     ├─ Xvfb or Xwayland + window manager (programs' windows)
                                                                                                     ├─ plugins' machine sides (op plugin)
+                                                                                                    ├─ chat.sock ◀── chat host (`veldr chat-host`, a hidden terminal of herdr-core) ──▶ coding agents headless
                                                                                                     ├─ bridge.sock ◀── VS Code bridge extension
                                                                                                     └─ vault.sock ◀── the vault's MCP server (`<slug>-mcp`) ◀──stdio── coding agents' CLIs
 ```
 
-The local machine's agent runs inside the core (an in-process socket pair
-instead of ssh), so both paths run the same code. The agent is built for
-Linux and macOS only: a core on Windows (the desktop app's) has no local
-machine, lists it with the code `local_unsupported`, and reaches SSH
-machines only ([02](features/02-multi-machine-transport.md)).
+Each machine's agent sessions are served by its node (`veldr node`), a process of its own listening on a socket in the instance's runtime directory on that host (`backend/shared/host/hostdirs.ts`; a home several hosts share keeps each host's sockets, locks and executables apart, [40](features/40-shared-homes.md)): the hub reaches the local machine's node through that socket, a remote machine's over ssh with `node dial`, so both paths run the same code ([39](features/39-nodes.md)). The agent builds for Linux and macOS only. A hub on Windows (the desktop app's) lists its local machine with the code `local_unsupported` and reaches SSH machines only ([02](features/02-multi-machine-transport.md)).
+
+The node starts separate in-process workers for terminal history and the AI usage cost cache. The hub uses workers for usage history, the vault's access log and startup cleanup. Calls to the shared databases run on those threads while the node and hub serve their streams ([38](features/38-sqlite-state.md)).
+
+## Code map
+
+The hub is TypeScript under `backend/` (its [README](../backend/README.md) has the layers and their rules), built with Bun into one executable per platform, which is the hub and the TypeScript machine side (`backend/machine`, `backend/hosts/machine`, the features' `machine.ts`) of its platform (the machine build): machines download their platform's from the hub's release, checked against its `SHA256SUMS`, or the hub uploads it ([42](features/42-typescript-backend.md)). A node of this build takes over from a node of an earlier release still running on a machine.
 
 | Directory | Role |
 | --- | --- |
-| `cmd/herdr-ide` | The one entry point (`main.go`): `mcp` (the vault's MCP server, also run by the name `<slug>-mcp`) and `version`; the core's commands `serve` and `fetch-assets` with its flags (`serve.go`) and the local machine's in-process agent (`local_unix.go`; `local_windows.go` dials none); a machine's commands `agent` (the agent over stdio) and `gui-keep` (`machine_unix.go`, `//go:build unix`). Builds for Linux, macOS and Windows. With the tag `machine` the core's files are left out (`machine_only.go` stands in): the build the core embeds for every agent platform and uploads to machines, so it carries no server, no UI and no embedded payloads. |
-| `internal/brand` | Product names; the only place they are defined in Go. |
-| `internal/agentproto` | Stream protocol shared by core and agent, and the yamux configuration of both ends (`yamux.go`). |
-| `internal/agent` | Agent: the terminal core, agent detection, files, code-server supervision, virtual displays, the bridge and vault listeners and the MCP link, housekeeping. Every file is `//go:build unix` (unix sockets with peer checks, process groups, Xvfb), so code the core runs on Windows does not import it. |
-| `internal/agent/detect` | Which coding agent a terminal's foreground process is and its state from the screen, by herdr's method and manifests (embedded, Apache-2.0), with the state machine for debouncing and done ([25](features/25-agent-detection.md)). |
-| `internal/transport` | yamux sessions: in-process for the local machine (`local.go`, unix), ssh stdio for others; agent upload; the ssh control directory (`sys_unix.go`: private, under `/tmp`; `sys_windows.go`: none, since Win32-OpenSSH has no ControlMaster, and ssh started without a console window). |
-| `internal/sshconfig` | The Host aliases of the core host's OpenSSH configuration (`~/.ssh/config` and its includes) with their HostName and User, read with bounds for the Add Machine dialog ([02](features/02-multi-machine-transport.md)). |
-| `internal/machines` | The core's machines (`Registry`: SSH machines in `machines[-<instance>].json`, the SSH machines herdr saved imported once when that file does not exist; entries and fields it does not use are written back as they were), added, removed, renamed, enabled and disabled at runtime; the connection state machine; the ssh target rule (`ValidTarget`; a stored machine whose target fails is listed with `invalid_target` and never dialed); the local machine of a core on Windows, listed with `local_unsupported` and never dialed (`LocalSupported`). |
-| `internal/hc` | Client of herdr-core's API (protocol generation 1): JSON-RPC calls, attached terminals as raw byte streams with credit, event subscriptions. |
-| `internal/hcdist` | herdr-core release embedded for machines: version, upstream archive names and SHA-256 digests ([21](features/21-terminal-core.md)). |
-| `internal/checksum` | SHA-256 of files, shared by the code-server downloads. |
-| `internal/codeserver` | code-server provisioning (artifacts, checksums, install modes, start/stop). |
-| `internal/settings` | The settings system: typed definitions registered by packages, flags, the hand-editable settings file (watched, migrated), layered values per machine ([13](features/13-settings-and-appearance.md)). |
-| `internal/keybindings` | Commands, default keys per platform, the user's keybindings file, the bindings in effect and their conflicts; the key syntax shared with the clients. |
-| `internal/uisettings` | The user interfaces' settings (appearance, layout, terminal, colors, notifications); `tokens.go` is generated from the design tokens. |
-| `internal/registry` | What the core registers: the setting modules and the commands (used by the core and `scripts/registry`). |
-| `internal/userfile` | Atomic writes and change detection of the hand-editable files; the configuration directory made private on Linux and macOS (`private_unix.go`; on Windows its access control list keeps it the user's). |
-| `internal/plugin` | The core's side of plugins: their routes below `/api/p/<id>` and `/api/m/{id}/p/<id>` (guarded as the core's own; changes audited once their handler returned, with what they acted on and how they ended), `/ws` messages, switches (`plugins.<id>.enabled`) and the calls to their machine sides ([27](features/27-plugins.md)). |
-| `internal/agent/plugin` | The machine side of plugins: handlers of the agent's `plugin` op, registered per plugin; a handler's panic fails its action, not the agent. |
-| `internal/plugins/files`, `internal/agent/plugin/files` | The file explorer plugin: its routes below `/api/m/{id}/p/files/` and its actions on machines (`mkdir`, `mkdirs`, `create`, `rename`, `move`, `copy`, `trash`, `remove`, `write` with a precondition and `upload`, both writing a file that is there in place, as VS Code does, `stat` with a bound on stats running at once, `reveal`, which shows a path in the file manager of the core's host for its own machine and a client on that host only), refusing in its changes the root, the home directory and what holds it, and the agent's data directory, by file identity ([28](features/28-file-explorer.md)). |
-| `internal/plugins/git`, `internal/agent/plugin/git` | The Git plugin: its routes below `/api/m/{id}/p/git/` (reads GET, changes POST, audited as `git.<action>`) and its actions on machines, each the `git` executable with an argument vector built in the agent (no shell, paths after `--` and literal, revisions and names checked, no credential prompts, timeouts that kill the process group) ([31](features/31-git.md)). |
-| `internal/plugins/monitor`, `internal/agent/plugin/monitor` | The System Monitor & Task Manager plugin: its routes below `/api/m/{id}/p/monitor/` (`metrics` and `processes` GET, `signal` POST, audited as `monitor.signal` and refused in read-only mode) and its actions on machines reading `/proc`, `/sys`, `nvidia-smi`, `sysctl`, `vm_stat`, `ioreg` and `ps` directly without shells, plus allowlisted POSIX signaling (`syscall.Kill`, refusing PID ≤ 1 and the agent's own PID) ([34](features/34-system-monitor.md)). |
-| `internal/plugins/browser`, `internal/agent/plugin/browser`, `internal/loopback` | The browser plugin's port forwards ([32](features/32-browser-and-ports.md)): a listener of the core on the core host's loopback per forward (both loopback addresses), each connection one stream to the agent's `dial` action, which connects to the port on the machine's own loopback; the machine's listening ports; idle forwards ended. `internal/loopback` takes the other loopback address of a listener's port, which the core's own listener does too. |
-| `internal/vault` | The variable vault's store on the core host: values encrypted one by one (AES-256-GCM, the name, machines and inject-only flag as additional data) in `vault[-<instance>].json`, the master key derived from the passphrase (Argon2id) and kept in memory only (also while suspended: locked with the key held), and the encrypted export files (a versioned envelope, Argon2id and AES-256-GCM under a passphrase of their own) ([30](features/30-variable-vault.md)). Builds for Windows too. |
-| `internal/plugins/vault` | The vault plugin's core side: its routes behind the gate (sessions opened with the passphrase or an authenticator's proof, `X-Vault-Session`), the key's hold after the passphrase, the MCP servers' requests (op `vault`, a `plugin.Streamer`), approvals and exempt apps, export and import, and the access log (`vault[-<instance>]-access.jsonl`, written before a value leaves). |
-| `internal/vaultmcp` | The vault's MCP server (the `mcp` command of the core and the agent): JSON-RPC over stdio, the tools `list_variables`, `get_variable`, `run_with_env`. |
-| `internal/usage` | What AI subscriptions have left on one machine: the CLIs' credentials read only (Kimi Code's sign-in renewed under its own lock), the providers' usage endpoints, Antigravity's local language server, the logs' token cost at the prices of `pricing.json` with an incremental cache (OpenCode's and Antigravity's SQLite databases read by a reader of the file format of its own, without a lock); portable, run by the agent ([29](features/29-ai-usage.md)). |
-| `internal/agent/plugin/usage` | The AI usage plugin's machine side: actions `limits`, `cost` and `setDeepseekKey` of the `plugin` op. |
-| `internal/plugins/usage` | The AI usage plugin's core side: its settings, a scheduler that asks the machines and merges the accounts several share, history for pace, the alerts (once per window's period), the providers' status pages, its routes and `/ws` messages. |
-| `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
-| `internal/jpegstrip` | JPEG encoding of a window capture in independent row groups, encoded in parallel (from Go's `image/jpeg`, BSD). |
-| `internal/server` | HTTP/WS front: guards, the event channel, terminal streams, files, proxy, bridge, audit. |
-| `internal/perf` | What the core's own process uses (processor time, memory, goroutines, uptime, processors), answered by `GET /api/perf` for the settings' Performance page ([13](features/13-settings-and-appearance.md)). |
-| `internal/embedded` | Build artifacts compiled into the core (agents, herdr-core, the video encoder, bridge VSIX). |
-| `web` | Browser UI (Vite, React, zustand): the plugins' web sides (`src/plugins`, the right sidebar `src/components/RightBar.tsx`, [27](features/27-plugins.md); the components panels share: searchable dropdowns `src/components/Picker.tsx`, tree rows, selection and sections `src/components/tree`, file-type icons `src/fileIcons.tsx`; Monaco loaded on first use for plugins' editors, `src/plugins/monaco.ts`, [28](features/28-file-explorer.md)); the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document, whose panes are terminals, VS Code and previews; `src/state/terms.ts`: the machines' terminals and layouts; `src/restore.ts`: the layout's terminals and coding agents brought back after a terminal core started again, [33](features/33-workspace-restore.md); `src/keptPanes.ts`: the terminals shown last kept attached while hidden, as many as `performance.keptTerminals` says; `src/perf.ts`: what the page, the core and the desktop app's processes use, for the settings' Performance page, [13](features/13-settings-and-appearance.md); `src/ime.ts`: an input method's keys kept from the page's handlers; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); VS Code panes' iframes in a layer over the panes (`src/codeFrames.ts`, `src/components/CodeLayer.tsx`, [05](features/05-vscode-panes.md)); `web/embed.go` embeds `web/dist`. |
-| `desktop` | Electron shell for macOS, Windows and Linux (`src`: the owned core process, what differs per system (`platform.ts`), the client of its settings and keybindings, the application menu, the main window's preload and policy) and electron-builder config: macOS DMG and zip, Windows NSIS setup, Linux AppImage and deb, each wrapping the core built for its system. |
-| `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
-| `scripts` | Build, packaging and check scripts (`build.sh`, which also builds a Windows core; `package.sh`, archives for Linux and macOS; `desktop.sh`, the desktop app of each system; `icons.sh`; `check.sh`, which vets for Linux, macOS and Windows too), the pinned downloads (`fetch-hc`, `fetch-ghostty-vt.sh` for the web UI's emulator, `build-ffmpeg.sh` for the video encoder) and the generators (`tokens`, `registry`). |
-| `design` | Design tokens (`tokens.json`): colors in light and dark, color themes (accents), Git and chart colors, metrics, sizes and the type scale (in rem) and terminal palettes; `scripts/tokens` generates `web/src/tokens.css` and the terminal colors' and color theme setting's defaults (`internal/uisettings/tokens.go`) from them. `generated/registry.json` (`scripts/registry`): setting defaults, commands, default bindings per platform and the translation keys the web UI needs for them. `testdata/layout`: the layout document's test vectors (directional focus, pane and tab drops and VS Code and preview panes included), run by the web UI's tests ([22](features/22-terminal-protocol.md)); `testdata/keys`: the key syntax's vectors, run by the web UI's tests (`parse.json` by Go's too); `testdata/math`: the formulas found in terminal text, run by the web UI's tests ([19](features/19-formulas-in-panes.md)); `testdata/machines`: the ssh target rule's vectors, run by Go and the web UI's tests. |
+| `backend/shared` | What the hub and the machine side share: wire protocols (`proto/`: agentproto, yamux, herdr-core's, the chat host's), libraries (`lib/`: brand names, logging, Go-compatible times and strings), SQLite state (`store/`), the host's directories, ids, loopback and file rules (`host/`), the coding agents' kinds and Claude Code's transcripts mapped to ACP-shaped events (`agents/`, `agents/transcript/`, [35](features/35-agent-native-view.md)). |
+| `backend/kernel` | The hub's machinery: HTTP routing and guards (`http/`: Host/Origin, proxy secret, CSP), `Fail` codes and audit, channels and the pages on `/ws`, machines and their connections (`machines/`: the registry `machines[-<instance>].json`, the connection state machine, the ssh target rule, the transports to the local node and over ssh, the machine builds they install, `transport/builds.ts`, and the TypeScript build's release, its `SHA256SUMS` and archives, `transport/release.ts`), settings and keybindings (`config/`: typed settings, the hand-editable files, the registry written to `spec/generated/registry.json` and `docs/reference.md`, [13](features/13-settings-and-appearance.md)), typed agent actions, the payloads it carries for machines (`payloads.ts`). |
+| `backend/machine` | The TypeScript machine side's machinery (Bun, Linux and macOS): the node and its clients (`node.ts`, `dial.ts`), the agent its sessions share and the hub's ops (`agent.ts`, `fsops.ts`, `hcop.ts`), the dispatch of the `plugin` op, and of the ops a feature serves itself (`detect`, `code-server`), to the features' machine sides (`dispatch.ts`, `feature.ts`: `defineMachine`, and what they see of the sessions: their pipes per socket, streams towards their hubs), the terminal core (`hc.ts`), hidden terminals, housekeeping, the vault's socket and the MCP command's link in `<data>/bin` (`vault.ts`), the coding agents' sessions and their files, which several features read (`agents/`, [35](features/35-agent-native-view.md)), system calls through `bun:ffi` (`sys/`). |
+| `backend/features/<id>` | Everything the product does, one directory per feature: its typed protocol (`protocol.ts`), its hub side (`hub.ts`: routes, channels, services, settings), and its machine side in TypeScript (`machine.ts` and `machine/`, for files, git, search, monitor, browser, history, usage, agents: detection, [25](features/25-agent-detection.md), vscode: code-server and the bridge's socket, chat: the chat host, its adapter interface, the ACP adapter, Codex's and Claude Code's, [37](features/37-agent-chats.md), and program windows with the GUI helper, `scripts/gui-helper`, [14](features/14-gui-windows.md)) ([27](features/27-plugins.md)): `machines`, `terminals` ([22](features/22-terminal-protocol.md)), `files` ([28](features/28-file-explorer.md)), `git` ([31](features/31-git.md)), `search` ([41](features/41-project-search.md)), `monitor` ([34](features/34-system-monitor.md)), `browser` ([32](features/32-browser-and-ports.md)), `agents` ([33](features/33-workspace-restore.md)), `history` ([36](features/36-terminal-history.md)), `chat` ([37](features/37-agent-chats.md)), `usage` ([29](features/29-ai-usage.md)), `vault` ([30](features/30-variable-vault.md)), `gui` ([14](features/14-gui-windows.md)), `vscode` ([05](features/05-vscode-panes.md), [09](features/09-air-gapped-installs.md)). |
+| `backend/hosts/bun` | The command line (`main.ts`: `serve`, `desktop`, `fetch-assets`, `version`, `node`, `mcp`, `chat-host`), `serve` on `Bun.serve` (`serve.ts`), `desktop` over multiplexed stdio (`desktop.ts`), the payloads embedded in the executable (`payloads.ts`), and host terminals via `Bun.Terminal` (`pty.ts`). |
+| `backend/hosts/common` | What both hub modes compose (`compose.ts`): the features, settings and keybindings, the machines, the host's routes. |
+| `backend/hosts/machine` | The TypeScript machine side's commands (`cli.ts`: `node`, `node dial`, `node stop`; `mcp.ts`: `mcp`, the vault's MCP server, whose server and runner are `backend/features/vault/machine/`; `chathost.ts`: `chat-host`, the chat host, `backend/features/chat/machine/host`), which the command line runs, and the features its node serves and the chat host's adapters (`features.ts`). |
+| `backend/hosts/desktop` | The desktop app's request and channel bridge (`bridge.ts`), binary stdio multiplexer (`mux.ts`), parent protocol server (`serve.ts`) and start validation (`check.ts`). |
+| `backend/scripts` | The executable's build (`build.ts`), the pinned herdr-core release (`hcdist.ts`, `fetch-hc.ts`, [21](features/21-terminal-core.md)) and native submodule releases (`deps.ts`, `fetch-deps.ts`: `veldr-vt`, `veldr-encoder`, `veldr-gpupick`, `veldr-gui-helper`), the design tokens' generator (`tokens.ts`, [24](features/24-design-tokens.md)), the VSIX normalizer (`zipnorm.ts`), the price table's comparison with LiteLLM's (`pricecheck.ts`), the reference check (`reference.ts`), the npm packages' notices, the types of Codex's app-server generated from its schema (`codex-schema.ts`, `spec/codex-app-server`). |
+| `web` | Browser UI (Vite, React, zustand). Terminals: `src/term` (protocol client, layout), `src/vt` (emulator, [26](features/26-web-terminals.md)); restores: `src/restore.ts`; conversation view: `src/conversation`; plugins: `src/plugins`. The hub embeds `web/dist`. |
+| `desktop` | Electron shell and electron-builder configuration ([16](features/16-desktop-packaging.md)). |
+| `extensions/veldr-bridge` | VS Code extension installed into code-server. |
+| `scripts` | Stage 1 full cross-platform build (`build.sh`, `package.sh`), Stage 2 desktop packaging (`desktop.sh`), repository checks (`check.sh`), notices (`notices.sh`), the host's platform (`platform.sh`), and integration/E2E runners. |
+| `spec` | Design tokens (`tokens.json`, [24](features/24-design-tokens.md)), `generated/registry.json`, the pinned Codex app-server schema, and shared test vectors and recordings (`vectors/`) run by the hub's and the web tests. |
+| `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real hub, each on an isolated instance (`harness`), `machines`, old kernels and C libraries in KVM and containers with payloads run in each (`payloads/machine-node`: the TypeScript machine side), `fakes`, the fake programs compiled by Bun: `acp.ts`, a scripted offline ACP agent installed as `kimi`, `codex.ts`, a fake Codex app-server installed as `codex`, and `xclient.ts`, an X program that reports its input for the program window tests, and `sshd`, the image of the SSH machines the tests run in Docker (with Xvfb). |
 
-## Desktop launcher
+## Desktop app
 
-The optional Electron shell (`desktop/src/main.ts`) runs on macOS, Windows
-and Linux (`desktop/src/platform.ts` holds what differs). It spawns the
-bundled core from its resources (`bin/herdr-ide`, `bin/herdr-ide.exe` on
-Windows) with `--parent-stdio`, loopback port 7781 and instance `desktop`.
-The shell's first line on the core's stdin is its hello,
-`{ "desktop_token": "…", "verify_key": "…" }`, which the core reads before
-it serves: the token of this launch, which the shell also sets as an
-HttpOnly cookie for the core's origin in its session, so the core tells
-the app's windows from browsers (VS Code has a switch for each,
-[08](features/08-web-access-and-security.md)), and the key with which the
-shell's main process signs that the user answered a prompt of the system
-(Touch ID, Windows Hello) for the variable vault
-([30](features/30-variable-vault.md)); the key stays in that process. The core writes one
-`{ "event": "ready", "url": "…" }` line to stdout after
-binding its listener; stderr carries logs. The shell loads only that owned
-core's URL. Closing the parent stdin pipe cancels the core's context, and
-it is how the shell stops the core on every system (no signal is sent;
-Windows has none a process can clean up after), also when Electron
-crashes; a core that has not exited after 20 seconds is killed. On macOS
-the app and its core keep running in the Dock when the main window closes;
-on Windows and Linux closing it quits.
+The Electron shell (`desktop/src/main.ts`) spawns the Stage 1 compiled Bun hub executable (`veldr desktop`, `backend/hosts/bun/desktop.ts`), instance `desktop` and the default namespace on machines ([39](features/39-nodes.md)), over multiplexed stdio (`backend/hosts/desktop/mux.ts`) and listens on nothing ([42](features/42-typescript-backend.md)):
 
-The shell is a client of its core (`desktop/src/follow.ts`): it holds its
-own `/ws` connection, reads `GET /api/settings` and `GET /api/keybindings`
-when it opens and applies the `settings` and `keybindings` messages after
-every change. The theme setting becomes the native title bar's and
-controls', the language the menu's, the zoom (`window.zoom`) its
-windows'. The application menu
-(`desktop/src/menu.ts`: on macOS the application's, Shell, Edit, View and
-Window; on Windows and Linux File, Shell, Edit, View, Window and Help)
-holds the keybindings' commands for terminals, splits, workspaces, tabs,
-find, the palette, the sidebar, Open in VS Code, maximizing a pane, the window's
-zoom and focus, named as the
-commands are everywhere; each command item shows the first single-stroke
-key its command has and is disabled while the page says its command
-cannot run, and the menu is rebuilt when the keybindings or the language
-change.
+- The hub starts with a control message on its stdio mux: the instance, the bundled `machines/` directory (all 6 Stage 1 machine archives and `SHA256SUMS`) and the verify key, which signs the user's system prompt answers (Touch ID, Windows Hello) for the vault and never leaves the shell's main process otherwise ([30](features/30-variable-vault.md)).
+- The app's windows load `https://<slug>.localhost/`, which their session intercepts: each request goes to the hub over a multiplexed virtual port (`backend/hosts/desktop/bridge.ts`), its body and the response's in chunks with credit both ways. WebSockets are channels, MessagePorts the main process makes for a frame of that origin and pipes onto virtual mux ports (`desktopChannels`; the web UI's `openChannel`, VS Code's frames' WebSocket). Requests in process are the desktop client's; their Origin is the one Electron reports for the frame or worker that made them (`initiatorOrigin`), so the hub's guard refuses a page of another origin in the app's session.
+- A crashed hub is started again with the windows kept, with an increasing delay (at most 3 restarts a minute). Requests wait for the pending restart. Quitting asks it to stop, and kills it after 20 s.
 
-The renderer reuses the browser UI with no Node APIs, sandboxing and context
-isolation. The page matches every key it sees itself (`web/src/keymap.ts`),
-with the desktop platform's bindings (`mac`, or `pc` on Windows and Linux),
-and cancels the keys it runs. On macOS the menu acts only on keys the page
-left (a text field, VS Code or another window has the keyboard), so a key
-runs once; while a VS Code pane has the keyboard its commands act on that
-pane; on Windows and Linux it registers no key and every key goes to the
-page ([04](features/04-layout-and-keyboard.md)). A VS Code pane gives the
-page the key of `pane.close` before VS Code sees it
-([05](features/05-vscode-panes.md)). The main window's
-preload exposes only `desktopShell`: the commands of menu items chosen,
-which commands' items to disable (from the page), how many panes have
-unsaved changes and the page's answer when the window closes with some
-(from the page; the shell's request carries nothing), where a file or folder
-dropped from the file manager is on disk (to create a workspace there or
-paste its path into a pane of the local machine), and the folders opened
-with the app (dropped on the Dock icon on macOS, named
-on the command line by a file manager's Open With on Linux), also when they
-launched it, and on macOS three requests for Full Disk Access without
-arguments (System Settings at that list, the local terminal core's
-executable in Finder, quitting and reopening the app), for which the shell
-opens one fixed URL, a path it works out itself and its own bundle. It
-also answers what the app's own processes use (their kinds, helpers'
-names, shares of a processor and memory), for the settings' Performance
-page ([13](features/13-settings-and-appearance.md)).
-Same-origin popups become equally restricted native windows;
-HTTP(S) links outside the core open in the default browser. Packaging and
-lifecycle details are in [16](features/16-desktop-packaging.md).
+The shell is a client of its hub, reached directly: it follows settings and keybindings over `/ws` for the title bar theme, menu language, zoom and the menu's keys. The renderer is the web UI, sandboxed, with no Node APIs; its preload exposes `desktopShell` to the main window's page and `desktopChannels` to each frame of the app's origin. On macOS the menu acts only on keys the page did not handle; on Windows and Linux every key goes to the page ([04](features/04-layout-and-keyboard.md)). Packaging, menus and the preload's surface are in [16](features/16-desktop-packaging.md).
 
-## Core ↔ agent protocol (`internal/agentproto`)
+## Hub ↔ agent protocol (`backend/shared/proto/agentproto`)
 
-One yamux session per machine over the ssh session's stdio (an in-process
-socketpair for the local machine, so both paths run the same code). Every
-stream starts with a JSON header line from the opener and a JSON reply line;
-after a successful reply it carries op-specific bytes.
+One yamux session per machine over ssh stdio and `node dial`, or the local node's socket; the connection's first line, before yamux, is a `NodeHello` (`serve` with the ssh session's `SSH_CONNECTION`, or `stop`). Every stream starts with a JSON header line from the opener and a JSON reply line; after a successful reply it carries op-specific bytes.
 
-| Op | Direction | Payload after the reply |
+| Op | Direction | Purpose |
 | --- | --- | --- |
-| `hello` | core → agent | – (reply has host info and data dirs, and apart from them, since clients see those, the `SSH_CONNECTION` of the ssh session the agent runs in, which the core gives the machine's new terminals); the machine is ready once it answers |
-| `fs.stat`, `fs.list` | core → agent | – (a failed `fs.stat` has the code `not_found` or `denied`, which `/file` answers with 404 or 403); a listing over 32 KiB (`MaxInline`, a directory of some hundreds of names) is not in the line, which holds at most 1 MiB: the reply's `entries_length` says that many bytes of JSON (at most 64 MiB) follow it, which `transport.Session.Open` reads into `Entries` |
-| `fs.read` | core → agent | `Length` bytes from `Offset` |
-| `fs.write` | core → agent | chunked upload, then a second reply; `unique` keeps existing files (`-1`, `-2`… names) |
-| `fs.archive` | core → agent | a zip of `Paths` (each at the root under its name, directories recursively), streamed until the agent closes the stream; with `Chunked` as `ChunkWriter` chunks ended by the empty chunk once the archive is complete |
-| `dial-unix` | core → agent | raw pipe to a socket in the agent's run directory |
-| `code-server` | core → agent | actions `status`, `install` (chunked tarball), `download` (the machine fetches `URL`, checked against `Digest`; it stops when the core closes the stream), `start`, `stop`, `install-ext`, `uninstall-ext` (their output in `Exec`), `marker`; `Bin` selects an installed code-server |
-| `hc` | core → agent | actions `status`, `install` (after a first reply the gzip-compressed herdr-core executable, chunked, checked against `Digest`), `start`, `restart` (the core's successor adopts the programs; both with `Digest`, the executable this build carries, which the agent hashes the installed file against before running it) and `stop` (the terminal core of the agent's instance); each ends with a reply with `HC` (the installed executable's digest, whether a core answers, its version, session and socket); failures carry `Code`: `not_installed`, `bad_digest`, `start_failed`, `stop_failed` |
-| `hc-api` | core → agent | raw pipe to the terminal core's socket (herdr-core's API, `internal/hc`); starts nothing |
-| `detect` | core → agent | after the reply, `DetectEvent` lines `{terminal, agent, status}` (status `working`, `blocked`, `idle`, `done`, `unknown`; `{terminal}` when the agent left) from the agent, which follows the terminal core's terminals until the core closes the stream ([25](features/25-agent-detection.md)); starts and writes nothing |
-| `privacy` | core → agent | – (reply has `Privacy`: whether macOS's Full Disk Access lets the agent's process (`files`; on the local machine the core's) and the terminal core (`terminals`, a probe it runs with `machine.exec`) open a folder only it opens, each `granted`, `denied` or `unknown`, and the terminal core's executable); starts no terminal core, reads no file |
-| `plugin` | core → agent | `Action` of `Plugin` with `Params` (the plugin's JSON); the reply's `Plugin` is its result, or JSON lines follow until either side closes the stream; failures carry `Code` (`unknown_plugin`, `bad_params`, `failed` for a handler that panicked, the plugin's own). Params and results over 32 KiB (`MaxInline`) are not in the line, which is read byte by byte and bounded to 1 MiB: the header's `params_length` or the reply's `plugin_length` says that many bytes of JSON (at most 64 MiB) follow the line. The stream ends when the core closes it: actions that read nothing more (copies, removals, scans, machine downloads) stop then ([27](features/27-plugins.md)) |
-| `bridge` | agent → core | JSON lines between the VS Code extension and the core; opened once the extension sent its first line (its hello) on `bridge.sock`, which the newest agent of the instance serves |
-| `vault` | agent → core | the header's `process` (`[{pid, name}]`: the process connected to `vault.sock`, by its peer credentials, and up to 7 of its parents, as the agent read them from the kernel), then one `VaultRequest` line `{tool: list\|get\|env, names, client, terminal, cwd}` from the vault's MCP server, relayed from `vault.sock` (served as `bridge.sock` is) once the server sent it, and one `VaultResponse` line `{ok, code, error, variables, values, run}` (`run`: `run_with_env`'s timeouts and output, the vault's settings, with an `env`'s values); the core decides from the machine the stream came from and records the header's process chain, never one the request claims; refused with `Code` `plugin_disabled` while the plugin is off ([30](features/30-variable-vault.md)) |
-| `gui` | core → agent | actions `status`, `install` (fetch Xvfb in user space), `start` (`Args[0]`: the kind of display asked for, `auto` or `xvfb`; a display of the other kind is replaced while no program is connected), `pick` (write the library that shows a program only the GPUs of its `CUDA_VISIBLE_DEVICES`), `keep` (start the display keeper, which holds the display while the instance's terminal core runs), `shells` (which of the pids in `Args` were started with the display) (reply `GUI`); `video` and `video-install` (`Digest`: the video encoder's SHA-256; the second streams the gzip-compressed encoder, chunked) reply whether it is installed and the stream kinds it makes here (`GUI.Video`, `GUI.VideoEncoders`); `attach`: messages `[kind u8][len u32][payload]`, JSON events (`window`, `gone`, `layer`, `layer_gone`, `cursor`, `stats`, `video` (a window's stream starts, or ends without a codec)) and frames (`GUIFrameHeader` + JPEG/PNG, or a video frame of the whole window, `Enc` 3, 4 for key frames) from the agent, JSON commands (`watch`, `ack`, `refresh`, `codecs` (the stream kinds all viewers decode, also sent with `watch` and `refresh`), `keyframe`, input, `close`) from the core |
+| `hello` | hub → agent | Host info, data directories, the ssh session's `SSH_CONNECTION`; the machine is ready once it answers. |
+| `fs.stat`, `fs.list` | hub → agent | Metadata and listings; large listings follow the reply as `entries_length` bytes of JSON. |
+| `fs.read` | hub → agent | `Length` bytes from `Offset`. |
+| `fs.write` | hub → agent | Chunked upload, then a second reply; `unique` keeps existing files. |
+| `fs.archive` | hub → agent | A zip of `Paths`, streamed. |
+| `dial-unix` | hub → agent | Raw pipe to a socket in the agent's run directory. |
+| `code-server` | hub → agent | `status`, `install` (with the `digest` the hub verified the release by, which the TypeScript machine side checks before unpacking it), `download` (checked against the hub's `digest`), `start`, `stop`, `release` (stops it unless another hub's session has a connection to it), `install-ext`, `marker`. |
+| `hc` | hub → agent | Terminal core `status` and `ensure`, which checks the expected digest, installs if needed and starts or restarts under one lock. A reply with `hc_upload` requests a chunked executable, with a final reply after the upload. Separate `install`, `install-embedded`, `start`, `restart` and `stop` actions are also supported. |
+| `hc-api` | hub → agent | Raw pipe to the terminal core's API socket; starts nothing. |
+| `detect` | hub → agent | Stream of `DetectEvent {terminal, agent, status}` lines, with the agent's `session` when asked ([25](features/25-agent-detection.md)). |
+| `privacy` | hub → agent | macOS Full Disk Access of the agent and the terminal core. |
+| `plugin` | hub → agent | A plugin's `Action` with `Params`; a result or JSON lines follow ([27](features/27-plugins.md)). |
+| `bridge` | agent → hub | JSON lines between the VS Code extension (`bridge.sock`) and the hub. |
+| `node.drain` | agent → hub | The node was taken over by a newer build's: the hub connects again and moves the machine to that session ([39](features/39-nodes.md)). |
+| `vault` | agent → hub | One request from the vault's MCP server (`vault.sock`) with the caller's process chain from peer credentials, one response; asked of every hub the node serves ([30](features/30-variable-vault.md)). |
+| `gui` | hub → agent | Displays: `status`, `install`, `start`, `pick`, `keep`, `shells`, `video`, `video-install`, and `attach` for framed window events, frames and input; every hub of the node attaches to one window manager, which takes input from the one in control ([14](features/14-gui-windows.md)). |
 
-The core waits for an agent's reply until the deadline of the request that
-opened the stream, and 60 s when it has none (`transport.ReplyTimeout`):
-actions that answer only after their work (a scan of logs, a git push, an
-install, a machine's download of code-server) give their own, longer
-deadline. A plugin's stream (`plugin.Open`) stays bound to the caller's
-context after the reply too: it is closed when that context ends, so a
-caller reading or writing more (a save's chunks and second reply) never
-waits on a stalled agent beyond it.
+Rules:
 
-yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing
-(`[u32 length][data]…[0]`). Core and agent always come from the same build:
-the agent is uploaded by content hash, so the protocol needs no version
-negotiation. Keep it that way when adding ops (add fields, don't reuse them).
+- Headers and replies are bounded to 1 MiB. Payloads over 32 KiB (`MaxInline`) follow the line with a length field, at most 64 MiB.
+- The hub waits for a reply until the request's deadline, else 60 s (`transport.ReplyTimeout`). A plugin stream stays bound to the caller's context after the reply.
+- yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing (`[u32 length][data]…[0]`).
+- The yamux receiver checks each data frame's declared size against the stream-window limit before allocating its body. An outgoing stream's open timer ends with its acknowledgement, a reset or a local close of the write side.
+- Hub and agent come from the same build (the agent is installed by content hash), so there is no version negotiation. Extend by adding fields and ops; never reuse them.
+- A node of this build takes over from a node of an earlier release still running on a machine. It answers an op or plugin it does not serve as an unknown plugin (`unknown_plugin`).
 
 ## Event channel (`/ws`)
 
-Every client holds one: the browser UI and the desktop app (its page and
-its shell, which follows the settings and keybindings). Text frames are JSON with a `t` field; terminals have their
-own protocol (`/api/v1/term`, below). A client plays no notification sounds
-(`agent {sound}`) before it reports `active`.
+Every client (browser page, desktop page, desktop shell) holds one. Text frames are JSON with a `t` field. Terminals have their own protocol (below).
 
-| Client → core | Core → client |
+| Client → hub | Hub → client |
 | --- | --- |
-| `retry {m}` (ends the wait before a disconnected machine's next connection attempt; refused for read-only clients), `ping {rid}` | `pong {rid}`, `machines {list}`, `machine {state}`, `agent {m, data}` (status change), `bridge.send {m, text, file, line, end_line, folders, window}` (text for an agent, with the file and lines it came from; `folders` and `window` are the sending VS Code window's, absent while unknown: the page whose VS Code pane shows that window picks a terminal of the pane's workspace), `bridge.download {m, paths, window}` (files chosen in VS Code's explorer; the page showing that window, else the page with the focus, downloads them), `bridge.focus {m, window, folders}` (a VS Code window got the keyboard: the page whose pane has it learns the pane's window and names it in its commands, `POST /api/m/{id}/bridge`), `bridge.close {m, window, folders}` (VS Code's key for closing in a window without editors: the page whose pane of that window has the keyboard closes the pane), `bridge.leave {m, window, folders}` (the extension's key for giving the keyboard back: that page moves it to the pane's header) |
-| `download.watch {ids}` (downloads the page started with `dl=<id>`: before starting one and after reconnecting), `download.cancel {id}` | `download {id, state, sent, total, name, error}` to the page following the id: progress and how it ended (`unknown` for an id the core has not seen or no longer knows), for the downloads panel |
-| `theme {kind: dark\|light}` (VS Code follows it) | `gui {state: {m, phase, gpu, windows}}` (program windows per machine) |
-| – | `plugin {plugin, m, data}`: a plugin's message for machine `m` (`""` for the core's), handed to the plugin's web side while it is on ([27](features/27-plugins.md)); the vault's: `{type: request, request: {id, m, tool, names, client, terminal, cwd, process, created, expires}}` (an approval to ask), `{type: resolved, id, answer}` (answered or expired: every page closes it), `{type: changed}` (load the variables and the log again; for access records at most once a second, the last included) ([30](features/30-variable-vault.md)) |
-| – | `settings {values, problems}` and `keybindings {user, effective, conflicts, problems}` after every change, through the API or the files ([13](features/13-settings-and-appearance.md)) |
-| `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound; a terminal core's terminal sends `data {terminal, agent, display_agent, agent_status, title}` ([25](features/25-agent-detection.md)) |
+| `ping {rid}` | `pong {rid}` |
+| `retry {m}`: reconnect a machine now (not for read-only clients) | `machines {list}`, `machine {state}` |
+| `active {idle}`: when the user last used the page | `agent {m, data, sound}`: a terminal's agent status, or a chat that became blocked or done; `sound` only for the most recently used page |
+| `theme {kind}`: VS Code follows it | `gui {state}`: program windows per machine |
+| `download.watch {ids}`, `download.cancel {id}` | `download {id, state, sent, total, name, error}` |
+| – | `bridge.send`, `bridge.download`, `bridge.focus`, `bridge.close`, `bridge.leave`: VS Code bridge events for the page showing that window ([05](features/05-vscode-panes.md)) |
+| – | `settings {values, problems}`, `keybindings {user, effective, conflicts, problems}` after every change ([13](features/13-settings-and-appearance.md)) |
+| – | `plugin {plugin, m, data}`: a plugin's message, e.g. the vault's approvals or the chats' states ([27](features/27-plugins.md)) |
 
-HTTP endpoints besides files (`GET /api/m/{id}/file`, `GET /api/m/{id}/list`,
-and `GET /api/m/{id}/download?path=…[&dl=<id>]`: one file as an attachment,
-anything else as a zip from `fs.archive`; `download.cancel` over `/ws`
-breaks a followed download off), uploads and the code-server proxy:
-`GET /api/config` (with `ssh_login`: whether the core offers the
-interactive ssh login, false on Windows), `GET /api/machines` (every
-machine's state: the record, `status`, `code` for a machine never
-connected (`invalid_target`, `local_unsupported`), the agent's `info`,
-`hc {state, code, version}` while the core has a connection to the
-machine's terminal core), `GET /api/gui`
-(the program windows of every machine, as the `gui` messages of `/ws`),
-`GET`/`PUT`/`DELETE /api/settings` (definitions, values, problems; one
-value set or removed) and `GET`/`PUT /api/keybindings` (commands, defaults,
-the user's rules, the bindings in effect and conflicts per platform; the
-rules replaced), see [13](features/13-settings-and-appearance.md).
-Machines ([02](features/02-multi-machine-transport.md)):
-`POST /api/machines` (`{"target", "label"}`: adds and stores an SSH
-machine; `201` with its state, `409 machine_exists`),
-`GET /api/ssh/hosts` (the Host aliases of the core host's ssh
-configuration that are no machine yet, with their `hostname` and `user`,
-for the Add Machine dialog; refused read-only),
-`PUT /api/machines/order` (`{"order": [ids]}`, each machine once),
-`PUT /api/m/{id}/label` (`{"label": "…"}`; `409 label_taken`),
-`PUT /api/m/{id}/enabled` (`{"enabled": bool}`) and `DELETE /api/m/{id}`
-change the core's machines file and the running machine; the WebSocket
-`GET /api/m/{id}/auth` is the interactive ssh login of an *auth_required*
-machine (`501 ssh_login_unsupported` on a core without ssh control
-sockets, Windows). `GET /api/m/{id}/hc` and `POST /api/m/{id}/hc/{start|stop|restart}`
-report, start, stop and restart its terminal core; `GET /api/m/{id}/privacy`
-reports macOS's Full Disk Access for the machine's processes (op
-`privacy`, [16](features/16-desktop-packaging.md)). When machines come or
-go the core sends every browser a new `machines {list}`; a renamed machine
-arrives as its `machine {state}`. A program window is shown by
-the app at `GET /m/{id}/gui/{win}`, streamed over the WebSocket
-`/m/{id}/gui/{win}/ws` (JSON events and binary frames out, JSON commands in;
-`?video=avc1,vp8` names the video streams the browser decodes)
-and closed through `POST /m/{id}/gui/{win}/close`;
-`POST /api/m/{id}/gui/enable` (`{"terminals": [...]}`, empty or absent
-for all of them) gives open terminals of the machine's terminal core the
-display, see [14](features/14-gui-windows.md). `PUT /api/settings` takes an
-optional `machine` for settings that can differ per machine. Plugins' routes
-are below `/api/p/<plugin>/` and `/api/m/{id}/p/<plugin>/` (each plugin's
-document lists them); they answer `404 plugin_disabled` while the plugin is
-off ([27](features/27-plugins.md)).
+HTTP endpoints are listed in [reference.md](reference.md#http-and-websocket-endpoints). Plugins' routes are below `/api/p/<plugin>/` and `/api/m/{id}/p/<plugin>/` and answer `404 plugin_disabled` while the plugin is off.
 
-## Terminal clients ↔ core protocol (`/api/v1/term`)
+The server never produces user-facing text: it sends codes that the UI translates.
 
-Clients that draw terminals themselves use the WebSocket `/api/v1/term`,
-behind the same guards as `/ws`. It reaches the terminal core of each
-machine (herdr-core in the agent's own session,
-[21](features/21-terminal-core.md)); the protocol and its reasoning are in
-[22](features/22-terminal-protocol.md). Text frames are JSON with a `t`
-field; binary frames are `[stream u32 LE][kind u8][payload]`.
+## Terminal clients ↔ hub protocol (`/api/v1/term`)
 
-| Client → core | Core → client |
+Clients that draw terminals themselves use the WebSocket `/api/v1/term`, behind the same guards as `/ws`. It reaches each machine's terminal core ([21](features/21-terminal-core.md)); the protocol and its reasoning are in [22](features/22-terminal-protocol.md). Text frames are JSON with a `t` field; binary frames are `[stream u32 LE][kind u8][payload]`.
+
+| Client → hub | Hub → client |
 | --- | --- |
-| `sub {m}`, `unsub {m}` (a machine's terminals) | `backend {m, state: starting\|ready\|error, code, version}` (also in the machine's state on `/ws` as `hc`), `snapshot {m, terminals}` (herdr-core's terminal records, with the detected `agent` and `agent_status`), `event {m, type, terminal, data}` (herdr-core's events, and `agent` with `{agent, agent_status}`) |
-| `call {rid, m, method, params}` (allowlisted herdr-core methods) | `res {rid, result}` or `res {rid, error: {kind, message}}` |
-| `attach {rid, m, terminal, cols, rows, history, observe, display}` (an observer's `display` is not passed on) | `attached {rid, s, terminal, cols, rows, observe, automatic}`, later `closed {s, reason, exit_code, signal}` |
-| `ack {s, n}` (output bytes drawn; at most the bytes sent and not yet acknowledged are credited), `resize {s, cols, rows}`, `focus {s, focused}` (focused also marks a terminal's ended turn seen; an observer's is dropped), `facts {s, display}`, `detach {s}` | – |
-| binary kind 0 (input bytes), kind 6 (the client terminal's automatic answers) | binary kind 0 (output bytes: a first paint, then the program's output), kind 3 (`cols u16 LE, rows u16 LE`: an observed terminal's new grid) |
+| `sub {m}`, `unsub {m}` | `backend {m, state, code, version}`, `snapshot {m, terminals}`, `event {m, type, terminal, data}` (with detected agents and sessions) |
+| `call {rid, m, method, params}` (allowlisted methods) | `res {rid, result}` or `res {rid, error}` |
+| `attach {rid, m, terminal, cols, rows, history, observe, display}` | `attached {rid, s, …}`, later `closed {s, reason, exit_code, signal}` |
+| `ack {s, n}`, `resize`, `focus`, `facts`, `detach {s}` | – |
+| binary kind 0 (input), kind 6 (automatic answers) | binary kind 0 (output), kind 3 (an observed terminal's new grid) |
 | `ping {rid}` | `pong {rid}` |
 
-`detach`, or the client leaving, ends the client's stream. The core closes
-it at the terminal core, except the last one that set a live terminal's
-size: that one stays attached there, unread and out of every client's
-reach, until the terminal's next such viewer has attached, the terminal
-ends or the backend's connection closes, so that a terminal keeps its size
-while no client shows it instead of getting herdr-core's headless size
-([22](features/22-terminal-protocol.md)).
+`ack` returns stream credit for bytes drawn. When the last client that set a live terminal's size leaves, the hub keeps that attachment open so the terminal keeps its size instead of herdr-core's headless one.
 
-Terminal labels the UI sets with `terminal.label`: `name` (a pane's name)
-and `closing` (the time, in ms since the epoch, when a terminal whose pane
-was closed ends unless Undo Close brings it back; empty when brought back,
-[04](features/04-layout-and-keyboard.md)). The core sets `seen`: the turn
-of the program's own `done` (OSC 7501) a client saw, so that the turn is
-not news again after a restart ([25](features/25-agent-detection.md)).
+Terminal labels: the UI sets `name` and `closing` (Undo Close, [04](features/04-layout-and-keyboard.md)); the hub sets `seen` for an acknowledged `done` turn ([25](features/25-agent-detection.md)).
 
-User-facing text is never produced by the server: it sends codes (phases,
-notices) that the UI translates.
+The product's own terminals (the chat host, `agentproto.Hidden`) and other machines' terminals are in no snapshot, event or list; a call or attach naming one is answered as for a missing terminal and audited as `denied.term`.
+
+## Chats (`backend/shared/proto/chatproto`, `backend/features/chat`)
+
+A machine's chat host runs coding agents headless and keeps their conversations ([37](features/37-agent-chats.md)). The path from a page:
+
+1. **Page ↔ hub**: one WebSocket per page, `GET /api/p/chat/ws`, JSON frames: `attach`, `detach` and `command` from the page; `attached`, `event`, `detached` and `ack` from the hub, with bounded subscriptions and queues (`backend/features/chat/page.ts`, mirrored by `web/src/plugins/chat/protocol.ts`). Routes below `/api/m/{id}/p/chat/` manage chats ([reference](reference.md#http-and-websocket-endpoints)).
+2. **Hub ↔ agent**: each subscription, request and watch is a `plugin` stream (`chat`, action `open`) that then carries the host's socket. The machine side starts the host as a hidden terminal of the instance's terminal core when none serves, and asks a host of an older build to make way.
+3. **Hub ↔ chat host**: `chatproto` JSON lines on `chat.sock` in the runtime directory: a hello, one request and its response, then for `attach` the chat's stored and live events and for `watch` the chats' states.
+4. **Chat host ↔ agent**: one process per live chat, through its adapter on the agent's standard input and output: Claude Code's stream-json, Codex's app-server JSON-RPC, or ACP. The host (`backend/features/chat/machine/host`, the `chat-host` command of the executable) keeps the chats' journal, its statements run by a worker thread; its adapters implement `backend/features/chat/machine/adapter.ts` (ACP: `machine/acp`, on `@agentclientprotocol/sdk`; Codex's: `machine/codex`, on types generated from its app-server's schema; Claude Code's: `machine/claude`, on `@anthropic-ai/claude-agent-sdk`, which no executable carries: the hub has a machine fetch it into `<data>/claude-agent-sdk/<version>` before a Claude Code chat starts, and the host loads it from there, [42](features/42-typescript-backend.md#claude-code)).
 
 ## code-server lifecycle
 
-`codeserver.Manager.Ensure` (core): depending on the `codeServer.install`
-setting, use an installed code-server, have the machine download the release
-(verified against the core's digest), or resolve it for the machine's
-platform (seed → cache → download, SHA-256 verified) → upload and unpack;
-the first two fall back to the last → install the bridge and the default
-extensions (VSIXs, also from the core) → start (a running code-server is
-reused only if it serves the workbench; otherwise it is replaced). The agent records the process in `run/cs.pid` with its own pid as
-owner; it stops its own process on exit, reaps processes whose owner died,
-and stops on request. The core stops code-server after `--code-server-idle`
-without WebSocket connections through its proxy. The VS Code plugin has a
-switch for the desktop app's windows and one for browsers
-([05](features/05-vscode-panes.md)): turning one off closes the proxied
-requests and WebSockets of that kind of client, and turning off the last
-one on also ends a preparation under way (its context; an upload's stream
-is closed and the machine's download stops with its stream), so
-code-server idles out. See
-[deployment](deployment.md#remote-resources).
+`CodeServers.ensure` (hub, `backend/features/vscode/provision.ts`), by the `codeServer.install` setting:
 
-## Names, renames and migration
+1. Use an installed code-server, have the machine download the release (checked against the hub's digest), or upload one the hub resolved (seed → cache → download, SHA-256 verified; the TypeScript machine side checks the upload against the same digest before unpacking it). The first two fall back to the last.
+2. Install the bridge and default extensions.
+3. Start, reusing a running code-server only if it serves the workbench.
 
-All runtime identifiers derive from `internal/brand` (Go),
-`web/src/brand.ts` and `extensions/herdr-ide-bridge/src/brand.ts`;
-`internal/brand/brand_test.go` keeps the three in sync and
-`scripts/check.sh` rejects new hardcoded occurrences. `scripts/rename.sh NEW`
-renames the project (files, directories, module path) and appends the old
-names to the `Legacy*` lists, from which:
+The node owns the process (`cs.pid` in the runtime directory) for every hub it serves, stops it on exit, hands it to a node that takes over and reaps orphans. A hub releases it after `--code-server-idle` without proxied WebSockets, which stops it unless another hub has a connection to it, and stops it when VS Code is switched off for every kind of client ([05](features/05-vscode-panes.md), [deployment](deployment.md#remote-resources)).
 
-- the agent moves `~/.<old>` to `~/.<new>` on each machine,
-- the core removes the old download cache,
-- the web UI moves `localStorage` keys,
-- code-server uninstalls the old bridge extension.
+## Names and renames
+
+Runtime identifiers derive from `backend/shared/lib/brand.ts`, `web/src/brand.ts` and `extensions/veldr-bridge/src/brand.ts`, kept in sync by `backend/shared/lib/brand.test.ts`; `scripts/check.sh` rejects hardcoded names. `scripts/rename.sh NEW` renames the project; the renamed version starts with namespaces of its own ([11](features/11-naming-and-renames.md)).
 
 ## Internationalization
 
-The web UI uses `web/src/i18n`: `en.ts` defines every key, other locales are
-typed against it (missing keys fail the build, a test checks placeholders);
-a plugin's messages are files of its own directory
-(`web/src/plugins/<id>/i18n`), which `en.ts` and the locales gather;
-the desktop app's menu and dialogs use the same strings. The settings' and
-commands' labels are the keys `design/generated/registry.json` lists, and
-the web UI's tests fail when one is missing. The VS Code extension uses
-`package.nls*.json` and `l10n/`. Code comments, logs and protocol messages
-are English ([12](features/12-internationalization.md)).
+`web/src/i18n/en.ts` defines every key; other locales are typed against it, so a missing key fails the build. Plugins keep messages in `web/src/plugins/<id>/i18n`. The desktop menu uses the same strings. The VS Code extension uses `package.nls*.json` and `l10n/`. Comments, logs and protocol messages are English ([12](features/12-internationalization.md)).

@@ -67,7 +67,7 @@ export function PaneGuiButton({ m, terminal }: { m: string; terminal: string }) 
 }
 
 /** A machine's failed display in the status bar: clicking shows the error
- * the core reported (the agent's or Xvfb's message); the core retries on
+ * the hub reported (the agent's or Xvfb's message); the hub retries on
  * its own. Dismissing hides it until the display fails again after
  * recovering. */
 export function GuiErrorNote({ m, label, error }: { m: string; label: string; error?: string }) {
@@ -168,6 +168,7 @@ export function GuiMachineStatus({ m }: { m: string }) {
     <span className={`gui-state ${st.phase}`} title={st.error}>
       {t(`gui.state.${st.phase}` as 'gui.state.ready')}
       {st.phase === 'ready' && st.display === 'xwayland' && ` · ${t('gui.state.gpuDisplay')}`}
+      {st.phase === 'ready' && st.view_only && ` · ${t('gui.state.viewOnly')}`}
       {st.gpu && st.phase === 'ready' && ' · VirtualGL'}
       {st.phase === 'ready' && st.vulkan_gpu !== undefined && (
         <span

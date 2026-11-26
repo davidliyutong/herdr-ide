@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TermConnection, type Socket, type StreamHandler } from '../term/connection';
 import {
   adoptDirectory,
@@ -39,6 +39,7 @@ import {
   selectWorkspace,
   setPreviewPath,
   setViewFields,
+  setTerminalFields,
   soleLeaf,
   workspaceTitle,
   setRatio,
@@ -133,7 +134,7 @@ describe('terminal store', () => {
   });
 });
 
-/** A vector of design/testdata/layout. */
+/** A vector of spec/vectors/layout. */
 interface LayoutVector {
   description: string;
   input: unknown;
@@ -145,7 +146,7 @@ interface LayoutVector {
   titles?: { home: string; names: string[] };
 }
 
-const vectors = import.meta.glob<LayoutVector>('../../../design/testdata/layout/*.json', { eager: true, import: 'default' });
+const vectors = import.meta.glob<LayoutVector>('../../../spec/vectors/layout/*.json', { eager: true, import: 'default' });
 
 function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
   const s = (key: string) => op[key] as string;
@@ -193,6 +194,8 @@ function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
       return setPreviewPath(layout, s('pane'), s('path'));
     case 'setViewFields':
       return setViewFields(layout, s('pane'), op.fields as Record<string, unknown>);
+    case 'setTerminalFields':
+      return setTerminalFields(layout, s('terminal'), op.fields as Record<string, unknown>);
     case 'prune':
       return pruneLayout(layout, new Set(op.live as string[]));
     case 'setRatio':
@@ -307,7 +310,7 @@ describe('layout', () => {
   });
 });
 
-/** A socket the test drives: what the client sent, and messages from the core. */
+/** A socket the test drives: what the client sent, and messages from the hub. */
 class FakeSocket implements Socket {
   binaryType = '';
   onopen: (() => void) | null = null;
@@ -330,7 +333,7 @@ class FakeSocket implements Socket {
 }
 
 describe('terminal connection', () => {
-  it('tells the core the display a viewer answers programs with, but not for an observer', async () => {
+  it('tells the hub the display a viewer answers programs with, but not for an observer', async () => {
     const socket = new FakeSocket();
     const conn = new TermConnection(() => socket);
     conn.start();
@@ -420,12 +423,18 @@ describe('terminal connection', () => {
     s.text({ t: 'attached', rid: 4, s: 6 });
     await again;
     const pending = conn.call('x', 'terminal.list');
+    // The wait before connecting again passes on a fake clock.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     s.onclose!();
     await expect(pending).rejects.toMatchObject({ kind: 'unavailable' });
     expect(events[3]).toBe('closed:disconnected:undefined');
     expect(ups).toEqual([true, false]);
     expect(conn.connected).toBe(false);
-    await new Promise((r) => setTimeout(r, 600));
+    vi.advanceTimersByTime(499);
+    expect(sockets.length).toBe(1);
+    vi.advanceTimersByTime(1);
+    random.mockRestore();
     expect(sockets.length).toBe(2);
     sockets[1].onopen!();
     expect(sockets[1].sent).toEqual([
@@ -436,7 +445,8 @@ describe('terminal connection', () => {
     conn.unsubscribe('y');
     expect(sockets[1].sent[2]).toEqual({ t: 'unsub', m: 'y' });
     conn.close();
-    await new Promise((r) => setTimeout(r, 600));
+    vi.advanceTimersByTime(10_000);
+    vi.useRealTimers();
     expect(sockets.length).toBe(2);
   });
 });

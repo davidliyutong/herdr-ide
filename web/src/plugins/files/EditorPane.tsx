@@ -11,15 +11,17 @@
 // Binary files, text that is not UTF-8 and files over MAX_SIZE offer a
 // download; a UTF-8 byte order mark is kept. Read-only mode edits nothing.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { saveHandlers } from '../saveKey';
 import { Download, FileDiff, FolderTree, Pin, RotateCcw, Save } from 'lucide-react';
 import { fileUrl } from '../../lib/files';
 import { useStore } from '../../state/store';
+import { terms, useTerms } from '../../state/terms';
+import * as L from '../../term/layout';
 import { t } from '../../i18n';
 import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../unsaved';
 import type { PaneViewProps } from '../api';
-import { createEditor, setLanguage, type CodeEditor, type Monaco, type TextModel } from '../monaco';
+import { createEditor, setLanguage, type CodeEditor, type EditorViewState, type Monaco, type TextModel } from '../monaco';
 import { ConflictError, errorText, FilesError, filesApi, type Entry } from './api';
 import { keepEditor, loadRevealable, reveal } from './ops';
 import { lineChanges, quickDiff, type LineChange } from './quickDiff';
@@ -30,7 +32,7 @@ import { isMediaPath, MediaView } from '../../components/PreviewPane';
 import { isMixed, restoreEols, useMixedLineEndings } from '../../eol';
 import './files.css';
 
-/** The largest file the editor opens (the core's limit for a save). */
+/** The largest file the editor opens (the hub's limit for a save). */
 export const MAX_SIZE = 8 << 20;
 /** How often an open file is checked for changes on disk. */
 export const CHECK_MS = 5000;
@@ -58,13 +60,40 @@ function readFailure(r: Response, body = ''): string {
   return t('files.readFailed', { error: body.trim() || r.statusText || `HTTP ${r.status}` });
 }
 
+/** The line end Monaco gives a model of text (its text buffer's rule):
+ * CRLF when more than half the line ends have a CR; undefined without one. */
+export function eolOf(text: string): '\n' | '\r\n' | undefined {
+  let all = 0;
+  let cr = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 13) {
+      all++;
+      cr++;
+      if (text.charCodeAt(i + 1) === 10) i++;
+    } else if (c === 10) all++;
+  }
+  if (all === 0) return undefined;
+  return cr > all / 2 ? '\r\n' : '\n';
+}
+
 /** Puts text in model. Into text it showed already, as one edit of the
- * part that changed (the cursor stays, undo takes it back); a new model
- * just takes it. */
+ * part that changed (the cursor stays, undo takes it back), a change of
+ * the line ends as another; a new model just takes it. A model that holds
+ * the text already (with its line ends made one kind) stays as it is:
+ * setValue would drop its undo history, which Monaco gives a model made
+ * again with the same text. */
 export function applyText(monaco: Monaco, model: TextModel, text: string, edit: boolean) {
+  const eol = eolOf(text);
+  if (edit && eol && eol !== model.getEOL()) {
+    model.pushStackElement();
+    model.pushEOL(eol === '\r\n' ? monaco.editor.EndOfLineSequence.CRLF : monaco.editor.EndOfLineSequence.LF);
+  }
+  const want = text.replace(/\r\n|\r|\n/g, model.getEOL());
   const old = model.getValue();
-  if (old === text) return;
+  if (old === want) return;
   if (!edit) return model.setValue(text);
+  text = want;
   const max = Math.min(old.length, text.length);
   let a = 0;
   while (a < max && old.charCodeAt(a) === text.charCodeAt(a)) a++;
@@ -84,12 +113,10 @@ export function applyText(monaco: Monaco, model: TextModel, text: string, edit: 
     () => null,
   );
   model.pushStackElement();
-  // Line ends the model made its own.
-  if (model.getValue() !== text) model.setValue(text);
 }
 
 /** The version in a file response's ETag (W/"<size hex>-<mtime hex>",
- * internal/server/files.go). */
+ * backend/features/files). */
 export function versionOf(etag: string | null): Version | undefined {
   const m = /^W\/"([0-9a-f]+)-([0-9a-f]+)"$/i.exec(etag ?? '');
   return m ? { size: parseInt(m[1], 16), mtime: parseInt(m[2], 16) } : undefined;
@@ -140,6 +167,15 @@ type Status =
   | { kind: 'conflict'; removed: boolean; disk?: string }
   | Exclude<Loaded, { kind: 'text' }>;
 
+/** Shows line (1-based) and col of the editor's file in the middle of the
+ * view, with the cursor there (a search's match); Monaco keeps a place
+ * past the text's end within it. */
+export function revealAt(editor: Pick<CodeEditor, 'setPosition' | 'revealLineInCenter'>, line: number, col = 1) {
+  const position = { lineNumber: Math.max(1, Math.floor(line)), column: Math.max(1, Math.floor(col)) };
+  editor.setPosition(position);
+  editor.revealLineInCenter(position.lineNumber);
+}
+
 export function EditorPane(props: PaneViewProps) {
   const path = String(props.view.path ?? '');
   // Another component for media, so that the text editor's state starts
@@ -170,10 +206,10 @@ function EditorBar({ m, pane, view, children }: Pick<PaneViewProps, 'm' | 'pane'
 }
 
 /** An image, video, audio file or PDF. */
-function MediaFile({ m, pane, view }: PaneViewProps) {
+function MediaFile({ m, pane, view, focused }: PaneViewProps) {
   const path = String(view.path ?? '');
   return (
-    <div className="files-editor" data-autofocus tabIndex={-1}>
+    <div className="files-editor" data-autofocus tabIndex={-1} onMouseDown={() => !focused && terms.mutate(m, (l) => L.focusPane(l, pane))}>
       <EditorBar m={m} pane={pane} view={view}>
         <span className="spacer" />
         <a className="icon" href={fileUrl(m, path, true)} title={t('preview.download')} aria-label={t('preview.download')}>
@@ -269,6 +305,81 @@ interface KeptText extends KeptEdit {
   savedAt: number;
   /** The text as loaded or saved (its line endings, eol.ts). */
   raw: string;
+}
+
+/** An editor's view state (cursor, selection, scroll position, folded regions)
+ * kept while its pane stays in the layout across tab/workspace switches. */
+interface KeptViewState {
+  path: string;
+  state: EditorViewState;
+}
+
+export const MAX_VIEW_STATES = 64;
+const viewStates = new Map<string, KeptViewState>();
+const viewKey = (m: string, pane: string) => `${m}\n${pane}`;
+let unfollowTerms: (() => void) | undefined;
+let unfollowStore: (() => void) | undefined;
+
+function paneGone(m: string, pane: string, machines = useTerms.getState().machines): boolean {
+  const known = useStore.getState().machines;
+  if (!known[m] && Object.keys(known).length > 0) return true;
+  const layout = machines[m]?.layout;
+  return !!layout && !layout.workspaces.some((ws) => ws.tabs.some((tb) => L.tabPanes(tb).includes(pane)));
+}
+
+function syncViewWatch() {
+  if (viewStates.size > 0) {
+    unfollowTerms ??= useTerms.subscribe((s) => dropGoneViewStates(s.machines));
+    unfollowStore ??= useStore.subscribe(() => dropGoneViewStates());
+  } else {
+    unfollowTerms?.();
+    unfollowTerms = undefined;
+    unfollowStore?.();
+    unfollowStore = undefined;
+  }
+}
+
+export function keepViewState(m: string, pane: string, path: string, state: EditorViewState) {
+  if (paneGone(m, pane)) {
+    dropViewState(m, pane);
+    return;
+  }
+  const k = viewKey(m, pane);
+  viewStates.delete(k);
+  viewStates.set(k, { path, state });
+  while (viewStates.size > MAX_VIEW_STATES) viewStates.delete(viewStates.keys().next().value!);
+  syncViewWatch();
+}
+
+export function keptViewState(m: string, pane: string, path: string): EditorViewState | undefined {
+  const entry = viewStates.get(viewKey(m, pane));
+  return entry && entry.path === path ? entry.state : undefined;
+}
+
+export function takeViewState(m: string, pane: string, path: string): EditorViewState | undefined {
+  const k = viewKey(m, pane);
+  const entry = viewStates.get(k);
+  if (!entry) return undefined;
+  viewStates.delete(k);
+  syncViewWatch();
+  return entry.path === path ? entry.state : undefined;
+}
+
+export function dropViewState(m: string, pane: string) {
+  if (viewStates.delete(viewKey(m, pane))) syncViewWatch();
+}
+
+export function dropGoneViewStates(machines = useTerms.getState().machines) {
+  for (const k of [...viewStates.keys()]) {
+    const [m, pane] = k.split('\n');
+    if (paneGone(m, pane, machines)) viewStates.delete(k);
+  }
+  syncViewWatch();
+}
+
+export function resetViewStates() {
+  viewStates.clear();
+  syncViewWatch();
 }
 
 function TextEditor({ m, pane, view, focused }: PaneViewProps) {
@@ -400,12 +511,15 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   // The editor, once; the file, for each path. Text with unsaved changes
   // outlives the component while the pane is in its layout (unsaved.ts):
   // the pane takes it back, with the version it was edited from, when it
-  // shows again.
+  // shows again. View state (cursor, selection, scroll) outlives it too
+  // (viewStates) even when the file has no unsaved changes.
+  const pendingViewState = useRef<EditorViewState | undefined>(undefined);
   useEffect(() => {
     let disposed = false;
     let created: { editor: CodeEditor; monaco: Monaco } | undefined;
     let sub: { dispose(): void } | undefined;
     let keys: { dispose(): void } | undefined;
+    pendingViewState.current = undefined;
     (async () => {
       const first = await loadText(m, path).catch((e): Loaded => ({ kind: 'error', message: errorText(e) }));
       if (disposed) return;
@@ -417,8 +531,13 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       created = await createEditor(el, { readOnly: useStore.getState().readOnly });
       if (disposed) return created.editor.dispose();
       const { monaco, editor } = created;
+      const savedView = takeViewState(m, pane, path);
+      if (savedView) pendingViewState.current = savedView;
       // A model of the pane's own: another pane of the file has its own text.
-      const uri = monaco.Uri.from({ scheme: 'file', path, query: `m=${m}&pane=${pane}` });
+      // It is the file's while no other pane has that one, so that the file
+      // opened again (in any pane) gets the undo history Monaco keeps for it.
+      const fileUri = monaco.Uri.from({ scheme: 'file', path, query: `m=${m}` });
+      const uri = monaco.editor.getModel(fileUri) ? monaco.Uri.from({ scheme: 'file', path, query: `m=${m}&pane=${pane}` }) : fileUri;
       const kept = takeEdit<KeptText>(m, pane, (k) => k.path === path);
       if (kept) {
         version.current = kept.version;
@@ -427,7 +546,10 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
         raw.current = kept.raw;
         setMixed(isMixed(kept.raw));
       }
-      const model = kept?.model ?? monaco.editor.getModel(uri) ?? monaco.editor.createModel('', undefined, uri);
+      // Made with the file's text: Monaco then gives it the undo history the
+      // model of that URI had when it was disposed with that text.
+      const model =
+        kept?.model ?? monaco.editor.getModel(uri) ?? monaco.editor.createModel(first.kind === 'text' ? first.text : '', undefined, uri);
       editor.setModel(model);
       ed.current = created;
       keys = editor.onKeyDown((e) => saveKeys.editor(e, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS));
@@ -445,6 +567,12 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       ed.current = undefined;
       sub?.dispose();
       keys?.dispose();
+      const viewState = pendingViewState.current ?? c?.editor.saveViewState?.() ?? null;
+      pendingViewState.current = undefined;
+      if (c) {
+        if (viewState && !paneGone(m, pane)) keepViewState(m, pane, path, viewState);
+        else if (paneGone(m, pane)) dropViewState(m, pane);
+      }
       const model = c?.editor.getModel();
       c?.editor.dispose();
       if (!model) return;
@@ -474,11 +602,31 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       });
     };
     // focused only matters for the first load.
-  }, [m, path, showText]);
+  }, [m, pane, path, showText]);
+
+  // Restore saved view state once the editor host is visible and laid out.
+  useLayoutEffect(() => {
+    if ((status.kind !== 'ready' && status.kind !== 'conflict') || !pendingViewState.current || !ed.current) return;
+    const state = pendingViewState.current;
+    pendingViewState.current = undefined;
+    if (host.current && host.current.clientHeight > 0) ed.current.editor.layout?.();
+    ed.current.editor.restoreViewState?.(state);
+  }, [status, m, pane, path]);
 
   useEffect(() => {
     ed.current?.editor.updateOptions({ readOnly: locked });
   }, [locked]);
+
+  // The place the view asks for (openEditor's line and col), once the text
+  // is shown, and again each time it is asked for (reveal).
+  const place = typeof view.line === 'number' ? `${view.line}:${String(view.col)}:${String(view.reveal)}` : undefined;
+  const revealed = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const e = ed.current?.editor;
+    if (!place || !e || status.kind !== 'ready' || revealed.current === place) return;
+    revealed.current = place;
+    revealAt(e, Number(view.line), Number(view.col) || 1);
+  }, [place, status]);
 
   useEffect(() => {
     if (focused) ed.current?.editor.focus();
@@ -546,7 +694,16 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   );
 
   return (
-    <div className="files-editor" data-autofocus tabIndex={-1} onKeyDown={saveKeys.root}>
+    <div
+      className="files-editor"
+      data-autofocus
+      tabIndex={-1}
+      onMouseDown={() => !focused && terms.mutate(m, (l) => L.focusPane(l, pane))}
+      onFocus={(e) => {
+        if (e.target === e.currentTarget) ed.current?.editor.focus();
+      }}
+      onKeyDown={saveKeys.root}
+    >
       <EditorBar m={m} pane={pane} view={view}>
         {dirty && (
           <span className="files-dirty" title={t('files.unsaved')} aria-label={t('files.unsaved')}>

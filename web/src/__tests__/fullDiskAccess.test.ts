@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Full Disk Access in the settings: shown only in the desktop app on macOS,
-// in the user's Terminal page (and its search), with the state the core
+// in the user's Terminal page (and its search), with the state the hub
 // reports for terminals and for the app, read again when the window comes
 // back to the front; its buttons ask the shell, and what to restart comes
 // with the matching action after asking. The command opens System Settings
@@ -76,7 +76,7 @@ let privacy: PrivacyState;
 beforeEach(async () => {
   asked.length = 0;
   requests = [];
-  privacy = { files: 'granted', terminals: 'denied', hc: '/Users/u/.herdr-ide-desktop/hc/herdr-core' };
+  privacy = { files: 'granted', terminals: 'denied', hc: '/Users/u/.veldr-desktop/hc/herdr-core' };
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     requests.push({ method: init?.method ?? 'GET', url: String(url) });
     if (String(url) === '/api/m/local/privacy') return new Response(JSON.stringify(privacy), { status: 200 });
@@ -150,13 +150,13 @@ describe('Full Disk Access in the settings', () => {
     expect(privacyReads()).toBe(0);
   });
 
-  it("ends the user's Terminal page on macOS, with the core's state of terminals and the app", async () => {
+  it("ends the user's Terminal page on macOS, with the hub's state of terminals and the app", async () => {
     bridge.shell = mac;
     await open({ page: 'terminal' });
     expect(qa('.settings-group').map((h) => h.textContent)).toEqual(['Text', 'Cursor', 'Permissions']);
     expect(row()?.querySelector('.setting-title')?.textContent).toBe('Full Disk Access');
     expect(row()?.textContent).toContain('other apps’ data');
-    expect(qa('.fda-access code').map((c) => c.textContent)).toEqual(['herdr-core', 'herdr-ide']);
+    expect(qa('.fda-access code').map((c) => c.textContent)).toEqual(['herdr-core', 'veldr']);
     expect(states()).toEqual(['denied', 'granted']);
     expect(qa('.fda-state').map((s) => s.textContent)).toEqual(['Not granted', 'Granted']);
     expect(commandShown('app.fullDiskAccess')).toBe(true);
@@ -198,7 +198,7 @@ describe('Full Disk Access in the settings', () => {
 
     // Quitting and reopening the app is asked first.
     await act(async () => button('Quit and Reopen…')!.click());
-    expect(await reply(false)).toBe('Quit and reopen herdr-ide?');
+    expect(await reply(false)).toBe('Quit and reopen veldr?');
     expect(asked).toEqual([]);
     await act(async () => button('Quit and Reopen…')!.click());
     await reply(true);
@@ -214,7 +214,7 @@ describe('Full Disk Access in the settings', () => {
     expect(row()?.textContent).not.toContain('In the list');
   });
 
-  it('shows unknown when the core cannot tell, and nothing to restart', async () => {
+  it('shows unknown when the hub cannot tell, and nothing to restart', async () => {
     bridge.shell = mac;
     privacy = { files: 'unknown', terminals: 'unknown', hc: '' };
     await open({ page: 'terminal' });

@@ -15,7 +15,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { definePlugins, describeView, PANEL_VIEW } from '../plugins/registry';
 import { PluginPane } from '../components/PluginPane';
 import { droppedPanel, moveToSidebar, openPanelInPane, panelOfView, showPanel } from '../panelPanes';
@@ -36,8 +36,8 @@ const panel: PanelDef = {
 };
 const plugin: PluginDef = { id: 'files', title: 'plugins.gui.title', icon: Files, panels: [panel] };
 
-let core: FakeCore;
-const layout = () => core.model.layout('a')!;
+let hub: FakeHub;
+const layout = () => hub.model.layout('a')!;
 const tab = (i = 0) => layout().workspaces[0].tabs[i];
 const shape = (node: L.Node): unknown =>
   L.isSplit(node)
@@ -49,8 +49,8 @@ const rect = new DOMRect(0, 0, 100, 100);
 
 beforeEach(async () => {
   definePlugins([plugin]);
-  core = new FakeCore();
-  core.machine('a', [FakeCore.term('s1', { cwd: '/home/u' }), FakeCore.term('s2', { cwd: '/home/u/proj' })], {
+  hub = new FakeHub();
+  hub.machine('a', [FakeHub.term('s1', { cwd: '/home/u' }), FakeHub.term('s2', { cwd: '/home/u/proj' })], {
     version: 2,
     workspaces: [
       {
@@ -66,13 +66,13 @@ beforeEach(async () => {
     ],
     selected: 0,
   });
-  core.install();
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setMachines([{ id: 'a', label: 'a', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
   s.selectMachine('a');
   s.setPanel(undefined);
-  core.model.subscribe('a');
+  hub.model.subscribe('a');
   await settle();
 });
 
@@ -130,13 +130,13 @@ describe('a panel as a pane', () => {
     expect(shape(tab().root)).toEqual(['horizontal', 's1', 'panel:files']);
     expect(useStore.getState().panel).toBeUndefined();
     // Again: the same pane.
-    core.model.mutate('a', (l) => L.focusPane(l, 's1'));
+    hub.model.mutate('a', (l) => L.focusPane(l, 's1'));
     await openPanelInPane(panel);
     expect(shape(tab().root)).toEqual(['horizontal', 's1', 'panel:files']);
     const key = tab().focused;
     expect(key).toMatch(/^view:/);
     // Shown where the user has it: its pane in the tab shown.
-    core.model.mutate('a', (l) => L.focusPane(l, 's1'));
+    hub.model.mutate('a', (l) => L.focusPane(l, 's1'));
     showPanel('files');
     expect(tab().focused).toBe(key);
     expect(useStore.getState().panel).toBeUndefined();
@@ -162,7 +162,7 @@ describe('a panel as a pane', () => {
     noteFocus({ m: 'b', pane: 'x' });
     expect(recentDirectory()).toBe('/home/u');
     noteFocus({ m: 'a', pane: 's2' });
-    core.model.mutate('a', (l) => droppedPanel(l, leaf(), { kind: 'newTab', ws: 'w1', rect }));
+    hub.model.mutate('a', (l) => droppedPanel(l, leaf(), { kind: 'newTab', ws: 'w1', rect }));
     noteFocus({ m: 'a', pane: 'view:p1' });
     expect(recentDirectory()).toBe('/home/u/proj');
     resetHistory();

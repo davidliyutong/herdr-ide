@@ -2,20 +2,29 @@
 /.worktrees/
 /desktop/dist/
 node_modules/
-web/dist/*
-!web/dist/.gitkeep
-internal/embedded/agents/*.gz
-internal/embedded/ext/*.vsix
-extensions/herdr-ide-bridge/dist/
-extensions/herdr-ide-bridge/*.vsix
+web/dist/
+extensions/veldr-bridge/dist/
+extensions/veldr-bridge/*.vsix
 .DS_Store
 /bundle/
 coverage/
 .claude/settings.local.json
 CLAUDE.local.md
-internal/embedded/encoder/*.gz
-internal/embedded/hc/*.gz
 web/.deps/
+/web/src/vt/ghostty-vt.wasm
+/web/src/vt/LICENSE
 
 TODO.md
 .codegraph
+
+# What bun build --compile leaves when it is interrupted.
+*.bun-build
+
+# Review files of the docs-keeper's slimming (the user reviews them).
+/docs-review/
+
+# Local test/machine environment overrides (copy from .env.example; never commit).
+.env
+.env.local
+.env.*.local
+/.machines-work/

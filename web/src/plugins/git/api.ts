@@ -1,6 +1,6 @@
-// The Git plugin's requests to the core (internal/plugins/git): reads are
+// The Git plugin's requests to the hub (backend/features/git): reads are
 // GETs with their parameters in the query, changes POSTs with a JSON body.
-// The types are those of the machine side (internal/agent/plugin/git).
+// The types are those of the machine side (backend/features/git/protocol.ts).
 import { answer, failureOf, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
 
 export interface RepoInfo {
@@ -20,6 +20,8 @@ export interface RepoInfo {
   remoteUrls?: Record<string, string>;
   /** Repositories this one is nested in, innermost first. */
   parents?: string[];
+  /** Repositories nested inside this one (submodules and nested repos). */
+  nested?: string[];
 }
 
 export interface StatusFile {
@@ -150,7 +152,7 @@ export interface Watch {
   config?: string;
 }
 
-/** A failure with the code the core or the machine gave. */
+/** A failure with the code the hub or the machine gave. */
 export class GitError extends PluginError {
   constructor(code: string, message: string) {
     super(code, message);
@@ -209,6 +211,6 @@ export const gitApi = {
   tags: (m: string, repo: string) => get<Tag[]>(m, 'tags', { repo }),
   stashes: (m: string, repo: string) => get<Stash[]>(m, 'stashes', { repo }),
   watch: (m: string, repo: string) => get<Watch>(m, 'watch', { repo }),
-  /** A change (internal/agent/plugin/git's Params). */
+  /** A change (Params of backend/features/git/protocol.ts). */
   run: (m: string, repo: string, action: string, params: Record<string, unknown> = {}) => post(m, action, { ...params, repo }),
 };

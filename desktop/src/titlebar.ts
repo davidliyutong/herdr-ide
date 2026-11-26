@@ -5,7 +5,7 @@
 // across UI font sizes and window zoom levels. Kept without Node imports so
 // the sandboxed preload can read the same constants.
 
-import tokens from '../../design/tokens.json';
+import tokens from '../../spec/tokens.json';
 
 /** Minimum header height in window points while the integrated title bar is shown. */
 export const MAC_TITLEBAR_MIN_HEIGHT = 44;

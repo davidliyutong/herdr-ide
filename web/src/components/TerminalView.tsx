@@ -7,10 +7,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
+import { isLive } from '../term/protocol';
 import { registerPane } from '../state/panes';
 import { usePrefs, getPrefs } from '../prefs';
 import { appearanceOf, useThemeKind } from '../appearance';
-import { handleKey } from '../keymap';
+import { handleKey, shellKeyContext } from '../keymap';
 import { uploadPasted } from '../transfers';
 import { droppedItems, droppedPaths, filesAreOn } from '../drop';
 import { shortPath } from '../lib/machine';
@@ -82,17 +83,33 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
         address: terminal,
         connection: terms.connection,
         // Attached again when the connection is back, and when the machine
-        // is: its streams end while the connection to the core stays.
+        // is: its streams end while the connection to the hub stays.
         onConnection: (fn) => {
-          const offCore = terms.onConnection(fn);
+          const offHub = terms.onConnection(fn);
           const offMachine = terms.onTerminals(m, () => fn(true));
           return () => {
-            offCore();
+            offHub();
             offMachine();
           };
         },
+        // The terminal's program while it is live: a pane whose program
+        // ended attaches again when the core starts another at its address.
+        onProgram: (fn) => {
+          const pidOf = (s: ReturnType<typeof useTerms.getState>) => {
+            const r = s.machines[m]?.terminals[terminal];
+            return r && isLive(r) && typeof r.pid === 'number' ? r.pid : undefined;
+          };
+          let pid = pidOf(useTerms.getState());
+          fn(pid);
+          return useTerms.subscribe((s) => {
+            const now = pidOf(s);
+            if (now === pid) return;
+            pid = now;
+            fn(now);
+          });
+        },
         readOnly: () => useStore.getState().readOnly,
-        appKey: (ev) => handleKey(ev),
+        appKey: (ev) => handleKey(ev, shellKeyContext()),
         activate: () => activate.current(),
         linkContext: () => ({ m, pane: terminal, cwd: terms.directory(m, terminal), home: useStore.getState().machines[m]?.info?.home }),
         mathHover: () => getPrefs().mathHover,
@@ -105,9 +122,11 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
         onMath: setMath,
         onFind: (text) => openFind(m, terminal, text),
         onClosed: (reason, code) => setClosed({ reason, code }),
+        onReopen: () => setClosed(undefined),
         onBell: () => {
           const mode = getPrefs().bell;
-          if (mode === 'sound') playSound('bell');
+          const layout = useTerms.getState().machines[m]?.layout;
+          if (mode === 'sound' && !(layout && L.paneMuted(layout, terminal))) playSound('bell');
           if (mode !== 'visual') return;
           setFlash(true);
           window.clearTimeout(flashTimer);
@@ -117,7 +136,7 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
         onCell: (cw, ch) => setCell({ cw, ch }),
         onRenderer: setRenderer,
         // A terminal that lost its agent with its core gets it back (restore.ts).
-        onAttached: () => terms.resumeAgent(m, terminal, (text) => pane.type(text)),
+        onAttached: () => terms.resumeAgent(m, terminal, pane),
       },
       appearanceOf(getPrefs()),
     );
@@ -149,7 +168,7 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
   });
   useEffect(() => {
     const pane = paneRef.current;
-    if (resume && pane?.attached) terms.resumeAgent(m, terminal, (text) => pane.type(text));
+    if (resume && pane?.attached) terms.resumeAgent(m, terminal, pane);
   }, [resume, m, terminal]);
 
   // Appearance: colors, font and size, cursor, scrollback.

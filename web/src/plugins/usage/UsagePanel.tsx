@@ -7,7 +7,7 @@
 // pace marker and how far ahead of an even pace they are), credits and
 // balances, incidents of its status page and the machines it was seen on,
 // and its own spend.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../state/store';
@@ -16,7 +16,8 @@ import { t } from '../../i18n';
 import { type Metric, costStale, fetchCost, fetchSnapshot, refreshNow, setDeepseekKey, setView, useUsage, type UsageTab } from './state';
 import {
   costOf,
-  daily,
+  dailyDetails,
+  dayOf,
   duration,
   equivalents,
   money,
@@ -27,16 +28,19 @@ import {
   rank,
   rankTokens,
   sortAccounts,
-  dailyTokens,
   tightestWindow,
   tokenKinds,
   tokens,
+  windowSpend,
+  modelBreakdown,
   type CostReport,
   type CostRow,
   type RankBy,
   type TokenKinds,
   type UsageAccount,
   type UsageWindow,
+  type WindowSpend,
+  type ModelUsage,
 } from './model';
 import { OverviewLogo, ProviderLogo, providerColor } from './logos';
 import './usage.css';
@@ -63,7 +67,7 @@ export function UsagePanel() {
   const snapshot = useUsage((s) => s.snapshot);
   const cost = useUsage((s) => s.cost);
   const deepseekOn = useSettings((s) => s.values['usage.providers.deepseek']?.value !== false);
-  // While the panel is open and the page shown the core asks at
+  // While the panel is open and the page shown the hub asks at
   // usage.refreshOpen (adaptive); a hidden page says nothing, so a
   // forgotten tab does not keep it asking. The cost is read again once it
   // is older than usage.costRefresh, else on demand.
@@ -82,6 +86,21 @@ export function UsagePanel() {
       document.removeEventListener('visibilitychange', look);
     };
   }, []);
+  // The user's prices and the providers shown change what the logs cost:
+  // the report is read again when they change, not at its next refresh.
+  const pricing = useSettings((s) =>
+    JSON.stringify(
+      Object.entries(s.values)
+        .filter(([k]) => k === 'usage.prices' || k.startsWith('usage.providers.'))
+        .map(([k, v]) => [k, v?.value]),
+    ),
+  );
+  const pricingSeen = useRef(pricing);
+  useEffect(() => {
+    if (pricingSeen.current === pricing) return;
+    pricingSeen.current = pricing;
+    void fetchCost();
+  }, [pricing]);
   const accounts = useMemo(() => sortAccounts(snapshot?.accounts ?? []), [snapshot]);
   const providers = useMemo(() => shownProviders(accounts, cost), [accounts, cost]);
   // DeepSeek's page has the form for its key, so it opens without one.
@@ -355,7 +374,7 @@ function AccountCard({ account: a }: { account: UsageAccount }) {
         <div key={g.label ?? ''} className="usage-group">
           {g.label && <div className="usage-group-label">{g.label}</div>}
           {g.windows.map((w) => (
-            <WindowRow key={w.id ?? `${w.kind}|${w.label ?? ''}`} w={w} grouped={!!g.label} now={now} />
+            <WindowRow key={w.id ?? `${w.kind}|${w.label ?? ''}`} account={a} w={w} grouped={!!g.label} now={now} />
           ))}
         </div>
       ))}
@@ -429,8 +448,22 @@ function level(w: UsageWindow): 'out' | 'warn' | 'ok' {
   return w.usedPct >= 100 ? 'out' : w.usedPct >= th ? 'warn' : 'ok';
 }
 
-function WindowRow({ w, grouped, now }: { w: UsageWindow; grouped: boolean; now: number }) {
+/** What a window has cost so far at API prices, and the whole window at
+ * that rate (model.ts windowSpend). */
+function WindowSpendLine({ spend: s }: { spend: WindowSpend }) {
+  const cost = `${s.priced ? '' : '≥'}${money(s.cost)}`;
+  return (
+    <div className="usage-window-spend muted" data-spend>
+      {t('usage.window.spent', { cost, tokens: tokens(s.tokens) })}
+      {s.full && ` · ${t('usage.window.full', { cost: money(s.full.cost), tokens: tokens(Math.round(s.full.tokens)) })}`}
+    </div>
+  );
+}
+
+function WindowRow({ account, w, grouped, now }: { account: UsageAccount; w: UsageWindow; grouped: boolean; now: number }) {
   const remaining = useUsage((s) => s.remaining);
+  const cost = useUsage((s) => s.cost);
+  const spend = windowSpend(cost, account, w, now);
   useSettings((s) => s.values['usage.thresholds']);
   const shown = remaining ? 100 - w.usedPct : w.usedPct;
   const ahead = w.pace ? Math.round(w.usedPct - w.pace.expectedPct) : 0;
@@ -457,6 +490,7 @@ function WindowRow({ w, grouped, now }: { w: UsageWindow; grouped: boolean; now:
       </div>
       <Bar w={w} remaining={remaining} />
       {notes.length > 0 && <div className={`usage-window-note ${w.pace?.beforeReset ? 'warn' : ''}`}>{notes.join(' · ')}</div>}
+      {spend && spend.requests > 0 && <WindowSpendLine spend={spend} />}
     </div>
   );
 }
@@ -527,16 +561,23 @@ function MetricSwitch() {
   );
 }
 
+/** The kinds of tokens as a thin stacked bar of their shares. */
+function KindBar({ kinds }: { kinds: TokenKinds }) {
+  return (
+    <div className="usage-kinds" role="img" aria-label={t('usage.tokens.kinds')}>
+      {KINDS.map((k) =>
+        kinds[k] > 0 ? <i key={k} style={{ background: kindColor(k), width: `${(kinds[k] / kinds.total) * 100}%` }} /> : null,
+      )}
+    </div>
+  );
+}
+
 /** The kinds of tokens as a thin stacked bar of their shares, and a legend
  * with each one's count (the output says how much of it was reasoning). */
 function KindBreakdown({ kinds }: { kinds: TokenKinds }) {
   return (
     <>
-      <div className="usage-kinds" role="img" aria-label={t('usage.tokens.kinds')}>
-        {KINDS.map((k) =>
-          kinds[k] > 0 ? <i key={k} style={{ background: kindColor(k), width: `${(kinds[k] / kinds.total) * 100}%` }} /> : null,
-        )}
-      </div>
+      <KindBar kinds={kinds} />
       <div className="usage-legend usage-kind-legend">
         {KINDS.map((k) => (
           <span key={k} className="usage-legend-item">
@@ -546,6 +587,59 @@ function KindBreakdown({ kinds }: { kinds: TokenKinds }) {
           </span>
         ))}
       </div>
+    </>
+  );
+}
+
+/** Models a breakdown lists until asked for all. */
+const MODEL_ROWS = 8;
+
+/** A model's line of the breakdown. */
+function ModelLine({ m, logo, isTokens }: { m: ModelUsage; logo: boolean; isTokens: boolean }) {
+  return (
+    <li data-model={m.name}>
+      <div className="usage-model-line">
+        {logo && <ProviderLogo provider={m.provider} />}
+        <span className="ellipsis usage-model-name">{m.name}</span>
+        {m.unpriced && <span className="usage-noprice muted">{t('usage.tokens.noPrice')}</span>}
+        <span className="spacer" />
+        <span className="muted">{isTokens ? money(m.cost) : tokens(m.total)}</span>
+        <b className="usage-rank-cost">{isTokens ? tokens(m.total) : money(m.cost)}</b>
+      </div>
+      <KindBar kinds={m} />
+      <div className="usage-model-kinds muted">
+        {t('usage.model.kinds', {
+          input: tokens(m.input),
+          cached: tokens(m.cached),
+          cacheWrite: tokens(m.cacheWrite),
+          output: tokens(m.output),
+          requests: m.requests,
+        })}
+      </div>
+    </li>
+  );
+}
+
+/** Every model's use in the last days: its cost and tokens, a bar of its
+ * kinds of tokens and their counts with its requests; the first
+ * MODEL_ROWS, the rest on asking. */
+function ModelBreakdown({ rows, days, isTokens }: { rows: CostRow[]; days: number; isTokens: boolean }) {
+  const [all, setAll] = useState(false);
+  const list = modelBreakdown(rows, days, new Date(), isTokens ? 'tokens' : 'cost');
+  if (!list.length) return <div className="muted">{t('usage.cost.empty')}</div>;
+  const logo = new Set(list.map((m) => m.provider)).size > 1;
+  return (
+    <>
+      <ol className="usage-models">
+        {(all ? list : list.slice(0, MODEL_ROWS)).map((m) => (
+          <ModelLine key={`${m.provider}\u0000${m.name}`} m={m} logo={logo} isTokens={isTokens} />
+        ))}
+      </ol>
+      {list.length > MODEL_ROWS && (
+        <button className="link usage-models-more" onClick={() => setAll(!all)}>
+          {all ? t('usage.model.fewer') : t('usage.model.all', { n: list.length })}
+        </button>
+      )}
     </>
   );
 }
@@ -636,18 +730,21 @@ function Spend() {
                   ))}
                 </div>
               </div>
-              <ol className="usage-rank">
-                {ranking.map((r) => (
-                  <li key={r.name}>
-                    <span className="ellipsis">{r.name}</span>
-                    {r.unpriced && <span className="usage-noprice muted">{t('usage.tokens.noPrice')}</span>}
-                    {isTokens ? <span className="muted">{money(r.cost)}</span> : <span className="muted">{tokens(r.tokens)}</span>}
-                    <span className="usage-rank-cost">{isTokens ? tokens(r.tokens) : money(r.cost)}</span>
-                    <div className="usage-rank-bar" style={{ width: `${main(ranking[0]) ? (main(r) / main(ranking[0])) * 100 : 0}%` }} />
-                  </li>
-                ))}
-              </ol>
-              {ranking.length === 0 && <div className="muted">{t('usage.cost.empty')}</div>}
+              {by === 'model' && <ModelBreakdown rows={rows} days={costDays} isTokens={isTokens} />}
+              {by !== 'model' && (
+                <ol className="usage-rank">
+                  {ranking.map((r) => (
+                    <li key={r.name}>
+                      <span className="ellipsis">{r.name}</span>
+                      {r.unpriced && <span className="usage-noprice muted">{t('usage.tokens.noPrice')}</span>}
+                      {isTokens ? <span className="muted">{money(r.cost)}</span> : <span className="muted">{tokens(r.tokens)}</span>}
+                      <span className="usage-rank-cost">{isTokens ? tokens(r.tokens) : money(r.cost)}</span>
+                      <div className="usage-rank-bar" style={{ width: `${main(ranking[0]) ? (main(r) / main(ranking[0])) * 100 : 0}%` }} />
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {by !== 'model' && ranking.length === 0 && <div className="muted">{t('usage.cost.empty')}</div>}
               <p className="usage-footnote muted">{t('usage.cost.about')}</p>
               {unpriced.length > 0 && (
                 <p className="usage-footnote muted">
@@ -723,6 +820,10 @@ function ProviderSpend({ provider }: { provider: string }) {
       )}
       <DailyBars rows={rows} days={30} metric={metric} />
       {top && <div className="usage-sub muted">{t('usage.spend.topModel', { model: top.name })}</div>}
+      <div className="usage-card-line">
+        <span className="usage-heading">{t('usage.model.title')}</span>
+      </div>
+      <ModelBreakdown rows={rows} days={30} isTokens={isTokens} />
       <p className="usage-footnote muted">{t('usage.cost.about')}</p>
     </section>
   );
@@ -742,78 +843,146 @@ export function tokensOf(rows: CostRow[], n: number, today = new Date()): number
   return tokenKinds(rows, n, today).total;
 }
 
-/** The day's tokens as a tooltip: the total and the kinds. */
-function tokensTitle(day: string, k: TokenKinds): string {
-  const kinds = KINDS.map((x) => `${t(`usage.tokens.${x}`)} ${tokens(k[x])}`).join(', ');
-  return `${day}: ${tokens(k.total)} (${kinds})`;
+/** Horizontal position of the bar chart tooltip, clamped to the chart box. */
+function tipPosition(idx: number, count: number): React.CSSProperties {
+  const pct = ((idx + 0.5) / count) * 100;
+  if (pct <= 28) return { left: 0 };
+  if (pct >= 72) return { right: 0 };
+  return { left: `${pct}%`, transform: 'translateX(-50%)' };
 }
 
 /** The cost or the tokens per day as bars (plain SVG): the cost in the
  * service's color, or, with `stacked`, in the services' colors; the tokens
- * stacked by service with `stacked`, else by kind. */
+ * stacked by service with `stacked`, else by kind. Hovering shows an
+ * immediate custom tooltip with the day's breakdown. */
 function DailyBars({ rows, days, stacked, metric = 'spend' }: { rows: CostRow[]; days: number; stacked?: boolean; metric?: Metric }) {
   const W = 300;
   const H = 72;
-  const today = new Date();
   const isTokens = metric === 'tokens';
-  const providers = stacked ? shownProviders([], { rows } as CostReport) : [];
-  const all = dailyTokens(rows, days, today);
-  const cost = daily(rows, days, today);
-  type Layer = { key: string; color: string; values: number[] };
-  let layers: Layer[];
-  if (!isTokens) {
-    layers = stacked
-      ? providers.map((p) => ({
-          key: p,
-          color: providerColor(p),
-          values: daily(
-            rows.filter((r) => r.provider === p),
-            days,
-            today,
-          ).map((d) => d.cost),
-        }))
-      : [{ key: 'cost', color: 'var(--brand)', values: cost.map((d) => d.cost) }];
-  } else {
-    layers = stacked
-      ? providers.map((p) => ({
-          key: p,
-          color: providerColor(p),
-          values: dailyTokens(
-            rows.filter((r) => r.provider === p),
-            days,
-            today,
-          ).map((d) => d.total),
-        }))
-      : KINDS.map((k) => ({ key: k, color: kindColor(k), values: all.map((d) => d[k]) }));
-  }
-  const totals = isTokens ? all.map((d) => d.total) : cost.map((d) => d.cost);
-  const max = Math.max(...totals, isTokens ? 1 : 0.01);
-  const bw = W / totals.length;
+  const todayKey = dayOf(new Date());
+  const [hoverIdx, setHoverIdx] = useState<number>();
+
+  const chart = useMemo(() => {
+    const today = new Date();
+    const details = dailyDetails(rows, days, today);
+    const providers = stacked ? shownProviders([], { rows } as CostReport) : [];
+    type Layer = { key: string; color: string; values: number[] };
+    let layers: Layer[];
+    if (stacked) {
+      layers = providers.map((p) => ({
+        key: p,
+        color: providerColor(p),
+        values: details.map((d) => {
+          const bp = d.byProvider.find((x) => x.provider === p);
+          return isTokens ? (bp?.tokens ?? 0) : (bp?.cost ?? 0);
+        }),
+      }));
+    } else if (!isTokens) {
+      layers = [{ key: 'cost', color: 'var(--brand)', values: details.map((d) => d.cost) }];
+    } else {
+      layers = KINDS.map((k) => ({ key: k, color: kindColor(k), values: details.map((d) => d.kinds[k]) }));
+    }
+    const totals = details.map((d) => (isTokens ? d.kinds.total : d.cost));
+    const max = Math.max(...totals, isTokens ? 1 : 0.01);
+    const bw = W / totals.length;
+    return { details, layers, totals, max, bw };
+  }, [rows, days, stacked, isTokens, todayKey]);
+
+  const activeIdx = hoverIdx !== undefined && hoverIdx >= 0 && hoverIdx < chart.details.length ? hoverIdx : undefined;
+  const hovered = activeIdx !== undefined ? chart.details[activeIdx] : undefined;
+  const emptyDay = hovered ? hovered.cost === 0 && hovered.kinds.total === 0 && hovered.kinds.requests === 0 : false;
+
   return (
-    <div className="usage-daily-box">
-      <span className="usage-daily-max muted">{isTokens ? tokens(max) : money(max)}</span>
+    <div className="usage-daily-box" onMouseLeave={() => setHoverIdx(undefined)}>
+      <span className="usage-daily-max muted">{isTokens ? tokens(chart.max) : money(chart.max)}</span>
       <svg
         className="usage-daily"
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
         role="img"
         aria-label={t(isTokens ? 'usage.tokens.daily' : 'usage.cost.daily')}
+        onMouseMove={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          if (rect.width <= 0) return;
+          const idx = Math.min(
+            chart.details.length - 1,
+            Math.max(0, Math.floor(((e.clientX - rect.left) / rect.width) * chart.details.length)),
+          );
+          if (idx !== hoverIdx) setHoverIdx(idx);
+        }}
       >
         <line x1={0} x2={W} y1={H - 0.5} y2={H - 0.5} className="usage-daily-axis" />
-        {totals.map((_, i) => {
+        {activeIdx !== undefined && <rect className="usage-daily-hover" x={activeIdx * chart.bw} y={0} width={chart.bw} height={H} />}
+        {chart.details.map((d, i) => {
           let y = H;
           return (
-            <g key={all[i].day}>
-              <title>{isTokens ? tokensTitle(all[i].day, all[i]) : `${cost[i].day}: ${money(cost[i].cost)}`}</title>
-              {layers.map((l) => {
-                const h = (l.values[i] / max) * (H - 2);
+            <g key={d.day} data-day={d.day} onMouseEnter={() => setHoverIdx(i)}>
+              {chart.layers.map((l) => {
+                const h = (l.values[i] / chart.max) * (H - 2);
                 y -= h;
-                return h > 0 ? <rect key={l.key} x={i * bw + bw * 0.15} y={y} width={bw * 0.7} height={h} fill={l.color} /> : null;
+                return h > 0 ? (
+                  <rect key={l.key} x={i * chart.bw + chart.bw * 0.15} y={y} width={chart.bw * 0.7} height={h} fill={l.color} />
+                ) : null;
               })}
             </g>
           );
         })}
       </svg>
+      {hovered && activeIdx !== undefined && (
+        <div className="usage-daily-tooltip" role="tooltip" style={tipPosition(activeIdx, chart.details.length)}>
+          <div className="usage-daily-tip-head">
+            <span className="usage-daily-tip-date">{hovered.day}</span>
+            <span className="usage-daily-tip-total">{isTokens ? tokens(hovered.kinds.total) : money(hovered.cost)}</span>
+          </div>
+          {emptyDay ? (
+            <div className="usage-daily-tip-sub muted">{t('usage.daily.empty')}</div>
+          ) : (
+            <>
+              <div className="usage-daily-tip-sub muted">
+                {isTokens ? money(hovered.cost) : t('usage.spend.tokens', { tokens: tokens(hovered.kinds.total) })}
+                {hovered.kinds.requests > 0 ? ` · ${t('usage.tokens.requests', { n: hovered.kinds.requests })}` : ''}
+              </div>
+              {stacked && hovered.byProvider.length > 0 && (
+                <div className="usage-daily-tip-list">
+                  {hovered.byProvider.map((p) => (
+                    <div key={p.provider} className="usage-daily-tip-row">
+                      <i style={{ background: providerColor(p.provider) }} />
+                      <span>{providerName(p.provider)}</span>
+                      <span className="spacer" />
+                      <span className="usage-daily-tip-val">
+                        {isTokens ? tokens(p.tokens) : money(p.cost)}
+                        <span className="muted"> · {isTokens ? money(p.cost) : tokens(p.tokens)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {hovered.kinds.total > 0 && (
+                <div className="usage-daily-tip-kinds">
+                  {KINDS.map((k) =>
+                    hovered.kinds[k] > 0 ? (
+                      <div key={k} className="usage-daily-tip-row">
+                        <i style={{ background: kindColor(k) }} />
+                        <span>{t(`usage.tokens.${k}`)}</span>
+                        <span className="spacer" />
+                        <span className="usage-daily-tip-val">
+                          {tokens(hovered.kinds[k])}
+                          {k === 'output' && hovered.kinds.reasoning > 0 && (
+                            <span className="muted">
+                              {' '}
+                              ({t('usage.tokens.reasoning')} {tokens(hovered.kinds.reasoning)})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    ) : null,
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

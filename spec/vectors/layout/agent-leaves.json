@@ -1,0 +1,187 @@
+{
+  "description": "A coding agent's terminal leaf may name the agent's session (a lower-case UUID) and the terminal it took the place of (before: an address); read from a document, a value of another type or shape is left out, the leaf's other fields kept, and render, which earlier versions wrote (\"native\": the pane showed the agent's conversation over its terminal), is dropped whatever its value. setTerminalFields changes only session and before of a terminal (never its address, nor render, nor fields of others such as agent, pid or resume): null removes a field, a value the document could not hold removes it too, other keys of the change are ignored, and panes of other kinds and unknown terminals stay as they are. The fields go with their leaf through splits, swaps and moves.",
+  "input": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w",
+        "name": "",
+        "cwd": "/p",
+        "tabs": [
+          {
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.5,
+              "children": [
+                {
+                  "terminal": "t1",
+                  "render": "native",
+                  "session": "0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f",
+                  "before": "t0",
+                  "agent": "claude",
+                  "pid": 42
+                },
+                {
+                  "split": "vertical",
+                  "ratio": 0.5,
+                  "children": [
+                    {
+                      "terminal": "t2",
+                      "render": "cli",
+                      "session": "x; rm -rf ~",
+                      "before": "../t 1",
+                      "font": 12
+                    },
+                    {
+                      "terminal": "t3",
+                      "render": true,
+                      "session": "0B6F5C1E-8D3A-4C2B-9E1F-2A3B4C5D6E7F",
+                      "before": 7
+                    }
+                  ]
+                }
+              ]
+            },
+            "focused": "t1"
+          },
+          {
+            "root": {
+              "code": {
+                "id": "c1",
+                "folder": "/p"
+              }
+            },
+            "focused": "code:c1"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  },
+  "ops": [
+    {
+      "op": "setTerminalFields",
+      "terminal": "t2",
+      "fields": {
+        "render": "native",
+        "session": "1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f",
+        "before": "t1x-old_2"
+      }
+    },
+    {
+      "op": "setTerminalFields",
+      "terminal": "t1",
+      "fields": {
+        "render": "native",
+        "before": null
+      }
+    },
+    {
+      "op": "setTerminalFields",
+      "terminal": "t3",
+      "fields": {
+        "terminal": "hijack",
+        "session": "$(reboot)",
+        "before": "",
+        "note": 1
+      }
+    },
+    {
+      "op": "setTerminalFields",
+      "terminal": "code:c1",
+      "fields": {
+        "session": "1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f"
+      }
+    },
+    {
+      "op": "setTerminalFields",
+      "terminal": "t9",
+      "fields": {
+        "session": "1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f"
+      }
+    },
+    {
+      "op": "splitPane",
+      "target": "t1",
+      "axis": "vertical",
+      "leaf": {
+        "terminal": "t4"
+      }
+    },
+    {
+      "op": "swap",
+      "a": "t2",
+      "b": "t4"
+    },
+    {
+      "op": "moveToNewTab",
+      "pane": "t3",
+      "workspace": "w"
+    },
+    {
+      "op": "focus",
+      "pane": "t2"
+    }
+  ],
+  "changed": true,
+  "expected": {
+    "version": 2,
+    "workspaces": [
+      {
+        "id": "w",
+        "name": "",
+        "cwd": "/p",
+        "tabs": [
+          {
+            "root": {
+              "split": "horizontal",
+              "ratio": 0.5,
+              "children": [
+                {
+                  "split": "vertical",
+                  "ratio": 0.5,
+                  "children": [
+                    {
+                      "terminal": "t1",
+                      "session": "0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f",
+                      "agent": "claude",
+                      "pid": 42
+                    },
+                    {
+                      "terminal": "t2",
+                      "font": 12,
+                      "session": "1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f",
+                      "before": "t1x-old_2"
+                    }
+                  ]
+                },
+                {
+                  "terminal": "t4"
+                }
+              ]
+            },
+            "focused": "t2"
+          },
+          {
+            "root": {
+              "code": {
+                "id": "c1",
+                "folder": "/p"
+              }
+            },
+            "focused": "code:c1"
+          },
+          {
+            "root": {
+              "terminal": "t3"
+            },
+            "focused": "t3"
+          }
+        ],
+        "selected": 0
+      }
+    ],
+    "selected": 0
+  }
+}

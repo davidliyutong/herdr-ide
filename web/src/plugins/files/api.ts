@@ -1,6 +1,6 @@
-// The file explorer's requests to the core (internal/plugins/files): the
+// The file explorer's requests to the hub (backend/features/files): the
 // changes, the stat it polls and saving an editor's text. Listings and
-// file contents come from the core's own routes (lib/files.ts).
+// file contents come from the hub's own routes (lib/files.ts).
 import { t } from '../../i18n';
 import { sendBody, type UploadOptions } from '../../lib/files';
 import { answer, failureCode, jsonInit, makeErrorText, PluginError, type AnswerBody } from '../../lib/pluginApi';
@@ -26,7 +26,7 @@ export interface Result {
   failed?: Record<string, string>;
 }
 
-/** A failure with the code the core or the machine gave. */
+/** A failure with the code the hub or the machine gave. */
 export class FilesError extends PluginError {
   constructor(code: string, message: string) {
     super(code, message);
@@ -94,7 +94,7 @@ export const filesApi = {
     return (await post<{ entries?: Entry[] }>(m, 'stat', { paths })).entries ?? [];
   },
 
-  /** Shows path in the file manager of the core's own computer (Finder on
+  /** Shows path in the file manager of the hub's own computer (Finder on
    * macOS): only for its own machine, from a page on that computer. */
   reveal: (m: string, path: string) => change(m, 'reveal', { path }),
 

@@ -45,11 +45,6 @@ function face(key: string): FontFace | undefined {
   return f;
 }
 
-/** True once the faces terminals of this weight draw with are loaded. */
-export function termFontLoaded(weight: TermFontWeight): boolean {
-  return loaded.has(weight);
-}
-
 /** The font stack for terminals of this weight: the font family the
  *  settings name (terminal.fontFamily), then the bundled font once loaded,
  *  then the fallbacks. A family is quoted unless it is a list already. */

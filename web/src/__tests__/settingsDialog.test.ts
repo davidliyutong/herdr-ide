@@ -8,7 +8,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, api: () => Promise.r
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import registry from '../../../design/generated/registry.json';
+import registry from '../../../spec/generated/registry.json';
 import { SettingsDialog, formatNumber, machineScoped } from '../components/SettingsDialog';
 import { applySettings, builtinDefaults, useSettings, type SettingDef, type SettingState } from '../settings';
 import { colors } from '../prefs';
@@ -19,7 +19,7 @@ import { matchScore } from '../components/Palette';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** Definitions as the core serves them, for the settings the tests use. */
+/** Definitions as the hub serves them, for the settings the tests use. */
 const defs: SettingDef[] = [
   {
     key: 'terminal.fontSize',
@@ -355,7 +355,7 @@ describe('terminal colors', () => {
     });
     expect(colors('dark')).toMatchObject({ background: '#282a36', foreground: '#ff0000' });
   });
-  it('has every scheme the core offers, with 16 colors', () => {
+  it('has every scheme the hub offers, with 16 colors', () => {
     const offered = (registry.i18n as string[])
       .filter((k) => k.startsWith('settings.terminal.colorScheme.dark.'))
       .map((k) => k.split('.').pop()!);

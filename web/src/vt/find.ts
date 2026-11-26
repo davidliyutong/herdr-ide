@@ -51,8 +51,3 @@ export function findStep(older: boolean) {
 export function findResult(total: number, selected: number | undefined) {
   useFind.setState({ total, selected });
 }
-
-export function findOpenIn(m: string, terminal: string): boolean {
-  const s = useFind.getState();
-  return s.m === m && s.terminal === terminal;
-}

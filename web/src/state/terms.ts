@@ -1,4 +1,4 @@
-// The machines' terminals as the core's terminal protocol reports them
+// The machines' terminals as the hub's terminal protocol reports them
 // (/api/v1/term, docs/features/22-terminal-protocol.md) and their shared
 // arrangement, the layout document of each machine: workspaces, tabs and
 // split panes. A machine is subscribed once the user turns to it (which
@@ -14,7 +14,7 @@ import * as L from '../term/layout';
 import { nextPlace, settled, SETTLE_MS, type Place } from '../term/place';
 import { currentDisplay } from '../appearance';
 import { useStore } from './store';
-import { AGENT_FORGET_MS, endedWithCore, rememberAgents, replaceTerminal, takeResume } from '../restore';
+import { AGENT_FORGET_MS, confirmSession, endedWithCore, rememberAgents, replaceTerminal, resumeSession, takeResume } from '../restore';
 import { agentOf } from '../lib/machine';
 
 export interface MachineTerms {
@@ -35,6 +35,20 @@ export const useTerms = create<TermsState>(() => ({ connected: false, machines: 
 /** The label of a terminal whose pane was closed: when it ends (Date.now()
  * in ms); empty or absent for one that is not closing. */
 export const CLOSING_LABEL = 'closing';
+
+/** What a live terminal runs (TermModel.programOf). */
+interface RunningProgram {
+  pid: number;
+  foreground?: number;
+}
+
+/** A terminal's pane on the page, as resumeAgent types into it. */
+export interface ResumeTarget {
+  /** Whether input reaches the terminal's program now: false once the
+   * pane is gone, and while it attaches. */
+  readonly attached: boolean;
+  type(text: string): void;
+}
 
 /** Where a new terminal starts and how it is placed. */
 export interface RunOptions {
@@ -73,6 +87,10 @@ export class TermModel {
   private readonly agentGone = new Map<string, number>();
   /** Terminals being started again in place of ones that ended with their core, by machine and old address. */
   private readonly restoring = new Set<string>();
+  /** Terminals whose agent's session the machine is being asked to
+   * confirm before it is resumed, with the pane that types into each, by
+   * machine and address. */
+  private readonly resuming = new Map<string, ResumeTarget>();
   /** Terminals started in place of ended ones whose layout is not written
    * yet, with the ended ones they replace, by machine: the ended one is
    * removed once a layout naming its replacement is written or read, and
@@ -125,13 +143,13 @@ export class TermModel {
     };
   }
 
-  /** Follows a machine's terminals: the core installs and starts its
+  /** Follows a machine's terminals: the hub installs and starts its
    * terminal core. Kept for the page's life. */
   subscribe(m: string) {
     if (this.subscribed.has(m)) return;
     this.subscribed.add(m);
     this.connection.subscribe(m);
-    this.publish();
+    this.publish(m);
   }
 
   isSubscribed(m: string): boolean {
@@ -159,7 +177,7 @@ export class TermModel {
     this.dirty.delete(m);
     this.store.forget(m);
     this.trackPlaces(m);
-    this.publish();
+    this.publish(m);
   }
 
   /** A machine's layout, once read. */
@@ -175,18 +193,29 @@ export class TermModel {
     return this.connection.call(m, method, params);
   }
 
-  private publish() {
-    const machines: Record<string, MachineTerms> = {};
-    const ids = new Set([...this.subscribed, ...this.store.backends.keys()]);
+  private publish(machine?: string, placeChanged = false) {
     const prev = useTerms.getState().machines;
+    const machines = { ...prev };
+    let changed = placeChanged;
+    const ids = machine === undefined ? new Set([...this.subscribed, ...this.store.backends.keys(), ...Object.keys(prev)]) : [machine];
     for (const m of ids) {
+      const old = Object.hasOwn(prev, m) ? prev[m] : undefined;
+      const backend = this.store.backends.get(m);
+      if (!this.subscribed.has(m) && !backend) {
+        if (old) {
+          delete machines[m];
+          changed = true;
+        }
+        continue;
+      }
       const terminals: Record<string, TerminalRecord> = {};
       for (const r of this.store.terminals(m)) terminals[r.address] = r;
-      const next: MachineTerms = { backend: this.store.backends.get(m), terminals, layout: this.layout(m) };
-      const old = prev[m];
-      machines[m] = old && old.backend === next.backend && old.layout === next.layout && sameRecords(old.terminals, terminals) ? old : next;
+      const layout = this.layout(m);
+      if (old && old.backend === backend && old.layout === layout && sameRecords(old.terminals, terminals)) continue;
+      Object.defineProperty(machines, m, { value: { backend, terminals, layout }, enumerable: true, configurable: true });
+      changed = true;
     }
-    useTerms.setState({ machines });
+    if (changed) useTerms.setState({ machines });
   }
 
   private message(msg: Record<string, unknown>) {
@@ -219,7 +248,7 @@ export class TermModel {
       }
     }
     this.remember(m);
-    this.publish();
+    this.publish(m);
   }
 
   /** A machine whose layout was never written starts with a workspace to
@@ -266,7 +295,7 @@ export class TermModel {
         if (!L.sameLayout(layout, read)) this.save(m);
         for (const a of back) this.restore(m, a);
         this.remember(m);
-        this.publish();
+        this.publish(m);
         done?.();
       },
       () => {},
@@ -343,7 +372,7 @@ export class TermModel {
     if (L.sameLayout(after, before)) return false;
     this.layouts.set(m, after);
     this.save(m);
-    this.publish();
+    this.publish(m);
     return true;
   }
 
@@ -408,19 +437,83 @@ export class TermModel {
     );
   }
 
-  /** Types the command that continues an agent's conversation into a
-   * terminal that lost its agent with its core, once it is attached: type
-   * sends text to it. The request is taken out of the layout first and the
+  /** Types the command that brings an agent's conversation back into a
+   * terminal that lost its agent with its core, into its pane once that is
+   * attached (it calls this from onAttached). The request is taken out of the layout first and the
    * command typed once the core took that layout: of several pages that
    * have the terminal, the one whose write won types, and the others read
-   * a layout that asks for nothing. */
-  resumeAgent(m: string, address: string, type: (text: string) => void) {
+   * a layout that asks for nothing.
+   *
+   * A leaf that names a session the agent resumes by its id is asked about
+   * first (confirmSession, at most RESOLVE_TIMEOUT_MS), before the request
+   * is taken: the answer only chooses between two commands of the agent's
+   * kind, and the versioned write that follows still decides whether
+   * anything is typed. Asking after the write would leave a layout that no
+   * longer asks for the agent while nothing is typed yet, for as long as
+   * the machine takes to answer, and a page closed meanwhile would lose the
+   * resume. The request is taken from the layout as it is once the answer
+   * came, and the session is resumed by its id only while the leaf still
+   * names the agent and session confirmed.
+   *
+   * By then the user may have started something else in the terminal: the
+   * request is taken only while the pane is attached (it may have gone, or
+   * be attaching again, while the question was on its way) and the
+   * terminal runs what it ran when this was asked (sameProgram), else it
+   * stays for the pane's next attach; and the command is typed only while
+   * the terminal still does, else nothing more happens (the user is in
+   * control of the terminal). While a question is on its way for a
+   * terminal, other calls for it only give the newest pane. */
+  resumeAgent(m: string, address: string, pane: ResumeTarget) {
     const layout = this.layout(m);
-    const taken = layout && !this.readOnly() ? takeResume(layout, address) : undefined;
+    if (!layout || this.readOnly()) return;
+    const key = `${m}\n${address}`;
+    if (this.resuming.has(key)) return void this.resuming.set(key, pane);
+    const program = this.programOf(m, address);
+    if (!program) return;
+    const asked = resumeSession(layout, address);
+    if (!asked) return this.takeAndType(m, address, undefined, pane, program);
+    this.resuming.set(key, pane);
+    void confirmSession(m, asked.agent, asked.session, this.directory(m, address)).then((ok) => {
+      const latest = this.resuming.get(key) ?? pane;
+      this.resuming.delete(key);
+      this.takeAndType(m, address, ok ? asked : undefined, latest, program);
+    });
+  }
+
+  /** What a live terminal runs: its program's pid and, when the core says,
+   * that of the program in its foreground. */
+  private programOf(m: string, address: string): RunningProgram | undefined {
+    const r = this.store.terminal(m, address);
+    if (!r || !isLive(r) || typeof r.pid !== 'number') return undefined;
+    const fg = (r.foreground as { pid?: unknown } | null | undefined)?.pid;
+    return typeof fg === 'number' ? { pid: r.pid, foreground: fg } : { pid: r.pid };
+  }
+
+  /** Whether a terminal is live and runs what it ran then: the same
+   * program, with the same program in its foreground, or its own (its shell
+   * waits at its prompt), or none the core says. */
+  private sameProgram(m: string, address: string, then: RunningProgram): boolean {
+    const now = this.programOf(m, address);
+    if (!now || now.pid !== then.pid) return false;
+    return now.foreground === undefined || now.foreground === now.pid || now.foreground === then.foreground;
+  }
+
+  /** Takes a terminal's request for its agent back out of the layout and
+   * types the command once that layout is written (resumeAgent). */
+  private takeAndType(
+    m: string,
+    address: string,
+    confirmed: { agent: string; session: string } | undefined,
+    pane: ResumeTarget,
+    program: RunningProgram,
+  ) {
+    if (!pane.attached || !this.sameProgram(m, address, program)) return;
+    const layout = this.layout(m);
+    const taken = layout && !this.readOnly() ? takeResume(layout, address, confirmed) : undefined;
     if (!taken || !this.mutate(m, () => taken.layout)) return;
     const command = taken.command;
     if (!command) return;
-    this.afterWrite(m, (ok) => ok && type(`${command}\r`));
+    this.afterWrite(m, (ok) => ok && this.sameProgram(m, address, program) && pane.type(`${command}\r`));
   }
 
   /** Ends a terminal whose pane was closed at deadline (Date.now()), unless
@@ -529,7 +622,7 @@ export class TermModel {
             const next = p && settled(p, Date.now());
             if (!p || next === p) return;
             this.places.set(key, next!);
-            this.publish();
+            this.publish(m, true);
           },
           Math.max(0, place.seen.at + SETTLE_MS - now),
         ),
@@ -595,8 +688,8 @@ function sameRecords(a: Record<string, TerminalRecord>, b: Record<string, Termin
   return ka.every((k) => a[k] === b[k]);
 }
 
-/** The page's model, on the core that served it. */
-export let terms = new TermModel(TermConnection.toCore());
+/** The page's model, on the hub that served it. */
+export let terms = new TermModel(TermConnection.toHub());
 
 /** Replaces the page's model (tests). */
 export function setTermModel(model: TermModel) {

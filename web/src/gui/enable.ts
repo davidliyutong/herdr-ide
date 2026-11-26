@@ -1,5 +1,5 @@
 // Terminals opened before a machine's display existed (or outside this UI)
-// have no DISPLAY. The core types the display variables into shells waiting
+// have no DISPLAY. The hub types the display variables into shells waiting
 // at their prompt; terminals running a program are left alone and reported,
 // with the command to enter once the program exits.
 

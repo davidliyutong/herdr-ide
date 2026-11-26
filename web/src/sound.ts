@@ -12,7 +12,7 @@ export function mutedAgents(list: readonly string[]): Set<string> {
 }
 
 export interface SoundContext {
-  /** The core chose this page to play sounds (the most recently used one). */
+  /** The hub chose this page to play sounds (the most recently used one). */
   chosen: boolean;
   /** The "Notification sounds" setting. */
   enabled: boolean;

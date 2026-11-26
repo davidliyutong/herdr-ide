@@ -12,6 +12,9 @@ export function GuiWindowPage({ m, id }: { m: string; id: number }) {
   const [status, setStatus] = useState<SessionStatus>('connecting');
   const [blocked, setBlocked] = useState<GuiWindow[]>([]);
   const [stats, setStats] = useState<StatsView | undefined>();
+  const [viewOnly, setViewOnly] = useState(false);
+  const [canControl, setCanControl] = useState(false);
+  const sessionRef = useRef<GuiSession>(undefined);
   const showStats = useRef(wantsStats());
 
   useEffect(() => {
@@ -47,9 +50,12 @@ export function GuiWindowPage({ m, id }: { m: string; id: number }) {
             stats: (s) => {
               if (showStats.current) setStats(s);
             },
+            role: (control) => setViewOnly(!control),
           },
           !c.read_only,
         );
+        sessionRef.current = session;
+        setCanControl(!c.read_only);
       });
     return () => {
       cancelled = true;
@@ -68,6 +74,18 @@ export function GuiWindowPage({ m, id }: { m: string; id: number }) {
       <div className="gui-host" ref={host} />
       {status !== 'open' && <div className="gui-overlay">{t(`gui.status.${status}`)}</div>}
       {stats && <StatsPanel s={stats} />}
+      {viewOnly && status === 'open' && (
+        <div className="gui-banner">
+          <div className="gui-banner-row">
+            <span className="ellipsis">{t('gui.viewOnly')}</span>
+            {canControl && (
+              <button className="primary" onClick={() => sessionRef.current?.takeControl()}>
+                {t('gui.takeControl')}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {blocked.length > 0 && (
         <div className="gui-banner">
           {blocked.map((w) => (

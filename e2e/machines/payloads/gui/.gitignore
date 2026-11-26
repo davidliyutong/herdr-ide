@@ -1,0 +1,5 @@
+# What build.sh builds.
+/driver.js
+/exe/
+/bin/
+/enc/

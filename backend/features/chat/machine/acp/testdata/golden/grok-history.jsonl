@@ -1,0 +1,30 @@
+{"event":{"t":"notice","method":"_veldr/imported","params":{"lossy":true}}}
+{"event":{"t":"info","chat":{"id":"","kind":"","title":"Create hello.txt containing hi","cwd":"","sessionId":"","state":"","status":"","created":"0001-01-01T00:00:00Z","updated":"0001-01-01T00:00:00Z","seq":0,"seen":0,"capabilities":{"images":false,"compact":false,"queue":false,"plan":false,"questions":false,"effort":false,"model":false,"cancelQueued":false}}}}
+{"event":{"t":"user","content":[{"type":"text","text":"Reply with the word hi"}]}}
+{"event":{"t":"turn","state":"start"}}
+{"event":{"t":"update","item":"h-m-2","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}}}
+{"event":{"t":"turn","state":"end","stopReason":"end_turn"}}
+{"event":{"t":"user","content":[{"type":"text","text":"Create a file hello.txt containing hi in the current directory"}]}}
+{"event":{"t":"turn","state":"start"}}
+{"event":{"t":"update","item":"h-t-4","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Creating hello.txt with the content \"hi\" in the current directory."}}}}
+{"event":{"t":"update","item":"h-m-5","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I'll create `hello.txt` with the text `hi` in the current directory."}}}}
+{"event":{"t":"update","item":"call-00000000-0000-4000-8000-000000000011-0","update":{"_meta":{"x.ai/tool":{"version":1,"name":"write","kind":"write","namespace":"grok_build","label":"Write","read_only":false}},"content":[{"type":"diff","path":"/work/hello.txt","oldText":"","newText":"hi\n","_meta":{"details":[{"old_string":"","old_line":1,"new_string":"hi\n","new_line":1,"context_before":"","context_after":"","line_prefix":""}]}}],"kind":"edit","locations":[{"path":"/work/hello.txt"}],"rawInput":{"variant":"Write","file_path":"/work/hello.txt","content":"hi\n"},"rawOutput":{"type":"SearchReplace","EditsApplied":{"old_string":"","new_string":"hi\n","tool_output_for_prompt":"The file /work/hello.txt has been created.","tool_output_for_prompt_concise":"The file /work/hello.txt has been created.","absolute_path":"/work/hello.txt","edits":{"details":[{"old_string":"","old_line":1,"new_string":"hi\n","new_line":1,"context_before":"","context_after":"","line_prefix":""}]}}},"sessionUpdate":"tool_call","status":"completed","title":"Write `/work/hello.txt`","toolCallId":"call-00000000-0000-4000-8000-000000000011-0"}}}
+{"event":{"t":"update","item":"h-t-6","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Created hello.txt with the content \"hi\"."}}}}
+{"event":{"t":"update","item":"h-m-7","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Created `hello.txt` in the current directory with the contents `hi`."}}}}
+{"event":{"t":"turn","state":"end","stopReason":"end_turn"}}
+{"event":{"t":"user","content":[{"type":"text","text":"Run `echo hi` in the shell and tell me its output."}]}}
+{"event":{"t":"turn","state":"start"}}
+{"event":{"t":"update","item":"h-t-9","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Running `echo hi` in the shell."}}}}
+{"event":{"t":"update","item":"call-00000000-0000-4000-8000-000000000013-1","update":{"_meta":{"x.ai/tool":{"version":1,"name":"run_terminal_command","kind":"execute","namespace":"grok_build","label":"Run Command","read_only":false}},"content":[{"type":"content","content":{"type":"text","text":"hi\n"}}],"kind":"execute","rawInput":{"variant":"Bash","command":"echo hi","description":"Print hi from the shell","is_background":false},"rawOutput":{"type":"Bash","output":[104,105,10],"output_for_prompt":"exit: 0\nhi\n","exit_code":0,"command":"echo hi","truncated":false,"signal":null,"timed_out":false,"description":"Print hi from the shell","current_dir":"/work","output_file":"/home/user/.grok/sessions/%2Fwork/00000000-0000-4000-8000-000000000007/terminal/call-00000000-0000-4000-8000-000000000013-1.log","total_bytes":3,"was_bare_echo":true},"sessionUpdate":"tool_call","status":"completed","title":"Execute `echo hi`","toolCallId":"call-00000000-0000-4000-8000-000000000013-1"}}}
+{"event":{"t":"update","item":"h-m-10","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The command printed:\n\n```\nhi\n```"}}}}
+{"event":{"t":"turn","state":"end","stopReason":"end_turn"}}
+{"event":{"t":"user","content":[{"type":"text","text":"Count slowly from 1 to 50, one number per line, with a short comment after each number."}]}}
+{"event":{"t":"turn","state":"start"}}
+{"event":{"t":"update","item":"h-t-12","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Preparing to count from 1 to 50, one number per line, with a short"}}}}
+{"event":{"t":"turn","state":"end","stopReason":"end_turn"}}
+{"event":{"t":"user","content":[{"type":"image","data":"iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC","mimeType":"image/png"},{"type":"text","text":"What color is this image? One word."}]}}
+{"event":{"t":"turn","state":"start"}}
+{"event":{"t":"update","item":"h-t-14","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"The image is too small to see. It is only 64 pixels.\n\nI see a prior request to count from 1 to 50. I will not respond to that now."}}}}
+{"event":{"t":"update","item":"h-m-15","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I can't tell. The image was too small to load, so there is no color to name."}}}}
+{"event":{"t":"turn","state":"end","stopReason":"end_turn"}}
+{"chat":{"id":"","kind":"","title":"","cwd":"","sessionId":"","state":"","status":"","created":"0001-01-01T00:00:00Z","updated":"0001-01-01T00:00:00Z","seq":0,"seen":0,"capabilities":{"images":false,"compact":false,"queue":false,"plan":false,"questions":false,"effort":false,"model":false,"cancelQueued":false}}}

@@ -121,15 +121,6 @@
   gap: 6px;
   margin-left: auto;
 }
-/* The auto-lock's countdown: digits that do not shift as they change; a
- * time set for this unlock in the accent. */
-.vault-autolock-time {
-  font-variant-numeric: tabular-nums;
-}
-.vault-session .vault-autolock.custom {
-  color: var(--accent);
-}
-
 /* ---- tabs and tools ---- */
 .vault-tabs {
   display: flex;

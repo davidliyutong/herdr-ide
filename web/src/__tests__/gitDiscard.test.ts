@@ -18,7 +18,7 @@ import { useDialog } from '../dialog';
 import { discard, panesOfFiles } from '../plugins/git/ops';
 import { useGit } from '../plugins/git/state';
 import type { StatusFile } from '../plugins/git/api';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 
 const ROOT = '/home/u/repo';
 const diff = (id: string, path: string, mode = 'worktree') => ({ view: { id, plugin: 'git', kind: 'diff', repo: ROOT, path, mode } });
@@ -51,9 +51,9 @@ const files: StatusFile[] = [
 ];
 
 describe('discarding files', () => {
-  let core: FakeCore;
+  let hub: FakeHub;
   const posts: Array<{ action: string; body: Record<string, unknown> }> = [];
-  const panes = () => core.model.layout('m')!.workspaces.flatMap((ws) => ws.tabs.flatMap((tb) => L.tabPanes(tb)));
+  const panes = () => hub.model.layout('m')!.workspaces.flatMap((ws) => ws.tabs.flatMap((tb) => L.tabPanes(tb)));
   const answer = async (ok: boolean, alt = false) => {
     await vi.waitFor(() => expect(useDialog.getState().current).toBeDefined());
     const req = useDialog.getState().current as { resolve(ok: boolean, checked?: boolean, alt?: boolean): void };
@@ -73,14 +73,14 @@ describe('discarding files', () => {
       if (action === 'watch') return new Response(JSON.stringify({ token: 't' }));
       return new Response('{}');
     });
-    core = new FakeCore();
-    core.machine('m', [], JSON.parse(JSON.stringify(LAYOUT)));
-    core.install();
+    hub = new FakeHub();
+    hub.machine('m', [], JSON.parse(JSON.stringify(LAYOUT)));
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([{ id: 'm', label: 'm', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
     s.selectMachine('m');
-    core.model.subscribe('m');
+    hub.model.subscribe('m');
     await settle();
     await settle();
   });

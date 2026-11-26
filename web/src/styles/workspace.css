@@ -144,6 +144,14 @@
   color: var(--fg-mute);
   margin: 0 -2px;
 }
+/* A muted tab or workspace: no sounds or notifications. */
+.tab-muted.lucide,
+.ws-muted.lucide {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--fg-mute);
+  flex: none;
+}
 /* A preview pane's title (a file shown by a single click, replaced by the
    next one), as VS Code's preview editors. */
 .is-preview {
@@ -158,7 +166,7 @@
   width: 10em;
   padding: 0 4px;
 }
-.pane-actions button:disabled {
+:is(.pane-actions, .pane-plugin-actions) button:disabled {
   opacity: 0.4;
   pointer-events: none;
 }
@@ -196,6 +204,15 @@
 }
 .pane.focused > .pane-header {
   border-top-color: var(--accent);
+}
+/* The plugins' buttons in a terminal's header (TerminalHeaderActions),
+ * right before the pane's own and drawn as they are (.pane-actions). */
+.pane-header .pane-plugin-actions {
+  height: 100%;
+  margin-left: auto;
+}
+.pane-header .pane-plugin-actions + .pane-actions {
+  margin-left: 0;
 }
 /* A split's handle: dragged, it sets the split's ratio. */
 .split-handle {
@@ -490,14 +507,14 @@
   direction: ltr;
   unicode-bidi: isolate;
 }
-.pane-actions {
+:is(.pane-actions, .pane-plugin-actions) {
   display: flex;
   align-items: center;
   gap: 1px;
   flex: none;
 }
-/* Icon buttons, as large as every toolbar's. */
-.pane-actions button {
+/* Icon buttons, as large as every toolbar's; the plugins' too. */
+:is(.pane-actions, .pane-plugin-actions) button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -510,17 +527,17 @@
   border-radius: var(--radius-sm);
   color: var(--fg-dim);
 }
-.pane-actions .lucide {
+:is(.pane-actions, .pane-plugin-actions) .lucide {
   width: var(--ic);
   height: var(--ic);
 }
 /* With several panes, only the focused one and the one pointed at show
-   their buttons, so the keyboard's pane stands out; a program window that
-   wants attention stays visible. */
-.tab-panes:not(.alone) .pane:not(.focused):not(:hover) .pane-actions :is(button:not(.attention), .sep) {
+   their buttons, the plugins' too, so the keyboard's pane stands out; a
+   program window that wants attention stays visible. */
+.tab-panes:not(.alone) .pane:not(.focused):not(:hover) :is(.pane-actions, .pane-plugin-actions) :is(button:not(.attention), .sep) {
   visibility: hidden;
 }
-.pane-actions button:hover {
+:is(.pane-actions, .pane-plugin-actions) button:hover {
   color: var(--fg);
   background: var(--bg-3);
 }
@@ -538,9 +555,9 @@
 .pane-actions .more {
   display: none;
 }
-/* Narrow panes drop the folder, then the agent and the VS Code buttons (the
- * menu's button takes their place), the split buttons, zoom and the title,
- * in this order; the menu's button and close stay. */
+/* Narrow panes drop the folder, then the agent, the VS Code buttons and
+ * the plugins' (the menu's button takes their place), the split buttons,
+ * zoom and the title, in this order; the menu's button and close stay. */
 @container (max-width: 30rem) {
   .pane-header .pane-cwd {
     display: none;
@@ -548,8 +565,12 @@
 }
 @container (max-width: 26rem) {
   .pane-header .pane-agent,
-  .pane-header .pane-actions .code {
+  .pane-header .pane-actions .code,
+  .pane-header .pane-plugin-actions {
     display: none;
+  }
+  .pane-header .pane-plugin-actions + .pane-actions {
+    margin-left: auto;
   }
   .pane-header .pane-actions .more {
     display: inline-flex;

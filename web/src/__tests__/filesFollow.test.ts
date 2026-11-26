@@ -19,7 +19,7 @@ import { FilesPanel } from '../plugins/files/FilesPanel';
 import { setFollow, useTree } from '../plugins/files/tree';
 import { actions } from '../actions';
 import { noteFocus, resetHistory } from '../paneHistory';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -47,7 +47,7 @@ const workspace = (id: string, cwd: string, terminal: string, file: string) => (
 describe('the explorer across workspaces and machines', () => {
   let host: HTMLDivElement;
   let root: Root;
-  let core: FakeCore;
+  let hub: FakeHub;
   const flush = () => act(async () => settle());
   const rootOf = () => [useTree.getState().m, useTree.getState().root];
   const show = async (m: string, ws: string) => {
@@ -77,8 +77,8 @@ describe('the explorer across workspaces and machines', () => {
       }
       return json({});
     });
-    core = new FakeCore();
-    core.machine('a', [FakeCore.term('pa', { cwd: '/home/a/proj' }), FakeCore.term('pa2', { cwd: '/home/a/two' })], {
+    hub = new FakeHub();
+    hub.machine('a', [FakeHub.term('pa', { cwd: '/home/a/proj' }), FakeHub.term('pa2', { cwd: '/home/a/two' })], {
       version: 2,
       workspaces: [
         workspace('wa1wa1wa', '/home/a/other', 'pa', '/home/a/proj/x.txt'),
@@ -86,12 +86,12 @@ describe('the explorer across workspaces and machines', () => {
       ],
       selected: 0,
     });
-    core.machine('b', [FakeCore.term('pb', { cwd: '/srv/b/app' })], {
+    hub.machine('b', [FakeHub.term('pb', { cwd: '/srv/b/app' })], {
       version: 2,
       workspaces: [workspace('wb1wb1wb', '/srv/b', 'pb', '/srv/b/app/z.txt')],
       selected: 0,
     });
-    core.install();
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([
@@ -99,8 +99,8 @@ describe('the explorer across workspaces and machines', () => {
       { id: 'b', label: 'b', kind: 'ssh', status: 'ready', info: { home: '/home/b' } },
     ] as unknown as MachineState[]);
     s.selectMachine('a');
-    core.model.subscribe('a');
-    core.model.subscribe('b');
+    hub.model.subscribe('a');
+    hub.model.subscribe('b');
     await settle();
     useTree.setState({ m: undefined, ws: undefined, root: undefined, follow: true, dirs: {}, expanded: {}, mtimes: {}, selection: [] });
     host = document.createElement('div');

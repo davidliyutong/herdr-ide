@@ -1,5 +1,5 @@
 const { execFileSync } = require('node:child_process');
-const { existsSync, readFileSync } = require('node:fs');
+const { existsSync, statSync, readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { Arch } = require('electron-builder');
 
@@ -12,24 +12,40 @@ function brand(key) {
 }
 const slug = brand('APP_SLUG');
 const name = brand('APP_NAME');
-// The same as APP_ID in src/platform.ts.
-const appId = `dev.${slug}.desktop`;
+// The same as APP_ID in src/platform.ts: the domain reversed and "desktop".
+const appId = `${brand('APP_DOMAIN').split('.').reverse().join('.')}.desktop`;
 const arch = process.env.DESKTOP_ARCH || process.arch;
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported architecture: ${arch}`);
-const goArch = arch === 'x64' ? 'amd64' : 'arm64';
-// The core scripts/build.sh built for a platform (Go's names), placed at
-// bin/<slug> in the app's resources, outside ASAR.
-const goos = { darwin: 'darwin', linux: 'linux', win32: 'windows' };
-const exe = (platform) => (platform === 'win32' ? '.exe' : '');
-const coreOf = (platform) => `../dist/${slug}-${goos[platform]}-${goArch}${exe(platform)}`;
-const core = (platform) => [{ from: coreOf(platform), to: `bin/${slug}${exe(platform)}` }];
-// macOS: a Developer ID signature when the signing step has a certificate
-// (CSC_LINK, or CSC_NAME of the keychain's), notarized with APPLE_ID,
-// APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID; ad hoc otherwise.
+
+// Stage 2 inputs staged in ../dist/desktop-stage by scripts/desktop.sh:
+//   - bin/<slug>[.exe]: the Stage 1 compiled Bun hub executable for this
+//     desktop OS and architecture (placed in Contents/Helpers/<slug> on
+//     macOS so Hardened Runtime signs it with JIT entitlements, and in
+//     resources/bin/ on Linux and Windows);
+//   - machines/: all 6 Stage 1 POSIX release archives (<slug>-<key>.tar.gz)
+//     and SHA256SUMS, so every desktop build (release and dev, macOS,
+//     Windows and Linux) deploys the exact same verified Stage 1 binaries as
+//     the CLI;
+//   - licenses/: third-party notices extracted from Stage 1.
+const STAGE = '../dist/desktop-stage';
+const ALL_MACHINE_KEYS = ['linux-amd64', 'linux-arm64', 'linux-amd64-musl', 'linux-arm64-musl', 'darwin-amd64', 'darwin-arm64'];
+
+// macOS: the Secure Enclave helper, a universal app bundle helper/build.mjs
+// made in dist/helper, placed in the app's Contents/Helpers (src/enclave.ts
+// helperPath), where signing the app signs it with the hardened runtime.
+const helper = `${name} Enclave.app`;
+const helperOf = `dist/helper/${helper}`;
+const withHelper = process.platform === 'darwin';
 const developerId = !!(process.env.CSC_LINK || process.env.CSC_NAME);
 
-// The project's page, which a Debian package names: the repository the
-// release workflow runs in, else this checkout's origin.
+// The app's version: its hub's (VERSION, from scripts/version.sh), which is
+// a tag or git describe's output. A bundle version must be semver, so a
+// version without a tag (a bare commit, "dev") becomes a prerelease of 0.0.0.
+function appVersion() {
+  const v = (process.env.VERSION || require('./package.json').version).replace(/^v/, '');
+  return /^\d+\.\d+\.\d+([-+].*)?$/.test(v) ? v : `0.0.0-${v.replace(/[^0-9A-Za-z.-]/g, '-')}`;
+}
+
 function homepage() {
   if (process.env.GITHUB_REPOSITORY) return `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${process.env.GITHUB_REPOSITORY}`;
   try {
@@ -40,40 +56,57 @@ function homepage() {
   }
 }
 
+const nonMacBinResource =
+  process.env.DESKTOP_OS === 'mac' || (!process.env.DESKTOP_OS && process.platform === 'darwin')
+    ? []
+    : [{ from: `${STAGE}/bin`, to: 'bin' }];
+
 module.exports = {
   appId,
   productName: name,
   artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
   directories: { output: '../dist/desktop' },
-  files: ['dist/main.cjs', 'dist/preload.cjs', 'assets/icon.png', 'package.json'],
+  files: ['dist/main.cjs', 'dist/preload.cjs', 'dist/frames.cjs', 'assets/icon.png', 'package.json'],
   extraMetadata: {
     name: `${slug}-desktop`,
-    // Release tags (vX.Y.Z) stay as is in the core; app metadata takes semver.
-    version: (process.env.VERSION || require('./package.json').version).replace(/^v/, ''),
+    version: appVersion(),
     homepage: homepage(),
-    // Linux: Electron's app id (Wayland) and window class (X11), the name of
-    // the desktop entry (linux.syncDesktopName) and of its launcher badge.
     desktopName: `${slug}.desktop`,
   },
   extraResources: [
-    // Written by scripts/fetch-hc from the herdr-core release the core embeds.
-    { from: '../dist/hc/licenses', to: 'licenses/herdr-core' },
-    { from: '../licenses/herdr-detect', to: 'licenses/herdr-detect' },
-    { from: '../licenses/encoder', to: 'licenses/encoder' },
+    { from: `${STAGE}/licenses/herdr-core`, to: 'licenses/herdr-core' },
+    { from: `${STAGE}/licenses/herdr-detect`, to: 'licenses/herdr-detect' },
+    { from: `${STAGE}/licenses/encoder`, to: 'licenses/encoder' },
     { from: '../LICENSE', to: 'LICENSE' },
     { from: '../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
-    { from: '../web/dist/licenses.md', to: 'licenses.md' },
+    { from: `${STAGE}/licenses/licenses.md`, to: 'licenses.md' },
+    { from: `${STAGE}/machines`, to: 'machines' },
+    ...nonMacBinResource,
   ],
-  // The core is built for DESKTOP_ARCH and the platform being packaged;
-  // refuse to put it into an Electron app for another architecture (e.g. a
-  // manual --x64 run) or package without it.
   beforePack: async (context) => {
     const packing = Arch[context.arch];
     if (packing !== arch) {
-      throw new Error(`Packaging ${packing} with ${goArch} binaries; set DESKTOP_ARCH=${packing} (scripts/desktop.sh does)`);
+      throw new Error(`Packaging ${packing} with ${arch} stage; set DESKTOP_ARCH=${packing} (scripts/desktop.sh does)`);
     }
-    for (const file of [coreOf(context.electronPlatformName), '../dist/hc/licenses/LICENSE', '../web/dist/licenses.md']) {
-      if (!existsSync(join(__dirname, file))) throw new Error(`Missing ${file}; build it with scripts/desktop.sh`);
+    const hubFile = context.electronPlatformName === 'win32' ? `${STAGE}/bin/${slug}.exe` : `${STAGE}/bin/${slug}`;
+    const needed = [
+      'dist/main.cjs',
+      'dist/preload.cjs',
+      'dist/frames.cjs',
+      hubFile,
+      `${STAGE}/machines/SHA256SUMS`,
+      `${STAGE}/licenses/herdr-core/LICENSE`,
+      `${STAGE}/licenses/licenses.md`,
+      ...ALL_MACHINE_KEYS.map((k) => `${STAGE}/machines/${slug}-${k}.tar.gz`),
+    ];
+    if (context.electronPlatformName === 'darwin' && withHelper) needed.push(`${helperOf}/Contents/MacOS/${name} Enclave`);
+    for (const file of needed) {
+      const full = join(__dirname, file);
+      if (!existsSync(full)) throw new Error(`Missing ${file}; build it with scripts/desktop.sh`);
+    }
+    if (context.electronPlatformName !== 'win32') {
+      const st = statSync(join(__dirname, `${STAGE}/bin/${slug}`));
+      if (!(st.mode & 0o111)) throw new Error(`${STAGE}/bin/${slug} is not executable`);
     }
   },
   asar: true,
@@ -85,9 +118,10 @@ module.exports = {
     identity: developerId ? undefined : '-',
     notarize: developerId && !!process.env.APPLE_ID,
     hardenedRuntime: true,
-    extraResources: core('darwin'),
-    // Folders dropped on the Dock icon become workspaces (src/folders.ts). Rank
-    // None: the app accepts dropped folders but never becomes their opener.
+    extraFiles: [
+      { from: `${STAGE}/bin/${slug}`, to: `Helpers/${slug}` },
+      ...(withHelper ? [{ from: helperOf, to: `Helpers/${helper}` }] : []),
+    ],
     extendInfo: {
       CFBundleDocumentTypes: [
         { CFBundleTypeName: 'Folder', CFBundleTypeRole: 'Viewer', LSHandlerRank: 'None', LSItemContentTypes: ['public.folder'] },
@@ -101,27 +135,19 @@ module.exports = {
       { x: 420, y: 180, type: 'link', path: '/Applications' },
     ],
   },
-  // A per-user installer (no administrator rights), unsigned.
   win: {
     icon: 'assets/icon.ico',
     target: ['nsis'],
-    extraResources: core('win32'),
   },
-  // Linux takes its icon sizes (16 to 1024 px) from the ICNS.
   linux: {
     category: 'Development',
     target: ['AppImage', 'deb'],
     executableName: slug,
     syncDesktopName: true,
     maintainer: `${name} contributors`,
-    // Offered in file managers' Open With for folders, which become
-    // workspaces on the local machine (src/platform.ts foldersOf).
     mimeTypes: ['inode/directory'],
-    extraResources: core('linux'),
   },
   deb: {
-    // electron-builder's defaults and ALSA, which Electron links and a
-    // minimal system lacks (libasound2t64 provides it on newer releases).
     depends: [
       'libgtk-3-0',
       'libnotify4',
@@ -134,7 +160,6 @@ module.exports = {
       'libsecret-1-0',
       'libasound2',
     ],
-    // SSH machines need the OpenSSH client.
     recommends: ['openssh-client'],
   },
 };

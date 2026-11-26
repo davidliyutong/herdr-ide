@@ -14,9 +14,10 @@ vi.mock('../lib/bridge', () => ({ bridge: { command: (...a: unknown[]) => comman
 import { useStore } from '../state/store';
 import { terminalTitle, type MachineState } from '../lib/machine';
 import { PaneHeader } from '../components/PaneHeader';
+import * as rowKeys from '../rowKeys';
 import * as L from '../term/layout';
 import { useMenu } from '../contextMenu';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { definePlugins } from '../plugins/registry';
 import { vscodePlugin } from '../plugins/vscode';
 import { vscodeOn } from './fakeSettings';
@@ -30,19 +31,19 @@ vscodeOn();
 describe('PaneHeader', () => {
   let host: HTMLDivElement;
   let root: Root;
-  let core: FakeCore;
+  let hub: FakeHub;
   const buttons = () => [...host.querySelectorAll('button')];
   const render = (pane = 'p1', leaf: L.Leaf = { terminal: 'p1' }) =>
     act(async () => root.render(createElement(PaneHeader, { m: 'm', pane, leaf, ws: 'w1w1w1w1', focused: false, zoomed: false })));
 
   beforeEach(async () => {
     command.mockClear();
-    core = new FakeCore();
-    core.machine(
+    hub = new FakeHub();
+    hub.machine(
       'm',
       [
-        FakeCore.term('p1', { cwd: '/home/u/src', labels: { name: 'build' }, agent: 'claude', agent_status: 'working' }),
-        FakeCore.term('p2', { cwd: '/tmp' }),
+        FakeHub.term('p1', { cwd: '/home/u/src', labels: { name: 'build' }, agent: 'claude', agent_status: 'working' }),
+        FakeHub.term('p2', { cwd: '/tmp' }),
       ],
       {
         version: 2,
@@ -58,12 +59,12 @@ describe('PaneHeader', () => {
         selected: 0,
       },
     );
-    core.install();
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([{ id: 'm', label: 'm', kind: 'local', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
     s.selectMachine('m');
-    core.model.subscribe('m');
+    hub.model.subscribe('m');
     await settle();
     host = document.createElement('div');
     document.body.append(host);
@@ -93,12 +94,12 @@ describe('PaneHeader', () => {
     await act(async () => buttons()[4].click());
     await act(settle);
     // The split starts in p1's folder and goes below p1.
-    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
+    expect(hub.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
       keep: true,
       cwd: '/home/u/src',
       display: expect.any(Object),
     });
-    expect(core.layout('m')!.workspaces[0].tabs[0].root).toMatchObject({
+    expect(hub.layout('m')!.workspaces[0].tabs[0].root).toMatchObject({
       children: [{ split: 'vertical', children: [{ terminal: 'p1' }, { terminal: 't1' }] }, { terminal: 'p2' }],
     });
     await act(async () => buttons()[5].click());
@@ -108,8 +109,8 @@ describe('PaneHeader', () => {
     await act(async () => buttons()[1].click());
     await act(settle);
     expect(command).toHaveBeenLastCalledWith('m', expect.any(String), '/home/u/src', { cmd: 'openDiff', repo: '/home/u/src' }, true);
-    const [view] = L.codeViews(L.parseLayout(core.layout('m')).workspaces[0]);
-    expect(L.parseLayout(core.layout('m')).workspaces[0].tabs[0].root).toMatchObject({
+    const [view] = L.codeViews(L.parseLayout(hub.layout('m')).workspaces[0]);
+    expect(L.parseLayout(hub.layout('m')).workspaces[0].tabs[0].root).toMatchObject({
       children: [{ split: 'vertical', children: [{ split: 'horizontal', children: [{ terminal: 'p1' }, { code: view.view }] }, {}] }, {}],
     });
     // The menu's button has the pane's commands.
@@ -118,7 +119,7 @@ describe('PaneHeader', () => {
   });
 
   it("names a VS Code pane by its folder and has VS Code's buttons", async () => {
-    core.model.mutate('m', (l) => L.splitPane(l, 'p2', 'vertical', { code: { id: 'c1', folder: '/home/u/src/app' } }));
+    hub.model.mutate('m', (l) => L.splitPane(l, 'p2', 'vertical', { code: { id: 'c1', folder: '/home/u/src/app' } }));
     await render('code:c1', { code: { id: 'c1', folder: '/home/u/src/app' } });
     expect(host.querySelector('.pane-title')?.textContent).toBe('app');
     expect(host.querySelector<HTMLElement>('.pane-title')?.title).toBe('VS Code on m: /home/u/src/app');
@@ -134,8 +135,8 @@ describe('PaneHeader', () => {
     ]);
     await act(async () => buttons()[5].click());
     await act(settle);
-    expect(L.findLeaf(L.parseLayout(core.layout('m')), 'code:c1')).toBeNull();
-    expect(core.calls.filter((c) => c.method === 'terminal.kill')).toEqual([]);
+    expect(L.findLeaf(L.parseLayout(hub.layout('m')), 'code:c1')).toBeNull();
+    expect(hub.calls.filter((c) => c.method === 'terminal.kill')).toEqual([]);
   });
 
   it('keeps keyboard focus in the terminal when a button is pressed', async () => {
@@ -149,7 +150,7 @@ describe('PaneHeader', () => {
     await render();
     await act(async () => host.querySelector('.pane-header')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
     await act(settle);
-    expect(core.layout('m')!.workspaces[0].tabs[0].focused).toBe('p1');
+    expect(hub.layout('m')!.workspaces[0].tabs[0].focused).toBe('p1');
     // A click on the title only focuses; a double click renames, as tabs and workspaces.
     await act(async () => host.querySelector<HTMLElement>('.pane-title')!.click());
     expect(host.querySelector('.pane-title-edit')).toBeNull();
@@ -158,7 +159,7 @@ describe('PaneHeader', () => {
     expect(input?.value).toBe('build');
     input!.value = 'tests';
     await act(async () => input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
-    expect(core.calls.find((c) => c.method === 'terminal.label')?.params).toEqual({ terminal: 'p1', labels: { name: 'tests' } });
+    expect(hub.calls.find((c) => c.method === 'terminal.label')?.params).toEqual({ terminal: 'p1', labels: { name: 'tests' } });
     await act(async () =>
       host.querySelector('.pane-header')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })),
     );
@@ -182,7 +183,7 @@ describe('PaneHeader', () => {
     // The keyboard on the header makes its pane the focused one.
     await act(async () => header.focus());
     await settle();
-    expect(core.layout('m')!.workspaces[0].tabs[0].focused).toBe('p1');
+    expect(hub.layout('m')!.workspaces[0].tabs[0].focused).toBe('p1');
     const key = (k: string, o: KeyboardEventInit = {}) =>
       act(
         async () =>
@@ -210,6 +211,34 @@ describe('PaneHeader', () => {
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
     header.dispatchEvent(down);
     expect(down.defaultPrevented).toBe(true);
+  });
+
+  it('does not hijack Enter on a header button to rename on macOS', async () => {
+    const orig = rowKeys.isRenameKey;
+    vi.spyOn(rowKeys, 'isRenameKey').mockImplementation((e) => orig(e, true));
+    try {
+      await render();
+      const header = host.querySelector<HTMLElement>('.pane-header')!;
+      await act(async () => header.focus());
+      await settle();
+      const btn = buttons()[0];
+      btn.focus();
+      expect(document.activeElement).toBe(btn);
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      await act(async () => void btn.dispatchEvent(enter));
+      expect(enter.defaultPrevented).toBe(false);
+      expect(useStore.getState().renaming).toBeUndefined();
+      // Enter on the title itself still renames on macOS.
+      const title = host.querySelector<HTMLElement>('.pane-title')!;
+      title.focus();
+      const titleEnter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      await act(async () => void title.dispatchEvent(titleEnter));
+      expect(titleEnter.defaultPrevented).toBe(true);
+      expect(useStore.getState().renaming).toEqual({ kind: 'pane', m: 'm', id: 'p1' });
+    } finally {
+      await act(async () => useStore.getState().setRenaming(undefined));
+      vi.restoreAllMocks();
+    }
   });
 
   it('has no commands in read-only mode', async () => {

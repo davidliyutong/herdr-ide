@@ -6,13 +6,12 @@
 // they came from (docs/features/05-vscode-panes.md).
 
 import * as L from './term/layout';
-import { describeView, isPluginOn } from './plugins/registry';
+import { describeView, isPluginOn, viewStatus, viewUnopened } from './plugins/registry';
 import { isLive, type TerminalRecord } from './term/protocol';
-import { procName, SHELLS } from './term/place';
 import { terms, useTerms } from './state/terms';
 import { useStore } from './state/store';
 import { withView } from './state/panes';
-import { agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } from './lib/machine';
+import { aggregate, agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } from './lib/machine';
 import { mediaExt } from './terminal/links';
 import { bridge, hasFrame, type BridgeCommand } from './lib/bridge';
 import { reloadFrame, setStopped } from './codeFrames';
@@ -26,13 +25,23 @@ import type { MessageKey } from './i18n/en';
 
 export interface AttentionItem {
   m: string;
+  /** The pane's key: a terminal's address, view:<id> for a plugin's pane,
+   * or an unopened conversation id (chat:<id>). */
   terminal: string;
-  record: TerminalRecord;
+  /** The terminal's record; none for a plugin's pane. */
+  record?: TerminalRecord;
+  /** The plugin's pane, for one. */
+  view?: L.PluginView;
+  /** A conversation/agent without an open pane yet. */
+  unopened?: { title: string; directory?: string; open: () => void };
   status: AgentStatus;
 }
 
-/** Terminals with an agent (or a status their program reports) on every
- * machine followed, by how much they need the user. */
+/** Terminals with an agent (or a status their program reports), the
+ * plugins' panes with a status, and active/attention-needing plugin
+ * conversations without an open pane on every machine followed, by how
+ * much they need the user; terminals before panes, panes before unopened
+ * chats within the same status. */
 export function attentionList(): AttentionItem[] {
   const s = useStore.getState();
   const tm = useTerms.getState().machines;
@@ -43,7 +52,53 @@ export function attentionList(): AttentionItem[] {
       if (isLive(r) && status && (agentOf(r) || status !== 'idle')) out.push({ m, terminal: r.address, record: r, status });
     }
   }
+  for (const m of s.order) {
+    const layout = tm[m]?.layout;
+    for (const { key, view } of layout ? L.layoutViews(layout) : []) {
+      const status = viewStatus(m, view);
+      if (status) out.push({ m, terminal: key, view, status });
+    }
+  }
+  for (const m of s.order) {
+    for (const u of viewUnopened(m)) {
+      out.push({ m, terminal: u.id, unopened: u, status: u.status });
+    }
+  }
   return out.sort((a, b) => statusRank[b.status] - statusRank[a.status]);
+}
+
+/** Opens or focuses an item from the attention list. */
+export function focusAttention(item: AttentionItem) {
+  if (item.unopened) item.unopened.open();
+  else actions.focusPane(item.m, item.terminal);
+}
+
+/** What an attention item is called first: its agent, else its pane's
+ * title (a terminal's; a plugin's pane's, a chat's). */
+export function attentionName(i: AttentionItem): string {
+  return (i.record && agentOf(i.record)) ?? i.unopened?.title ?? attentionTitle(i);
+}
+
+/** An attention item's pane's title. */
+export function attentionTitle(i: AttentionItem): string {
+  if (i.unopened) return i.unopened.title;
+  return i.view ? describeView(i.m, i.view).title : terminalTitle(i.record, i.terminal);
+}
+
+/** The status of a pane: a terminal's agent's, a plugin's pane's. */
+export function paneStatus(m: string, leaf: L.Leaf): AgentStatus | undefined {
+  if (L.isTerminalLeaf(leaf)) return agentStatus(useTerms.getState().machines[m]?.terminals[leaf.terminal]);
+  return L.isPluginLeaf(leaf) ? viewStatus(m, leaf.view) : undefined;
+}
+
+/** The status a tab shows: the highest of its panes' (aggregate). */
+export function tabStatus(m: string, tab: L.Tab): AgentStatus | undefined {
+  return aggregate(L.leavesOf(tab.root).map((leaf) => paneStatus(m, leaf)));
+}
+
+/** The status a workspace shows: the highest of its tabs'. */
+export function workspaceStatus(m: string, ws: L.Workspace): AgentStatus | undefined {
+  return aggregate(ws.tabs.map((tab) => tabStatus(m, tab)));
 }
 
 /** Each pane's share of its tab, from the split tree. */
@@ -131,7 +186,7 @@ function report(e: unknown) {
   useStore.getState().toast?.(msg);
 }
 
-/** The translations of the core's error codes for machine requests. */
+/** The translations of the hub's error codes for machine requests. */
 const machineErrors: Record<string, MessageKey> = {
   label_taken: 'machine.labelTaken',
   machine_exists: 'machine.exists',
@@ -142,7 +197,7 @@ const machineErrors: Record<string, MessageKey> = {
   save: 'machine.notSaved',
 };
 
-/** The reason a machine request failed, from the core's error code (with
+/** The reason a machine request failed, from the hub's error code (with
  * the system's reason when the file could not be saved). */
 async function machineError(res: Response): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
@@ -176,19 +231,6 @@ function awaitLogin(m: string) {
   if (settle(decide())) return;
   off = useStore.subscribe(() => void settle(decide()));
   timer = setTimeout(() => off(), LOGIN_WAIT_MS);
-}
-
-/** What runs in a terminal in front of its shell: the agent's name for an
- * agent, the foreground program's otherwise; '' when only the shell waits
- * at its prompt or the program has ended. Jobs sent to the background do
- * not count. */
-export function runningProgram(r: TerminalRecord | undefined): string {
-  if (!r || !isLive(r)) return '';
-  const fg = r.foreground as { pid?: number; name?: string } | undefined;
-  if (!fg?.name) return '';
-  const name = procName(fg.name);
-  if (fg.pid === r.pid && SHELLS.has(name.toLowerCase())) return '';
-  return agentOf(r) ?? name;
 }
 
 /** Records panes about to close for Undo Close (each list a tab's, all
@@ -446,6 +488,12 @@ export const actions = {
   },
 
   /** Pins a tab (it moves to the end of the pinned ones) or unpins it. */
+  muteTab(m: string, ws: string, index: number, muted: boolean) {
+    terms.mutate(m, (l) => L.muteTab(l, ws, index, muted));
+  },
+  muteWorkspace(m: string, ws: string, muted: boolean) {
+    terms.mutate(m, (l) => L.muteWorkspace(l, ws, muted));
+  },
   pinTab(m: string, ws: string, index: number, pinned: boolean) {
     terms.mutate(m, (l) => L.pinTab(l, ws, index, pinned));
   },
@@ -485,7 +533,7 @@ export const actions = {
     actions.moveTabsToWorkspace(m, keys, L.newId(), { name: input.label, cwd: input.cwd });
   },
 
-  /** Adds an SSH machine to the core's machines (docs/features/02) and
+  /** Adds an SSH machine to the hub's machines (docs/features/02) and
    * reports whether it was added. It connects at once; when it needs an
    * interactive login (auth_required) the authentication terminal opens. */
   async addMachine(form: { target: string; label: string }): Promise<boolean> {
@@ -507,7 +555,7 @@ export const actions = {
     }
   },
 
-  /** Enables or disables a machine (stored by the core). Disabling a
+  /** Enables or disables a machine (stored by the hub). Disabling a
    * connected machine asks first: its agent disconnects and VS Code there
    * stops; its programs keep running there. */
   async setMachineEnabled(m: string, enabled: boolean) {
@@ -566,7 +614,7 @@ export const actions = {
     );
   },
 
-  /** Removes an SSH machine from the core's machines after asking. */
+  /** Removes an SSH machine from the hub's machines after asking. */
   async removeMachine(m: string) {
     const st = useStore.getState().machines[m];
     const machine = st?.label ?? m;
@@ -632,7 +680,7 @@ export const actions = {
   },
 
   /** Moves a machine to a slot of the machines (0 before the first, the
-   * machine count after the last): shown at once, stored by the core
+   * machine count after the last): shown at once, stored by the hub
    * (PUT /api/machines/order), which sends every page the new list. */
   async moveMachine(m: string, slot: number) {
     return actions.moveMachines([m], slot);
@@ -1000,18 +1048,11 @@ export const actions = {
     return { m: c.m, ws: c.ws.id, index: c.tabIndex, name: tabName(c.m, c.tab) };
   },
 
-  /** Jump to the agent that most needs attention (blocked first, then done). */
+  /** Jump to the agent that most needs attention (blocked first, then
+   * done): a terminal's, a plugin's pane's, or an unopened chat. */
   openAttention() {
     const best = attentionList()[0];
-    if (best) actions.focusPane(best.m, best.terminal);
-  },
-
-  /** Starts a coding agent in a pane split off the focused one. */
-  async startAgent(kind: string) {
-    const c = current();
-    if (!c) return;
-    if (c.focused) await actions.split(c.m, c.focused, 'right', [kind]);
-    else await actions.newTab(c.m, undefined, [kind]);
+    if (best) focusAttention(best);
   },
 };
 

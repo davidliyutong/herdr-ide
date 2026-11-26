@@ -4,8 +4,9 @@
 // request card, the gate, the biometrics of the vault's settings page):
 // which proofs a page can make, how it makes them (WebAuthn, the desktop
 // app's prompt), the card's choices between a click, a proof and the
-// passphrase, unlocking with a proof, and the settings' changes, which need
-// a session the passphrase opened.
+// passphrase, opening a session with a proof, unlocking a locked vault by
+// an unlock entry (the desktop app's relay, a credential's PRF), and the
+// settings' changes, which need a session the passphrase opened.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -38,6 +39,10 @@ const PASS_TOKEN = 'tok-pass';
 const PROOF_TOKEN = 'tok-proof';
 const NONCE = b64urlEncode(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
 const CRED = b64urlEncode(new Uint8Array([9, 9, 9]));
+const SALT = b64urlEncode(new Uint8Array(32).fill(5));
+const PRF_SALT = b64urlEncode(new Uint8Array(32).fill(6));
+/** What the authenticator's PRF answers. */
+const PRF_OUT = new Uint8Array(32).fill(7);
 
 interface Call {
   method: string;
@@ -72,7 +77,7 @@ const guardOf = (over: Partial<VaultGuardFull> = {}): VaultGuardFull => ({
   ...over,
 });
 
-/** The guard as the core shows it to a page without a session. */
+/** The guard as the hub shows it to a page without a session. */
 const waysOf = (g: VaultGuardFull): VaultGuard => ({
   authenticators: g.authenticators
     .filter((a) => (a.kind === 'desktop' ? g.desktop : g.webauthn && a.origin === location.origin))
@@ -90,30 +95,41 @@ const REQ: VaultRequest = {
   expires: new Date(Date.now() + 60_000).toISOString(),
 };
 
-/** What the authenticator makes of a request for an assertion. */
-const assertion = () => ({
+/** What the authenticator makes of a request for an assertion: with a
+ * PRF evaluation asked, its output when it has PRF (prf). */
+const assertion = (o?: CredentialRequestOptions, prf = true) => ({
   rawId: new Uint8Array([9, 9, 9]).buffer,
   response: {
     clientDataJSON: new Uint8Array([1]).buffer,
     authenticatorData: new Uint8Array([2]).buffer,
     signature: new Uint8Array([3]).buffer,
   },
+  getClientExtensionResults: () =>
+    o?.publicKey?.extensions?.prf && prf ? { prf: { results: { first: new Uint8Array(PRF_OUT).buffer } } } : {},
 });
 
 describe('vault authenticators', () => {
   let host: HTMLDivElement;
   let root: Root;
   let calls: Call[];
-  /** What guards the vault, as the core keeps it (null: the key not held). */
+  /** What guards the vault, as the hub keeps it (null: the key not held). */
   let guard: VaultGuardFull | null;
   let creds: string[];
   let desktopUsable: boolean;
   let refuseProof: boolean;
   let variables: VaultVariable[];
-  // The core's rule, which the page may not know yet.
+  // The hub's rule, which the page may not know yet.
   let serverRule: boolean;
-  // The vault is locked, the core holding its key or not (guard null).
+  // The vault is locked: the hub does not hold its key, and shows no guard.
   let locked: boolean;
+  /** How the locked vault unlocks without the passphrase, as the list says. */
+  let unlockOf: { ways: string[]; due: string } | undefined;
+  /** The PRF salts of this origin's unlock entries, by credential. */
+  let prfSalts: Record<string, string> | undefined;
+  /** What POST session {unlock} fails with. */
+  let unlockError: { code: number; error: string } | undefined;
+  /** The hub refuses a credential's registration as one without PRF. */
+  let refusePrf: boolean;
   let get: ReturnType<typeof vi.fn>;
   let create: ReturnType<typeof vi.fn>;
 
@@ -126,7 +142,11 @@ describe('vault authenticators', () => {
     variables = [];
     serverRule = false;
     locked = false;
-    get = vi.fn(async () => assertion());
+    unlockOf = undefined;
+    prfSalts = undefined;
+    unlockError = undefined;
+    refusePrf = false;
+    get = vi.fn(async (o?: CredentialRequestOptions) => assertion(o));
     create = vi.fn(async () => ({
       rawId: new Uint8Array([9, 9, 9]).buffer,
       response: {
@@ -135,6 +155,7 @@ describe('vault authenticators', () => {
         getPublicKey: () => new Uint8Array([6]).buffer,
         getPublicKeyAlgorithm: () => -7,
       },
+      getClientExtensionResults: () => ({ prf: { enabled: true } }),
     }));
     vi.stubGlobal('PublicKeyCredential', class {});
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
@@ -167,8 +188,10 @@ describe('vault authenticators', () => {
           sessionProof: token === PROOF_TOKEN,
           idle: 600,
           variables,
-          // Without a session, only the ways this page can prove with.
-          guard: open || !guard ? guard : waysOf(guard),
+          // Locked, none; without a session, only the ways this page can
+          // prove with.
+          guard: locked || !guard ? null : open ? guard : waysOf(guard),
+          ...(unlockOf && { unlock: unlockOf }),
         });
       if (url === '/api/p/vault/log')
         return json({
@@ -187,17 +210,31 @@ describe('vault authenticators', () => {
         });
       if (url === '/api/p/vault/lock') {
         locked = true;
-        if (body?.forget) guard = null;
+        // The next unlock needs the passphrase: the list offers nothing else.
+        if (body?.forget) unlockOf = undefined;
         return json({ mode: 'passphrase', locked: true });
       }
       if (url === '/api/p/vault/requests') return json({ requests: [] });
       if (url === '/api/p/vault/proof')
-        return json({ nonce: NONCE, rpId: 'localhost', credentials: creds, desktop: desktopUsable, ttl: 120 });
+        return json({
+          nonce: NONCE,
+          rpId: 'localhost',
+          credentials: locked && prfSalts ? Object.keys(prfSalts) : creds,
+          desktop: desktopUsable,
+          ttl: 120,
+          ...(locked && prfSalts && body.for === 'session' && { prf: prfSalts }),
+          ...(body.for === 'register' && { prfSalt: PRF_SALT }),
+        });
       if (url === '/api/p/vault/session' && method === 'POST') {
-        if (body.proof) {
-          // A proof unlocks a vault whose key the core holds, and no other.
-          if (!guard) return json({ error: 'vault_locked' }, 409);
+        if (body.unlock) {
+          if (unlockError) return json({ error: unlockError.error }, unlockError.code);
           locked = false;
+          guard ??= guardOf();
+          return json({ session: PROOF_TOKEN, proof: true, status: { mode: 'passphrase', locked: false } });
+        }
+        if (body.proof) {
+          // A proof opens a session of an unlocked vault, and unlocks none.
+          if (locked) return json({ error: 'vault_locked' }, 409);
           return json({ session: PROOF_TOKEN, proof: true, status: { mode: 'passphrase', locked: false } });
         }
         if (body.passphrase !== PASS) return json({ error: 'wrong_passphrase' }, 403);
@@ -225,7 +262,12 @@ describe('vault authenticators', () => {
       if (token === PROOF_TOKEN) return json({ error: 'vault_passphrase' }, 401);
       if (!open) return json({ error: 'vault_session' }, 401);
       if (url === '/api/p/vault/authenticators' && method === 'POST') {
-        guard = { ...guard!, authenticators: [...guard!.authenticators, auth({ id: 'new', kind: body.kind, label: body.label })] };
+        if (body.kind === 'webauthn' && (!body.prf || refusePrf)) return json({ error: 'prf_required' }, 400);
+        if (body.kind === 'desktop' && !body.relay) return json({ error: 'bad_request' }, 400);
+        guard = {
+          ...guard!,
+          authenticators: [...guard!.authenticators, auth({ id: 'new', kind: body.kind, label: body.label, unlock: true })],
+        };
         return json({ guard });
       }
       if (url.startsWith('/api/p/vault/authenticators/') && method === 'DELETE') {
@@ -268,9 +310,19 @@ describe('vault authenticators', () => {
     delete (globalThis as { desktopShell?: unknown }).desktopShell;
   });
 
-  const shell = (prompt: 'touchid' | 'hello' | null, mac: string | null) => {
+  /** The desktop app's prompt and unlock key: the MAC its prompt answers
+   * (null: not confirmed), and whether the install can keep an unlock key.
+   * Returns prove; `desk` has the rest. */
+  let desk: { unlock: ReturnType<typeof vi.fn>; enroll: ReturnType<typeof vi.fn> };
+  const shell = (prompt: 'touchid' | 'hello' | null, mac: string | null, canUnlock = true) => {
     const prove = vi.fn(async () => mac);
-    (globalThis as { desktopShell?: unknown }).desktopShell = { verifyUser: { available: async () => prompt, prove } };
+    desk = {
+      unlock: vi.fn(async () => (mac ? { id: 'e1', relay: 'relay-unlock' } : null)),
+      enroll: vi.fn(async () => (mac ? { mac, relay: 'relay-enroll' } : null)),
+    };
+    (globalThis as { desktopShell?: unknown }).desktopShell = {
+      verifyUser: { available: async () => prompt, canUnlock: async () => canUnlock, prove, ...desk },
+    };
     return prove;
   };
   const unlock = async () => {
@@ -318,7 +370,7 @@ describe('vault authenticators', () => {
       // The same host name from another origin (another port or scheme) is not this page's.
       expect(ways(guardOf({ authenticators: [auth({ origin: 'http://localhost:1' })] })).webauthn).toBe(false);
       expect(ways(guardOf({ authenticators: [auth({ origin: undefined })] })).webauthn).toBe(false);
-      // The core does not vouch for this origin.
+      // The hub does not vouch for this origin.
       expect(ways(guardOf({ authenticators: [auth()], webauthn: false })).webauthn).toBe(false);
       expect(ways(null)).toEqual({ desktop: false, webauthn: false });
       const desk = guardOf({ authenticators: [auth({ kind: 'desktop', rpId: undefined })], desktop: true });
@@ -333,7 +385,7 @@ describe('vault authenticators', () => {
 
     it('knows an IP host and an insecure page, and the localhost address of a loopback one', () => {
       expect(webauthnState(guardOf())).toBe('ready');
-      // On a name the core does not vouch for: a note, no adding.
+      // On a name the hub does not vouch for: a note, no adding.
       expect(webauthnState(guardOf({ webauthn: false }))).toBe('untrusted');
       expect(webauthnState(null)).toBe('untrusted');
       Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });
@@ -484,24 +536,154 @@ describe('vault authenticators', () => {
       expect(useVault.getState()).toMatchObject({ session: true, sessionProof: true });
     });
 
-    it('unlocks a vault locked while the core holds its key with biometrics, or requires the passphrase', async () => {
-      creds = [CRED];
-      guard = guardOf({ authenticators: [auth()] });
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString();
+    const sessionCalls = () => calls.filter((c) => c.url === '/api/p/vault/session' && c.method === 'POST');
+    const errText = () => host.querySelector('.vault-gate .callout.error')?.textContent;
+
+    it('unlocks a locked vault with the desktop app’s key: the relay goes to the hub as the app answered', async () => {
+      guard = guardOf({ authenticators: [auth({ id: 'd1', kind: 'desktop', origin: undefined, unlock: true })], desktop: true });
       locked = true;
+      unlockOf = { ways: ['enclave'], due };
+      desktopUsable = true;
+      shell('touchid', 'aa');
       await renderPanel();
-      expect(host.querySelector('[data-action="proof-session"]')).not.toBeNull();
-      await click('[data-action="proof-session"]');
+      // The proof of an unlocked vault is not offered: it is locked.
+      expect(host.querySelector('[data-action="proof-session"]')).toBeNull();
+      const btn = host.querySelector<HTMLButtonElement>('[data-action="unlock-biometric"]')!;
+      expect(btn.textContent).toContain(t('vault.gate.withProof', { way: t('vault.way.touchid') }));
+      expect(host.querySelector('[data-note="due"]')?.textContent).toBe(
+        t('vault.gate.until', { date: new Date(due).toLocaleDateString() }),
+      );
+      await click('[data-action="unlock-biometric"]');
+      expect(calls.find((c) => c.url === '/api/p/vault/proof')?.body).toEqual({ for: 'session' });
+      expect(desk.unlock).toHaveBeenCalledWith(NONCE);
+      expect(sessionCalls().pop()?.body).toEqual({ unlock: { nonce: NONCE, id: 'e1', relay: 'relay-unlock' } });
+      expect(useVault.getState()).toMatchObject({ session: true, sessionProof: true, status: { locked: false } });
+    });
+
+    it('says to set biometrics up again when the app has no unlock key of this install', async () => {
+      guard = guardOf({ authenticators: [auth({ id: 'd1', kind: 'desktop', origin: undefined, unlock: true })], desktop: true });
+      locked = true;
+      unlockOf = { ways: ['enclave'], due };
+      desktopUsable = true;
+      shell('touchid', 'aa');
+      desk.unlock.mockResolvedValueOnce('none');
+      await renderPanel();
+      await click('[data-action="unlock-biometric"]');
+      expect(desk.unlock).toHaveBeenCalledWith(NONCE);
+      expect(sessionCalls()).toHaveLength(0);
+      expect(errText()).toBe(t('vault.gate.stale'));
+      expect(useVault.getState()).toMatchObject({ session: false, status: { locked: true } });
+    });
+
+    it('offers the desktop app’s key only where the app can keep one, and nothing once the passphrase is due', async () => {
+      locked = true;
+      unlockOf = { ways: ['hello'], due };
+      shell('hello', 'aa', false);
+      await renderPanel();
+      expect(host.querySelector('[data-action="unlock-biometric"]')).toBeNull();
+      expect(host.querySelector('[data-action="forget-key"]')).toBeNull();
+      act(() => root.unmount());
+      root = createRoot(host);
+      shell('hello', 'aa');
+      await renderPanel();
+      expect(host.querySelector('[data-action="unlock-biometric"]')?.textContent).toContain(t('vault.way.hello'));
+      // The hint says the passphrase is due: biometrics are not offered.
+      act(() => useVault.setState({ unlock: { ways: ['hello'], due: new Date(Date.now() - 1000).toISOString() } }));
+      expect(host.querySelector('[data-action="unlock-biometric"]')).toBeNull();
+    });
+
+    it('unlocks a locked vault with a credential’s PRF of the entry’s salt, and its assertion', async () => {
+      locked = true;
+      unlockOf = { ways: ['prf'], due };
+      prfSalts = { [CRED]: SALT };
+      await renderPanel();
+      expect(host.querySelector('[data-action="unlock-biometric"]')?.textContent).toContain(t('vault.way.webauthn'));
+      await click('[data-action="unlock-biometric"]');
+      const o = get.mock.calls[0][0].publicKey;
+      expect([...new Uint8Array(o.challenge)]).toEqual([...b64urlDecode(NONCE)]);
+      expect(o).toMatchObject({ rpId: 'localhost', userVerification: 'required' });
+      expect([...new Uint8Array(o.allowCredentials[0].id)]).toEqual([9, 9, 9]);
+      expect(Object.keys(o.extensions.prf.evalByCredential)).toEqual([CRED]);
+      expect([...new Uint8Array(o.extensions.prf.evalByCredential[CRED].first)]).toEqual([...b64urlDecode(SALT)]);
+      expect(sessionCalls().pop()?.body).toEqual({
+        unlock: {
+          nonce: NONCE,
+          prf: { credential: CRED, output: b64urlEncode(PRF_OUT) },
+          assertion: { credential: CRED, clientDataJSON: 'AQ', authenticatorData: 'Ag', signature: 'Aw' },
+        },
+      });
       expect(useVault.getState()).toMatchObject({ session: true, status: { locked: false } });
-      // Locked again: Require Passphrase has the core forget the key.
-      await click('.vault-session button.sm:not(.ghost)');
-      expect(calls.filter((c) => c.url === '/api/p/vault/lock').pop()?.body).toBeUndefined();
-      expect(host.querySelector('[data-action="forget-key"]')).not.toBeNull();
+    });
+
+    it('sends nothing when the authenticator gives no PRF output, and nothing is said of a cancel', async () => {
+      locked = true;
+      unlockOf = { ways: ['prf'], due };
+      prfSalts = { [CRED]: SALT };
+      await renderPanel();
+      get.mockImplementationOnce(async (o?: CredentialRequestOptions) => assertion(o, false));
+      await click('[data-action="unlock-biometric"]');
+      expect(sessionCalls()).toHaveLength(0);
+      expect(errText()).toBe(t('vault.error.proof_failed'));
+      get.mockRejectedValueOnce(new DOMException('no', 'NotAllowedError'));
+      await click('[data-action="unlock-biometric"]');
+      expect(sessionCalls()).toHaveLength(0);
+      expect(errText()).toBeUndefined();
+      expect(useVault.getState().session).toBe(false);
+    });
+
+    it('says why a biometric unlock was refused: the passphrase due, the entry stale, the check failed', async () => {
+      locked = true;
+      unlockOf = { ways: ['enclave'], due };
+      shell('touchid', 'aa');
+      await renderPanel();
+      const field = host.querySelector<HTMLInputElement>(`.vault-gate input[aria-label="${t('vault.passphrase')}"]`)!;
+      unlockError = { code: 403, error: 'passphrase_due' };
+      await click('[data-action="unlock-biometric"]');
+      expect(errText()).toBe(t('vault.gate.due', { days: 14 }));
+      expect(document.activeElement).toBe(field);
+      unlockError = { code: 409, error: 'unlock_stale' };
+      await click('[data-action="unlock-biometric"]');
+      expect(errText()).toBe(t('vault.gate.stale'));
+      unlockError = { code: 401, error: 'vault_proof' };
+      await click('[data-action="unlock-biometric"]');
+      expect(errText()).toBe(t('vault.error.vault_proof'));
+      expect(useVault.getState().session).toBe(false);
+      // The app's prompt cancelled: nothing goes to the hub, nothing is said.
+      desk.unlock.mockResolvedValueOnce(null);
+      const before = sessionCalls().length;
+      await click('[data-action="unlock-biometric"]');
+      expect(sessionCalls()).toHaveLength(before);
+      expect(errText()).toBeUndefined();
+    });
+
+    it('Require Passphrase has the next unlock need the passphrase, and is offered only beside biometrics', async () => {
+      locked = true;
+      unlockOf = { ways: ['enclave'], due };
+      shell('touchid', 'aa');
+      await renderPanel();
+      const forget = host.querySelector<HTMLButtonElement>('[data-action="forget-key"]')!;
+      expect(forget.textContent).toBe(t('vault.gate.forget'));
+      expect(forget.title).toBe(t('vault.gate.forgetTitle'));
       await click('[data-action="forget-key"]');
       expect(calls.filter((c) => c.url === '/api/p/vault/lock').pop()?.body).toEqual({ forget: true });
       // Now only the passphrase unlocks it.
+      expect(host.querySelector('[data-action="unlock-biometric"]')).toBeNull();
+      expect(host.querySelector('[data-action="forget-key"]')).toBeNull();
+      expect(host.querySelector('[data-note="due"]')).toBeNull();
+    });
+
+    it('locks from the session bar, which leaves the passphrase or the unlock entries', async () => {
+      creds = [CRED];
+      guard = guardOf({ authenticators: [auth()] });
+      await renderPanel();
+      await click('[data-action="proof-session"]');
+      expect(useVault.getState()).toMatchObject({ session: true });
+      await click('.vault-session button.sm:not(.ghost)');
+      expect(calls.filter((c) => c.url === '/api/p/vault/lock').pop()?.body).toBeUndefined();
+      // Locked: the proof of an unlocked vault is no more.
       expect(useVault.getState().guard).toBeNull();
       expect(host.querySelector('[data-action="proof-session"]')).toBeNull();
-      expect(host.querySelector('[data-action="forget-key"]')).toBeNull();
     });
 
     it('offers no proof, nor Require Passphrase, where the page cannot prove', async () => {
@@ -552,16 +734,19 @@ describe('vault authenticators', () => {
       const o = create.mock.calls[0][0].publicKey;
       expect([...new Uint8Array(o.challenge)]).toEqual([...b64urlDecode(NONCE)]);
       expect(o).toMatchObject({
-        rp: { id: 'localhost', name: 'herdr-ide' },
+        rp: { id: 'localhost', name: 'veldr' },
         attestation: 'none',
         authenticatorSelection: { userVerification: 'required', residentKey: 'discouraged' },
       });
       expect(o.user.id).toHaveLength(16);
       expect(o.pubKeyCredParams.map((p: { alg: number }) => p.alg)).toEqual([-7, -8, -257]);
       expect(o.excludeCredentials).toHaveLength(1);
+      expect(o.extensions).toEqual({ prf: {} });
       const g = get.mock.calls[0][0].publicKey;
       expect([...new Uint8Array(g.challenge)]).toEqual([...b64urlDecode(NONCE)]);
       expect(g.allowCredentials).toHaveLength(1);
+      // The new credential's PRF of the hub's salt, under which the key is wrapped.
+      expect([...new Uint8Array(g.extensions.prf.evalByCredential[CRED].first)]).toEqual([...b64urlDecode(PRF_SALT)]);
       expect(calls.find((c) => c.url.endsWith('/proof'))?.body).toEqual({ for: 'register' });
       expect(calls.find((c) => c.url.endsWith('/authenticators'))?.body).toEqual({
         kind: 'webauthn',
@@ -573,8 +758,61 @@ describe('vault authenticators', () => {
         publicKey: 'Bg',
         alg: -7,
         assertion: { nonce: NONCE, credential: CRED, clientDataJSON: 'AQ', authenticatorData: 'Ag', signature: 'Aw' },
+        prf: b64urlEncode(PRF_OUT),
       });
       expect(section()!.querySelector('[data-auth="new"]')).not.toBeNull();
+      expect(section()!.querySelector('[data-auth="new"] [data-note="approvals-only"]')).toBeNull();
+    });
+
+    it('does not add a credential without PRF, which cannot unlock the vault', async () => {
+      const add = async () => {
+        // A refusal leaves the form open, its passphrase emptied.
+        if (!host.querySelector('[data-form="webauthn"]')) await click('[data-action="add-webauthn"]');
+        await act(async () => type(host.querySelector<HTMLInputElement>('[data-field="auth-label"]')!, 'Key'));
+        await act(async () => type(host.querySelector<HTMLInputElement>('[data-field="guard-passphrase"]')!, PASS));
+        await act(async () => host.querySelector<HTMLButtonElement>('[data-form="webauthn"] button[type="submit"]')!.click());
+        await flush();
+      };
+      const added = () => calls.filter((c) => c.url.endsWith('/authenticators'));
+      await renderSettings();
+      await passSession();
+      // The authenticator says at creation that it has no PRF: no second prompt.
+      create.mockImplementationOnce(async () => ({
+        rawId: new Uint8Array([9, 9, 9]).buffer,
+        response: {
+          clientDataJSON: new Uint8Array([4]).buffer,
+          getAuthenticatorData: () => new Uint8Array([5]).buffer,
+          getPublicKey: () => new Uint8Array([6]).buffer,
+          getPublicKeyAlgorithm: () => -7,
+        },
+        getClientExtensionResults: () => ({ prf: { enabled: false } }),
+      }));
+      await add();
+      expect(get).not.toHaveBeenCalled();
+      expect(added()).toHaveLength(0);
+      expect(section()!.querySelector('.callout.error')?.textContent).toBe(t('vault.error.prf_required'));
+      // The assertion brings no PRF output: nothing is sent either.
+      get.mockImplementationOnce(async (o?: CredentialRequestOptions) => assertion(o, false));
+      await add();
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(added()).toHaveLength(0);
+      expect(section()!.querySelector('.callout.error')?.textContent).toBe(t('vault.error.prf_required'));
+      // The hub's refusal says the same.
+      refusePrf = true;
+      await add();
+      expect(added()).toHaveLength(1);
+      expect(section()!.querySelector('.callout.error')?.textContent).toBe(t('vault.error.prf_required'));
+      expect(section()!.querySelector('[data-auth="new"]')).toBeNull();
+    });
+
+    it('labels an authenticator that only approves, until it is added again', async () => {
+      guard = guardOf({
+        authenticators: [auth({ unlock: false }), auth({ id: 'a2', label: 'Phone', unlock: true })],
+      });
+      await renderSettings();
+      await passSession();
+      expect(section()!.querySelector('[data-auth="a1"] [data-note="approvals-only"]')?.textContent).toBe(t('vault.guard.approvalsOnly'));
+      expect(section()!.querySelector('[data-auth="a2"] [data-note="approvals-only"]')).toBeNull();
     });
 
     it('offers localhost on a loopback IP, instead of adding', async () => {
@@ -585,8 +823,8 @@ describe('vault authenticators', () => {
       expect(section()!.querySelector<HTMLAnchorElement>('[data-link="localhost"]')?.getAttribute('href')).toBe('http://localhost:9000/');
     });
 
-    it('turns the desktop authenticator on with the prompt’s MAC and the passphrase', async () => {
-      shell('touchid', 'cafe');
+    it('turns the desktop authenticator on with the app’s enrollment: its MAC, its relay and the passphrase', async () => {
+      const prove = shell('touchid', 'cafe');
       guard = guardOf({ desktop: true });
       await renderSettings();
       await passSession();
@@ -601,7 +839,10 @@ describe('vault authenticators', () => {
         passphrase: PASS,
         nonce: NONCE,
         mac: 'cafe',
+        relay: 'relay-enroll',
       });
+      expect(desk.enroll).toHaveBeenCalledWith(NONCE);
+      expect(prove).not.toHaveBeenCalled();
       expect(section()!.querySelector<HTMLInputElement>('[data-switch="desktop"] input')!.checked).toBe(true);
       // The switch stands for it: it is not listed again, and the app's page,
       // which has no WebAuthn, shows nothing of browsers without credentials.
@@ -609,10 +850,36 @@ describe('vault authenticators', () => {
       expect(section()!.querySelector('[data-webauthn]')).toBeNull();
     });
 
-    it('shows no desktop switch in a browser', async () => {
+    it('shows no desktop switch in a browser, nor in an app that cannot keep an unlock key', async () => {
       await renderSettings();
       await passSession();
       expect(section()!.querySelector('[data-switch="desktop"]')).toBeNull();
+      act(() => root.unmount());
+      root = createRoot(host);
+      shell('touchid', 'cafe', false);
+      guard = guardOf({
+        desktop: true,
+        authenticators: [auth({ id: 'd1', kind: 'desktop', origin: undefined, rpId: undefined, label: 'This app', unlock: false })],
+      });
+      await renderSettings();
+      await flush();
+      expect(section()!.querySelector('[data-switch="desktop"]')).toBeNull();
+      // Listed instead, to be removed, with what it is good for.
+      expect(section()!.querySelector('[data-auth="d1"] [data-note="approvals-only"]')).not.toBeNull();
+    });
+
+    it('says on the desktop switch that one added before only approves', async () => {
+      shell('touchid', 'cafe');
+      guard = guardOf({
+        desktop: true,
+        authenticators: [auth({ id: 'd1', kind: 'desktop', origin: undefined, rpId: undefined, label: 'This app', unlock: false })],
+      });
+      await renderSettings();
+      await passSession();
+      expect(section()!.querySelector<HTMLInputElement>('[data-switch="desktop"] input')!.checked).toBe(true);
+      expect(section()!.querySelector('[data-switch="desktop"] [data-note="approvals-only"]')?.textContent).toBe(
+        t('vault.guard.approvalsOnly'),
+      );
     });
 
     it('sets the rule that every Allow is verified', async () => {
@@ -654,7 +921,7 @@ describe('vault authenticators', () => {
       expect(useVault.getState().sessionProof).toBe(false);
     });
 
-    it('shows the origin of a credential and offers adding only where the core vouches for the page', async () => {
+    it('shows the origin of a credential and offers adding only where the hub vouches for the page', async () => {
       guard = guardOf({ authenticators: [auth(), auth({ id: 'a2', origin: 'http://localhost:1', label: 'Other port' })] });
       await renderSettings();
       await passSession();
@@ -758,7 +1025,7 @@ describe('vault authenticators', () => {
         exempt: [{ id: 'e1', machine: 'm1', app: 'claude', created: '' }],
       });
       await renderSettings();
-      // The core held the key, but the page has no session: unlock first.
+      // The hub held the key, but the page has no session: unlock first.
       expect(useVault.getState().guard).toEqual({
         authenticators: [{ kind: 'webauthn', origin: location.origin }],
         desktop: false,
@@ -770,7 +1037,7 @@ describe('vault authenticators', () => {
       expect(section()!.querySelector('[data-exemption="e1"]')).not.toBeNull();
     });
 
-    it('asks for the passphrase to unlock when the core does not hold the key', async () => {
+    it('asks for the passphrase to unlock when the hub does not hold the key', async () => {
       guard = null;
       locked = true;
       await renderSettings();

@@ -91,6 +91,10 @@
   gap: 8px;
   z-index: 60;
 }
+.toasts.toasts-left {
+  right: auto;
+  left: 14px;
+}
 /* A toast is plain; one that reports a failure or a warning has an icon
    and a bar of its color. */
 .toast {

@@ -29,6 +29,9 @@ class FakeModel {
   getAlternativeVersionId() {
     return this.version;
   }
+  getEOL() {
+    return '\n';
+  }
   onDidChangeContent(l: () => void) {
     this.listeners.push(l);
     return { dispose: () => (this.listeners = this.listeners.filter((x) => x !== l)) };

@@ -1,27 +1,12 @@
-// Product names for the web UI. Mirrors internal/brand (checked by
-// internal/brand/brand_test.go); scripts/rename.sh updates both.
+// Product names for the web UI. Mirrors backend/shared/lib/brand.ts
+// (checked by its brand.test.ts); scripts/rename.sh updates both.
 
-export const APP_NAME = 'herdr-ide';
-export const APP_SLUG = 'herdr-ide';
-/** Previous slugs, appended by scripts/rename.sh; their storage is migrated. */
-export const LEGACY_SLUGS: string[] = ['webherdr'];
+export const APP_NAME = 'veldr';
+export const APP_SLUG = 'veldr';
+/** The product's domain; reversed, it begins the desktop app's id. */
+export const APP_DOMAIN = 'veldr.app';
 
 const prefix = `${APP_SLUG}.`;
-
-// Move browser storage written under a previous product name, once.
-try {
-  for (const old of LEGACY_SLUGS) {
-    const oldPrefix = `${old}.`;
-    for (const key of Object.keys(localStorage)) {
-      if (!key.startsWith(oldPrefix)) continue;
-      const next = prefix + key.slice(oldPrefix.length);
-      if (localStorage.getItem(next) === null) localStorage.setItem(next, localStorage.getItem(key)!);
-      localStorage.removeItem(key);
-    }
-  }
-} catch {
-  /* storage unavailable */
-}
 
 /** Per-browser state (localStorage), namespaced by the product slug. */
 export const storage = {

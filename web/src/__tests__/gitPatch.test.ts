@@ -1,9 +1,9 @@
 // Patches of selected ranges (plugins/git/patch.ts). The shared vectors
-// (design/testdata/git/range-patches.json) are also applied with git
-// apply by internal/agent/plugin/git's tests, which check their results.
+// (spec/vectors/git/range-patches.json) are what the machine side's git
+// apply takes.
 
 import { describe, expect, it } from 'vitest';
-import rangeVectors from '../../../design/testdata/git/range-patches.json';
+import rangeVectors from '../../../spec/vectors/git/range-patches.json';
 import { quotePath, rangePatch, selectChanges, type Direction, type LineChange, type LineRange, type Side } from '../plugins/git/patch';
 import { selectedLines } from '../plugins/git/DiffPane';
 

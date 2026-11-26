@@ -1,11 +1,13 @@
 // Biometrics in the vault's page of Settings (SettingsExtra.tsx): what
 // stands in for the passphrase (proof.ts: the desktop app's Touch ID or
-// Windows Hello, WebAuthn credentials of browsers), the rule that every
-// Allow needs it, and the apps exempt from asking. The core shows them to
-// a page with a session only: without one the page asks for the passphrase
-// to unlock first. Changes need a session the passphrase opened (a page
-// whose session a proof opened asks for the passphrase first), and adding
-// an authenticator or an exemption the passphrase again with the request.
+// Windows Hello, WebAuthn credentials of browsers with PRF), which also
+// unlocks the locked vault, the rule that every Allow needs it, and the
+// apps exempt from asking. One added before unlock entries only approves
+// until it is added again. The hub shows them to a page with a session
+// only: without one the page asks for the passphrase to unlock first.
+// Changes need a session the passphrase opened (a page whose session a
+// proof opened asks for the passphrase first), and adding an
+// authenticator or an exemption the passphrase again with the request.
 // The passphrase is asked beside the control whose change needs it, when
 // that change is made, and dropped once it was sent: no field of the page
 // holds it between changes.
@@ -31,7 +33,7 @@ import {
 } from './api';
 import { localhostUrl, registerDesktop, registerWebAuthn, verifyUser, webauthnState } from './proof';
 import { machineItems } from './shared';
-import { wayName } from './useWay';
+import { useCanUnlock, wayName } from './useWay';
 
 const day = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 
@@ -97,6 +99,7 @@ export function BiometricsSettings({ readOnly }: { readOnly: boolean }) {
   const session = useVault((s) => s.session);
   const sessionProof = useVault((s) => s.sessionProof);
   const prompt = useDesktopPrompt();
+  const canUnlock = useCanUnlock();
   const [ask, setAsk] = useState<Ask>();
   const [adding, setAdding] = useState(false);
   const [label, setLabel] = useState('');
@@ -127,7 +130,7 @@ export function BiometricsSettings({ readOnly }: { readOnly: boolean }) {
     }
   };
 
-  // Without a session (or while the core does not hold the key) the core
+  // Without a session (or while the hub does not hold the key) the hub
   // shows none of this: the passphrase unlocks it first.
   if (!guard?.full || !session)
     return (
@@ -199,9 +202,18 @@ export function BiometricsSettings({ readOnly }: { readOnly: boolean }) {
   // credentials are only listed there, to be removed.
   const inApp = !!verifyUser();
   const desktopOn = guard.authenticators.find((a) => a.kind === 'desktop');
-  // The desktop authenticator is the switch where the app can prompt, and
-  // listed where it cannot (a browser), so it can be removed there.
-  const listed = guard.authenticators.filter((a) => a.kind === 'webauthn' || !prompt);
+  // The desktop authenticator is the switch where the app can prompt and
+  // keep an unlock key, and listed elsewhere (a browser, an app without
+  // the Secure Enclave or Windows Hello), so it can be removed there.
+  const switchable = !!prompt && canUnlock;
+  const listed = guard.authenticators.filter((a) => a.kind === 'webauthn' || !switchable);
+  /** The note on one added before unlock entries: it only approves. */
+  const approvalsOnly = (a?: Authenticator) =>
+    a?.unlock === false && (
+      <span className="muted" data-note="approvals-only">
+        {t('vault.guard.approvalsOnly')}
+      </span>
+    );
 
   const addWebAuthn = async () => {
     const ok = await run(async () => {
@@ -223,7 +235,7 @@ export function BiometricsSettings({ readOnly }: { readOnly: boolean }) {
   return (
     <div data-guard="">
       <h4 className="settings-group">{t('vault.guard.title')}</h4>
-      {prompt && (
+      {switchable && prompt && (
         <div className="setting" data-switch="desktop">
           <label className="setting-check">
             <input
@@ -253,6 +265,7 @@ export function BiometricsSettings({ readOnly }: { readOnly: boolean }) {
             />
             <span>{t('vault.guard.desktop', { way: wayName(prompt) })}</span>
           </label>
+          {desktopOn?.unlock === false && <div className="setting-desc">{approvalsOnly(desktopOn)}</div>}
           {asking('desktop')}
         </div>
       )}
@@ -276,6 +289,7 @@ export function BiometricsSettings({ readOnly }: { readOnly: boolean }) {
                         .filter(Boolean)
                         .join(' · ')}
                     </span>
+                    {approvalsOnly(a)}
                   </span>
                   <button
                     className="icon sm ghost"
@@ -417,7 +431,7 @@ function Exemptions({
   const [picked, setPicked] = useState<string[]>([]);
   const [pass, setPass] = useState('');
   const label = (m: string) => machines[m]?.label ?? m;
-  // The apps that asked on the machines chosen (or any), as the core saw them.
+  // The apps that asked on the machines chosen (or any), as the hub saw them.
   const seen = [...new Set(log.filter((a) => a.m && (!picked.length || picked.includes(a.m))).map((a) => appOf(a.process)))].filter(
     Boolean,
   );

@@ -17,9 +17,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
@@ -30,39 +27,122 @@ jobs:
           cache-dependency-path: |
             web/pnpm-lock.yaml
             desktop/pnpm-lock.yaml
+            e2e/pnpm-lock.yaml
+            backend/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.5
       - run: make deps
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-      # gofmt, vet, types, formatting, brand, flags, notices, generated
-      # files, the terminal emulator's digest and the shared test vectors.
       - run: make check
-      - run: go test -race ./...
+      - run: pnpm -C backend test
+        env:
+          EXTENDED_TESTS: 1
       - run: pnpm -C web test
+        env:
+          EXTENDED_TESTS: 1
       - run: pnpm -C desktop test
-      - name: Web build keeps the go:embed placeholder
-        run: pnpm -C web build && test -f web/dist/.gitkeep
+        env:
+          EXTENDED_TESTS: 1
 
-  # The integration tests against a real terminal core: the pinned
-  # herdr-core of internal/hcdist, fetched and verified as the build does.
   integration:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
-          go-version-file: go.mod
-      - name: Pinned terminal core
-        run: go run ./scripts/fetch-hc -exe "$RUNNER_TEMP/hc/herdr-core" "$(go env GOOS)/$(go env GOARCH)"
+          package_json_file: backend/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: backend/pnpm-lock.yaml
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.5
+      - run: pnpm -C backend install --frozen-lockfile
+      - name: Pinned terminal core and GUI helper
+        run: |
+          bun backend/scripts/fetch-hc.ts --exe "$RUNNER_TEMP/hc/herdr-core" "$(scripts/platform.sh --slash)"
+          bun backend/scripts/fetch-deps.ts --only gui-helper
       - run: make it
         env:
           HC_TEST_BIN: ${{ runner.temp }}/hc/herdr-core
 
-  # The core's tests on macOS and Windows (the check job runs them on
-  # Linux, with the race detector), the web UI's and the shell's tests, and
-  # the Electron app packaged as a directory on each system; the release
-  # workflow builds the installers.
+  e2e:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: e2e/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            e2e/pnpm-lock.yaml
+            backend/pnpm-lock.yaml
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.5
+      - name: Chromium and its system libraries
+        run: pnpm -C e2e install --frozen-lockfile && pnpm -C e2e exec playwright install --with-deps --no-shell chromium
+      - run: make e2e
+        env:
+          E2E_REQUIRE_DOCKER: 1
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-results
+          path: dist/e2e/results
+
+  # Stage 1 cross-compilation of all 6 POSIX archives + Windows hub executable.
+  cross-compile:
+    runs-on: ubuntu-24.04
+    needs: check
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            desktop/pnpm-lock.yaml
+            e2e/pnpm-lock.yaml
+            backend/pnpm-lock.yaml
+            extensions/*/pnpm-lock.yaml
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.5
+      - run: make deps
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      - run: scripts/build.sh
+        env:
+          WITH_WINDOWS: 1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-packages
+          path: dist/release/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hub-windows
+          path: dist/*-windows-amd64.exe
+          if-no-files-found: error
+
+  # Stage 2 desktop tests and directory packaging on Linux, macOS and Windows,
+  # consuming Stage 1's cross-compiled archives directly.
   desktop:
+    needs: cross-compile
     strategy:
       fail-fast: false
       matrix:
@@ -73,9 +153,6 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: desktop/package.json
@@ -86,41 +163,44 @@ jobs:
           cache-dependency-path: |
             web/pnpm-lock.yaml
             desktop/pnpm-lock.yaml
+            e2e/pnpm-lock.yaml
+            backend/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.5
+      - if: runner.os == 'macOS'
+        run: pnpm -C backend install --frozen-lockfile && pnpm -C backend test
+        env:
+          EXTENDED_TESTS: 1
+      - if: runner.os == 'Windows'
+        run: pnpm -C backend install --frozen-lockfile && pnpm -C backend test:hub
+        env:
+          EXTENDED_TESTS: 1
       - if: runner.os != 'Linux'
-        run: go test ./...
-      - if: runner.os != 'Linux'
-        run: pnpm -C web install --frozen-lockfile && pnpm -C web test
+        run: |
+          pnpm -C backend install --frozen-lockfile
+          bun backend/scripts/fetch-deps.ts --only vt
+          pnpm -C web install --frozen-lockfile && pnpm -C web test
+        env:
+          EXTENDED_TESTS: 1
       - run: pnpm -C desktop install --frozen-lockfile && pnpm -C desktop test
-      - run: scripts/desktop.sh app
-
-  cross-compile:
-    runs-on: ubuntu-24.04
-    needs: check
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          package_json_file: web/package.json
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: |
-            web/pnpm-lock.yaml
-            desktop/pnpm-lock.yaml
-            extensions/*/pnpm-lock.yaml
-      - run: make deps
         env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-      # The Windows core goes into the desktop installer only (no archive).
-      - run: scripts/build.sh
-        env:
-          TARGETS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          EXTENDED_TESTS: 1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-packages
-          path: dist/release/*
+          path: dist/archives
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: runner.os == 'Windows'
+        with:
+          name: hub-windows
+          path: dist/hub-windows
+      - name: Package Stage 2 desktop app
+        run: |
+          slug=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
+          export STAGE1_ARCHIVES=dist/archives
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            export STAGE1_HUB_EXE="dist/hub-windows/$slug-windows-amd64.exe"
+          fi
+          scripts/desktop.sh app

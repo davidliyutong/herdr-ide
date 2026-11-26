@@ -6,7 +6,7 @@
 // the computer that upload them. A click shows a file in Quick Look, a
 // double click (or Enter) opens it in the editor pane.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronsDownUp, Ellipsis, Eye, EyeOff, FilePlus, FolderPlus, LocateFixed, RefreshCw } from 'lucide-react';
 import { current, paneDirectory } from '../../actions';
 import { recentSpots } from '../../paneHistory';
@@ -19,6 +19,7 @@ import { InlineEdit } from '../../components/InlineEdit';
 import { APP_SLUG } from '../../brand';
 import { t } from '../../i18n';
 import { isMac } from '../../keys';
+import { isDeleteKey, isRenameKey } from '../../rowKeys';
 import { useSize } from '../../lib/sizes';
 import { revealTop, useScrollView, visibleRange } from '../../lib/windowed';
 import { TreeRow } from '../../components/tree/TreeRow';
@@ -29,24 +30,31 @@ import {
   baseName,
   collapseAll,
   crumbs,
+  getLastAutoRevealed,
+  getScrollMemory,
   navRows,
   parentOf,
   poll,
   refresh,
+  revealVisiblePath,
   rowIds,
   select,
   selectAllRows,
+  setClipboard,
   setEdit,
   setExpanded,
   setFilter,
   setFollow,
   setHidden,
+  setLastAutoRevealed,
+  setScrollMemory,
   showRoot,
   shownDirs,
   shownError,
   treeRows,
+  useReveal,
   useTree,
-  setClipboard,
+  within,
   type Row,
   type TreeState,
 } from './tree';
@@ -62,11 +70,13 @@ import {
   openPath,
   panelMenu,
   paste,
+  pasteFiles,
   quickLook,
   remove,
   rename,
   trash,
 } from './ops';
+import { hasClipboardFiles } from './upload';
 import { canDownload } from '../../download';
 import { downloadUrl } from '../../lib/files';
 import { startPolling } from './poller';
@@ -76,10 +86,13 @@ import './files.css';
 export const POLL_MS = 2000;
 /** The drag type of paths dragged inside the tree. */
 const DRAG_TYPE = `application/x-${APP_SLUG}-files`;
+/** Clipboard marker written on in-app copy/cut so an earlier OS file copy
+ * does not shadow a more recent in-app copy/cut on paste. */
+const CLIP_TYPE = `application/x-${APP_SLUG}-clipboard`;
 
 /** The DownloadURL of rows dragged out of the page ("type:name:url", as
  * Chromium takes it): one file as itself, anything else as the zip the
- * core makes, named as the core names it. */
+ * hub makes, named as the hub names it. */
 export function dragOutUrl(m: string, paths: string[], isDir: (p: string) => boolean): string | undefined {
   if (!paths.length) return undefined;
   let name: string;
@@ -154,6 +167,7 @@ export function FilesPanel() {
   const m = useStore((s) => s.machineId);
   const home = useStore((s) => (s.machineId ? s.machines[s.machineId]?.info?.home : undefined));
   const readOnly = useStore((s) => s.readOnly);
+  const layout = useTerms((s) => (m ? s.machines[m]?.layout : undefined));
   // Both stores: the focused pane is in the layout, the shown machine in the UI's.
   const paneDir = useTerms(followedDir);
   const paneDir2 = useStore(followedDir);
@@ -162,11 +176,25 @@ export function FilesPanel() {
   const ws2 = useStore(shownWorkspace);
   const ws = ws1 ?? ws2;
   const s = useTree();
+  const revealTick = useReveal((r) => r.seq);
+  const revealTarget = useReveal((r) => r.path);
   useDecorationVersion((d) => d.v);
   const treeRef = useRef<HTMLDivElement>(null);
   const [drop, setDrop] = useState<string>();
   const view = useScrollView();
   const typeahead = useMemo(() => new TypeAhead(), []);
+
+  // The active editor file in the currently shown workspace/tab, if any.
+  const activeEditor = useMemo(() => {
+    if (!m || !layout) return undefined;
+    const selectedWs = L.selectedWorkspace(layout);
+    const tab = selectedWs?.tabs[selectedWs.selected];
+    if (!tab?.focused) return undefined;
+    const leaf = L.leafOf(tab.root, tab.focused);
+    if (!leaf || !L.isPluginLeaf(leaf) || leaf.view.plugin !== 'files' || leaf.view.kind !== 'editor') return undefined;
+    const path = typeof leaf.view.path === 'string' ? leaf.view.path : '';
+    return path ? { pane: tab.focused, path } : undefined;
+  }, [m, layout]);
 
   // The directories shown, for decoration providers.
   const shownKey = s.m === m && s.root ? shownDirs(s).sort().join('\n') : '';
@@ -181,6 +209,24 @@ export function FilesPanel() {
     if (m) showRoot(m, rootFor(useTree.getState(), m, ws, followed, home), ws);
   }, [m, ws, followed, s.follow, home]);
 
+  // Auto-reveal and highlight the active editor file when it changes (while
+  // staying within the current root, without changing the user's root).
+  useEffect(() => {
+    if (!activeEditor) {
+      setLastAutoRevealed(undefined);
+      return;
+    }
+    if (!m || s.m !== m || !s.root) return;
+    if (!within(activeEditor.path, s.root) || activeEditor.path === s.root) {
+      setLastAutoRevealed(undefined);
+      return;
+    }
+    const key = `${m}\u0000${s.root}\u0000${activeEditor.pane}\u0000${activeEditor.path}`;
+    if (key === getLastAutoRevealed()) return;
+    setLastAutoRevealed(key);
+    revealVisiblePath(activeEditor.path);
+  }, [m, s.m, s.root, activeEditor]);
+
   // While the panel is shown and the page visible, the shown directories
   // are checked for changes, one poll at a time.
   useEffect(() => startPolling(POLL_MS, poll), []);
@@ -193,13 +239,90 @@ export function FilesPanel() {
   const kinds = useMemo(() => new Map(rows.map((r) => [r.path, r.dir])), [rows]);
   const isDir = (p: string) => kinds.get(p) ?? p === s.root;
 
-  // Keep the cursor's row in view.
-  useEffect(() => {
+  // Scroll position memory across unmounts and tab/root switches. The
+  // tree's scroll events record where the user has it, for the root they
+  // show; nothing reads the position after the tree shows another root,
+  // where the browser has clamped it to the new rows' height already. A
+  // root's remembered position is restored once its rows reach it (or are
+  // all listed).
+  const pendingScroll = useRef<number | undefined>(undefined);
+  /** Where the tree was scrolled as last seen: put there by a restore,
+   * found there under a root just shown, or recorded from a scroll event.
+   * A scroll event that finds it still there is the browser's (its clamp
+   * to a shorter root's rows, a restore), not the user's, and records
+   * nothing. */
+  const lastScroll = useRef(0);
+  const pendingReveal = useRef<string | undefined>(undefined);
+  const prevCursor = useRef<string | undefined>(s.cursor);
+  const prevRevealSeq = useRef(revealTick);
+
+  /** Whether the rows reach top: the tree can be scrolled to it. */
+  const reaches = (el: HTMLElement, top: number) => top === 0 || rows.length * ROW_HEIGHT - el.clientHeight >= top;
+  /** Scrolls the tree to the remembered position, pending no more. */
+  const restoreScroll = (el: HTMLElement, top: number) => {
+    el.scrollTop = top;
+    lastScroll.current = el.scrollTop;
+    pendingScroll.current = undefined;
+  };
+
+  useLayoutEffect(() => {
+    if (!m || s.m !== m || !s.root) return;
+    const saved = getScrollMemory(m, s.root);
+    pendingScroll.current = saved;
+    prevCursor.current = useTree.getState().cursor;
     const el = treeRef.current;
-    if (!el || !s.cursor || !el.clientHeight) return;
-    const i = rows.findIndex((r) => r.path === s.cursor);
-    if (i >= 0) el.scrollTop = revealTop(el.scrollTop, el.clientHeight, i * ROW_HEIGHT, (i + 1) * ROW_HEIGHT);
-  }, [s.cursor, rows, ROW_HEIGHT]);
+    if (!el) return;
+    // Where the browser left it under this root's rows.
+    lastScroll.current = el.scrollTop;
+    if (reaches(el, saved)) {
+      restoreScroll(el, saved);
+      view.ref(el);
+    }
+    // Only run on (m, root) identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [m, s.m, s.root]);
+
+  useLayoutEffect(() => {
+    const saved = pendingScroll.current;
+    const el = treeRef.current;
+    if (saved === undefined || !el) return;
+    const st = useTree.getState();
+    const listed = shownDirs(st).every((d) => !st.dirs[d]?.loading && (d === st.root || !!st.dirs[d]));
+    if (!reaches(el, saved) && !listed) return;
+    restoreScroll(el, saved);
+    view.ref(el);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, ROW_HEIGHT, view.ref]);
+
+  const setTreeEl = useCallback(
+    (el: HTMLDivElement | null) => {
+      // A tree element comes with the panel or with another (m, root),
+      // whose layout effect above restores its scroll position.
+      treeRef.current = el;
+      view.ref(el);
+    },
+    [view.ref],
+  );
+
+  // Keep the cursor's row (or an explicitly/auto-revealed row) in view.
+  useEffect(() => {
+    if (revealTick !== prevRevealSeq.current) {
+      prevRevealSeq.current = revealTick;
+      pendingReveal.current = revealTarget;
+      prevCursor.current = s.cursor;
+    } else if (s.cursor !== prevCursor.current) {
+      prevCursor.current = s.cursor;
+      pendingReveal.current = s.cursor;
+    }
+    const el = treeRef.current;
+    const target = pendingReveal.current;
+    if (!el || !target || !el.clientHeight) return;
+    const i = rows.findIndex((r) => r.path === target);
+    if (i >= 0) {
+      el.scrollTop = revealTop(el.scrollTop, el.clientHeight, i * ROW_HEIGHT, (i + 1) * ROW_HEIGHT);
+      pendingReveal.current = undefined;
+    }
+  }, [s.cursor, revealTick, revealTarget, rows, ROW_HEIGHT]);
 
   // The path's end stays in view: a narrow panel scrolls its start away
   // (as VS Code's breadcrumbs do) rather than squeezing every name.
@@ -241,8 +364,17 @@ export function FilesPanel() {
       else if (nav.kind === 'selectAll') selectAllRows(rows);
       return;
     }
+    const plain = !ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey;
+    const openKey =
+      (!isMac && plain && ev.key === 'Enter') ||
+      (isMac && ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey && (ev.key.toLowerCase() === 'o' || ev.key === 'ArrowDown'));
     switch (true) {
-      case ev.key === 'Enter': {
+      case isRenameKey(ev): {
+        handled();
+        if (!readOnly && row) setEdit({ kind: 'rename', path: row.path });
+        return;
+      }
+      case openKey: {
         handled();
         // On a selection of several, its files open; else the cursor's row.
         const files = st.selection.filter((p) => kinds.get(p) === false);
@@ -263,19 +395,55 @@ export function FilesPanel() {
     if (readOnly) return;
     // Only rows shown: a selection the tree does not show is not acted on.
     const sel = (st.selection.length ? st.selection : cur ? [cur] : []).filter((p) => kinds.has(p));
-    if (ev.key === 'F2' && row) {
-      handled();
-      setEdit({ kind: 'rename', path: row.path });
-    } else if ((ev.key === 'Delete' || (isMac && ev.key === 'Backspace' && ev.metaKey)) && sel.length) {
+    if (isDeleteKey(ev) && sel.length) {
       handled();
       if (ev.shiftKey) void remove(m, sel);
       else void trash(m, sel);
     } else if (mod && !ev.shiftKey && !ev.altKey && (ev.key === 'c' || ev.key === 'x') && sel.length) {
-      handled();
+      // Do not preventDefault: let native copy/cut fire onCopy/onCut to update
+      // the system clipboard marker when running in a browser.
       setClipboard({ m, paths: sel, cut: ev.key === 'x' });
-    } else if (mod && !ev.shiftKey && !ev.altKey && ev.key === 'v' && st.clipboard) {
-      handled();
-      void paste(m, row ? dirOf(row.path, row.dir) : root);
+    }
+  };
+
+  const onCopyCut = (ev: React.ClipboardEvent<HTMLDivElement>, cut: boolean) => {
+    if (useStore.getState().readOnly) return;
+    if (ev.target instanceof HTMLElement && ev.target.closest('input, textarea, [contenteditable]')) return;
+    const st = useTree.getState();
+    const cur = st.cursor;
+    const sel = (st.selection.length ? st.selection : cur ? [cur] : []).filter((p) => kinds.has(p));
+    if (!sel.length) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    setClipboard({ m, paths: sel, cut });
+    ev.clipboardData?.setData(CLIP_TYPE, JSON.stringify({ m, paths: sel, cut }));
+  };
+
+  const onPaste = (ev: React.ClipboardEvent<HTMLDivElement>) => {
+    if (useStore.getState().readOnly) return;
+    if (ev.target instanceof HTMLElement && ev.target.closest('input, textarea, [contenteditable]')) return;
+    const st = useTree.getState();
+    const cur = st.cursor;
+    const row = cur ? rows.find((r) => r.path === cur) : undefined;
+    const dir = row ? dirOf(row.path, row.dir) : root;
+    const dt = ev.clipboardData;
+    const hasInAppMarker = !!dt?.types && Array.from(dt.types).includes(CLIP_TYPE);
+    if (hasInAppMarker && st.clipboard?.m === m) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void paste(m, dir);
+      return;
+    }
+    if (hasClipboardFiles(dt)) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void pasteFiles(m, dir, dt);
+      return;
+    }
+    if (st.clipboard?.m === m) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void paste(m, dir);
     }
   };
 
@@ -379,10 +547,11 @@ export function FilesPanel() {
     }
     const deco = decorationOf(row);
     const renaming = s.edit?.kind === 'rename' && s.edit.path === row.path;
+    const isActive = activeEditor?.path === row.path;
     return (
       <TreeRow
         key={row.path}
-        className="files-row"
+        className={isActive ? 'files-row active' : 'files-row'}
         style={style}
         depth={row.depth}
         expanded={row.dir ? row.expanded : undefined}
@@ -395,6 +564,7 @@ export function FilesPanel() {
         dropTarget={drop === row.path && row.dir}
         dimmed={cut.has(row.path)}
         data-path={row.path}
+        data-active={isActive ? 'true' : undefined}
         title={deco?.tooltip ? `${row.path}\n${deco.tooltip}` : row.path}
         draggable={!renaming && (!readOnly || canDownload(m))}
         onClick={(ev) => onRowClick(ev, row)}
@@ -527,17 +697,25 @@ export function FilesPanel() {
         }}
       />
       <div
-        ref={(el) => {
-          treeRef.current = el;
-          view.ref(el);
-        }}
+        ref={setTreeEl}
         className={`tree files-tree ${drop === root ? 'drop' : ''}`}
         role="tree"
         tabIndex={0}
         aria-label={t('files.title')}
         aria-multiselectable
         onKeyDown={onKey}
-        onScroll={view.onScroll}
+        onCopy={(ev) => onCopyCut(ev, false)}
+        onCut={(ev) => onCopyCut(ev, true)}
+        onPaste={onPaste}
+        onScroll={(e) => {
+          const top = e.currentTarget.scrollTop;
+          if (top !== lastScroll.current) {
+            lastScroll.current = top;
+            pendingScroll.current = undefined;
+            setScrollMemory(m, root, top);
+          }
+          view.onScroll(e);
+        }}
         onContextMenu={(ev) => {
           if (ev.defaultPrevented) return;
           openMenu(ev, menuFor(m, [], isDir, treeRef.current));

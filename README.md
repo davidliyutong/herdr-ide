@@ -1,299 +1,125 @@
-# herdr-ide
+# veldr
 
 English | [简体中文](README.zh-CN.md)
 
-A terminal-first, multi-machine, agent-native web IDE built on the
-[herdr-core](https://github.com/herdrdev/herdr-core) terminal core: the
-workspaces and terminals of every machine in one browser tab, with VS Code
-(code-server) one click away.
+A terminal-first, multi-machine, agent-native web IDE built on the [herdr-core](https://github.com/herdrdev/herdr-core) terminal core: the workspaces and terminals of every machine in one browser tab, with VS Code (code-server) one click away.
 
-![Two SSH machines in one tab: Claude Code waiting for confirmation and codex done in the agent inbox, with git history and a GPU monitor in split panes](docs/images/overview.png)
+![A workstation and GPU server in one tab: Claude Code waiting in the agent inbox, with an agent chat and terminal in split panes and a GPU monitor](docs/images/overview.png)
 
 ## Features
 
-- **Terminals in the browser.** Each machine's terminal core (herdr-core)
-  runs the programs; the browser emulates every terminal itself with
-  Ghostty's terminal library, compiled to WebAssembly, and draws it with
-  WebGL (Canvas 2D without it). Keys are encoded for the program in the
-  pane (kitty keyboard protocol included). Mouse, scrollback (selections
-  scroll past the edge and copy whole), IME, OSC 52 copy (a selection in
-  Claude Code, or in Codex on an SSH machine, goes straight to the
-  clipboard), resizable splits, and
-  programs see the UI theme's colors. The terminals shown last stay
-  attached while another tab is shown, so coming back shows them at once,
-  where you had scrolled. A terminal keeps its size while no tab shows
-  it, so a full-screen program such as Claude Code or Codex stays as you
-  left it, and a terminal shown longer ago than the ones kept comes back
-  where you had scrolled as well. Workspaces, tabs and splits are a
-  layout document kept on each machine, the same in every browser and the
-  desktop app. Drag a pane by its header to swap or move it; double-click
-  a tab, workspace, pane title or machine to rename it in place (a
-  workspace's menu edits its name and folder; without a folder, new
-  terminals start in the focused pane's); drag a pane onto another
-  workspace in the sidebar, or use its **Move to Workspace** menu, to move
-  it there; drag a tab onto a pane of another tab to split them side by
-  side, as in Edge (terminals, VS Code and plugin panes alike); drag tabs,
-  workspaces and machines to reorder them; drag the sidebar's edge or a split's
-  handle to resize them (a double click restores the default or equal
-  sizes); every tab has a × and a middle
-  click closes it, and a pinned tab stays first with a pin instead;
-  right-click a pane header, tab, workspace or machine
-  for its commands, or a pane's text to copy, paste or open a path. Everything is
-  in reach of the mouse; the few default keys take nothing from the
-  programs in the terminals (`ctrl+b` reaches tmux), and every key can be
-  bound in the settings.
-- **Terminal core included.** The binary carries herdr-core for Linux/macOS
-  on amd64/arm64 and installs it on a machine the first time its terminals
-  are shown; machines need nothing installed and no internet. Programs keep running
-  when the browser closes or the core stops. After a machine restarted,
-  its workspaces and tabs come back as shells in their directories, and
-  Claude Code and Codex continue the directory's latest conversation
-  (`claude --continue`, `codex resume --last`); other programs are not
-  started again ([33](docs/features/33-workspace-restore.md)). A machine's menu has
-  **Troubleshooting** ▸ **Restart Terminal Service…** (its programs keep
-  running), **Start Terminal Service** and **Stop Terminal Service…**.
-- **Multi-machine.** Keeps its own list of SSH machines (the machines saved
-  in herdr are imported the first time); right-click the sidebar to add one
-  (a host of your `~/.ssh/config`, picked from a list, or any ssh target,
-  and a label; a password or host key is asked for in a terminal), or a machine to rename, remove, disable or enable it or open
-  its **Machine Settings…**. One ssh
-  connection per machine runs a small static agent
-  (linux/macOS × amd64/arm64, uploaded automatically) that multiplexes
-  everything; nothing listens on the machines.
-- **Agent-native.** An inbox of agents that are blocked or done across all
-  machines, browser notifications and sounds when an agent needs input or
-  finishes, starting agents from the command palette,
-  sending code from VS Code to an agent of its workspace, pasting images into agent
-  prompts. Each machine's agent tells which coding agent runs in a terminal
-  and whether it works, waits or finished a turn, with herdr's rules for
-  Claude Code, Codex, Gemini, OpenCode and more.
-- **VS Code on demand.** code-server is installed per machine from the core
-  host (no internet needed on machines), downloaded by the machines
-  themselves, or taken from an existing install, with Git Graph and a bridge
-  extension. VS Code is a pane like a terminal: **Open in VS Code** (the
-  pane header's button, the pane's menu, the command palette, `cmd+j` in
-  the desktop app) opens a folder as a new tab, a pane's diff and Git Graph
-  open in VS Code beside it, and a `path:line` in the terminal opens in the
-  workspace's VS Code pane, else in one beside the terminal. VS Code panes
-  split, move between tabs, maximize and come back after a restart; moving
-  one or switching tabs does not reload it. Idle instances are stopped.
-  VS Code is off by default: it runs on the UI's own address, so its
-  extensions and webviews can do whatever the page can on every machine.
-  Turn it on in Settings › Plugins: in the desktop app with its switch, in
-  a browser after accepting that risk in a dialog. The two switches are
-  separate, so VS Code on in the desktop app stays off in browsers.
-- **Program windows.** Windows that programs on remote Linux machines open
-  (matplotlib, the MuJoCo viewer, Qt tools) appear in browser windows, one
-  per program window, with mouse and keyboard. Terminals get a virtual
-  display automatically (a shell opened before can be given it from
-  its menu). Where a machine has a GPU and Xwayland, the display draws with
-  the GPU, so OpenGL and Vulkan programs (Isaac Sim) render on it; elsewhere
-  it is Xvfb, fetched without root when a machine lacks it, with VirtualGL
-  for OpenGL on the GPU where that is installed. On machines with several
-  NVIDIA GPUs a program can show its window from the one its
-  `CUDA_VISIBLE_DEVICES` names. Windows that
-  keep changing are sent as video (H.264 on NVIDIA, Intel and AMD GPUs, VP8
-  otherwise) to browsers that decode it, still ones as exact pictures.
-- **Quick Look.** ⌘/Ctrl-click or right-click a path in a terminal, also one
-  wrapped over several lines, to preview images, GIFs, videos (with
-  seeking), audio, PDFs, text or directories in a preview pane. Code is
-  colored in about 125 languages with VS Code's grammars (also Makefiles,
-  TOML, Dockerfiles and scripts without an extension), in the editor and
-  the diffs too, and Markdown files show rendered.
-- **Formulas.** Rest the pointer on a LaTeX formula an agent wrote in a
-  pane (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`, also with the backslashes its
-  markdown dropped) to see it typeset, and copy its source.
-- **Find.** ⌘F (Ctrl+Shift+F on other systems) finds text in a pane's
-  output, scrollback included: every match on the screen is highlighted,
-  Enter and Shift+Enter step to older and newer ones, scrolling them into
-  view.
-- **Files to agents.** Paste or drop files into a pane to paste their paths;
-  files that are not on the pane's machine are uploaded to it first, dropped
-  ones into the pane's directory (an existing file there is never replaced).
-  The uploads panel in the status bar shows each upload's progress and
-  speed, cancels uploads and lists the recent ones.
-- **Files from machines.** Right-click in a pane to download the path under
-  the pointer, or choose files and folders of the pane's directory to
-  download together; folders arrive as zip archives, streamed from the
-  machine. VS Code's explorer has the same download. The downloads panel in
-  the status bar shows each download's progress, speed and result, and
-  cancels or repeats it.
-- **Several browsers at once.** Every browser and the desktop app show the
-  same terminals and type into them; the one used last sets a terminal's
-  size.
-- **Plugins and the right sidebar.** Features that come as plugins add
-  panels to a sidebar on the right (⌘⌥B in the desktop app on macOS),
-  panes of their own, commands and status bar items; each can be turned
-  off in Settings › Plugins, where a plugin with settings of its own
-  opens their page. Uploads and downloads, program windows and
-  VS Code are plugins too (VS Code off, the default, code-server is never
-  fetched or started).
-- **File explorer.** A tree of the machine's files in the right sidebar
-  (⌘⇧E in the desktop app on macOS) that follows the focused terminal's
-  directory, as VS Code's explorer works: file-type icons, filter,
-  hidden files, keys (type a name to go to it),
-  new files and folders, rename, cut, copy and paste, drag to move, drop
-  files and folders from your computer (or choose them with Upload Files…
-  and Upload Folder…) to upload them with their structure, asking whether
-  to replace, keep both or skip names already there (or cancel), drag rows out to
-  download them, Move to Trash, copy paths,
-  download, open in a terminal or VS Code, and for the computer the app
-  runs on, Reveal in Finder (the file manager on Linux). Switching to
-  another workspace or machine shows its directory at once. A click shows a file in a
-  preview editor that the next click replaces, a double click keeps it
-  open, as in VS Code (text in Monaco, images, video and PDFs as Quick Look
-  shows them); saves never overwrite a change made on the machine since it
-  was opened, and write the file in place as VS Code does, so hard links,
-  owners, permissions and symbolic links stay. An open file deleted or
-  moved away has its tab struck through, its text kept.
-  Changed files are colored by their Git status and the editor's gutter
-  marks changed lines. Its settings page has hidden files, excluded names,
-  the sort order, following the focused pane and asking before the trash.
-- **Browser.** A tab can be a browser: a development server on a remote
-  machine's `localhost` shows in a pane through a port forward, as
-  `ssh -L` would give it, and ⌘/Ctrl-click on a link to `localhost` in a
-  terminal (or a click on one in a document) opens it there in a new tab;
-  links to other computers open in your browser. Forwards are made only
-  when you open a port yourself (a tab that finds none asks first), listen
-  on the core's computer only, end when unused, and their pages stay
-  another site than the UI. The pane lists the machine's listening ports;
-  the desktop app shows any web page typed into it.
-  ⌘/Ctrl-click the new-tab button (or its chevron) to choose the kind of
-  tab: terminal, VS Code, browser
-  ([32](docs/features/32-browser-and-ports.md)).
-- **Git.** VS Code's Source Control and Git Graph without VS Code, for the
-  focused pane's repository on any machine: a panel (Ctrl+Shift+G in the
-  desktop app) with the branch (a searchable branch picker for thousands
-  of branches), ahead/behind, fetch, pull and push with one remote or
-  several, staged and unstaged changes in collapsible groups as a list or
-  a tree of folders, with file icons, several selected and acted on as in
-  the file explorer, commits (⌘/Ctrl+Enter, amend), stashes and, docked at
-  its bottom, the whole history with its graph (scrolls through every
-  commit, a click shows its files); a graph pane with lanes, branch and
-  tag badges, search, a filter of several branches, a commit's files and
-  context menus (checkout, branches, tags, merge, rebase, cherry-pick,
-  revert, reset); diffs in Monaco, side by side or inline, where selected
-  ranges are staged, unstaged or discarded and the working tree's side is
-  editable, files that mix line endings keeping each line's own. Changed
-  files are colored, ignored ones muted, in the file explorer; Settings ›
-  Plugins › Git has the plugin's settings ([31](docs/features/31-git.md)).
-- **System monitor and task manager.** Hold ⌘ (Ctrl/Meta on Windows and
-  Linux) and hover any machine in the left sidebar—or hover/click the
-  bottom-right status bar indicator whose menu floats upward—to inspect live
-  CPU (with sparkline and load averages), memory and swap, per-GPU
-  utilization/VRAM/temperature/power, network throughput and disk I/O and
-  mounts. Open the **Task Manager** panel (in the right sidebar, or as a
-  split pane or tab) for a searchable process explorer with parent-child
-  tree view, flat list, subtree sorting and guarded process signaling
-  ([34](docs/features/34-system-monitor.md)).
-- **Variable vault.** API keys and other environment variables, encrypted
-  on the core's computer under a key made from your passphrase, for coding
-  agents on every machine: Claude Code, Codex and other MCP clients read
-  them through the vault's MCP server, which the panel shows how to add per
-  machine. Each variable names the machines that may read it; others ask on
-  every page (allow once, always, deny), and `run_with_env` runs a command
-  with the variables set without showing their values to the model. One
-  gate stands before every approval, reveal and change: the passphrase,
-  so no program, not even one on the core's computer, approves a request
-  or reads a variable that asks every time without you. The passphrase
-  unlocks the vault once after a start; for 24 hours after it (a setting)
-  biometrics stand in for it, to approve and to unlock the vault after it
-  locked: Touch ID or Windows Hello in the desktop app, whose prompt names
-  the machine and the variables, or a WebAuthn credential in a browser;
-  then the passphrase is needed again. Biometrics and Verify every Allow
-  (each approval needs them) are set in the vault's page of Settings, as
-  are exempt apps: an app on a machine (claude, say) whose requests need no
-  approval while the vault is unlocked. Every value that
-  leaves the vault is first written to its access log. It locks after an
-  hour without use; the panel counts down and sets another time for the
-  current unlock (presets or one you type). Variables move
-  between vaults in files encrypted under a passphrase of their own
-  (export and import, with a preview and a choice per variable)
-  ([30](docs/features/30-variable-vault.md)).
-- **AI usage.** A panel of the right sidebar and a status bar item show
-  what the AI subscriptions signed in on your machines have left — Claude,
-  Codex, Grok, Antigravity, Kimi Code and DeepSeek: each window's use, its
-  reset countdown and whether its pace runs it out first, credits and
-  balances, incidents of the providers' status pages — one card per
-  account even when several machines share it, with notifications at the
-  thresholds you choose. Laid out as CodexBar: a tile per service with its
-  logo and color, an overview of what the CLIs' local logs would cost at
-  API prices (by day, model, project and machine; or the tokens by kind,
-  which also count the models without a price), Antigravity's and OpenCode's sessions
-  among them, and a page per service. Its settings list the providers,
-  each opening its own.
-  Credentials are read where they are and never leave the machine; only Kimi Code's
-  15-minute sign-in is renewed there, as Kimi Code renews it.
-- **Settings.** Language (English, Chinese), light/dark theme followed by
-  VS Code, color themes (the accent: blue, VS Code blue, teal, violet,
-  rose, amber, graphite), interface size, the desktop app's zoom, the terminals' font (picked from the monospace
-  fonts installed, with a preview), line height, cursor (a thin bar by
-  default, its thickness adjustable), scrollback, bell,
-  color schemes (Dracula, Nord, Solarized, One, Gruvbox, Tomorrow…) with
-  your own colors on top, notification sounds, system notifications and
-  the Dock/taskbar badge each on or off, silent agents, how each machine
-  gets VS Code, program windows per machine, how many terminals stay
-  attached in the background and every keyboard shortcut,
-  in one dialog laid out as VS Code's (the sidebar's gear, `cmd+,` or
-  `ctrl+,` in the desktop app; a machine's own settings from its menu) with
-  search. Settings and keys are kept on the core's
-  host in two JSON files you can also edit by hand, and are the same in
-  every browser and the desktop app. Terminals use
-  the included JetBrains Mono font unless you choose another.
-  The **Performance** page also shows what the app uses now: in the
-  desktop app each of its processes with CPU and memory, in a browser the
-  window's script memory, and in both the core and the terminals shown
-  and kept.
+- **Terminals in the browser.** Ghostty's terminal library, compiled to WebAssembly, emulates each terminal; WebGL draws it. Keys are encoded for the program in the pane (kitty keyboard protocol included), with mouse, IME, scrollback and OSC 52 copy.
+- **Workspaces, tabs and splits.** A layout document kept on each machine, the same in every browser and the desktop app. Drag, rename, pin, split and reorder with the mouse; right-click anything for its commands. A pinned tab stays first and `cmd+w` does not close it.
+- **Keys left to the programs.** The few default keys take almost nothing from the terminals; `ctrl+b` moves the keyboard from an editor to its pane header and back, and stays the program's (tmux) in a terminal. Every key can be rebound or unbound, chords included.
+- **Terminal core included.** herdr-core is installed on a machine the first time its terminals are shown; machines need nothing installed and no internet. Programs keep running when the browser or the hub stops.
+- **Workspaces come back.** After a machine restarts, its tabs return as shells in their directories, and Claude Code and Codex resume the session each ran (`claude --resume <id>`, `codex resume <id>`) once the machine confirms it, else the directory's latest conversation ([33](docs/features/33-workspace-restore.md)).
+- **Multi-machine.** Add any host of `~/.ssh/config` or any ssh target. One ssh connection per machine runs a small static agent that multiplexes everything; nothing listens on the machines. Cluster nodes sharing one home directory (NFS) stay separate machines, each with its own sockets, terminal core and files ([40](docs/features/40-shared-homes.md)).
+- **Agent-native.** An inbox of agents that are blocked or done on every machine, with notifications and sounds. Each machine detects Claude Code, Codex, Gemini, OpenCode and more, whether they work, wait or finished, and which session Claude Code and Codex run ([35](docs/features/35-agent-native-view.md)).
+- **Agent chats.** A tab can be a chat with Claude Code, Codex, Kimi Code or Grok running headless on any machine: streamed text, permissions, questions and plans answered in cards, model, effort and mode per chat (full access only where the machine allows it), images, queued messages, and cost, context and limits. A chat host on each machine keeps chats across disconnects within limits you set and stops idle agents; chats count in the agent inbox. A session moves between a terminal and a chat either way ([37](docs/features/37-agent-chats.md)).
+- **Terminal history.** Opt in per machine (terminal output can hold secrets) and the machine keeps bounded snapshots of its terminals' output; after its terminal core restarts, each terminal shows its old output above the new shell ([36](docs/features/36-terminal-history.md)).
+- **VS Code on demand.** code-server per machine, installed from the hub host without internet on the machines, as a pane beside the terminals; a `path:line` in a terminal opens there. Off by default, because its extensions run with the UI's own origin.
+- **Program windows.** Windows of programs on remote Linux machines (matplotlib, MuJoCo, Isaac Sim) open in browser windows, drawn on the GPU where there is one and streamed as video while they change.
+- **Quick Look.** ⌘/Ctrl-click or right-click a path in a terminal to preview images, video, audio, PDFs, code (about 125 languages), Markdown or directories.
+- **Formulas.** Rest the pointer on a LaTeX formula an agent printed to see it typeset and copy its source.
+- **Find.** ⌘F (Ctrl+Shift+F elsewhere) finds text in a pane's output, scrollback included.
+- **Files to and from machines.** Paste or drop files into a pane to upload them and paste their paths; download any path, folders as zip archives. The status bar shows the transfers' progress.
+- **Several browsers at once.** Every browser and the desktop app show and type into the same terminals.
+- **Plugins and the right sidebar.** Features that come as plugins add panels, panes, commands and status bar items; each can be turned off in Settings › Plugins.
+- **File explorer.** A tree of the machine's files that follows the focused terminal, used as VS Code's explorer, and an editor whose saves never overwrite a change made on the machine ([28](docs/features/28-file-explorer.md)).
+- **Browser.** A tab shows a machine's `localhost` service through a port forward, as `ssh -L` would; forwards are made only when you open them ([32](docs/features/32-browser-and-ports.md)).
+- **Git.** VS Code's Source Control and Git Graph without VS Code, for the focused pane's repository on any machine: stage ranges, commit, branch, pull and push ([31](docs/features/31-git.md)).
+- **System monitor and task manager.** CPU, memory, GPUs, network and disks of each machine, hardware temperatures and fan speeds, and a process tree with guarded signals ([34](docs/features/34-system-monitor.md)).
+- **Project search.** A Search panel finds text in the files of a folder on any machine, as VS Code's search view: match case, whole word, regular expressions, include and exclude globs; a click opens the match. ripgrep where the machine has it, a bounded search of its own otherwise ([41](docs/features/41-project-search.md)).
+- **Variable vault.** API keys encrypted under your passphrase on the hub's computer, read by coding agents on every machine through an MCP server; each read is allowed per machine or approved by you, with the passphrase or Touch ID, Windows Hello or a WebAuthn credential ([30](docs/features/30-variable-vault.md)).
+- **AI usage.** What the AI subscriptions signed in on your machines have left (Claude, Codex, Grok, Antigravity, Kimi Code, DeepSeek), with alerts, the local logs' cost at API prices, and what the focused Claude Code or Codex session has cost so far ([29](docs/features/29-ai-usage.md)).
+- **Settings.** Language (English, Chinese), themes, terminal font and colors, notifications and every shortcut, in one searchable dialog laid out as VS Code's. Kept on the hub's host in two JSON files you can also edit by hand ([13](docs/features/13-settings-and-appearance.md)).
 
 ## Screenshots
 
-**VS Code beside the terminals.** An agent's `path:line` opens in VS Code
-on the machine where the pane runs; the pane header opens its folder, its
-diff or Git Graph.
+**VS Code beside the terminals.** An agent's `path:line` opens in VS Code on the machine where the pane runs; the pane header opens its folder, its diff or Git Graph.
 
-![codex's review in a pane, with model.py opened at the line it names in VS Code](docs/images/vscode.png)
+![The fixed nanoGPT project with train.py open in a VS Code pane](docs/images/vscode.png)
 
-**Program windows.** A matplotlib window on a remote Linux machine opens in
-a browser window of its own, with mouse and keyboard.
+**Program windows.** A matplotlib window on a remote Linux machine opens in a browser window of its own, with mouse and keyboard.
 
-![An animated matplotlib plot from the workstation in its own browser window, over the pane that started it](docs/images/windows.png)
+![A fixed two-source interference plot from the GPU server, composed over the terminal that started it](docs/images/windows.png)
 
-**Quick Look.** Right-click or ⌘/Ctrl-click a path in a terminal to preview
-it; the arrows step through the other files of the folder.
+**Quick Look.** Preview images, video, audio, PDFs, code, Markdown or directories without leaving the workspace.
 
-![A training loss curve previewed from a file listing](docs/images/quicklook.png)
+![A training loss curve previewed from the file explorer](docs/images/quicklook.png)
+
+**Agent chats.** Headless agents stream Markdown, formulas, tool results and diffs into the same layout as the terminals, with permissions answered in cards.
+
+![A training review with a diff and a file-change permission request in an agent chat](docs/images/chat.png)
+
+**File explorer.** Follow the focused terminal's directory and edit code with conflict-safe saves.
+
+![The nanoGPT file tree beside train.py in the editor](docs/images/files.png)
+
+**Git.** Source Control, a branch and tag graph, and Monaco diffs work without VS Code.
+
+![Source Control beside a fixed commit graph and a train.py diff](docs/images/git.png)
+
+**System monitor and task manager.** Live machine resources and a searchable process tree share a pane.
+
+![CPU, memory, two GPUs, network, disk and training processes on the GPU server](docs/images/monitor.png)
+
+**Settings.** Search settings, choose appearance and themes, and configure plugins and keybindings.
+
+![The appearance settings with color themes and the plugin and keyboard navigation](docs/images/settings.png)
+
+**Explicit browser security.** Enabling VS Code in a browser requires acknowledging what its extensions and webviews can access.
+
+![The VS Code browser risk confirmation with its acknowledgement checked](docs/images/security.png)
+
+**Browser and port forwards.** Open a machine's localhost service through a loopback forward and inspect its listening and forwarded ports.
+
+![The remote training dashboard in a browser pane with its port-forward list](docs/images/browser.png)
+
+**Project search.** Search with filters and open a match in the editor.
+
+![learning_rate results in Python files beside the matched source](docs/images/search.png)
+
+**Variable vault.** Keep encrypted variables with per-machine access while their values stay hidden.
+
+![The unlocked variable vault with three demonstration variables and no values shown](docs/images/vault.png)
+
+**AI usage.** Compare subscription windows, resets, balances and API-equivalent spend across providers and machines.
+
+![Fixed Claude, Codex, Kimi Code and Grok usage with daily cost charts](docs/images/usage.png)
+
+**Terminal history.** Restored workspaces keep their split layout and show saved output above each new shell.
+
+![Two restored terminals with their saved training and GPU output](docs/images/terminal-history.png)
+
+**Formulas.** Rest the pointer on a LaTeX formula in a terminal to see it typeset and copy its source.
+
+![A learning-rate formula in a terminal with its KaTeX popover](docs/images/formula.png)
+
+**Desktop app.** The same workspaces and features run in the Electron shell with an in-process hub.
+
+![The isolated desktop app showing a terminal, the file explorer and train.py](docs/images/desktop.png)
 
 ## Quick start
 
 Requirements:
 
-- an OpenSSH client with working access to the machines you want to use
-  (this host needs none);
-- to build: Go (version in `go.mod`), Node.js 22.12+ and pnpm (`corepack enable`
-  picks the pinned version).
+- an OpenSSH client with working access to the machines you want to use (this host needs none);
+- to build: Bun 1.4.5 (the hub, its machine side and the build's tools), Node.js 22.12+ and pnpm (`corepack enable` picks the pinned version).
 
 ```bash
 make deps && make build
-cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
-./herdr-ide
+cd dist/packages/veldr-$(scripts/platform.sh)
+./veldr
 ```
 
-Or extract the matching archive from `dist/release/` (or GitHub Releases)
-and run `./herdr-ide`. Add SSH machines with **Add machine…** in the
-sidebar. Coming from a version that drew its panes from herdr: settings,
-keys and machines move over on the first start, terminals stay in herdr
-([migration](docs/deployment.md#migrating-from-versions-that-used-herdr)).
+Or extract the matching archive from `dist/release/` (or GitHub Releases) and run `./veldr`. Add SSH machines with **Add Machine…** in the sidebar. A hub from GitHub Releases has each machine download its platform's build. One built here serves machines of its own platform only, unless you build the others too (`TARGETS="linux/amd64 linux/arm64 …" make build`, its own among them) and start it with `--agent-dir dist/release`.
 
-Open <http://127.0.0.1:7780>. The status bar opens the command palette and
-the list of shortcuts (`cmd+k` and `cmd+/` in a browser on macOS,
-`ctrl+shift+/` for the shortcuts elsewhere). All flags are listed in
-[docs/reference.md](docs/reference.md).
+Open <http://127.0.0.1:7780>. The status bar opens the command palette and the list of shortcuts. All flags are listed in [docs/reference.md](docs/reference.md).
 
 ## Desktop app
 
-The same UI in an Electron app with a core of its own
-(`http://127.0.0.1:7781`, instance `desktop`), for macOS, Windows and Linux.
-Download it from GitHub Releases:
+The same UI in an Electron app with a hub of its own, which runs inside the app and listens on no port (instance `desktop`), for macOS, Windows and Linux. Download it from GitHub Releases:
 
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
@@ -305,32 +131,11 @@ Download it from GitHub Releases:
 | Program windows | of remote Linux machines | of remote Linux machines | of remote Linux machines |
 | Notifications | yes, with a badge on the Dock icon | yes, with an overlay on the taskbar button | with a notification daemon (desktop environments run one) |
 
-- **macOS:** drag the app from the DMG to Applications. If macOS says it
-  cannot check the app for malicious software, Control-click the app and
-  choose **Open** (on macOS 15 and later: **Open Anyway** under System
-  Settings → Privacy & Security). The app stays in the Dock when its
-  window closes, until you quit it. For terminals and the file browser to
-  reach other apps' data (Mail, Messages, Safari) and open Desktop,
-  Documents, Downloads or external disks without asking, give them Full
-  Disk Access under **Settings → Terminal → Permissions**: it opens System
-  Settings, where you turn on herdr-ide and add herdr-core, which runs the
-  terminals, and tells you what to restart. An app signed ad hoc needs it
-  again after each rebuild or update.
-- **Windows:** run the setup; if SmartScreen says "Windows protected your
-  PC", choose **More info** → **Run anyway**. The app needs Windows'
-  OpenSSH Client (installed by default on Windows 10 1809 and later).
-  It works on SSH machines: accept each machine's host key once with
-  `ssh <target>` in a terminal, and use a key the ssh agent holds
-  (`ssh-add`), since the app cannot ask for a password. WSL is not built in;
-  a WSL distribution running an ssh server can be added as an SSH machine.
-- **Linux:** `sudo apt install ./herdr-ide-<version>-linux-amd64.deb`
-  (Ubuntu 24.04 and later need the deb, which lets Chromium's sandbox run).
-  The AppImage needs `chmod +x` and FUSE 2 (`libfuse2`, `libfuse2t64` on
-  Ubuntu 24.04).
+- **macOS:** drag the app from the DMG to Applications. If macOS says it cannot check the app for malicious software, Control-click the app and choose **Open** (on macOS 15 and later: **Open Anyway** under System Settings → Privacy & Security). For terminals to open Desktop, Documents, Downloads or external disks without asking, grant Full Disk Access under **Settings → Terminal → Permissions**; an app signed ad hoc needs it again after each update.
+- **Windows:** run the setup; if SmartScreen says "Windows protected your PC", choose **More info** → **Run anyway**. The app needs Windows' OpenSSH Client and works on SSH machines only: accept each host key once with `ssh <target>` and use a key the ssh agent holds (`ssh-add`), since the app cannot ask for a password.
+- **Linux:** `sudo apt install ./veldr-<version>-linux-amd64.deb` (Ubuntu 24.04 and later need the deb, which lets Chromium's sandbox run). The AppImage needs `chmod +x` and FUSE 2 (`libfuse2`, `libfuse2t64` on Ubuntu 24.04).
 
-There are no automatic updates: install a newer release over the old one.
-Or build the app, with the same embedded core, UI, agents and VS Code
-bridge, for the system you are on:
+There are no automatic updates: install a newer release over the old one. Or build the app for the system you are on:
 
 ```bash
 make desktop-app                 # the unpacked app in dist/desktop/
@@ -339,56 +144,17 @@ make desktop-install             # macOS: the .app, copied into /Applications
 ARCH=x64 make desktop-dist       # another architecture; default is the host Node architecture
 ```
 
-Drag folders from the file manager onto the sidebar, onto the Dock icon on
-macOS, or open them with the app on Linux (**Open With**), to create a
-workspace for each on the local machine. Files and folders dropped on a
-pane of the local machine are pasted as their own paths, without uploading.
+Drag folders onto the sidebar or the Dock icon to create a workspace for each on the local machine. The app's shortcuts are direct keys (`cmd+t`, `cmd+w`, `cmd+d` on macOS; `ctrl+shift+t`, `ctrl+shift+w` on Windows and Linux); every other key, `ctrl+c` included, reaches the terminal. The full list is in [docs/reference.md](docs/reference.md#keyboard-shortcuts); change keys under **Settings → Keyboard Shortcuts**.
 
-On macOS `cmd+t` opens a tab, `cmd+1`…`cmd+9` select one (`cmd+9` the
-last), `cmd+shift+w` closes it, `cmd+w` closes the pane (or a workspace with no tab left), `cmd+d` /
-`cmd+shift+d` split it, `cmd+alt+arrows` move between panes, `cmd+[` /
-`cmd+]` go back and forward through the panes focused, `cmd+w` closes at once and `cmd+z` undoes it within 5 s (the setting `layout.undoClose`)
-(the same terminal, its program still running),
-`cmd+shift+enter` maximizes one, `cmd+n` creates a workspace, `cmd+,` opens
-the settings, `cmd+shift+p` the command palette, `cmd+j` opens the focused
-pane's folder in VS Code and `cmd++`, `cmd+-` and `cmd+0` zoom the window,
-terminals included. On Windows and Linux `ctrl+shift+t` opens a tab,
-`ctrl+tab` and `alt+1`…`alt+9` switch tabs, `ctrl+shift+w` closes one,
-`ctrl+shift+n` creates a workspace, `ctrl+,` opens the settings,
-`ctrl+shift+p` the command palette, `ctrl+shift+j` opens VS Code and
-`ctrl++`, `ctrl+-` and `ctrl+0` zoom;
-every other key, `ctrl+c` and `ctrl+q` included, reaches the terminal.
-While VS Code has focus, its own keys come first (`cmd+j` toggles its
-bottom panel, `cmd+w` closes its editor, and the VS Code pane once no
-editor is open). The menu
-bar shows the keys in effect, in the UI's language; the title bar follows
-the UI's theme.
-Change or remove the keys under **Settings → Keyboard Shortcuts**, where
-chords such as `ctrl+b c` can be bound too; browsers keep their own
-`cmd+t` / `cmd+w`.
-
-Quitting the app stops its core; the machines' terminals keep running.
-OpenSSH must already be installed. See
-[desktop deployment](docs/deployment.md#desktop-app) for paths, versioning
-and isolated development.
+Quitting the app stops its hub; the machines' terminals keep running. See [desktop deployment](docs/deployment.md#desktop-app) for paths, versioning and isolated development.
 
 ## Remote access
 
-herdr-ide has no login of its own: keep it on `127.0.0.1` and put an
-authenticating reverse proxy with HTTPS in front (Tailscale, Caddy, nginx), then
-pass its origin with `--allowed-origin`. Optional guardrails: a proxy secret
-header, a read-only mode and an audit log. See
-[docs/deployment.md](docs/deployment.md) and [SECURITY.md](SECURITY.md).
+veldr has no login of its own: keep it on `127.0.0.1` and put an authenticating reverse proxy with HTTPS in front (Tailscale, Caddy, nginx), then pass its origin with `--allowed-origin`. Optional guardrails: a proxy secret header, a read-only mode and an audit log. See [docs/deployment.md](docs/deployment.md) and [SECURITY.md](SECURITY.md).
 
 ## Air-gapped networks
 
-Machines never download anything (the AI usage plugin asks the AI
-providers' hosts from the machines whose CLIs are signed in to them; it
-fails quietly without internet). If the host running herdr-ide is offline
-too, run `herdr-ide fetch-assets DIR` on a connected machine, carry `DIR` over
-and start with `--offline --seed-dir DIR`. Downloads are verified against
-pinned SHA-256 digests. Details in
-[docs/deployment.md](docs/deployment.md#air-gapped-networks).
+Machines need no internet access. A machine that has it downloads its platform's veldr from the GitHub release, checked against the release's `SHA256SUMS`; to one that has not, the hub uploads it over ssh, and a hub host that cannot reach the release fetches `SHA256SUMS` through the machine's ssh connection, with its own TLS end to end. Claude Code's chats need Anthropic's Agent SDK, which machines get from the npm registry the same way. code-server and extensions are resolved on the host running veldr and pushed to the machines (the AI usage plugin asks the AI providers' hosts from the machines whose CLIs are signed in to them; it fails quietly without internet). If the host running veldr is offline too, run `veldr fetch-assets DIR` on a connected machine, carry `DIR` over and start with `--offline --seed-dir DIR`; for machines of another platform than that host's, add `--agent-dir` with a directory holding the release's `SHA256SUMS` and their archives. Downloads are verified against pinned SHA-256 digests. Details in [docs/deployment.md](docs/deployment.md#air-gapped-networks).
 
 ## Documentation
 
@@ -401,33 +167,17 @@ pinned SHA-256 digests. Details in
 ## Development
 
 ```bash
-make dev-core      # core on :7790 with --instance dev (terminal core session herdr-ide-dev)
+make dev-hub       # hub on :7790 with --instance dev (terminal core session veldr-dev-<host id>)
 make dev-web       # UI with hot reload on :5173
 make check test    # before sending a PR
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md); coding agents start with
-[AGENTS.md](AGENTS.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md); coding agents start with [AGENTS.md](AGENTS.md).
 
 ## Contributing
 
-Issues and pull requests are welcome, in English or Chinese. Please read
-[CONTRIBUTING.md](CONTRIBUTING.md) and the
-[Code of Conduct](CODE_OF_CONDUCT.md) first.
+Issues and pull requests are welcome, in English or Chinese. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) first.
 
 ## License
 
-[MIT](LICENSE). Third-party licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-(Go modules) and `/licenses.md` served by the binary (the web UI bundle,
-with Ghostty's terminal library (MIT), KaTeX and the JetBrains Mono font).
-The core embeds
-[herdr-core](https://github.com/herdrdev/herdr-core) (Apache-2.0) for
-machines; release archives carry its license and notices in
-`licenses/herdr-core/`. The agents carry herdr's agent detection rules
-(Apache-2.0, [licenses/herdr-detect/](licenses/herdr-detect/)), and the
-core the video encoder for Linux machines (FFmpeg, LGPL-2.1, with libvpx,
-libva and libdrm; [licenses/encoder/](licenses/encoder/)).
-code-server and Git Graph retain their own licenses and are downloaded at
-runtime. Git Graph restricts derivative distribution and does not clearly
-grant general redistribution of the original; it is excluded from public
-release packages.
+[MIT](LICENSE). Third-party licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (the hub's Bun runtime and npm packages) and `/licenses.md` served by the hub (the web UI bundle, with Ghostty's terminal library (MIT), KaTeX and the JetBrains Mono font). The hub embeds [herdr-core](https://github.com/herdrdev/herdr-core) (Apache-2.0) for machines; release archives carry its license and notices in `licenses/herdr-core/`. The agents carry herdr's agent detection rules (Apache-2.0, [licenses/herdr-detect/](licenses/herdr-detect/)), and the hub the video encoder for Linux machines (FFmpeg, LGPL-2.1, with libvpx, libva and libdrm; [licenses/encoder/](licenses/encoder/)). code-server and Git Graph retain their own licenses and are downloaded at runtime. Git Graph restricts derivative distribution and does not clearly grant general redistribution of the original; it is excluded from public release packages.

@@ -3,7 +3,7 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { APP_NAME } from './src/brand';
 
-const core = process.env.HERDR_IDE_CORE ?? 'http://127.0.0.1:7780';
+const hub = process.env.VELDR_HUB ?? 'http://127.0.0.1:7780';
 
 // index.html title and the PWA manifest come from src/brand.ts.
 function brand(): Plugin {
@@ -32,8 +32,6 @@ function brand(): Plugin {
     },
     generateBundle() {
       this.emitFile({ type: 'asset', fileName: 'manifest.webmanifest', source: manifest });
-      // dist/ is emptied on build but must keep a tracked file for go:embed.
-      this.emitFile({ type: 'asset', fileName: '.gitkeep', source: '' });
     },
   };
 }
@@ -123,11 +121,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/ws': { target: core, ws: true },
+      '/ws': { target: hub, ws: true },
       // The terminals' WebSocket (and the ssh login's) under /api.
-      '/api': { target: core, ws: true },
+      '/api': { target: hub, ws: true },
       '/m': {
-        target: core,
+        target: hub,
         ws: true,
         // Pages of GUI windows are the app itself.
         bypass: (req) => (/^\/m\/[^/]+\/gui\/\d+\/?(\?|$)/.test(req.url ?? '') ? '/index.html' : undefined),

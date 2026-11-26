@@ -11,11 +11,11 @@ import { CodeIcon } from './icons';
 import { startPaneDrag } from '../paneDrag';
 import { openMenu } from '../contextMenu';
 import { openPaneMenu, paneMenu } from '../menus';
-import { isMenuKey } from '../rowKeys';
+import { isMenuKey, isRenameKey } from '../rowKeys';
 import { PaneActions } from './PaneActions';
 import { t } from '../i18n';
 import { FileTitle, LeafIcon, ViewTitle } from './PluginPane';
-import { describeView } from '../plugins/registry';
+import { describeView, TerminalHeaderActions, useViewStatus } from '../plugins/registry';
 
 interface Props {
   m: string;
@@ -59,7 +59,7 @@ function onHeaderKey(e: React.KeyboardEvent<HTMLElement>, m: string, pane: strin
   else if (plain && e.key === 'ArrowLeft') go(at < 0 ? items.length - 1 : at - 1);
   else if (plain && e.key === 'Home') go(0);
   else if (plain && e.key === 'End') go(items.length - 1);
-  else if (plain && (e.key === 'F2' || (e.key === 'Enter' && onTitle)) && renamable) {
+  else if (((onTitle && (isRenameKey(e) || (plain && e.key === 'Enter'))) || (plain && e.key === 'F2')) && renamable) {
     done();
     actions.startRename('pane', m, pane);
   } else if (isMenuKey(e)) {
@@ -72,8 +72,9 @@ function onHeaderKey(e: React.KeyboardEvent<HTMLElement>, m: string, pane: strin
 }
 
 /** The header of one pane: for a terminal the agent's state, the title, the
- * agent and the folder; for VS Code its mark, the folder's name and path;
- * for a preview the file's name and directory. Then the pane's own buttons
+ * agent and the folder, and the plugins' buttons for it; for VS Code its
+ * mark, the folder's name and path; for a preview the file's name and
+ * directory. Then the pane's own buttons
  * (PaneActions). Pressing it focuses the pane (VS Code takes the
  * keyboard), dragging it moves the pane, its menu has the pane's commands.
  * It is a toolbar, one stop of the Tab key (onHeaderKey); the keyboard on
@@ -112,7 +113,10 @@ export function PaneHeader({ m, pane, leaf, ws, focused, zoomed }: Props) {
       onContextMenu={(e) => !(e.target as HTMLElement).closest('input') && openMenu(e, paneMenu(m, pane))}
     >
       {L.isTerminalLeaf(leaf) ? (
-        <TerminalHeading m={m} terminal={pane} home={home} />
+        <>
+          <TerminalHeading m={m} terminal={pane} home={home} />
+          <TerminalHeaderActions m={m} terminal={pane} leaf={leaf} />
+        </>
       ) : L.isCodeLeaf(leaf) ? (
         <>
           <CodeIcon className="pane-kind" />
@@ -193,11 +197,14 @@ export function PaneTitle({ m, terminal, title, name }: { m: string; terminal: s
   );
 }
 
-/** A plugin's pane: its icon, title and path. */
+/** A plugin's pane: its agent's state when its plugin has one (a chat's;
+ * ViewStatusDef), its icon, title and path. */
 function PluginHeading({ m, view, home }: { m: string; view: L.PluginView; home?: string }) {
   const d = describeView(m, view);
+  const status = useViewStatus(m, view);
   return (
     <>
+      {status && <StatusDot status={status} />}
       <LeafIcon m={m} leaf={{ view }} className="pane-kind" />
       <ViewTitle m={m} view={view} className="pane-title" tooltip={(gone) => [d.title, d.path, gone].filter(Boolean).join(' · ')}>
         {d.title}

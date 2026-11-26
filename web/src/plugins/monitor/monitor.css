@@ -326,6 +326,38 @@
   font-size: var(--fs-xs);
 }
 
+/* ---- Sensors ---- */
+.monitor-sensor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.monitor-sensor-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+}
+.monitor-sensor-chip .lucide {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+.monitor-sensor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 12px;
+}
+.monitor-sensor {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-xs);
+}
+
 .monitor-disk-list {
   display: flex;
   flex-direction: column;

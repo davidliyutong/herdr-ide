@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// Plugins' settings pages: a section the core says is a plugin's (or a
+// Plugins' settings pages: a section the hub says is a plugin's (or a
 // plugin names) is listed under the plugins in the settings dialog, the
 // Plugins page opens it from the plugin's row, the page starts with the
 // plugin and its switch and says when the plugin is off, ends with the
@@ -104,13 +104,16 @@ describe("plugins' settings pages", () => {
 
   it('lists the sections of plugins under the Plugins page, in the plugins’ order', () => {
     const labels = nav().map((b) => b.textContent);
-    // The vault's page has its extra alone here (its section has no settings in this stand-in).
+    // The vault's, chat's and terminal history's pages have their extra alone
+    // here (their sections have no settings in this stand-in).
     expect(labels).toEqual([
       'Terminal',
       'Plugins',
       t('files.title'),
       t('usage.title'),
       t('plugins.vault.title'),
+      t('chat.title'),
+      t('history.title'),
       t('plugins.transfers.title'),
       'Keyboard Shortcuts',
     ]);

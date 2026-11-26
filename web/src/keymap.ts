@@ -17,9 +17,11 @@ import { fullDiskAccessAvailable } from './fullDiskAccess';
 import type { CommandDef } from './plugins/api';
 import { commandOfOffPlugin, pluginCommand } from './plugins/registry';
 import { useFrames, windowFocused } from './codeFrames';
+import { terms } from './state/terms';
 
-/** Where a key is pressed: the main UI, a VS Code pane, or a dialog. */
-export type KeyContext = 'terminal' | 'vscode' | 'dialog';
+/** Where a key is pressed: the main UI (terminal), a terminal of it
+ * (shell), a VS Code pane, or a dialog. */
+export type KeyContext = 'terminal' | 'shell' | 'vscode' | 'dialog';
 
 /** What a stroke did: nothing (the key is not the app's), a chord goes on,
  * a command ran, the chord's first stroke was pressed again (this press
@@ -29,10 +31,21 @@ export type StrokeResult =
   { kind: 'none' } | { kind: 'pending' } | { kind: 'run'; command: string } | { kind: 'literal' } | { kind: 'swallow' };
 
 /** Whether a binding for when runs where the key was pressed. A VS Code pane
- * is a pane of the main UI: the main UI's bindings run there too, for the
- * keys VS Code leaves (those it takes never reach the app). */
+ * and a terminal are panes of the main UI: the main UI's bindings run there
+ * too, for the keys VS Code leaves (those it takes never reach the app);
+ * those for outside terminals (editor) everywhere in it but a terminal,
+ * whose program gets the key. */
 export function applies(when: When, ctx: KeyContext): boolean {
-  return when === 'always' || when === ctx || (when === 'terminal' && ctx === 'vscode');
+  switch (when) {
+    case 'always':
+      return true;
+    case 'terminal':
+      return ctx === 'terminal' || ctx === 'shell' || ctx === 'vscode';
+    case 'editor':
+      return ctx === 'terminal' || ctx === 'vscode';
+    default:
+      return when === ctx;
+  }
 }
 
 /** One step of the matcher: the result of `stroke` after the strokes of an
@@ -93,6 +106,12 @@ export function keyContext(): KeyContext {
   return typeof document !== 'undefined' && document.querySelector('.modal-backdrop, .palette-backdrop') ? 'dialog' : 'terminal';
 }
 
+/** Where a key pressed in a terminal of the main UI is: a dialog's, when
+ * one is open, else the terminal's (shell). */
+export function shellKeyContext(): KeyContext {
+  return keyContext() === 'dialog' ? 'dialog' : 'shell';
+}
+
 /** Commands a held key repeats, as in browsers and terminals: opening and
  * closing tabs and panes, and stepping through tabs, workspaces, panes and
  * matches. Toggles, dialogs and splits run once per press. */
@@ -145,16 +164,35 @@ export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): bo
   }
 }
 
+/** Runs `pane.leave` when `ev` matches a single-stroke binding for it in the
+ * terminal context (used in capture phase inside Monaco editors and pane inputs
+ * so Ctrl+B escapes focus to the app chrome before the editor consumes it). */
+export function handlePaneLeaveKey(ev: KeyboardEvent): boolean {
+  if (ev.type !== 'keydown' || modifierKeys.has(ev.key)) return false;
+  if (keyContext() === 'dialog') return false;
+  const stroke = strokeOf(ev);
+  if (!stroke) return false;
+  const match = bindings().find((b) => applies(b.when, 'terminal') && b.key === stroke && b.command === 'pane.leave');
+  if (!match) return false;
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (!ev.repeat) runCommand('pane.leave');
+  return true;
+}
+
 /** VS Code's key for closing, pressed in a window without editors
  * (bridge.close; the extension binds it there, as VS Code closes such a
  * window): closes the VS Code pane showing that window, when this page has
- * the keyboard there. Every other key in a VS Code pane is VS Code's
- * first. */
+ * the keyboard there, as pane.close would (not the last pane of a pinned
+ * tab). Every other key in a VS Code pane is VS Code's first. */
 export function closeWindowPane(m: string, window: string, folders?: string[]) {
   const k = windowFocused(m, window, folders);
   const fr = k ? useFrames.getState().frames[k] : undefined;
   if (!fr || keyContext() === 'dialog' || !commandEnabled('pane.close')) return;
-  void actions.closePane(fr.m, L.codeKey(fr.id));
+  const pane = L.codeKey(fr.id);
+  const layout = terms.layout(fr.m);
+  if (layout && L.onlyPaneOfPinnedTab(layout, pane)) return;
+  void actions.closePane(fr.m, pane);
 }
 
 /** The extension's key for leaving VS Code, pressed in a window
@@ -184,7 +222,8 @@ export function keyHint(command: string): string {
     .getState()
     .effective.filter((b) => b.command === command)
     .map((b) => b.key);
-  const direct = platform() === 'mac' || platform() === 'pc' ? keys.find((k) => !k.includes(' ')) : undefined;
+  const direct =
+    platform() === 'mac' || platform() === 'windows' || platform() === 'linux' ? keys.find((k) => !k.includes(' ')) : undefined;
   const key = direct ?? keys[0];
   return key ? keyLabel(key) : '';
 }

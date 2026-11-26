@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// A failed display in the status bar shows the core's error when clicked,
+// A failed display in the status bar shows the hub's error when clicked,
 // not only in a tooltip.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -84,7 +84,7 @@ describe('display error', () => {
     useGui.setState({ machines: { ws2: { m: 'ws2', phase: 'error', error: 'boom', windows: [] } } });
     const host = renderTray();
     expect(host.querySelector('.gui-note')).toBeNull();
-    // The core reports the display as disconnected once the machine is.
+    // The hub reports the display as disconnected once the machine is.
     machine('ready');
     act(() => useGui.getState().setState({ m: 'ws2', phase: 'disconnected', windows: [] }));
     expect(host.querySelector('.gui-note')).toBeNull();

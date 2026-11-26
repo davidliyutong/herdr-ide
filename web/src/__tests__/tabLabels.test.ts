@@ -14,7 +14,7 @@ vi.mock('../components/PaneHeader', () => ({ PaneHeader: () => null }));
 
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { Workspace } from '../components/Workspace';
 import { Palette } from '../components/Palette';
 import { Sidebar } from '../components/Sidebar';
@@ -26,19 +26,19 @@ import * as L from '../term/layout';
 describe('tab labels', () => {
   let host: HTMLDivElement;
   let root: Root;
-  let core: FakeCore;
+  let hub: FakeHub;
 
   beforeEach(async () => {
     vi.stubGlobal('fetch', () => Promise.resolve(new Response('{}', { status: 200 })));
-    core = new FakeCore();
+    hub = new FakeHub();
     const tab = (t: string, name?: string) => ({ root: { terminal: t }, focused: t, ...(name ? { name } : {}) });
-    core.machine(
+    hub.machine(
       'm',
       [
-        FakeCore.term('t1', { title: 'yutong@nus-ws-1:~' }),
-        FakeCore.term('t2', { title: 'yutong@nus-ws-1:~' }),
-        FakeCore.term('t3', { title: '✳ Fix the tests', agent: 'claude', agent_status: 'blocked' }),
-        FakeCore.term('t4', { title: 'htop' }),
+        FakeHub.term('t1', { title: 'yutong@nus-ws-1:~' }),
+        FakeHub.term('t2', { title: 'yutong@nus-ws-1:~' }),
+        FakeHub.term('t3', { title: '✳ Fix the tests', agent: 'claude', agent_status: 'blocked' }),
+        FakeHub.term('t4', { title: 'htop' }),
       ],
       {
         version: 2,
@@ -58,12 +58,12 @@ describe('tab labels', () => {
         selected: 0,
       },
     );
-    core.install();
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([{ id: 'm', label: 'nus-ws-1', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
     s.selectMachine('m');
-    core.model.subscribe('m');
+    hub.model.subscribe('m');
     await settle();
     host = document.createElement('div');
     document.body.append(host);
@@ -94,19 +94,19 @@ describe('tab labels', () => {
   });
 
   it('marks a pinned tab with a pin that a click does not unpin', async () => {
-    core.model.mutate('m', (l) => L.pinTab(l, 'wwwwwwww', 1, true));
+    hub.model.mutate('m', (l) => L.pinTab(l, 'wwwwwwww', 1, true));
     await act(async () => root.render(createElement(Workspace)));
     const pin = host.querySelector<HTMLElement>('.tab.pinned .tab-pin')!;
     expect(pin.tagName).toBe('SPAN');
     expect(host.querySelector('.tab.pinned .tab-close')).toBeNull();
     await act(async () => pin.click());
-    expect(core.model.layout('m')!.workspaces[0].tabs[0].pinned).toBe(true);
+    expect(hub.model.layout('m')!.workspaces[0].tabs[0].pinned).toBe(true);
   });
 
   it('shows a tab of VS Code or a preview alone by its mark and name, a tab with a terminal by its number', async () => {
-    core.model.mutate('m', (l) => L.splitPane(l, 't1', 'horizontal', { code: { id: 'c2', folder: '/home/u' } }));
-    core.model.mutate('m', (l) => L.openPane(l, { code: { id: 'c1', folder: '/home/u/src/website' } }));
-    core.model.mutate('m', (l) => L.openPane(l, { preview: { id: 'p1', path: '/home/u/src/website/plot.png' } }));
+    hub.model.mutate('m', (l) => L.splitPane(l, 't1', 'horizontal', { code: { id: 'c2', folder: '/home/u' } }));
+    hub.model.mutate('m', (l) => L.openPane(l, { code: { id: 'c1', folder: '/home/u/src/website' } }));
+    hub.model.mutate('m', (l) => L.openPane(l, { preview: { id: 'p1', path: '/home/u/src/website/plot.png' } }));
     await act(async () => root.render(createElement(Workspace)));
     expect(tabs().map((t) => t.querySelector('.tab-label')?.textContent)).toEqual(['1', 'server', '3', 'website', 'plot.png']);
     expect(tabs()[3].querySelector('.code-icon')).not.toBeNull();
@@ -129,9 +129,9 @@ describe('tab labels', () => {
       return before;
     };
     expect(await rename(0, null)).toBe('yutong@nus-ws-1:~');
-    expect(core.layout('m')?.workspaces[0].tabs[0].name).toBeUndefined();
+    expect(hub.layout('m')?.workspaces[0].tabs[0].name).toBeUndefined();
     expect(await rename(1, '')).toBe('server');
-    expect(core.layout('m')?.workspaces[0].tabs[1].name).toBeUndefined();
+    expect(hub.layout('m')?.workspaces[0].tabs[1].name).toBeUndefined();
     await rename(0, 'docs');
     expect(tabs().map((t) => t.querySelector('.tab-label')?.textContent)).toEqual(['docs', '2', '3']);
   });

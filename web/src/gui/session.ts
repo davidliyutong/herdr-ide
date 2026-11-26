@@ -1,18 +1,22 @@
-// Shows one program window in this browser window: frames from the core are
+// Shows one program window in this browser window: frames from the hub are
 // drawn on canvases (the window and its menus/tooltips as layers), scaled to
 // fit; pointer and keyboard input goes back with window coordinates.
 //
-// Messages from the core: JSON events {ev: window | gone | layer |
-// layer_gone | cursor | child | stats | video} and binary frames
+// Messages from the hub: JSON events {ev: window | gone | layer |
+// layer_gone | cursor | child | stats | video | role} and binary frames
 // [window u32][layer u32][x i16][y i16][w u16][h u16][enc u8][seq u32][data]
 // (enc 1 JPEG, 2 PNG, 3 video, 4 video key frame). Each frame is
 // acknowledged once drawn. The WebSocket's ?video= says which video streams
-// this browser decodes (./video.ts).
+// this browser decodes (./video.ts). While another connection controls the
+// machine's windows (role {control: false}) the window is only viewed: no
+// input is sent until this one takes control (takeControl).
 
 import { xKeycode } from './keycodes';
 import type { GuiWindow } from './state';
 import { FrameStats, type StatsView } from './stats';
 import { videoCodecs, VideoStream, type VideoConfig } from './video';
+import { RETRY_RESET_MS, retryDelay } from '../lib/retry';
+import { openChannel } from '../lib/transport';
 
 interface Layer {
   id: number;
@@ -32,6 +36,8 @@ export interface SessionEvents {
   child(w: GuiWindow): void;
   /** Frame statistics, once a second. */
   stats?(s: StatsView): void;
+  /** Whether this connection controls the window or only views it. */
+  role?(control: boolean): void;
 }
 
 const FRAME_HEADER = 21;
@@ -42,12 +48,13 @@ const ENC_VIDEO_KEY = 4;
 const WHEEL_STEP = 50;
 // Browser buttons (0 main, 1 middle, 2 secondary, 3 back, 4 forward) to X.
 const BUTTONS = [1, 2, 3, 8, 9];
+const BACKOFF_MIN_MS = 500;
 
 export class GuiSession {
   private ws?: WebSocket;
   private disposed = false;
   private gone = false;
-  private backoff = 500;
+  private backoff = BACKOFF_MIN_MS;
   private retry?: number;
   private stage: HTMLDivElement;
   private base: HTMLCanvasElement;
@@ -61,6 +68,7 @@ export class GuiSession {
   private stats = new FrameStats(performance.now());
   private video?: VideoStream;
   private ctx = new WeakMap<HTMLCanvasElement, CanvasRenderingContext2D | null>();
+  private control = true;
 
   constructor(
     private m: string,
@@ -75,7 +83,7 @@ export class GuiSession {
     this.stage.appendChild(this.base);
     host.appendChild(this.stage);
     this.listen(window, 'resize', () => this.fit());
-    // Closing this browser window closes the program window (the core waits
+    // Closing this browser window closes the program window (the hub waits
     // briefly, so a reload keeps it). A keepalive request survives the page
     // going away and, unlike a body-less beacon, carries the page's Origin.
     this.listen(window, 'pagehide', () => {
@@ -109,28 +117,40 @@ export class GuiSession {
   }
 
   private async connect() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const codecs = await videoCodecs();
     if (this.disposed) return;
     const query = codecs.length ? `?video=${codecs.join(',')}` : '';
-    const ws = new WebSocket(`${proto}//${location.host}/m/${encodeURIComponent(this.m)}/gui/${this.id}/ws${query}`);
+    const ws = openChannel(`/m/${encodeURIComponent(this.m)}/gui/${this.id}/ws${query}`);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
+    let openedAt: number | undefined;
     ws.onopen = () => {
-      this.backoff = 500;
+      openedAt = performance.now();
       this.stats.reconnected();
     };
     ws.onmessage = (e) => this.message(e);
     ws.onclose = () => {
       if (this.disposed || this.gone) return;
+      if (openedAt !== undefined && performance.now() - openedAt >= RETRY_RESET_MS) this.backoff = BACKOFF_MIN_MS;
       this.on.status('reconnecting');
-      this.retry = window.setTimeout(() => !this.disposed && void this.connect(), this.backoff);
+      this.retry = window.setTimeout(() => !this.disposed && void this.connect(), retryDelay(this.backoff));
       this.backoff = Math.min(this.backoff * 2, 5000);
     };
   }
 
   send(cmd: Record<string, unknown>) {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(cmd));
+  }
+
+  /** Input for the program, sent only while this connection controls it. */
+  private input(cmd: Record<string, unknown>) {
+    if (this.control) this.send(cmd);
+  }
+
+  /** Takes control of the machine's windows from the connection that has
+   * it; a role event follows. */
+  takeControl() {
+    this.send({ cmd: 'control' });
   }
 
   private message(e: MessageEvent) {
@@ -173,6 +193,10 @@ export class GuiSession {
         break;
       case 'video':
         if (ev.video?.window === this.id) this.startVideo(ev.video);
+        break;
+      case 'role':
+        this.control = !!ev.control;
+        this.on.role?.(this.control);
         break;
     }
   }
@@ -252,7 +276,7 @@ export class GuiSession {
         f.close();
         this.stats.drawn(t1 - t0, performance.now() - t1);
       } else if (v?.needKey) {
-        // Joined or fell behind mid-stream: the core sends a key frame.
+        // Joined or fell behind mid-stream: the hub sends a key frame.
         this.send({ cmd: 'keyframe' });
       }
       this.send({ cmd: 'ack', seq });
@@ -314,23 +338,25 @@ export class GuiSession {
       this.pending = this.point(e);
       if (first)
         requestAnimationFrame(() => {
-          if (this.pending) this.send({ cmd: 'pointer', ...this.pending });
+          if (this.pending) this.input({ cmd: 'pointer', ...this.pending });
           this.pending = undefined;
         });
     });
     this.listen(el, 'pointerdown', (e) => {
+      if (!this.control) return;
       el.setPointerCapture(e.pointerId);
-      this.send({ cmd: 'button', ...this.point(e), button: BUTTONS[e.button] ?? 1, down: true });
+      this.input({ cmd: 'button', ...this.point(e), button: BUTTONS[e.button] ?? 1, down: true });
       e.preventDefault();
     });
     this.listen(el, 'pointerup', (e) => {
-      this.send({ cmd: 'button', ...this.point(e), button: BUTTONS[e.button] ?? 1, down: false });
+      this.input({ cmd: 'button', ...this.point(e), button: BUTTONS[e.button] ?? 1, down: false });
     });
     this.listen(el, 'contextmenu', (e) => e.preventDefault());
     this.listen(
       el,
       'wheel',
       (e) => {
+        if (!this.control) return;
         e.preventDefault();
         const unit = e.deltaMode === 1 ? WHEEL_STEP : e.deltaMode === 2 ? WHEEL_STEP * 10 : 1;
         this.wheel.x += e.deltaX * unit;
@@ -340,22 +366,22 @@ export class GuiSession {
         if (!dx && !dy) return;
         this.wheel.x -= dx * WHEEL_STEP;
         this.wheel.y -= dy * WHEEL_STEP;
-        this.send({ cmd: 'wheel', ...this.point(e), dx, dy });
+        this.input({ cmd: 'wheel', ...this.point(e), dx, dy });
       },
       { passive: false },
     );
     const key = (down: boolean) => (e: KeyboardEvent) => {
       // Command-key shortcuts stay with the browser (close, copy, reload).
-      if (e.metaKey) return;
+      if (e.metaKey || !this.control) return;
       const keycode = xKeycode(e.code);
       if (keycode === undefined) return;
       e.preventDefault();
-      this.send({ cmd: 'key', keycode, down });
+      this.input({ cmd: 'key', keycode, down });
     };
     this.listen(window, 'keydown', key(true));
     this.listen(window, 'keyup', key(false));
-    this.listen(window, 'focus', () => this.send({ cmd: 'focus' }));
+    this.listen(window, 'focus', () => this.input({ cmd: 'focus' }));
     // Keys held when focus leaves would stay pressed in the program.
-    this.listen(window, 'blur', () => this.send({ cmd: 'release' }));
+    this.listen(window, 'blur', () => this.input({ cmd: 'release' }));
   }
 }

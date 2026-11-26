@@ -11,12 +11,12 @@ const texts = (s: string) =>
     .sort((a, b) => a.start - b.start)
     .map((m) => [m.tex, m.display]);
 
-/** The vectors of design/testdata/math. */
+/** The vectors of spec/vectors/math. */
 interface MathVectors {
   cases: Array<{ description: string; text: string; expected: Array<[string, boolean]> }>;
 }
 
-const vectors = import.meta.glob<MathVectors>('../../../design/testdata/math/*.json', { eager: true, import: 'default' });
+const vectors = import.meta.glob<MathVectors>('../../../spec/vectors/math/*.json', { eager: true, import: 'default' });
 
 describe('findMath', () => {
   it('has vectors', () => {

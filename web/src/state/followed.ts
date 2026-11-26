@@ -1,6 +1,6 @@
 // The machines this browser followed are followed again when the page opens
 // (or the app is reopened): each one as soon as it is connected, so its
-// workspaces show without "Show Terminals". A machine removed from the core
+// workspaces show without "Show Terminals". A machine removed from the hub
 // is no longer remembered. Kept per browser (localStorage) under
 // FOLLOWED_KEY.
 

@@ -1,8 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- The flat icon for 32 px and below (desktop/assets/icon.svg): the two
+       arms and their nodes, without the middle one, shadows or rims. -->
   <rect x="6" y="6" width="52" height="52" rx="12" fill="#17263c"/>
-  <rect x="13" y="18" width="23" height="28" rx="4" fill="#7aa2f7"/>
-  <rect x="39" y="18" width="12" height="13" rx="3" fill="#60c6ae"/>
-  <rect x="39" y="34" width="12" height="12" rx="3" fill="#4c6892"/>
-  <path d="m18 27 5 5-5 5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M28 37h3" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <path d="M19 20 32 44" stroke="#7aa2f7" stroke-width="7" stroke-linecap="round"/>
+  <path d="M45 20 32 44" stroke="#60c6ae" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="19" cy="20" r="5.5" fill="#d6e6ff"/>
+  <circle cx="45" cy="20" r="5.5" fill="#d3f6ec"/>
+  <circle cx="32" cy="44" r="5" fill="#f5f9ff"/>
 </svg>

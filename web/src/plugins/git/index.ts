@@ -1,19 +1,19 @@
 // Git (docs/features/31-git.md): VS Code's Source Control and the Git
 // Graph extension in one, without VS Code. A panel of the right sidebar
 // for the focused pane's repository, a graph pane and a diff pane in
-// Monaco, and the file explorer's colors for changed files. The core's
-// side is internal/plugins/git, the machine's internal/agent/plugin/git.
+// Monaco, and the file explorer's colors for changed files. The hub's
+// side is backend/features/git, the machine's
+// backend/features/git/machine.ts.
 import { FileDiff, GitBranch, GitGraph } from 'lucide-react';
 import type { PluginDef } from '../api';
 import { useStore } from '../../state/store';
 import { t } from '../../i18n';
 import { registerFileDecorations } from '../files/decorations';
-import { followedDir } from '../files/FilesPanel';
 import { gitApi, errorText } from './api';
 import { gitDecorations } from './decorations';
 import './follow';
 import { DiffPane, diffOf, diffTitle } from './DiffPane';
-import { GitPanel } from './GitPanel';
+import { GitPanel, gitFollowedDir, gitRecentDir } from './GitPanel';
 import { GraphPane } from './GraphPane';
 import { baseName, join, openGraph } from './ops';
 import { GitPrompt } from './prompt';
@@ -25,7 +25,7 @@ async function graphOfFocused() {
   const s = useStore.getState();
   const m = s.machineId;
   if (!m) return;
-  const dir = followedDir() ?? s.machines[m]?.info?.home;
+  const dir = gitFollowedDir() ?? gitRecentDir() ?? s.machines[m]?.info?.home;
   if (!dir) return;
   try {
     const info = await gitApi.repo(m, dir);

@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
-# Package each core with its license notices, including those of the
-# herdr-core the core embeds (scripts/fetch-hc).
+# Package each hub with its license notices, including those of the
+# herdr-core the hub embeds (backend/scripts/fetch-hc.ts), into
+# dist/release/<slug>-<platform>.tar.gz, and dist/release/SHA256SUMS: the
+# archives' digests and those of the executables in them
+# (<slug>-<platform>/<slug>), which a hub checks its machines' builds
+# against (the archives are also what machines download).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-SLUG=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
-HC_VERSION=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/hcdist/release.go)
+SLUG=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
+HC_VERSION=$(bun backend/scripts/fetch-hc.ts --version)
 test -n "$HC_VERSION"
-TARGETS=${TARGETS:-"$(go env GOOS)/$(go env GOARCH)"}
+TARGETS=${TARGETS:-"$(scripts/platform.sh --slash)"}
 mkdir -p dist/packages dist/release
+# What an earlier build left: SHA256SUMS lists the archives of this one only.
+rm -f dist/release/*.tar.gz dist/release/*.gz dist/release/SHA256SUMS
 packaged=
 for p in $TARGETS; do
   case "$p" in
-    linux/amd64|linux/arm64|darwin/amd64|darwin/arm64) ;;
-    # The Windows core ships in the desktop installer (scripts/desktop.sh).
+    linux/amd64|linux/arm64|darwin/amd64|darwin/arm64|linux/amd64-musl|linux/arm64-musl) ;;
+    # No Windows archive: there the hub runs inside the desktop app.
     windows/amd64) continue ;;
     *) echo "unsupported release platform: $p" >&2; exit 1 ;;
   esac
@@ -29,16 +35,15 @@ for p in $TARGETS; do
   cp LICENSE THIRD_PARTY_NOTICES.md web/dist/licenses.md "$dir/"
   cp dist/hc/licenses/LICENSE dist/hc/licenses/THIRD-PARTY-NOTICES "$dir/licenses/herdr-core/"
   cp licenses/herdr-detect/* "$dir/licenses/herdr-detect/"
-  cp licenses/encoder/* "$dir/licenses/encoder/"
+  cp dist/deps/licenses/encoder/* "$dir/licenses/encoder/"
   cat > "$dir/README.txt" <<EOF
 $SLUG release for $p
 
 Start the Web IDE:
   ./$SLUG
 
-$SLUG contains the unmodified herdr-core $HC_VERSION executables
-(https://github.com/herdrdev/herdr-core, Apache-2.0) for Linux and macOS
-machines.
+$SLUG contains the unmodified herdr-core $HC_VERSION executable of its
+platform (https://github.com/herdrdev/herdr-core, Apache-2.0).
 
 Licenses: LICENSE, THIRD_PARTY_NOTICES.md, licenses.md, licenses/herdr-core/,
 licenses/herdr-detect/, licenses/encoder/.
@@ -46,4 +51,21 @@ EOF
   tar -C dist/packages -czf "dist/release/$name.tar.gz" "$name"
   echo "    dist/release/$name.tar.gz"
 done
-[[ -z "$packaged" ]] || (cd dist/release && shasum -a 256 *.tar.gz > SHA256SUMS)
+# Portable SHA-256 command (Linux coreutils sha256sum, macOS shasum).
+sha256_cmd() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@"
+  else
+    shasum -a 256 "$@"
+  fi
+}
+
+# The archives and the executables in them.
+[[ -z "$packaged" ]] || (cd dist/release && {
+  sha256_cmd ./*.tar.gz | sed 's| \./| |'
+  for a in *.tar.gz; do
+    n=${a%.tar.gz}
+    s=$(tar -xzf "$a" -O "$n/$SLUG" | sha256_cmd | cut -d' ' -f1)
+    echo "$s  $n/$SLUG"
+  done
+} > SHA256SUMS)

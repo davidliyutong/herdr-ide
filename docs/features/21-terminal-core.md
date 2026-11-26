@@ -2,265 +2,90 @@
 
 ## Context
 
-herdr-core (`hc`, github.com/herdrdev/herdr-core) is a terminal server: it
-keeps terminals and their programs alive, hands a viewer a terminal's raw
-output, and stores small JSON documents for its clients. It knows no workspaces,
-tabs or panes. One account can run several cores side by side, one per
-session name.
+herdr-core (`hc`, github.com/herdrdev/herdr-core) is a terminal server: it keeps terminals and their programs alive, hands viewers a terminal's raw output, and stores small JSON documents for its clients. It knows nothing of workspaces, tabs or panes. One account can run several cores, one per session name.
 
-Facts the design relies on (herdr-core 0.1.21, `schema/README.md` and,
-below `crates/herdr-core/src/`, `wire.rs`, `server.rs`, `paths.rs`,
-`client.rs`, `viewers.rs` and `api/run.rs`, checked against a running core
-by the integration tests):
+What the design relies on (herdr-core 0.1.21; checked against a running core by the integration tests):
 
-- The API is JSON-RPC 2.0, one message per line, on a unix socket. `hello`
-  with `framed: true` switches the connection to frames
-  `[channel u32 LE][kind u8][length u32 LE][payload]` of at most 16 MiB.
-  Channel 0 carries the calls, which run side by side.
-- `terminal.attach` answers with a channel. On it the core sends a first
-  paint (the screen as escape sequences, starting with CAN and a reset) and
-  then the program's output; the viewer sends input bytes, its size, focus
-  and display facts. The core encodes no keys.
-- A terminal's size is that of its viewer active last among those not
-  observing (`apply_size` in `viewers.rs`); an `observe` viewer never
-  holds it. A terminal without such a viewer gets the *headless* size:
-  `headless` in herdr-core's `config.toml`, 200x120 by default. That file
-  is the user's own (`$XDG_CONFIG_HOME/herdr-core/config.toml`), shared by
-  their other herdr-core sessions, and herdr-ide never writes it. The
-  `size` of `terminal.run` is only the size a terminal has before its
-  first viewer. An attach of the size the terminal has causes no resize
-  and gets an exact first paint. No call sets a terminal's size outside a
-  stream, so the core keeps a terminal's last viewer attached while no
-  client shows it ([22](22-terminal-protocol.md)).
-- Output is sent against credit: 256 KiB per channel at first, returned by
-  the viewer as it passes bytes on. A viewer more than 4 MiB behind gets a
-  new paint instead of the backlog. Event channels use credit too; input
-  does not.
-- `events.subscribe` answers with a snapshot of terminals and a channel of
-  JSON lines (split anywhere across frames): events with a rising sequence
-  number, a heartbeat every 15 s, and `missed` with a new snapshot for a
-  subscriber that fell behind.
-- A terminal's status is what its program reported through OSC 7501; the
-  core infers nothing from the screen.
-- A terminal's address is never given twice. A finished terminal's record
-  stays for 24 h, with the `reason` it ended for (`exited`, `killed`, or
-  the core's own end: `stopped_by_restart`, `holder_lost`, `server_stop`,
-  `host_shutdown`), unless a client removes it (`terminal.rm`).
-- A terminal started with `keep: true` whose program was lost with the
-  core gets a new shell from the core when it runs again, at the same
-  address, in the directory it was last in (events `lost` and
-  `restarted`); an exit with a code and an explicit kill stay final. The
-  web UI starts its terminals this way
-  ([33](33-workspace-restore.md)).
-- Documents (`doc.get`, `doc.set`) are kept with their versions in the
-  core's state directory (`docs.json`), across restarts of the core and
-  of the machine.
-- `HC_SESSION` selects the core, its terminals and its state directory
-  (`~/.local/state/herdr-core/<session>/`); `HC_SOCKET` moves the API
-  socket, with the holders' sockets beside it. `herdr-core server start`
-  starts the core detached from its caller (a systemd user service on
-  Linux, a launchd job on macOS) and returns when it answers. Holder
-  processes own the terminals, so a core restart keeps programs running.
-- On macOS (`platform/macos_launchd.rs`, `macos_responsibility.rs`) the
-  launchd job is a one-shot job of the user's session (none when
-  `SSH_CONNECTION` is set), and the core and each holder execute
-  themselves again disclaiming the responsibility they inherited; programs
-  keep their holder's. macOS's privacy checks (Full Disk Access, the
-  prompts for Desktop, Documents and Downloads) therefore treat a
-  terminal's programs as herdr-core's, not as those of the app that
-  started the core ([16](16-desktop-packaging.md)).
-- Programs get the core's environment without the variables that name a
-  terminal (`TERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `COLORTERM`),
-  which herdr-core sets itself: `TERM=xterm-256color`,
-  `COLORTERM=truecolor` and `TERM_PROGRAM=ghostty`, with no version. To
-  that it adds `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET`, `HC_SCOPE` (by
-  which it finds a terminal's programs again), `HC_SESSION` when the core
-  has one, `PWD`, and what the client that runs the terminal passes. The agent
-  starts the core (and code-server and the display) with its own
-  environment without the variables of a terminal or multiplexer it was
-  started in (`cleanEnv` in `internal/agent/procutil.go`): herdr-core's
-  `HC_*`, herdr's `HERDR_*` (the product's own `HERDR_IDE_*` stay),
-  tmux's `TMUX` and `TMUX_PANE`, GNU screen's `STY` and zellij's `ZELLIJ`
-  and `ZELLIJ_*`. A core started from a herdr pane or inside tmux runs the
-  local machine's agent in its own process, so without this its terminals
-  would take themselves for nested sessions, and an agent's hooks would
-  report to the herdr pane the core was started from.
-- The new terminals of an ssh machine get `SSH_CONNECTION` and `SSH_CLIENT`
-  from the core (`internal/server/sshenv.go`), with the values of the ssh
-  session its agent runs in, which the agent tells in its hello apart from
-  the information clients see. A terminal core that systemd started as a
-  service of the user has not inherited them, and programs take them as the
-  sign that the user's clipboard and browser are on another computer: Codex
-  then also copies through the terminal (OSC 52), takes pastes from it and
-  logs in with a device code; prompts show the host name. Only an
-  `SSH_CONNECTION` of two addresses and two ports is passed on; a value the
-  client gave stays; the local machine gets none, since there they would
-  not be true. `terminal.sshEnv` (on by default, per machine) turns them
-  off. Terminals that already run keep their environment.
+- **API.** JSON-RPC 2.0 over a unix socket. `hello` with `framed: true` switches to frames `[channel u32 LE][kind u8][length u32 LE][payload]` (at most 16 MiB). Channel 0 carries the calls.
+- **Streams.** `terminal.attach` opens a channel: a first paint (the screen as escape sequences), then the program's output. The viewer sends input, its size, focus and display facts. The core encodes no keys.
+- **First paint.** It starts with CAN at the start of a data frame and a soft reset, clears the screen but not the scrollback (no `ESC[3J`, no full reset), then sends the attach's `history` lines, the screen (and the alternate screen when a program is on it), the title and the program's win32-input-mode; it has no end marker. An observing attach is invisible to the program and the other viewers. A paint over 4 MiB is dropped (only output follows); a resize before the paint was sent, or a reader more than 4 MiB behind, gets a new paint without history. The history kept follows the user's `history_mb` (5 MB by default). An attach while the core starts a kept terminal's shell again answers `unavailable`.
+- **`terminal.read`** returns the screen as plain text. With `lines` on a program on the alternate screen, the core scrolls the program with wheel input to collect history, which every viewer sees.
+- **Size.** A terminal takes the size of the non-observing viewer active last; without one it gets the *headless* size from the user's own herdr-core `config.toml` (200x120 by default), which veldr never writes. No call sets a size outside a stream, so a terminal's last viewer stays attached while no client shows it ([22](22-terminal-protocol.md)).
+- **Credit.** Output flows against credit: 256 KiB per channel, returned by the viewer as it passes bytes on. A viewer more than 4 MiB behind gets a new paint instead of the backlog. Input needs no credit.
+- **Events.** `events.subscribe` returns a snapshot and a channel of JSON lines: events with rising sequence numbers, a heartbeat every 15 s, and `missed` with a new snapshot for a subscriber that fell behind.
+- **Status** is what the program reported through OSC 7501; the core infers nothing from the screen.
+- **Addresses** are never reused. A finished terminal's record stays 24 h with the reason it ended, unless removed (`terminal.rm`).
+- **Kept terminals.** A terminal started with `keep: true` whose program was lost with the core gets a new shell at the same address, in its last directory, when the core runs again. The web UI starts terminals this way ([33](33-workspace-restore.md)). With the user's `restore_screen = true` in `config.toml` (read, never written, by veldr; [36](36-terminal-history.md)), the new shell shows the old screen above a dim separator line, except after a power loss.
+- **Documents** (`doc.get`, `doc.set`) are versioned and persist across core and machine restarts.
+- **Sessions.** `HC_SESSION` selects the core, its terminals and its state directory; `HC_SOCKET` moves the socket. `herdr-core server start` runs the core detached (systemd user service, launchd job on macOS). Holder processes own the terminals, so a core restart keeps programs running.
+- **macOS responsibility.** The core and its holders disclaim the responsibility they inherited, so macOS privacy checks (Full Disk Access, folder prompts) treat a terminal's programs as herdr-core's, not the launching app's ([16](16-desktop-packaging.md)).
+- **Environment.** Programs get the core's environment with `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=ghostty`, `HC_*` variables naming their terminal, and what the starting client passes.
 - The protocol is generation 1 and only grows within it.
 
 ## Goals / non-goals
 
-Goals: a terminal core per machine that belongs to herdr-ide's instance and
-shares nothing with a herdr-core the user runs; its executable
-delivered through the agent, verified; a Go client of the API whose
-backpressure reaches the slowest hop.
+Goals: a terminal core per machine owned by veldr's instance, sharing nothing with a herdr-core the user runs; its executable delivered through the agent and verified; a client whose backpressure reaches the slowest hop.
 
-Non-goals: emulating terminals (the browser UI does,
-[26](26-web-terminals.md)); clients
-reach these terminals through [22](22-terminal-protocol.md); herdr-core's own machine links
-(`machine.add`): machines are reached through the agent
-([02](02-multi-machine-transport.md)); Windows (a core on Windows has no
-local machine and reaches the terminal cores of SSH machines,
-[02](02-multi-machine-transport.md)).
+Non-goals: emulating terminals (the browser does, [26](26-web-terminals.md)); the client-facing protocol ([22](22-terminal-protocol.md)); herdr-core's own machine links (machines are reached through the agent, [02](02-multi-machine-transport.md)); running the core's agent on Windows.
 
 ## Design
 
-**Client** (`internal/hc`). `Dial` says hello on any byte stream, checks
-the generation and switches to frames; `Probe` asks a plain hello and
-closes. One goroutine reads frames. A reply that opens a channel
-(`terminal.attach`, `events.subscribe`) registers the channel before the
-next frame is read, because the core sends the channel's first frames right
-behind the reply. `Call` gives up with its context and tells the core
-(`$/cancelRequest`); a channel that a late reply still opens is closed.
+**Client** (`backend/shared/proto/hc`, in the hub and on the machine). It says hello on any byte stream, checks the generation and switches to frames. One reader takes the frames; a reply that opens a channel registers it before the next frame is read, because the core sends the channel's first frames right behind the reply. A call given up (its abort signal) sends `$/cancelRequest`.
 
-`Stream.Recv` returns output and, for an attach with resize notifications,
-the terminal's new grid in order with the output. `Stream.Ack` returns
-credit: the caller acknowledges bytes when it has passed them on, so a slow
-viewer slows the core instead of filling memory on the way. A channel holds
-at most 512 KiB; a core sending more than its credit ends the connection.
-`WriteAutomatic` sends a viewer's automatic answers as their own frame kind
-when the attach confirmed it, else as input. `Events.Recv` joins lines
-across frames and returns their credit itself.
+A stream's `ack` returns credit only when the caller has passed bytes on, so a slow browser slows the core instead of filling memory along the way. A channel buffers at most twice the credit window; a core exceeding its credit ends the connection. An event subscription's `recv` joins lines across frames and returns their credit itself.
 
-**Delivery** (`internal/hcdist`, `scripts/fetch-hc`, `internal/embedded`).
-`internal/hcdist` pins herdr-core 0.1.21 and the SHA-256 digests of its
-four release archives (Linux and macOS on amd64 and arm64).
-`scripts/fetch-hc`, run by `scripts/build.sh` for every agent platform,
-downloads an archive unless a verified copy is in `dist/hc/`, and takes the
-`herdr-core` member at the archive's root from the bytes whose digest it
-just checked: one regular file of at most 64 MiB, so the copy inside the
-macOS release's own application bundle (`Herdr Core.app`), a link or a
-second entry of that name is never used. It writes the executable gzip-compressed, without a name or time in
-the header, to `internal/embedded/hc/hc-<os>-<arch>.gz`, and the release's
-`LICENSE` and `THIRD-PARTY-NOTICES` to `dist/hc/licenses/`, which archives
-and the desktop app ship as `licenses/herdr-core/`. The executable is never
-run during a build. `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`
-writes one platform's verified executable to a file instead, for the
-integration tests (`HC_TEST_BIN`; CI's `integration` job). `embedded.HC` returns the compressed executable of a
-platform and the SHA-256 of the uncompressed one, computed once per
-platform: the two things the agent's `install` takes. The four executables
-add about 12 MB to the core.
+**Delivery** (`backend/scripts/hcdist.ts`, `backend/scripts/fetch-hc.ts`, `backend/kernel/payloads.ts`). `hcdist.ts` pins the version and the SHA-256 of the four release archives (Linux and macOS, amd64 and arm64). `fetch-hc.ts`, run by `scripts/build.sh`, downloads and verifies each archive, takes only the regular `herdr-core` file at the archive root (at most 64 MiB; never the copy inside the macOS app bundle, links or duplicates), and writes it gzip-compressed as `hc-<os>-<arch>.gz` into `dist/machines-hc/`, of which each executable embeds its own platform's and records the digests of all ([42](42-typescript-backend.md#the-machine-side)); the release's licenses go under `dist/hc/licenses/`. The executable is never run during a build. `bun backend/scripts/fetch-hc.ts --exe <file> <os>/<arch>` writes one verified executable for the integration tests (`HC_TEST_BIN`).
 
-**Agent** (`internal/agent/hc.go`). The session is `herdr-ide` or
-`herdr-ide-<instance>` and the socket `run/hc.sock` in the agent's data
-directory, short enough for the holders' sockets beside it. Op `hc`:
+**Agent** (`backend/machine/hc.ts`, `hcop.ts`). The session is `veldr[-<instance>]-<host id>`, so hosts sharing a home keep their cores and herdr-core's state apart ([40](40-shared-homes.md)); the socket is `hc.sock` in the namespace's runtime directory on the host (short, for macOS's socket path limit). Op `hc`:
 
-- `install` reads the gzip-compressed executable, compares its SHA-256
-  with the header's digest and renames it over `hc/herdr-core`, as
-  herdr-core's own update replaces its executable: a running core and its
-  holders keep the file they started from. The same digest installs
-  nothing.
-- `start` runs `herdr-core server start`, which returns at once when the
-  core runs, and makes the socket 0600. `restart` runs `server restart`:
-  the core's successor adopts the programs, and makes the socket 0600 too.
-  The core sends both with the digest of the executable this build
-  carries; the agent hashes `hc/herdr-core` again (not from its cache)
-  and answers `bad_digest` without running it when it differs. A build
-  without an executable sends none, and the installed one runs. `stop`
-  runs `server stop`, which ends the session's programs; the terminals'
-  records and the documents stay in the state directory, from which the
-  web UI brings the workspaces back when the core runs again
-  ([33](33-workspace-restore.md)).
-- `status`, and the reply of every action, report the installed digest and
-  whether a core answers on the socket, with its version.
+- `install` checks the upload's SHA-256 and renames it over `<data>/hosts/<host>/hc/herdr-core`, as herdr-core's own updater does: a running core keeps the file it started from.
+- `start` / `restart` run `herdr-core server start` / `restart` (the successor adopts the programs) and make the socket 0600. The core sends the digest of the executable this build carries; the agent re-hashes the installed file and answers `bad_digest` without running it if it differs.
+- `stop` runs `server stop`, ending the session's programs; records and documents stay, and the UI restores workspaces from them ([33](33-workspace-restore.md)).
+- `status` (and every reply) reports the installed digest and whether a core answers, with its version.
 
-Installs, starts and stops run one at a time. Op `hc-api` pipes the socket
-and starts nothing; op `detect` connects to it to follow the agents in its
-terminals ([25](25-agent-detection.md)). The agent never stops the core on its own: the core
-asks for `stop` only when the user stops the terminal core from the
-machine's menu ([02](02-multi-machine-transport.md)).
+The hub queues user lifecycle actions and automatic startup together for each machine. A node that advertises `atomic_ensure` holds one lock from the status check through any install, start or restart. It asks the hub for an upload only when the expected executable is missing and the node carries no copy. A concurrent ensure observes the result of the first. Older nodes still use the separate actions. Op `hc-api` pipes the socket; op `detect` follows agents in the terminals ([25](25-agent-detection.md)). The agent never stops the core on its own; only the user's "stop terminal core" does ([02](02-multi-machine-transport.md)), or `veldr node stop --terminal-core` on the machine, which runs `server stop` when a core answers on the instance's socket.
+
+**Helpers as hidden terminals** (`backend/machine/hidden.ts`). The chat host ([37](37-agent-chats.md)) must outlive the agent, so it runs as a terminal of the instance's terminal core (`runHidden`): a reserved name, the label `veldr.hidden`, `no_parent`, `no_notify` and `rm`, in the user's home with a minimal environment. It thereby has the lifetime, owner and macOS privacy attribution of the user's terminals and ends with its program or the core's stop. The core gives a name to one live terminal at a time, so the name is the lock against a second chat host; when a user's terminal holds it, the helper takes a numbered fallback name (at most 16). `killHidden` ends a helper only when label and arguments match. The name and label together (`hidden` of agentproto) hide it from the terminal protocol ([22](22-terminal-protocol.md)), agent detection and terminal history. No terminal core is started for a helper: without one it answers `no_terminal_core`.
+
+**Environment of terminals.** The agent starts the core (and code-server and the display) with `cleanEnv` (`backend/machine/env.ts`): without `HC_*`, `HERDR_*` (the product's own `VELDR_*` stay), `TMUX`, `TMUX_PANE`, `STY`, `ZELLIJ` and `ZELLIJ_*`. Otherwise a core started from a herdr pane or inside tmux would give its terminals the look of nested sessions, and agents' hooks would report to the wrong pane. It also drops the variables by which Claude Code and Codex mark a session's child processes (`agentSessionVars`): a Claude Code started under them would take itself for a child session and save no transcript ([35](35-agent-native-view.md)). Their configuration variables (`CLAUDE_CONFIG_DIR`, `ANTHROPIC_*`, `CODEX_HOME`, `OPENAI_*`, …) stay.
+
+New terminals of an ssh machine get `SSH_CONNECTION` and `SSH_CLIENT` of the agent's ssh session (`backend/features/terminals/sshenv.ts`), because a core started by systemd has not inherited them and programs use them to know the user's clipboard and browser are elsewhere (Codex then copies via OSC 52 and logs in with a device code). Only well-formed values are passed, a client's own value wins, the local machine gets none, and `terminal.sshEnv` (per machine) turns it off.
 
 ## Alternatives considered
 
 | Option | Why not |
 | --- | --- |
-| A terminal multiplexer that renders panes itself (tmux and the like) | Needs it installed on every machine, and it renders a tab's grid for one foreground client: several viewers of a terminal and client-side rendering are not possible. |
-| herdr-core's default session | Its terminals, documents and restarts would be shared with the user's own herdr-core clients and `hc` commands. |
-| Private XDG directories for the core | Programs inherit the core's environment, so the directories would reach the user's shells and tools. A session name moves the state without them. |
-| herdr-core's default socket path | Depends on `XDG_RUNTIME_DIR` and the state directory, which the agent would have to mirror; the run directory is already private and short. |
-| A versioned install directory per digest | The core starts its holders and its successor from its own path; a fixed path replaced by rename is what herdr-core's updater does. |
-| Reaching machines through `hc connect` over ssh | A second ssh session and installation path per machine beside the agent's; the agent already multiplexes one session. |
-| Downloading herdr-core on the machine | Machines often have no route to the internet ([09](09-air-gapped-installs.md)), and the agent already receives its own executable and the video encoder from the core. |
-| Committing the executables or their notices to the repository | About 30 MB of binaries and 1 MB of generated text per release; pinned digests give the same content from upstream's archives. |
-| Acknowledging output as soon as it is read | The core would send at the speed of the agent link, and the backlog of a slow browser would grow in the core process. |
+| A multiplexer that renders panes itself (tmux and the like) | Must be installed everywhere; renders for one foreground client, so no several viewers or client-side rendering. |
+| herdr-core's default session | Would share terminals, documents and restarts with the user's own herdr-core. |
+| Private XDG directories for the core | Programs inherit them; a session name moves the state without leaking into shells. |
+| herdr-core's default socket path | Depends on `XDG_RUNTIME_DIR`; the agent's run directory is already private and short. |
+| A versioned install directory per digest | The core starts holders and successor from its own path; rename over a fixed path matches herdr-core's updater. |
+| `hc connect` over ssh | A second ssh session and install path beside the agent's multiplexed one. |
+| Downloading herdr-core on the machine | Machines often have no internet ([09](09-air-gapped-installs.md)). |
+| Committing the executables | About 30 MB per release; pinned digests give the same bytes from upstream. |
+| Acknowledging output as soon as read | The backlog of a slow browser would grow inside the core process. |
 
 ## Failure modes
 
-- **Archive not downloadable, or its digest differs from the pin** → the
-  build fails; a cached archive that fails verification is downloaded again.
-- **Build without `scripts/fetch-hc`** (plain `go build`) → `embedded.HC`
-  returns an error naming the platform.
-- **No executable installed** → `start` and `stop` answer `not_installed`.
-- **Upload damaged or cut off** → `bad_digest`; the temporary file is
-  removed and the installed executable stays.
-- **Executable changed after its install** → `start` and `restart` answer
-  `bad_digest` (the terminal backend reports `start_failed`); its next
-  attempt finds the new digest in `status` and installs this build's
-  executable again.
-- **Core does not start** (unsupported system, socket path too long) →
-  `start_failed` with herdr-core's output.
-- **Nothing listens** → `hc-api` fails; `status` reports `running: false`.
-- **Core of another generation** → `Dial` fails with both generations.
-- **Connection lost** → calls, streams and subscriptions end with its
-  error. Sequence numbers restart with the core: subscribe again and use
-  the new snapshot.
-- **Program ends** → the stream returns the output before it, then EOF;
-  `Stream.Exit` has the reason (`exited`, `killed`, `server_stop`, …).
-- **Machine reboot or logout where logind ends user processes** → the core
-  and its programs end; herdr-core reports in `hello` whether lingering is
-  enabled. When the core runs again, terminals started with `keep: true`
-  have a new shell in their last directory, the others are finished
-  records with the core's end as the reason, and the documents are as they
-  were written; the web UI restores its layout from that
-  ([33](33-workspace-restore.md)).
+- **Archive missing or digest mismatch** → the build fails.
+- **A hub built without `fetch-hc`'s payload** (or run from its sources before `dist/payload` holds it) → `hc(os, arch)` fails naming the platform, and the machine's terminal core is `not_bundled`.
+- **Not installed** → `start`/`stop` answer `not_installed`.
+- **Damaged upload or executable changed after install** → `bad_digest`; the next attempt reinstalls this build's executable.
+- **Core does not start** → `start_failed` with herdr-core's output.
+- **Other protocol generation** → `Dial` fails naming both.
+- **Connection lost** → calls and streams end; sequence numbers restart with the core, so clients resubscribe and take the new snapshot.
+- **Reboot or logout ending user processes** → kept terminals come back as shells, the others as finished records; the UI restores its layout ([33](33-workspace-restore.md)).
 
 ## Security
 
-The core's API gives whoever reaches its socket the user's shell. See the
-row for the agent's herdr-core in [SECURITY.md](../../SECURITY.md).
+Whoever reaches the core's socket gets the user's shell: the socket is 0600 in a private directory, and the executable is verified against the build's digest before every start. See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-`internal/hcdist/release_test.go` with archives built in the test: platform
-names and URLs, a corrupt archive, the member at the root beside a bundle's
-copy, an oversized member, a symlink, a hard link, a directory, a repeated
-or missing name, an empty member, a truncated archive.
-`internal/embedded/embedded_test.go` with a file system in memory: the
-digest of the uncompressed executable, its caching, a platform without one,
-a damaged and a truncated stream. `internal/hc/hc_test.go` against a scripted core over a pipe: frame
-encoding and bounds, hello (wrong generation, plain reply, error,
-oversized), calls answered out of order, errors with their kind, cancelled
-calls, a channel's frames in the same write as its reply, every viewer
-frame kind, automatic input on an older path, detaching, an attach given up
-before its reply, a core ignoring credit, events split across frames with
-their credit, a cancelled dial. `internal/agent/hc_test.go` with a script as
-the executable: digest checks, replacement, the session and socket of
-default and named instances, the environment of commands, failure codes,
-the status of a core on the socket and the API pipe;
-`TestHCVerifiedBeforeStartAndSocketPrivate` an executable of another
-digest or changed in place (same size and time) refused by `start` and
-`restart`, and the socket made 0600 after both.
-`internal/server/term_test.go` (`TestTermRunGetsTheSSHSession`,
-`TestSSHEnv`): the ssh session's variables in a new terminal of an ssh
-machine, a client's own value kept, the setting off, nothing but addresses
-and ports passed on, none for the local machine, none in the state clients
-see; `internal/agent/agent_test.go` the hello telling the session.
-`internal/agent/procutil_test.go` (`TestCleanEnv`): the variables of
-terminals and multiplexers removed (every `HC_*`), `TMUX_TMPDIR`,
-`TERM_PROGRAM` and the product's own kept. `TestIntegrationTerminal` (`internal/hc`) and `TestIntegrationHC`
-(`internal/agent`) run with `make it` against a real herdr-core
-(`HC_TEST_BIN`, else `hc` on `PATH`) in the sessions `herdr-ide-it` with
-temporary state: first paint, input and output, sizes of two viewers,
-documents and their conflicts, how a killed program's stream ends; install
-through the agent, start, the socket's mode, a program's environment, stop.
+- `backend/scripts/fetch-hc.test.ts`: archive extraction against malformed, oversized and linked members.
+- `backend/kernel/payloads.test.ts`: the herdr-core digests the build records.
+- `backend/shared/proto/hc/hc.test.ts`: a scripted core — framing, hello, out-of-order replies, cancellation, credit violations, events across frames.
+- `backend/machine/agent.test.ts`: install, digest checks before start and restart, socket mode, session names, failure codes.
+- `backend/features/terminals/units.test.ts` (`sshEnv`, `the local machine gets no ssh session`), `terminals.test.ts` (`terminal.run gets the ssh session`) and `backend/machine/hidden.test.ts`, `housekeeping.test.ts` (`cleanEnv`): terminal environment.
+- `backend/machine/hidden.test.ts`: hidden helpers' flags, a taken name, no terminal core, killing a helper by name.
+- `make it`: `backend/machine/integration.test.ts` and `backend/features/terminals/integration.test.ts` against a real herdr-core in the session `veldr-it-<host id>` and the instance `ts-term`'s.

@@ -338,7 +338,7 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
 
 /** Chooses entries of a directory of a machine to download: several can be
  * checked, directories entered and left; one download takes them all (the
- * core zips directories and several entries). */
+ * hub zips directories and several entries). */
 function DownloadDialog({ req }: { req: Extract<DialogRequest, { kind: 'download' }> }) {
   const machine = useStore((s) => s.machines[req.m]?.label ?? req.m);
   const home = useStore((s) => s.machines[req.m]?.info?.home);

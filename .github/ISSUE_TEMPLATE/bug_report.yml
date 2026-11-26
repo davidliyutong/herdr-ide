@@ -19,12 +19,12 @@ body:
     id: version
     attributes:
       label: Versions / 版本
-      description: "`herdr-ide version`, the client (browser and its version, or the desktop app), OS/arch of core and machines"
+      description: "`veldr version`, the client (browser and its version, or the desktop app), OS/arch of hub and machines"
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
       label: Logs / 日志
-      description: Core stderr, browser console. Remove secrets and hostnames you do not want to share.
+      description: Hub stderr, browser console. Remove secrets and hostnames you do not want to share.
       render: text

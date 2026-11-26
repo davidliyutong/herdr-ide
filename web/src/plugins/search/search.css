@@ -1,0 +1,122 @@
+/* Project Search's panel (SearchPanel.tsx). */
+.search-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.search-empty {
+  padding: 12px;
+}
+.search-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  height: var(--h-toolbar);
+  padding: 0 4px 0 12px;
+  min-width: 0;
+}
+/* The query and its toggles look like one field, as the find bar's. */
+.search-field,
+.search-scope {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+  margin: 0 8px 4px;
+  min-width: 0;
+}
+.search-field {
+  padding-right: 2px;
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+}
+.search-field:focus-within {
+  border-color: var(--accent);
+}
+.search-field.error {
+  border-color: var(--error);
+}
+.search-field .search-input {
+  border: 0;
+  background: transparent;
+}
+.search-input {
+  flex: 1 1 auto;
+  min-width: 2rem;
+  height: var(--ctl);
+  padding: 0 6px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+.search-scope .search-input:focus,
+.search-details .search-input:focus {
+  border-color: var(--accent);
+}
+.search-dir {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+.search-field .icon,
+.search-scope .icon {
+  flex: none;
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+}
+.search-field .icon .lucide,
+.search-scope .icon .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.search-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: none;
+  margin: 0 8px 4px;
+}
+.search-status {
+  flex: none;
+  padding: 2px 12px 6px;
+}
+.search-error {
+  color: var(--error);
+  overflow-wrap: anywhere;
+}
+.search-warning {
+  color: var(--warning);
+}
+.search-engine {
+  font-size: var(--fs-sm);
+}
+.search-results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+/* The rows are the shared tree rows (components/tree, styles/tree.css). */
+.search-rows {
+  position: relative;
+}
+.search-row {
+  cursor: pointer;
+}
+.search-match .tree-label {
+  white-space: pre;
+}
+/* A match in a line, as editors mark what a search found. */
+.search-match mark.match {
+  font-weight: inherit;
+  text-decoration: none;
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  border-radius: 2px;
+}

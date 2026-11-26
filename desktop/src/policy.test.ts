@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { WebPreferences } from 'electron';
+import { APP_HOST, APP_ORIGIN } from './origin';
 import {
   allowGuestPermission,
   allowPermission,
+  APP_PARTITION,
+  appWindowPreferences,
   BROWSER_PARTITION,
   guestMayNavigate,
   guestPreferences,
@@ -17,19 +20,20 @@ import {
   webPreferences,
 } from './policy';
 
-const origin = 'http://127.0.0.1:7781';
-test('only the exact core origin may navigate or open native windows', () => {
+const origin = APP_ORIGIN;
+test('only the exact app origin may navigate or open native windows', () => {
   for (const path of ['/', '/m/local/gui/1', '/m/local/code/?folder=/tmp']) assert.ok(isInternal(origin + path, origin));
   for (const url of [
+    `http://${APP_HOST}`,
+    `https://${APP_HOST}:8443`,
     'http://127.0.0.1:7780',
-    'http://localhost:7781',
     `${origin}.evil.test`,
     'https://example.com',
     'file:///etc/passwd',
     'javascript:alert(1)',
     'data:text/html,test',
     'about:blank',
-    'http://user@127.0.0.1:7781',
+    `https://user@${APP_HOST}`,
     'invalid',
   ]) {
     assert.equal(isInternal(url, origin), false, url);
@@ -50,7 +54,7 @@ test('OS external opens accept only credential-free HTTP(S)', () => {
     assert.equal(isExternal(url), false, url);
 });
 
-test('permissions require both the requesting frame and top window to belong to the core', () => {
+test('permissions require both the requesting frame and top window to belong to the hub', () => {
   for (const permission of ['notifications', 'clipboard-read', 'clipboard-sanitized-write', 'fileSystem', 'local-fonts']) {
     assert.ok(allowPermission(permission, origin + '/m/local/code/', origin, origin));
     assert.equal(allowPermission(permission, 'https://example.com', origin, origin), false);
@@ -64,27 +68,34 @@ test('permissions require both the requesting frame and top window to belong to 
   assert.equal(webPreferences.contextIsolation, true);
   assert.equal(webPreferences.nodeIntegration, false);
   assert.equal(webPreferences.webSecurity, true);
-  // The main window only relaxes autoplay (notification sounds).
+  // The app's windows: its session, its preload in each frame (sandboxed,
+  // no Node); the main window only relaxes autoplay (notification sounds).
+  const app = appWindowPreferences('/app/frames.cjs');
+  assert.deepEqual(app, { ...webPreferences, nodeIntegrationInSubFrames: true, partition: APP_PARTITION, preload: '/app/frames.cjs' });
+  assert.equal(app.sandbox, true);
+  assert.equal(app.nodeIntegration, false);
+  const main = mainWindowPreferences('/app/preload.cjs');
   assert.deepEqual(
-    { ...mainWindowPreferences, autoplayPolicy: undefined, webviewTag: undefined },
-    { ...webPreferences, autoplayPolicy: undefined, webviewTag: undefined },
+    { ...main, autoplayPolicy: undefined, webviewTag: undefined },
+    { ...appWindowPreferences('/app/preload.cjs'), autoplayPolicy: undefined, webviewTag: undefined },
   );
   // Only the main window may hold webviews.
-  assert.equal(mainWindowPreferences.webviewTag, true);
+  assert.equal(main.webviewTag, true);
   assert.equal(webPreferences.webviewTag, false);
-  assert.equal(mainWindowPreferences.autoplayPolicy, 'no-user-gesture-required');
+  assert.equal(main.autoplayPolicy, 'no-user-gesture-required');
   assert.equal('autoplayPolicy' in webPreferences, false);
+  assert.notEqual(APP_PARTITION, BROWSER_PARTITION);
 });
 
-test('a webview attaches only for the browser partition and an http(s) address without credentials that is not the core’s', () => {
+test('a webview attaches only for the browser partition and an http(s) address without credentials that is not the hub’s', () => {
   const ok = { partition: BROWSER_PARTITION, src: 'https://example.com/a' };
   assert.ok(guestPreferences({}, ok, origin));
   assert.ok(guestPreferences({}, { ...ok, src: 'http://localhost:3000' }, origin));
   const refused: Array<Record<string, string>> = [
-    // The core's own address, under either loopback name.
+    // The app's own host, under any scheme and port.
     { ...ok, src: `${origin}/` },
-    { ...ok, src: 'http://localhost:7781/m/local/code/' },
-    { ...ok, src: 'http://[::1]:7781/' },
+    { ...ok, src: `http://${APP_HOST}/m/local/code/` },
+    { ...ok, src: `https://${APP_HOST.toUpperCase()}:8443/` },
     { ...ok, partition: 'persist:other' },
     { ...ok, partition: '' },
     { src: ok.src },
@@ -100,7 +111,7 @@ test('a webview attaches only for the browser partition and an http(s) address w
     assert.equal(guestPreferences(prefs, params, origin), false, JSON.stringify(params));
     assert.equal(prefs.nodeIntegration, true, 'a refused attach leaves the preferences alone');
   }
-  // Without the core's origin nothing attaches.
+  // Without the hub's origin nothing attaches.
   assert.equal(guestPreferences({}, ok, ''), false);
 });
 
@@ -153,42 +164,30 @@ test('a guest navigates to http(s) addresses without credentials only', () => {
   }
 });
 
-test('a guest never navigates to the core, under any name of the loopback', () => {
-  // The core is on 127.0.0.1:7781 and answers on that port under every
-  // loopback name; a page in a pane must not load the UI or open it as a tab.
+test("a guest never navigates to the app's own host", () => {
+  // The app's session alone takes the app's origin to the hub; a page in
+  // a pane must not load the UI's address or open it as a tab.
   for (const url of [
     origin,
     `${origin}/`,
     `${origin}/api/m/local/hc/stop`,
-    'http://localhost:7781/',
-    'http://LOCALHOST:7781/m/local/code/',
-    'http://[::1]:7781/',
-    'http://127.0.0.2:7781/',
-    'http://127.1:7781/',
-    'http://2130706433:7781/',
-    'http://app.localhost:7781/',
-    'http://[::ffff:127.0.0.1]:7781/',
-    'https://localhost:7781/',
-    'https://127.0.0.1:7781/x',
+    `http://${APP_HOST}/`,
+    `https://${APP_HOST}:7781/m/local/code/`,
   ]) {
     assert.equal(guestMayNavigate(url, origin), false, url);
   }
-  // Another port is another program, another host another computer.
+  // Every other address is another program's, the loopback's too.
   for (const url of [
     'http://127.0.0.1:7780/',
-    'http://localhost:7782/',
     'http://localhost/',
+    'https://localhost/',
     'http://[::1]:3000/',
+    `https://x.${APP_HOST}/`,
+    'https://app.localhost/',
     'http://192.168.1.5:7781/',
-    'https://example.com:7781/',
-    'http://localhost.example.com:7781/',
   ]) {
     assert.equal(guestMayNavigate(url, origin), true, url);
   }
-  // A core on a scheme's own port is known by it.
-  assert.equal(guestMayNavigate('http://localhost/', 'http://127.0.0.1'), false);
-  assert.equal(guestMayNavigate('http://localhost:80/x', 'http://127.0.0.1'), false);
-  assert.equal(guestMayNavigate('http://localhost:8080/', 'http://127.0.0.1'), true);
   // An origin that does not read is nobody's: nothing is allowed by it.
   for (const bad of ['', 'not an origin']) assert.equal(guestMayNavigate('https://example.com/', bad), false, bad);
 });
