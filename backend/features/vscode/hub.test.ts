@@ -2,6 +2,7 @@
 // work ending with a switch, the install mode, bridge commands and idle
 // code-servers.
 import { afterEach, expect, test } from 'bun:test';
+import { extended } from '#shared/testdata/extended.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import { Op } from '#shared/proto/agentproto/index.ts';
 import { checkGuarded, sleep, waitFor, type TestHub } from '#kernel/testing.ts';
@@ -219,7 +220,7 @@ test('bridge commands', async () => {
 
 // A code-server without connections or requests for --code-server-idle
 // is released; an open WebSocket keeps it.
-test('idle code-servers are released', async () => {
+extended('idle code-servers are released', async () => {
   const vc = await newHub({ idle: 150, timing: { idleCheckMs: 30 } });
   await ready(vc);
   const ws = await vc.websocket('/m/local/code/stable');

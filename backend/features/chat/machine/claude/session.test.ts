@@ -198,16 +198,20 @@ describe('the program', () => {
     expect(s.pid).toBeGreaterThan(0);
   }, 30_000);
 
-  test('a control request without an answer fails after its timeout; initialize without one fails the start', async () => {
-    const { s } = await started(initLines(), { silent: ['set_model'], timing: { request: 300 } });
-    const t0 = Date.now();
-    expect(codeOf(await rejects(s.setConfig(OPTION_MODEL, 'haiku', sig())))).toBe(Code.Failed);
-    expect(Date.now() - t0).toBeLessThan(5000);
+  extended(
+    'a control request without an answer fails after its timeout; initialize without one fails the start',
+    async () => {
+      const { s } = await started(initLines(), { silent: ['set_model'], timing: { request: 300 } });
+      const t0 = Date.now();
+      expect(codeOf(await rejects(s.setConfig(OPTION_MODEL, 'haiku', sig())))).toBe(Code.Failed);
+      expect(Date.now() - t0).toBeLessThan(5000);
 
-    const { err } = await start([], { silent: ['initialize'], timing: { initialize: 300 } });
-    expect(err?.code).toBe(Code.StartFailed);
-    expect(err?.message).toContain('initialize');
-  }, 30_000);
+      const { err } = await start([], { silent: ['initialize'], timing: { initialize: 300 } });
+      expect(err?.code).toBe(Code.StartFailed);
+      expect(err?.message).toContain('initialize');
+    },
+    30_000,
+  );
 
   test('the start refuses what is no session it can run, before running anything, and a model initialize does not list', async () => {
     const edits: Record<string, (p: StartParams) => void> = {

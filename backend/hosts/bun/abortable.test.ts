@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { extended } from '#shared/testdata/extended.ts';
 import { abortable } from './abortable.ts';
 
 /** A body of 64 KiB chunks at full speed that errors after n of them. */
@@ -24,11 +25,14 @@ async function failed(url: string): Promise<boolean> {
   }
 }
 
-test('a body that breaks off fails the transfer instead of leaving the client waiting', async () => {
+async function checkBrokenTransfers(count: number): Promise<void> {
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1', idleTimeout: 0, fetch: () => abortable(new Response(breaking(200))) });
   try {
-    for (let i = 0; i < 5; i++) expect(await failed(`http://127.0.0.1:${server.port}/`)).toBe(true);
+    for (let i = 0; i < count; i++) expect(await failed(`http://127.0.0.1:${server.port}/`)).toBe(true);
   } finally {
     void server.stop(true);
   }
-}, 40_000);
+}
+
+test('a body that breaks off fails the transfer instead of leaving the client waiting', () => checkBrokenTransfers(1), 10_000);
+extended('several large transfers fail promptly when their bodies break off', () => checkBrokenTransfers(5), 40_000);

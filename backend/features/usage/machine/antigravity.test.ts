@@ -89,7 +89,7 @@ printf 'p345\\nf20\\nn127.0.0.1:${ls.port}\\nf21\\nn10.0.0.2:9999\\n'`,
     ]);
   });
 
-  test('remembered while it answers; found again after it restarted elsewhere', async () => {
+  extended('remembered while it answers; found again after it restarted elsewhere', async () => {
     const home = tempHome();
     const state = join(home, 'state');
     const runs = join(home, 'runs');

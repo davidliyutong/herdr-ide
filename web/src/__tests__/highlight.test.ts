@@ -8,6 +8,7 @@ import tokens from '../../../spec/tokens.json';
 import { highlight, lineTokenizer, type Piece } from '../highlight/highlighter';
 import { LANGS, languageByAlias, languageOf } from '../highlight/languages';
 import { ROLES } from '../highlight/roles';
+import { extended } from './extended';
 
 const fsModule = 'node:fs';
 const fs = (await import(/* @vite-ignore */ fsModule)) as { readFileSync(p: URL, enc: 'utf8'): string };
@@ -57,10 +58,12 @@ describe('the language table', () => {
 
 // Compiling a large grammar (C++'s) takes seconds on a loaded machine.
 const GRAMMAR_TIMEOUT = 60_000;
+const standardGrammars = new Set(['typescript', 'python', 'shell', 'markdown', 'json']);
+const grammarTest = (id: string) => (standardGrammars.has(id) ? it : extended);
 
 describe('the grammars', () => {
   for (const l of LANGS) {
-    it(
+    grammarTest(l.id)(
       `load: ${l.id}`,
       async () => {
         const mod = await l.grammar();
@@ -71,7 +74,7 @@ describe('the grammars', () => {
   }
 
   for (const l of LANGS) {
-    it(
+    grammarTest(l.id)(
       `tokenize: ${l.id}`,
       async () => {
         const lines = await highlight('x', l.id);

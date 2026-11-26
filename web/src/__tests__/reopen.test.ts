@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import { FakeHub, settle } from './fakeTerms';
+import { FakeHub } from './fakeTerms';
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import { actions } from '../actions';
@@ -104,6 +104,8 @@ describe('closing with a way back, and going back, with a terminal core', () => 
     FakeHub.term(address, { pid: 10, cwd, foreground: { pid: 20, name: 'vim', argv: ['vim'], cwd }, ...extra });
   const tabs = () => hub.layout('m')!.workspaces[0].tabs;
 
+  const tick = (ms = 0) => vi.advanceTimersByTimeAsync(ms);
+
   const setup = async (extra: ReturnType<typeof running>[] = []) => {
     resetClosed(300);
     resetHistory();
@@ -127,11 +129,15 @@ describe('closing with a way back, and going back, with a terminal core', () => 
     s.upsertMachine({ id: 'm', label: 'm', kind: 'local', status: 'ready' } as unknown as MachineState);
     s.selectMachine('m');
     hub.model.subscribe('m');
-    await settle();
+    await tick();
   };
-  beforeEach(() => setup());
+  beforeEach(() => {
+    vi.useFakeTimers();
+    return setup();
+  });
   afterEach(() => {
     resetClosed();
+    vi.useRealTimers();
     document.body.innerHTML = '';
   });
 
@@ -143,39 +149,41 @@ describe('closing with a way back, and going back, with a terminal core', () => 
 
   it('closes a pane at once, its program running until the time to undo is over', async () => {
     await actions.closePane('m', 't2');
-    await settle();
+    await tick();
     expect(useDialog.getState().current).toBeUndefined();
     expect(tabs()[0].root).toEqual({ terminal: 't1' });
     expect(killed()).toEqual([]);
     expect(Number(closing('t2')[0])).toBeGreaterThan(Date.now());
-    await vi.waitFor(() => expect(killed()).toEqual(['t2']), { timeout: 2000 });
+    await tick(350);
+    expect(killed()).toEqual(['t2']);
   });
 
   it('puts a closed pane back as it was, with the same terminal, which then keeps running', async () => {
     await actions.closePane('m', 't2');
-    await settle();
+    await tick();
     expect(commandEnabled('pane.undoClose')).toBe(true);
     runCommand('pane.undoClose');
-    await settle();
+    await tick();
     expect(tabs()[0]).toEqual({
       root: { split: 'horizontal', ratio: 0.3, children: [{ terminal: 't1' }, { terminal: 't2' }] },
       focused: 't2',
     });
     expect(closing('t2').at(-1)).toBe('');
     expect(commandEnabled('pane.undoClose')).toBe(false);
-    await new Promise((r) => setTimeout(r, 500));
+    await tick(500);
     expect(killed()).toEqual([]);
   });
 
   it('puts a closed tab back with its terminals; nothing to undo once the time is over', async () => {
     await actions.closeTab('m', 'wwwwwwww', 0);
-    await settle();
+    await tick();
     expect(tabs()).toEqual([]);
     actions.undoClose();
-    await settle();
+    await tick();
     expect(L.panesOf(tabs()[0].root as L.Node)).toEqual(['t1', 't2']);
     await actions.closeTab('m', 'wwwwwwww', 0);
-    await vi.waitFor(() => expect(killed().sort()).toEqual(['t1', 't2']), { timeout: 2000 });
+    await tick(350);
+    expect(killed().sort()).toEqual(['t1', 't2']);
     expect(commandEnabled('pane.undoClose')).toBe(false);
   });
 
@@ -183,12 +191,12 @@ describe('closing with a way back, and going back, with a terminal core', () => 
     // A second tab, shown, in the workspace.
     await setup([running('t3', '/srv/c')]);
     hub.model.mutate('m', (l) => L.openTerminal(l, 't3', 'wwwwwwww'));
-    await settle();
+    await tick();
     const before = hub.layout('m')!;
     const terminals = L.workspaceTerminals(before.workspaces[0]);
     expect(terminals).toHaveLength(3);
     await actions.closeWorkspace('m', 'wwwwwwww');
-    await settle();
+    await tick();
     expect(useDialog.getState().current).toBeUndefined();
     // The machine's last workspace closes as any other: none is left.
     expect(hub.layout('m')!.workspaces).toEqual([]);
@@ -196,15 +204,16 @@ describe('closing with a way back, and going back, with a terminal core', () => 
     for (const a of terminals) expect(Number(closing(a)[0])).toBeGreaterThan(Date.now());
     expect(commandEnabled('pane.undoClose')).toBe(true);
     runCommand('pane.undoClose');
-    await settle();
+    await tick();
     const back = hub.layout('m')!;
     expect(back.workspaces).toEqual(before.workspaces);
     for (const a of terminals) expect(closing(a).at(-1)).toBe('');
-    await new Promise((r) => setTimeout(r, 500));
+    await tick(500);
     expect(killed()).toEqual([]);
     // Once the time is over, its terminals end.
     await actions.closeWorkspace('m', 'wwwwwwww');
-    await vi.waitFor(() => expect(killed().sort()).toEqual([...terminals].sort()), { timeout: 2000 });
+    await tick(350);
+    expect(killed().sort()).toEqual([...terminals].sort());
     expect(commandEnabled('pane.undoClose')).toBe(false);
   });
 
@@ -212,7 +221,8 @@ describe('closing with a way back, and going back, with a terminal core', () => 
     // t3 has no pane: a page closed it and is gone.
     await setup([running('t3', '/srv/c', { labels: { closing: String(Date.now() + 100) } })]);
     expect(killed()).toEqual([]);
-    await vi.waitFor(() => expect(killed()).toEqual(['t3']), { timeout: 2000 });
+    await tick(150);
+    expect(killed()).toEqual(['t3']);
   });
 
   it('goes back and forward through the panes focused, past those closed', async () => {

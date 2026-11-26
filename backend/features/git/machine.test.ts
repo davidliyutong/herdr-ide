@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, w
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { Op } from '#shared/proto/agentproto/index.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import { AgentError } from '#kernel/machines/transport/session.ts';
 import { MAX_NESTED_DEPTH } from './machine/read.ts';
 import { openRepo } from './machine/repo.ts';
@@ -20,6 +21,7 @@ afterEach(async () => {
 });
 
 const it = hasGit ? test : test.skip;
+const extendedGit = hasGit ? extended : test.skip;
 const SLOW = 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const byPath = (st: { files: Array<{ path: string }> }) => Object.fromEntries(st.files.map((f) => [f.path, f])) as Record<string, any>;
@@ -505,7 +507,7 @@ describe('the reads', () => {
     expect(st.files.map((f: { path: string; kind: string }) => [f.path, f.kind])).toEqual([['new.txt', 'untracked']]);
   });
 
-  test('a git that refuses --ignored=matching (before 2.16) gets the status without what it ignores, from then on', async () => {
+  extended('a git that refuses --ignored=matching (before 2.16) gets the status without what it ignores, from then on', async () => {
     for (const refusal of [
       `echo "error: option \\\`ignored' takes no value" >&2; echo 'usage: git status' >&2; exit 129`,
       `echo "fatal: Invalid ignored mode 'matching'" >&2; exit 128`,
@@ -571,7 +573,7 @@ describe('the reads', () => {
 });
 
 describe('the changes', () => {
-  it(
+  extendedGit(
     'many paths are staged and discarded over several runs of git',
     async () => {
       g = await gitRig();
@@ -727,7 +729,7 @@ describe('the changes', () => {
     SLOW,
   );
 
-  it(
+  extendedGit(
     'push, fetch and pull with bare repositories as remotes; their URLs without credentials; diverged branches',
     async () => {
       g = await gitRig();

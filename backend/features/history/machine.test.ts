@@ -359,7 +359,7 @@ describe('capture', () => {
       expect(snapshot(e, 't1')).toBe(before);
     });
 
-  test('a dropped paint is asked again with half the lines, down to the fewest', async () => {
+  extended('a dropped paint is asked again with half the lines, down to the fewest', async () => {
     const e = await setup();
     const { f } = e;
     f.set(live('t1', 1), live('t2', 2));

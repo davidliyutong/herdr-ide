@@ -5,6 +5,7 @@ import { dirsFor } from '#shared/host/hostdirs.ts';
 import { discard } from '#shared/lib/log.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import { NodeOp, Op, newer, readLine, writeLine, type Header, type NodeInfo } from '#shared/proto/agentproto/index.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import { Session } from '#kernel/machines/transport/session.ts';
 import { dialNodeSocket, nodeSocket, stopNodes } from './dial.ts';
 import { runNode, type NodeOptions } from './node.ts';
@@ -58,7 +59,7 @@ describe('the node', () => {
       await n.done;
     }));
 
-  test('ends after its idle time without a client, and when asked to stop', () =>
+  extended('ends after its idle time without a client', () =>
     withHome(async () => {
       const n = startNode();
       await until(() => existsSync(sock()), 'the node to listen');
@@ -68,11 +69,15 @@ describe('the node', () => {
       c.s.close();
       await n.done;
       expect(existsSync(sock())).toBe(false);
+    }),
+  );
 
-      const m = startNode();
+  test('ends when asked to stop', () =>
+    withHome(async () => {
+      const n = startNode();
       await until(() => existsSync(sock()), 'the node to listen');
       expect(await stopNodes('')).toBe(1);
-      await m.done;
+      await n.done;
     }));
 
   test('takes no new client once the file of its build is gone', () =>

@@ -64,9 +64,10 @@ function fakeHub(replies: Record<string, unknown>) {
   return { hub, sockets, fetched };
 }
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
+const settle = () => new Promise((r) => setImmediate(r));
 
-test('reads the state once the channel is open, then follows its messages', async () => {
+test('reads the state once the channel is open, then follows its messages', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const { hub, sockets, fetched } = fakeHub({
     '/api/settings': { values: { 'appearance.theme': { value: 'dark' } } },
     '/api/keybindings': { commands: [], effective: { mac: [{ key: 'cmd+t', command: 'tab.new', when: 'terminal' }] } },
@@ -94,15 +95,18 @@ test('reads the state once the channel is open, then follows its messages', asyn
   stop();
   assert.ok(sockets[0].closed);
   sockets[0].on.close();
-  await new Promise((r) => setTimeout(r, 600));
+  t.mock.timers.tick(600);
+  await settle();
   assert.equal(sockets.length, 1, 'no reconnection after stop');
 });
 
-test('opens the channel again when it drops', async () => {
+test('opens the channel again when it drops', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const { hub, sockets } = fakeHub({});
   const stop = followHub(hub, 'mac', { bindings: () => {}, settings: () => {} });
   sockets[0].on.close();
-  await new Promise((r) => setTimeout(r, 750));
+  t.mock.timers.tick(750);
+  await settle();
   assert.equal(sockets.length, 2);
   stop();
 });

@@ -3,6 +3,7 @@ import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DATA_DIR_NAME } from '#shared/lib/brand.ts';
 import { Fail } from '#shared/lib/fail.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import { call } from '#kernel/agent.ts';
 import { rig, machineOf, type Rig } from '#machine/testing.ts';
 import { searchMachine, type SearchMachineOptions } from './machine.ts';
@@ -174,7 +175,7 @@ describe('search', () => {
     expect(res.matchCount).toBe(MAX_RESULTS);
   });
 
-  test('at most so many searches at once: one more waits, then is busy', async () => {
+  extended('at most so many searches at once: one more waits, then is busy', async () => {
     // A ripgrep that takes its time: the search holds its place until its
     // time is up, and its process group is killed then.
     const rr = await start({ findRg: () => join(r!.home, 'slow-rg'), maxSearches: 1, slotWaitMs: 100, timeoutMs: 1000 });

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import baseSetup from '../harness/global-setup';
 import { paths, repoRoot } from '../harness/paths';
@@ -39,13 +40,16 @@ function prepareCodeServer() {
   const arch = process.arch === 'arm64' ? 'arm64' : process.arch === 'x64' ? 'amd64' : '';
   if (!os || !arch) throw new Error(`no code-server asset for ${process.platform}/${process.arch}`);
   const dir = join(dirname(paths.hub), 'code-server');
-  const suffix = `-${os}-${arch}.tar.gz`;
-  if (existsSync(dir) && readdirSync(dir).some((name) => name.startsWith('code-server-') && name.endsWith(suffix))) {
-    process.env.E2E_CODE_SERVER_SEED = dir;
-    return;
+  const home = mkdtempSync(join(tmpdir(), 'e2e-code-server-'));
+  try {
+    console.log('Preparing the pinned code-server release and extensions for the VS Code screenshot');
+    execFileSync(paths.hub, ['fetch-assets', '--platforms', `${os}-${arch}`, '--seed-dir', dir, dir], {
+      stdio: 'inherit',
+      timeout: 300_000,
+      env: { ...process.env, HOME: home, XDG_CACHE_HOME: join(home, '.cache') },
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
-
-  console.log('Preparing the pinned code-server release and extensions for the VS Code screenshot');
-  execFileSync(paths.hub, ['fetch-assets', '--platforms', `${os}-${arch}`, dir], { stdio: 'inherit', timeout: 300_000 });
   process.env.E2E_CODE_SERVER_SEED = dir;
 }

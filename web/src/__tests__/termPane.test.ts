@@ -131,7 +131,7 @@ async function loadEmulator() {
   gate.open?.();
   await settle();
 }
-const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+const settle = (ms = 0) => vi.advanceTimersByTimeAsync(ms);
 /** Longer than the pane waits to try a refused attach again. */
 const ATTACH_WAIT = 1600;
 
@@ -189,6 +189,7 @@ describe('a terminal’s pane', () => {
   let link: Link;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     made = [];
     renderers.length = 0;
     observers.length = 0;
@@ -204,6 +205,7 @@ describe('a terminal’s pane', () => {
     for (const p of made) p.dispose();
     setPrelude('a', 't1', undefined);
     document.body.replaceChildren();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -646,6 +648,8 @@ describe('a terminal’s pane', () => {
       await settle(120);
       p.type('lost');
       link.refuse!();
+      await settle();
+      expect(link.attaches).toHaveLength(3);
       await settle(ATTACH_WAIT);
       expect(link.attaches).toHaveLength(4);
       link.release!();
