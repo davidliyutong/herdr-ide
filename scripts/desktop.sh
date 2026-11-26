@@ -68,6 +68,9 @@ if [[ "$mode" == install && ! ( -d "$INSTALL_DIR" && -w "$INSTALL_DIR" ) ]]; the
   exit 1
 fi
 
+# The app's version is its hub's (electron-builder.cjs reads VERSION).
+source scripts/version.sh
+
 slug=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
 cpu=${DESKTOP_ARCH/x64/amd64}
 stage=dist/desktop-stage
@@ -154,7 +157,10 @@ esac
 name=$(sed -n "s/^export const APP_NAME = '\\(.*\\)';$/\\1/p" web/src/brand.ts)
 built=dist/desktop/mac$([[ "$DESKTOP_ARCH" == x64 ]] || echo "-$DESKTOP_ARCH")/$name.app
 dest=$INSTALL_DIR/$name.app
-test -d "$built"
+if [[ ! -d "$built" ]]; then
+  echo "electron-builder made no $built (ARCH=$DESKTOP_ARCH); nothing installed." >&2
+  exit 1
+fi
 main="^$dest/Contents/MacOS/$name( |\$)"
 reopen=
 if pgrep -f "$main" >/dev/null; then

@@ -16,13 +16,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}
-# Local edits at the same commit need distinct versions too: the chat host
-# outlives an app reinstall and only makes way for a newer build. Release
-# versions stay reproducible; dirty builds are ordered by their build time.
-if [[ "$VERSION" == *-dirty ]]; then
-  VERSION="$VERSION.$(date -u +%s)"
-fi
+source scripts/version.sh
 SLUG=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
 HC_PLATFORMS=${HC_PLATFORMS:-"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"}
 DEFAULT_TARGETS="linux/amd64 linux/arm64 linux/amd64-musl linux/arm64-musl darwin/amd64 darwin/arm64"

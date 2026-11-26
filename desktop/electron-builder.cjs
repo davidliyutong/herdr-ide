@@ -38,6 +38,14 @@ const helperOf = `dist/helper/${helper}`;
 const withHelper = process.platform === 'darwin';
 const developerId = !!(process.env.CSC_LINK || process.env.CSC_NAME);
 
+// The app's version: its hub's (VERSION, from scripts/version.sh), which is
+// a tag or git describe's output. A bundle version must be semver, so a
+// version without a tag (a bare commit, "dev") becomes a prerelease of 0.0.0.
+function appVersion() {
+  const v = (process.env.VERSION || require('./package.json').version).replace(/^v/, '');
+  return /^\d+\.\d+\.\d+([-+].*)?$/.test(v) ? v : `0.0.0-${v.replace(/[^0-9A-Za-z.-]/g, '-')}`;
+}
+
 function homepage() {
   if (process.env.GITHUB_REPOSITORY) return `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${process.env.GITHUB_REPOSITORY}`;
   try {
@@ -61,7 +69,7 @@ module.exports = {
   files: ['dist/main.cjs', 'dist/preload.cjs', 'dist/frames.cjs', 'assets/icon.png', 'package.json'],
   extraMetadata: {
     name: `${slug}-desktop`,
-    version: (process.env.VERSION || require('./package.json').version).replace(/^v/, ''),
+    version: appVersion(),
     homepage: homepage(),
     desktopName: `${slug}.desktop`,
   },
