@@ -377,9 +377,13 @@ describe('what the hub uploads', () => {
     const fd = openSync(path, 'r');
     try {
       const own = ownFile(OTHER, fd);
-      // An upgrade in place: another file renamed over the path.
+      // An upgrade in place: another file renamed over the path. Windows
+      // refuses to replace a file that is open (as a running executable
+      // is), so there the path keeps the running one.
       writeFileSync(join(d, 'new'), Buffer.from('a newer hub'));
-      renameSync(join(d, 'new'), path);
+      const replace = () => renameSync(join(d, 'new'), path);
+      if (process.platform === 'win32') expect(replace).toThrow(/EPERM|EACCES|EBUSY/);
+      else replace();
       expect(await own.digest()).toBe(sha256(OWN_EXE));
       expect(gunzipSync(await own.gz())).toEqual(OWN_EXE);
       expect(await own.digest()).toBe(sha256(OWN_EXE));
