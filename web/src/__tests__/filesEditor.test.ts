@@ -965,6 +965,47 @@ describe('EditorPane', () => {
       expect(createEditor).toHaveBeenCalledTimes(1);
     });
 
+    it('hides HTML comments, renders safe HTML and relative <img>, and strips XSS in File Preview', async () => {
+      const md = [
+        '<!-- single-line note -->',
+        '<!--',
+        'multi-line',
+        '',
+        'comment',
+        '-->',
+        '# Safe Preview',
+        '',
+        '<details open><summary>Summary</summary>',
+        '',
+        'Press <kbd>Cmd</kbd>+<kbd>S</kbd>',
+        '',
+        '</details>',
+        '',
+        '<img src="./diagram.png" alt="Diagram" width="200" onerror="alert(1)">',
+        '',
+        '<script>alert(1)</script>',
+        '<style>body{display:none}</style>',
+        '<iframe src="javascript:alert(1)"></iframe>',
+      ].join('\n');
+      file = { text: md, size: md.length, mtime: 7000 };
+      await render('/home/u/docs/README.md');
+      await vi.waitFor(() => expect(host.querySelector('.files-md-preview h1')?.textContent).toBe('Safe Preview'), { timeout: 5000 });
+      const preview = host.querySelector('.files-md-preview')!;
+      expect(preview.querySelector('.markdown')?.classList.contains('markdown-document')).toBe(true);
+      expect(preview.textContent).not.toContain('single-line note');
+      expect(preview.textContent).not.toContain('multi-line');
+      expect(preview.querySelector('details summary')?.textContent).toBe('Summary');
+      expect([...preview.querySelectorAll('kbd')].map((k) => k.textContent)).toEqual(['Cmd', 'S']);
+      const img = preview.querySelector('img')!;
+      expect(img.getAttribute('src')).toBe('/api/m/m/file?path=%2Fhome%2Fu%2Fdocs%2Fdiagram.png');
+      expect(img.getAttribute('width')).toBe('200');
+      expect(img.getAttribute('onerror')).toBeNull();
+      expect(preview.querySelector('script')).toBeNull();
+      expect(preview.querySelector('style')).toBeNull();
+      expect(preview.querySelector('iframe')).toBeNull();
+      expect(preview.textContent).not.toContain('display:none');
+    });
+
     it('opens .mdx files with a target line in Source mode and reveals the line range', async () => {
       const mdx = 'line 1\nline 2\n# Heading\nline 4\nline 5';
       file = { text: mdx, size: mdx.length, mtime: 7000 };

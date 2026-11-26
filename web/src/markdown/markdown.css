@@ -2,6 +2,7 @@
    surrounding font; all colors derive from the design tokens for full
    dark/light theme parity. */
 .markdown {
+  display: flow-root;
   color: var(--ds-color-foreground);
   line-height: 1.65;
   overflow-wrap: anywhere;
@@ -57,6 +58,9 @@
 .markdown p,
 .markdown ul,
 .markdown ol,
+.markdown dl,
+.markdown figure,
+.markdown details,
 .markdown blockquote,
 .markdown .md-alert,
 .markdown .md-frontmatter,
@@ -155,6 +159,29 @@
 .markdown .md-alert-body > :last-child {
   margin-bottom: 0;
 }
+.markdown details {
+  padding: 0.55em 0.85em;
+  background: color-mix(in srgb, var(--ds-color-sidebar) 75%, transparent);
+  border: 1px solid var(--ds-color-border-strong);
+  border-radius: var(--ds-metric-radius);
+}
+.markdown details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ds-color-foreground);
+  user-select: none;
+}
+.markdown details > summary:hover {
+  color: var(--ds-accent);
+}
+.markdown details[open] > summary {
+  margin-bottom: 0.6em;
+  padding-bottom: 0.45em;
+  border-bottom: 1px solid var(--ds-color-border);
+}
+.markdown details > :last-child {
+  margin-bottom: 0;
+}
 .markdown .md-frontmatter {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -176,6 +203,22 @@
   margin: 0;
   color: var(--ds-color-foreground);
 }
+.markdown dl:not(.md-frontmatter) dt {
+  font-weight: 600;
+  margin-top: 0.5em;
+}
+.markdown dl:not(.md-frontmatter) dt:first-child {
+  margin-top: 0;
+}
+.markdown dl:not(.md-frontmatter) dd {
+  margin: 0 0 0.35em 1.5em;
+  color: var(--ds-color-muted);
+}
+.markdown figure figcaption {
+  margin-top: 0.4em;
+  font-size: 0.88em;
+  color: var(--ds-color-muted);
+}
 .markdown hr {
   height: 0;
   margin: 1.6em 0;
@@ -194,6 +237,34 @@
   height: auto;
   border-radius: var(--ds-metric-radius-small);
 }
+.markdown img[data-align='left'] {
+  float: left;
+  margin: 0.25em 1em 0.5em 0;
+}
+.markdown img[data-align='right'] {
+  float: right;
+  margin: 0.25em 0 0.5em 1em;
+}
+.markdown img[data-align='center'] {
+  display: block;
+  margin: 0.5em auto;
+}
+.markdown [align='left' i] {
+  text-align: left;
+}
+.markdown [align='center' i] {
+  text-align: center;
+}
+.markdown [align='right' i] {
+  text-align: right;
+}
+.markdown [align='justify' i] {
+  text-align: justify;
+}
+.markdown [align='center' i] img {
+  display: inline-block;
+  vertical-align: middle;
+}
 .markdown code {
   font-family: var(--mono);
   font-size: 0.88em;
@@ -203,6 +274,49 @@
   background: var(--ds-color-hover);
   border: 1px solid var(--ds-color-border);
   border-radius: 0.32em;
+}
+.markdown kbd {
+  display: inline-block;
+  padding: 0.12em 0.45em;
+  font-family: var(--mono);
+  font-size: 0.84em;
+  line-height: 1.35;
+  color: var(--ds-color-foreground);
+  background: var(--ds-color-sidebar);
+  border: 1px solid var(--ds-color-border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--ds-metric-radius-small);
+  vertical-align: middle;
+}
+.markdown mark {
+  padding: 0.05em 0.28em;
+  border-radius: 0.25em;
+  color: var(--ds-color-foreground);
+  background: color-mix(in srgb, var(--ds-color-warning) 24%, transparent);
+}
+.markdown ins {
+  text-decoration: none;
+  padding: 0.04em 0.2em;
+  border-radius: 0.2em;
+  background: color-mix(in srgb, var(--ds-git-added) 18%, transparent);
+  border-bottom: 1px solid var(--ds-git-added);
+}
+.markdown sub,
+.markdown sup {
+  font-size: 0.78em;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+}
+.markdown sup {
+  top: -0.45em;
+}
+.markdown sub {
+  bottom: -0.25em;
+}
+.markdown abbr[title] {
+  text-decoration: underline dotted;
+  cursor: help;
 }
 .markdown .md-code {
   background: var(--ds-color-sidebar);
@@ -250,6 +364,13 @@
   width: max-content;
   min-width: 100%;
 }
+.markdown table caption {
+  padding: 0.45em 0.85em;
+  font-size: 0.9em;
+  color: var(--ds-color-muted);
+  text-align: left;
+  border-bottom: 1px solid var(--ds-color-border);
+}
 .markdown th,
 .markdown td {
   padding: 0.45em 0.85em;
@@ -257,17 +378,41 @@
   border-right: 1px solid var(--ds-color-border);
   text-align: left;
 }
+.markdown th[align='left' i],
+.markdown td[align='left' i] {
+  text-align: left;
+}
+.markdown th[align='center' i],
+.markdown td[align='center' i] {
+  text-align: center;
+}
+.markdown th[align='right' i],
+.markdown td[align='right' i] {
+  text-align: right;
+}
+.markdown th[align='justify' i],
+.markdown td[align='justify' i] {
+  text-align: justify;
+}
 .markdown th:last-child,
 .markdown td:last-child {
   border-right: 0;
 }
-.markdown tbody tr:last-child td {
+.markdown tbody tr:last-child td,
+.markdown tbody tr:last-child th {
   border-bottom: 0;
 }
 .markdown th {
   font-weight: 600;
   background: var(--ds-color-sidebar);
   border-bottom-color: var(--ds-color-border-strong);
+}
+.markdown tfoot td,
+.markdown tfoot th {
+  font-weight: 600;
+  border-top: 1px solid var(--ds-color-border-strong);
+  border-bottom: 0;
+  background: color-mix(in srgb, var(--ds-color-sidebar) 75%, transparent);
 }
 .markdown tbody tr:nth-child(even) {
   background: color-mix(in srgb, var(--ds-color-hover) 40%, transparent);
@@ -279,7 +424,8 @@
 .markdown .md-math-source code {
   color: var(--ds-color-muted);
 }
-.markdown del {
+.markdown del,
+.markdown s {
   color: var(--ds-color-muted);
 }
 .markdown strong {
@@ -298,4 +444,67 @@
 }
 .markdown sup a {
   padding: 0 0.1em;
+}
+
+/* Compact density variant: Agent Native View, chat messages, plans and tool
+   prose. Preserves all theme tokens while tightening headings, spacing and
+   table cells to fit inline conversation streams. */
+.markdown.markdown-compact {
+  font-size: inherit;
+  line-height: 1.6;
+}
+.markdown.markdown-compact h1,
+.markdown.markdown-compact h2,
+.markdown.markdown-compact h3,
+.markdown.markdown-compact h4,
+.markdown.markdown-compact h5,
+.markdown.markdown-compact h6 {
+  margin: 1.1em 0 0.45em;
+}
+.markdown.markdown-compact h1 {
+  font-size: 1.3em;
+  padding-bottom: 0.2em;
+}
+.markdown.markdown-compact h2 {
+  font-size: 1.16em;
+  padding-bottom: 0.2em;
+}
+.markdown.markdown-compact h3 {
+  font-size: 1.05em;
+}
+.markdown.markdown-compact p,
+.markdown.markdown-compact ul,
+.markdown.markdown-compact ol,
+.markdown.markdown-compact dl,
+.markdown.markdown-compact figure,
+.markdown.markdown-compact details,
+.markdown.markdown-compact blockquote,
+.markdown.markdown-compact .md-alert,
+.markdown.markdown-compact .md-frontmatter,
+.markdown.markdown-compact .md-table,
+.markdown.markdown-compact .md-code,
+.markdown.markdown-compact .md-math-display {
+  margin-bottom: 0.75em;
+}
+.markdown.markdown-compact ul,
+.markdown.markdown-compact ol {
+  padding-left: 1.6em;
+}
+.markdown.markdown-compact details {
+  padding: 0.4em 0.75em;
+}
+.markdown.markdown-compact table {
+  font-size: 0.95em;
+  font-variant-numeric: tabular-nums;
+}
+.markdown.markdown-compact th,
+.markdown.markdown-compact td {
+  padding: 0.3em 0.75em;
+  vertical-align: top;
+}
+.markdown.markdown-compact .md-math-display {
+  padding: 2px 0;
+}
+.md-stream > .markdown + .markdown {
+  margin-top: 0;
 }

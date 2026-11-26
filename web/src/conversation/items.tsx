@@ -7,12 +7,13 @@
 // An item is drawn again only when it changed (the reducer replaces only
 // the items an event changes).
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useState } from 'react';
 import { Bot, Brain, ChevronRight, Circle, CircleCheck, CircleDot, ListTodo, SquareSlash } from 'lucide-react';
-import { Markdown } from '../markdown/Markdown';
+import type { MarkdownBase } from '../markdown/links';
+import { StreamMarkdown as SharedStreamMarkdown } from '../markdown/StreamMarkdown';
 import { hasMessage, t } from '../i18n';
 import { PermissionCard, PlanCard, QuestionCard } from './cards';
-import { displayMath, formatTokens, inputText, plainOutput } from './format';
+import { formatTokens, inputText, plainOutput } from './format';
 import {
   asText,
   blocksText,
@@ -27,7 +28,6 @@ import {
   type ToolItem,
 } from './model';
 import { Blocks, errorText, isShortened, Shortened, type ItemContext } from './parts';
-import { streamBlocks } from './streaming';
 import { Results, Section, StatusIcon, ToolCallView } from './ToolCall';
 
 /** A user's prompt longer than this (characters or lines) shows its start
@@ -64,22 +64,32 @@ function UserMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
   );
 }
 
-/** A block of Markdown still arriving, drawn again only when it changed. */
-const StreamBlock = memo(function StreamBlock({ text, className }: { text: string; className: string }) {
-  return <Markdown text={displayMath(text)} className={className} />;
-});
-
 /** Markdown that is still arriving: its blocks apart, so that an increment
- * draws only the last; whole once it no longer streams. */
-export function StreamMarkdown({ text, live, className }: { text: string; live?: boolean; className: string }) {
-  const blocks = useMemo(() => (live ? streamBlocks(text) : undefined), [text, live]);
-  if (!blocks) return <Markdown text={displayMath(text)} className={className} />;
+ * draws only the last; whole once it no longer streams. Delegates to the
+ * unified Markdown component in compact mode. */
+export function StreamMarkdown({
+  text,
+  live,
+  base,
+  onOpenPath,
+  className,
+}: {
+  text: string;
+  live?: boolean;
+  base?: MarkdownBase;
+  onOpenPath?: (path: string) => void;
+  className: string;
+}) {
   return (
-    <div className="conv-stream" data-live>
-      {blocks.map((b, i) => (
-        <StreamBlock key={i} text={b} className={className} />
-      ))}
-    </div>
+    <SharedStreamMarkdown
+      text={text}
+      live={live}
+      variant="compact"
+      base={base}
+      onOpenPath={onOpenPath}
+      className={className}
+      streamClassName="conv-stream"
+    />
   );
 }
 
@@ -88,7 +98,7 @@ function AgentMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
   return (
     <div className="conv-item conv-agent" aria-busy={item.live || undefined}>
       <span className="conv-sr">{ctx.agent}: </span>
-      {text.trim() && <StreamMarkdown text={text} live={item.live} className="conv-md" />}
+      {text.trim() && <StreamMarkdown text={text} live={item.live} base={ctx.base} onOpenPath={ctx.openFile} className="conv-md" />}
       <Blocks blocks={item.content} ctx={ctx} />
       {item.content.some(isShortened) && <Shortened />}
     </div>
@@ -97,7 +107,7 @@ function AgentMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
 
 /** A thought: its text opens; one the agent keeps to itself says how many
  * tokens it took, when the agent estimates them. */
-function Thought({ item }: { item: ThoughtItem }) {
+function Thought({ item, ctx }: { item: ThoughtItem; ctx: ItemContext }) {
   const text = blocksText(item.content).trim();
   const [open, setOpen] = useState(false);
   const label =
@@ -124,7 +134,7 @@ function Thought({ item }: { item: ThoughtItem }) {
       </div>
       {open && text && (
         <div className="conv-tool-body">
-          <StreamMarkdown text={text} live={item.live} className="conv-md conv-thought-text" />
+          <StreamMarkdown text={text} live={item.live} base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-thought-text" />
         </div>
       )}
     </div>
@@ -364,7 +374,7 @@ export const ItemView = memo(function ItemView({ item, ctx }: { item: Item; ctx:
     case 'message':
       return item.role === 'user' ? <UserMessage item={item} ctx={ctx} /> : <AgentMessage item={item} ctx={ctx} />;
     case 'thought':
-      return <Thought item={item} />;
+      return <Thought item={item} ctx={ctx} />;
     case 'tool':
       return isSubagent(item) ? <SubagentView item={item} ctx={ctx} /> : <ToolCallView item={item} ctx={ctx} />;
     case 'plan':

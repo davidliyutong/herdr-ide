@@ -1189,7 +1189,7 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
               previewScrollTop.current = e.currentTarget.scrollTop;
             }}
           >
-            <Markdown text={deferredContent} base={mdBase} onOpenPath={openRelative} />
+            <Markdown text={deferredContent} variant="document" base={mdBase} onOpenPath={openRelative} />
           </div>
         )}
       </div>

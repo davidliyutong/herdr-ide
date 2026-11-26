@@ -1,17 +1,33 @@
 // The renderer behind Markdown.tsx, which hands it the renderer's packages
-// once they are loaded. The text is untrusted:
-//  - raw HTML is not enabled (no rehype-raw), so it shows as text;
+// once they are loaded. The text is untrusted (files on machines and coding
+// agents' messages):
+//  - HTML comments and safe GFM/VS Code HTML pass through rehype-raw and a
+//    strict allowlist sanitizer (sanitize.ts), stripping HTML comments, active
+//    tags (<script>, <style>, <iframe>, <object>, <embed>, <svg>, <math>,
+//    <form>, raw <input>, etc.), all on* handlers, style attributes, srcdoc,
+//    srcset and unsafe schemes;
 //  - a link keeps its href only for http(s) and mailto (links.ts); a relative
 //    one opens a file through the caller, and any other is its text; a web
-//    link names its address in its tooltip, and of a document of a machine
-//    opens as one of its terminals' does (terminal/openLink.ts: localhost
-//    in a browser pane, the rest outside), except that the pane asks before
-//    it makes a port forward: the link's text may hide where it leads;
-//  - an image loads only from a data URL, a blob or a file next to the
-//    document; a remote one becomes a link;
+//    link always names its address in its tooltip, and of a document of a
+//    machine opens as one of its terminals' does (terminal/openLink.ts:
+//    localhost in a browser pane, the rest outside), except that the pane
+//    asks before it makes a port forward: the link's text may hide where it
+//    leads;
+//  - an image (Markdown or HTML <img>) loads only from a raster base64 data
+//    URL, a blob or a file next to the document; a remote one becomes a link;
 //  - formulas go through KaTeX with trust off (terminal/mathRender.ts).
 
-import { cloneElement, isValidElement, useEffect, useMemo, useState, type ComponentProps, type ReactElement, type ReactNode } from 'react';
+import {
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type CSSProperties,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import type ReactMarkdown from 'react-markdown';
 import type { Components, Options } from 'react-markdown';
 import { AlertTriangle, Check, Copy, Info, Lightbulb, MessageSquareWarning, OctagonAlert } from 'lucide-react';
@@ -20,14 +36,20 @@ import { languageByAlias } from '../highlight/languages';
 import { renderMath } from '../terminal/mathRender';
 import { openWebLink } from '../terminal/openLink';
 import { t, type MessageKey } from '../i18n';
-import { imageSource, relativePath, safeLink, type MarkdownBase } from './links';
+import { imageSource, isSafeResolvedImage, parseImageDimension, relativePath, safeLink, type MarkdownBase } from './links';
+import { displayMath } from './math';
+import { ID_PREFIX } from './sanitize';
 
-/** Every URL as written: the components decide, where react-markdown's own
- * filter would drop some silently. */
+/** Layout and typographic density of rendered Markdown. */
+export type MarkdownVariant = 'document' | 'compact';
+
+/** Every URL as written: rehype-sanitize and the components decide, where
+ * react-markdown's own filter would drop some silently. */
 const urlTransform = (url: string) => url;
-/** Prefix of the ids of headings (and of footnotes, react-markdown's own), so
- * that a text cannot take an id the page uses. */
-const ID_PREFIX = 'user-content-';
+
+/** Disable remark-rehype's clobberPrefix so rehype-sanitize applies
+ * `user-content-` once instead of double-prefixing GFM footnote IDs. */
+const REMARK_REHYPE_OPTIONS = { clobberPrefix: '' } as const;
 
 function textOf(node: ReactNode): string {
   if (node == null || typeof node === 'boolean') return '';
@@ -140,7 +162,7 @@ function MathView({ tex, display }: { tex: string; display: boolean }) {
   );
 }
 
-function CodeBlock({ text, info }: { text: string; info: string }) {
+function CodeBlock({ text, info, copyable }: { text: string; info: string; copyable: boolean }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -155,18 +177,22 @@ function CodeBlock({ text, info }: { text: string; info: string }) {
   };
   return (
     <div className="md-code">
-      <div className="md-code-head">
-        <span className="md-code-lang">{info}</span>
-        <button
-          type="button"
-          className="icon md-code-copy"
-          title={copied ? t('markdown.copied') : t('markdown.copy')}
-          aria-label={t('markdown.copy')}
-          onClick={copy}
-        >
-          {copied ? <Check /> : <Copy />}
-        </button>
-      </div>
+      {(info || copyable) && (
+        <div className="md-code-head">
+          <span className="md-code-lang">{info}</span>
+          {copyable && (
+            <button
+              type="button"
+              className="icon md-code-copy"
+              title={copied ? t('markdown.copied') : t('markdown.copy')}
+              aria-label={t('markdown.copy')}
+              onClick={copy}
+            >
+              {copied ? <Check /> : <Copy />}
+            </button>
+          )}
+        </div>
+      )}
       <Code text={text} lang={languageByAlias(info)} />
     </div>
   );
@@ -188,7 +214,17 @@ function jumpTo(from: HTMLElement, fragment: string) {
   el?.scrollIntoView({ block: 'start' });
 }
 
-function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) => void) | undefined): Components {
+interface ComponentOptions {
+  base?: MarkdownBase;
+  onOpenPath?: (path: string) => void;
+  resolveImage?: (src: string, base?: MarkdownBase) => string | undefined;
+  resolveLink?: (href: string, base?: MarkdownBase) => string | undefined;
+  headingAnchors: boolean;
+  codeCopy: boolean;
+}
+
+function components(opts: ComponentOptions): Components {
+  const { base, onOpenPath, resolveImage, resolveLink, headingAnchors, codeCopy } = opts;
   // Deterministic, StrictMode-safe heading slug deduplication keyed by source offset.
   const seenOffsets = new Map<number, string>();
   const slugCounts = new Map<string, number>();
@@ -208,8 +244,8 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
   };
   const heading =
     (Tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6') =>
-    ({ node, children, ...rest }: ComponentProps<'h1'> & { node?: unknown }) => (
-      <Tag {...rest} id={headingId(node, children)}>
+    ({ node, children, id, ...rest }: ComponentProps<'h1'> & { node?: unknown }) => (
+      <Tag {...rest} id={id ?? (headingAnchors ? headingId(node, children) : undefined)}>
         {children}
       </Tag>
     );
@@ -250,12 +286,24 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
       }
       return <blockquote {...rest}>{children}</blockquote>;
     },
-    a({ node: _node, href, children }) {
-      if (href === undefined) return <span>{children}</span>;
+    a({ node: _node, href, title, id, className, children, ...rest }) {
+      const raw = rest as Record<string, unknown>;
+      const safeMeta = {
+        id,
+        className,
+        'aria-label': typeof rest['aria-label'] === 'string' ? rest['aria-label'] : undefined,
+        'aria-describedby': typeof rest['aria-describedby'] === 'string' ? rest['aria-describedby'] : undefined,
+        'aria-labelledby': typeof rest['aria-labelledby'] === 'string' ? rest['aria-labelledby'] : undefined,
+        ...(raw['data-footnote-ref'] !== undefined ? { 'data-footnote-ref': raw['data-footnote-ref'] } : undefined),
+        ...(raw['data-footnote-backref'] !== undefined ? { 'data-footnote-backref': raw['data-footnote-backref'] } : undefined),
+      };
+      if (href === undefined) return <span id={id}>{children}</span>;
       if (href.startsWith('#')) {
         return (
           <a
+            {...safeMeta}
             href={href}
+            title={title}
             onClick={(e) => {
               e.preventDefault();
               jumpTo(e.currentTarget, href.slice(1));
@@ -267,18 +315,21 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
       }
       const safe = safeLink(href);
       if (safe !== undefined) {
+        const tip = title && title !== safe ? `${title} — ${safe}` : safe;
         return (
-          <a href={safe} title={safe} target="_blank" rel="noopener noreferrer" onClick={openWeb(safe)}>
+          <a {...safeMeta} href={safe} title={tip} target="_blank" rel="noopener noreferrer" onClick={openWeb(safe)}>
             {children}
           </a>
         );
       }
-      const path = base && onOpenPath ? relativePath(href, base.dir) : undefined;
+      const path = onOpenPath ? (resolveLink ? resolveLink(href, base) : base ? relativePath(href, base.dir) : undefined) : undefined;
       if (path !== undefined && onOpenPath) {
+        const tip = title && title !== path ? `${title} — ${path}` : path;
         return (
           <a
+            {...safeMeta}
             href="#"
-            title={path}
+            title={tip}
             onClick={(e) => {
               e.preventDefault();
               onOpenPath(path);
@@ -288,15 +339,40 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
           </a>
         );
       }
-      return <span>{children}</span>;
+      return <span id={id}>{children}</span>;
     },
-    img({ node: _node, src, alt }) {
-      const source = typeof src === 'string' ? imageSource(src, base) : undefined;
-      if (source !== undefined) return <img src={source} alt={alt ?? ''} loading="lazy" />;
+    img({ node: _node, src, alt, title, width, height, ...rest }) {
+      const rawAlign = (rest as { align?: unknown }).align;
+      const rawSource = typeof src === 'string' ? (resolveImage ? resolveImage(src, base) : imageSource(src, base)) : undefined;
+      const source = rawSource !== undefined && (!resolveImage || isSafeResolvedImage(rawSource)) ? rawSource : undefined;
+      if (source !== undefined) {
+        const w = parseImageDimension(width);
+        const h = parseImageDimension(height);
+        const safeAlign = typeof rawAlign === 'string' && /^(?:left|center|right)$/i.test(rawAlign) ? rawAlign.toLowerCase() : undefined;
+        let style: CSSProperties | undefined;
+        if (w.pct || h.pct) {
+          style = {};
+          if (w.pct) style.width = w.pct;
+          if (h.pct) style.height = h.pct;
+        }
+        return (
+          <img
+            src={source}
+            alt={alt ?? ''}
+            title={title}
+            width={w.attr}
+            height={h.attr}
+            style={style}
+            data-align={safeAlign}
+            loading="lazy"
+          />
+        );
+      }
       const remote = typeof src === 'string' && /^https?:/i.test(src.trim()) ? safeLink(src) : undefined;
       if (remote !== undefined) {
+        const tip = title && title !== remote ? `${title} — ${remote}` : remote;
         return (
-          <a href={remote} title={remote} target="_blank" rel="noopener noreferrer" onClick={openWeb(remote)}>
+          <a href={remote} title={tip} target="_blank" rel="noopener noreferrer" onClick={openWeb(remote)}>
             {alt || remote}
           </a>
         );
@@ -309,7 +385,7 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
       const cls = isValidElement(child) ? (child.props.className ?? '') : '';
       const text = textOf(isValidElement(child) ? child.props.children : children).replace(/\n$/, '');
       if (/\blanguage-math\b/.test(cls)) return <MathView tex={text} display />;
-      return <CodeBlock text={text} info={/\blanguage-(\S+)/.exec(cls)?.[1] ?? ''} />;
+      return <CodeBlock text={text} info={/\blanguage-(\S+)/.exec(cls)?.[1] ?? ''} copyable={codeCopy} />;
     },
     code({ node: _node, className, children }) {
       if (/\blanguage-math\b/.test(className ?? '')) {
@@ -320,10 +396,10 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
     input({ node: _node, type, checked }) {
       return type === 'checkbox' ? <input type="checkbox" checked={!!checked} disabled readOnly /> : null;
     },
-    table({ node: _node, children }) {
+    table({ node: _node, children, ...rest }) {
       return (
         <div className="md-table">
-          <table>{children}</table>
+          <table {...rest}>{children}</table>
         </div>
       );
     },
@@ -332,17 +408,48 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
 
 export interface MarkdownBodyProps {
   text: string;
+  variant?: MarkdownVariant;
   base?: MarkdownBase;
   onOpenPath?: (path: string) => void;
+  resolveImage?: (src: string, base?: MarkdownBase) => string | undefined;
+  resolveLink?: (href: string, base?: MarkdownBase) => string | undefined;
+  frontmatter?: boolean;
+  headingAnchors?: boolean;
+  mathDelimiters?: boolean;
+  codeCopy?: boolean;
 }
 
-/** The renderer made of react-markdown and its plugins (GFM, maths). */
-export function markdownBody(Renderer: typeof ReactMarkdown, remarkPlugins: NonNullable<Options['remarkPlugins']>) {
-  return function MarkdownBody({ text, base, onOpenPath }: MarkdownBodyProps) {
-    const fm = useMemo(() => parseFrontmatter(text), [text]);
-    const body = fm ? fm.body : text;
-    // Recreate components when text changes so deduplicated heading slugs reset cleanly.
-    const comps = useMemo(() => components(base, onOpenPath), [text, base?.m, base?.dir, onOpenPath]);
+/** The renderer made of react-markdown and its remark/rehype plugins (GFM,
+ * maths, and strict HTML parsing + sanitization). */
+export function markdownBody(
+  Renderer: typeof ReactMarkdown,
+  remarkPlugins: NonNullable<Options['remarkPlugins']>,
+  rehypePlugins: NonNullable<Options['rehypePlugins']>,
+) {
+  return function MarkdownBody({
+    text,
+    variant = 'document',
+    base,
+    onOpenPath,
+    resolveImage,
+    resolveLink,
+    frontmatter,
+    headingAnchors = true,
+    mathDelimiters,
+    codeCopy = true,
+  }: MarkdownBodyProps) {
+    const showFrontmatter = frontmatter ?? variant !== 'compact';
+    const useMathDelimiters = mathDelimiters ?? variant === 'compact';
+    const fm = useMemo(() => (showFrontmatter ? parseFrontmatter(text) : undefined), [text, showFrontmatter]);
+    const body = useMemo(() => {
+      const raw = fm ? fm.body : text;
+      return useMathDelimiters ? displayMath(raw) : raw;
+    }, [fm, text, useMathDelimiters]);
+    // Recreate components when body changes so deduplicated heading slugs reset cleanly.
+    const comps = useMemo(
+      () => components({ base, onOpenPath, resolveImage, resolveLink, headingAnchors, codeCopy }),
+      [body, base?.m, base?.dir, onOpenPath, resolveImage, resolveLink, headingAnchors, codeCopy],
+    );
     return (
       <>
         {fm && (
@@ -355,7 +462,13 @@ export function markdownBody(Renderer: typeof ReactMarkdown, remarkPlugins: NonN
             ))}
           </dl>
         )}
-        <Renderer remarkPlugins={remarkPlugins} components={comps} urlTransform={urlTransform}>
+        <Renderer
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
+          remarkRehypeOptions={REMARK_REHYPE_OPTIONS}
+          components={comps}
+          urlTransform={urlTransform}
+        >
           {body}
         </Renderer>
       </>

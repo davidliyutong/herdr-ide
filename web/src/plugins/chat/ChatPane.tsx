@@ -7,7 +7,7 @@
 // refused it, or its agent failed (with what the agent wrote to its error
 // output). The composer says the rest (closed, handed off to a terminal,
 // sleeping agents start again with a message).
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BotMessageSquare, TriangleAlert, WifiOff } from 'lucide-react';
 import { actions } from '../../actions';
 import { InlineEdit } from '../../components/InlineEdit';
@@ -71,6 +71,7 @@ function ChatBody({ m, pane, view, chat }: { m: string; pane: string; view: Plug
 
   const title = live?.info?.title || st?.title || '';
   const cwd = live?.info?.cwd || st?.cwd || '';
+  const mdBase = useMemo(() => (cwd ? { m, dir: cwd } : undefined), [m, cwd]);
   const state = live?.state ?? st?.state;
   const status = st?.status;
   const offline = live?.link === 'offline' || (!!st?.stale && st.state !== 'closed');
@@ -159,6 +160,7 @@ function ChatBody({ m, pane, view, chat }: { m: string; pane: string; view: Plug
             ref={conv}
             source={source}
             kind={kind ?? ''}
+            base={mdBase}
             readOnly={readOnly}
             allowFull={allowFull}
             onOpenFile={(path, line) => void actions.openPath(m, path, line, undefined, pane)}

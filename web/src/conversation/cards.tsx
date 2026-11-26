@@ -17,7 +17,7 @@ import { useContext, useId, useMemo, useState, type FormEvent, type KeyboardEven
 import { ClipboardList, MessageCircleQuestion, ShieldQuestion } from 'lucide-react';
 import { Markdown } from '../markdown/Markdown';
 import { hasMessage, t } from '../i18n';
-import { commandOf, displayMath, inputText, jsonText } from './format';
+import { commandOf, inputText, jsonText } from './format';
 import {
   asText,
   OPTION_ALLOW_ONCE,
@@ -369,7 +369,7 @@ export function PlanCard({ item, ctx }: { item: PermissionItem; ctx: ItemContext
     >
       {plan.trim() && (
         <div className="conv-ask-plan">
-          <Markdown text={displayMath(plan)} className="conv-md conv-tool-md" />
+          <Markdown text={plan} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-tool-md" />
         </div>
       )}
       {a.waiting && (
@@ -430,7 +430,19 @@ function answersOf(q: Question, d: Draft): string[] {
   return out;
 }
 
-function QuestionField({ q, draft, disabled, onChange }: { q: Question; draft: Draft; disabled: boolean; onChange: (d: Draft) => void }) {
+function QuestionField({
+  q,
+  draft,
+  disabled,
+  ctx,
+  onChange,
+}: {
+  q: Question;
+  draft: Draft;
+  disabled: boolean;
+  ctx: ItemContext;
+  onChange: (d: Draft) => void;
+}) {
   const name = useId();
   const multi = !!q.multiSelect;
   const options = q.options ?? [];
@@ -496,7 +508,7 @@ function QuestionField({ q, draft, disabled, onChange }: { q: Question; draft: D
       )}
       {preview && (
         <div className="conv-q-preview">
-          <Markdown text={displayMath(preview)} className="conv-md conv-tool-md" />
+          <Markdown text={preview} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-tool-md" />
         </div>
       )}
     </fieldset>
@@ -566,6 +578,7 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
               q={q}
               draft={draftOf(q)}
               disabled={sending}
+              ctx={ctx}
               onChange={(d) => setDrafts((x) => new Map(x).set(q.id, d))}
             />
           ))}

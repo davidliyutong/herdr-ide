@@ -25,7 +25,7 @@ import {
 import { Markdown } from '../markdown/Markdown';
 import { t } from '../i18n';
 import { diffStat, hunks, lineDiff, patchLines, type DiffRow, type LineDiff, type Patch } from './diff';
-import { commandOf, displayMath, exitCodeOf, inputText, interrupted, jsonText, plainOutput, splitPath, subjectOf } from './format';
+import { commandOf, exitCodeOf, inputText, interrupted, jsonText, plainOutput, splitPath, subjectOf } from './format';
 import { asText, isDiffV2, type ToolCallContent, type ToolDiff, type ToolItem, type ToolKind } from './model';
 import { Blocks, isShortened, type ItemContext } from './parts';
 
@@ -244,7 +244,10 @@ export function Results({ content, kind, ctx }: { content: readonly ToolCallCont
   const cut = blocks.some(isShortened);
   const out: ReactNode[] = [];
   if (text.trim()) {
-    if (PROSE.has(kind)) out.push(<Markdown key="md" text={displayMath(text)} className="conv-md conv-tool-md" />);
+    if (PROSE.has(kind))
+      out.push(
+        <Markdown key="md" text={text} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-tool-md" />,
+      );
     else
       out.push(
         <pre key="pre" className={kind === 'execute' ? 'conv-pre conv-term' : 'conv-pre'}>
@@ -372,7 +375,7 @@ export function ToolCallView({ item, ctx }: { item: ToolItem; ctx: ItemContext }
               <div className="conv-prompt">{prompt}</div>
             </Section>
           )}
-          {plan && <Markdown text={displayMath(plan)} className="conv-md conv-tool-md" />}
+          {plan && <Markdown text={plan} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-tool-md" />}
           {rawInput && (
             <Section title={t('conversation.tool.input')}>
               <pre className="conv-pre">{rawInput}</pre>

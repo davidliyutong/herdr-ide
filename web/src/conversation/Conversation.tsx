@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
 import { ArrowDown, MessagesSquare } from 'lucide-react';
 import { t } from '../i18n';
+import type { MarkdownBase } from '../markdown/links';
 import { Composer } from './Composer';
 import { spokenText } from './format';
 import { ItemView } from './items';
@@ -29,6 +30,8 @@ export interface ConversationProps {
   source: ChatSource;
   /** The agent's kind (kinds.ts), whose title the view names it by. */
   kind: string;
+  /** Machine and directory relative Markdown links and images resolve against. */
+  base?: MarkdownBase;
   /** Read-only (also when the source says so): every control disabled. */
   readOnly?: boolean;
   /** The chat's machine allows full access (its setting
@@ -147,7 +150,7 @@ function useConversation(source: ChatSource, onTaken: (what: Taken) => void) {
   return shown.source === source ? shown.conv : EMPTY;
 }
 
-export function Conversation({ source, kind, readOnly: readOnlyProp, allowFull = true, onOpenFile, ref }: ConversationProps) {
+export function Conversation({ source, kind, base, readOnly: readOnlyProp, allowFull = true, onOpenFile, ref }: ConversationProps) {
   const agent = agentKind(kind)?.title ?? t('conversation.agent');
   const readOnly = !!readOnlyProp || !!source.readOnly;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -202,14 +205,18 @@ export function Conversation({ source, kind, readOnly: readOnlyProp, allowFull =
   const canOpen = !!onOpenFile;
   const canTrust = !readOnly && !!source.trust;
   const canUntrust = !readOnly && !!source.untrust;
+  const baseM = base?.m;
+  const baseDir = base?.dir;
+  const stableBase = useMemo<MarkdownBase | undefined>(() => (baseM && baseDir ? { m: baseM, dir: baseDir } : undefined), [baseM, baseDir]);
   const ctx = useMemo<ItemContext>(
     () => ({
       agent,
+      base: stableBase,
       openFile: canOpen ? (path, line) => latest.current.onOpenFile?.(path, line) : undefined,
       trust: canTrust ? () => latest.current.source.trust?.() ?? Promise.resolve() : undefined,
       untrust: canUntrust ? () => latest.current.source.untrust?.() ?? Promise.resolve() : undefined,
     }),
-    [agent, canOpen, canTrust, canUntrust],
+    [agent, stableBase, canOpen, canTrust, canUntrust],
   );
 
   const state = conv.state;

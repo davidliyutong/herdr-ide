@@ -159,6 +159,33 @@ describe('the chat pane', () => {
     expect(q('.chat-state')!.textContent).toBe(t('chat.state.working'));
   });
 
+  it('passes machine and cwd to unified Markdown so relative images and HTML render safely in Chat', async () => {
+    chats.chat(A, { kind: 'claude', title: 'Plots', cwd: '/home/u/proj', state: 'idle' }, [
+      {
+        seq: 1,
+        t: 'update',
+        item: 'm1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: {
+            type: 'text',
+            text: '<!-- hidden --><img src="./chart.png" alt="Chart" width="180"><script>alert(1)</script>',
+          },
+        },
+      },
+    ]);
+    await pane(view(A));
+    await vi.waitFor(async () => {
+      await tick();
+      expect(q('.conv-agent img')).not.toBeNull();
+    });
+    const img = q<HTMLImageElement>('.conv-agent img')!;
+    expect(img.getAttribute('src')).toBe('/api/m/m/file?path=%2Fhome%2Fu%2Fproj%2Fchart.png');
+    expect(img.getAttribute('width')).toBe('180');
+    expect(host.textContent).not.toContain('hidden');
+    expect(q('.conv-agent script')).toBeNull();
+  });
+
   it('renames the chat in place', async () => {
     chats.chat(A, { kind: 'claude', title: 'Old', state: 'idle' });
     await pane(view(A));

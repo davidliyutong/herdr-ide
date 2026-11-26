@@ -6,6 +6,7 @@
 import { createContext } from 'react';
 import { FileText, ImageIcon } from 'lucide-react';
 import { hasMessage, t, type MessageKey } from '../i18n';
+import type { MarkdownBase } from '../markdown/links';
 import { asText, ownMeta, type ContentBlock } from './model';
 import type { ChatSource, PermissionReply, QuestionReply } from './source';
 
@@ -14,6 +15,9 @@ import type { ChatSource, PermissionReply, QuestionReply } from './source';
 export interface ItemContext {
   /** The agent's name for people. */
   agent: string;
+  /** The machine and working directory relative Markdown links and images
+   * resolve against, when the conversation belongs to a machine. */
+  base?: MarkdownBase;
   /** Opens a file the agent named (a location, a link to a resource). */
   openFile?: (path: string, line?: number) => void;
   /** Trusts the chat's folder (ChatSource.trust); absent when the source

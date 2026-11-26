@@ -129,62 +129,9 @@
   mask-image: linear-gradient(to bottom, #000 70%, transparent);
 }
 
-/* ---- the agent's messages ---- */
+/* ---- the agent's messages (compact Markdown styling lives in markdown.css) ---- */
 .conv-agent {
   line-height: 1.6;
-}
-.conv-md {
-  font-size: inherit;
-}
-.conv-md h1,
-.conv-md h2,
-.conv-md h3,
-.conv-md h4,
-.conv-md h5,
-.conv-md h6 {
-  margin: 1.1em 0 0.45em;
-}
-.conv-md h1 {
-  font-size: 1.3em;
-  padding-bottom: 0.2em;
-}
-.conv-md h2 {
-  font-size: 1.16em;
-  padding-bottom: 0.2em;
-}
-.conv-md h3 {
-  font-size: 1.05em;
-}
-.conv-md p,
-.conv-md ul,
-.conv-md ol,
-.conv-md blockquote,
-.conv-md .md-table,
-.conv-md .md-code,
-.conv-md .md-math-display {
-  margin-bottom: 0.75em;
-}
-.conv-md ul,
-.conv-md ol {
-  padding-left: 1.6em;
-}
-.conv-md table {
-  font-size: 0.95em;
-  font-variant-numeric: tabular-nums;
-}
-.conv-md th,
-.conv-md td {
-  padding: 0.3em 0.75em;
-  vertical-align: top;
-}
-.conv-md th {
-  text-align: left;
-}
-.conv-md tbody tr:nth-child(even) td {
-  background: color-mix(in srgb, var(--bg-2) 45%, transparent);
-}
-.conv-md .md-math-display {
-  padding: 2px 0;
 }
 
 /* ---- quiet rows: thoughts and tool calls ---- */

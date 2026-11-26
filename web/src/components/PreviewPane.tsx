@@ -243,7 +243,7 @@ export function PreviewPane({ m, pane, path, shown = true }: { m: string; pane: 
         {text !== undefined &&
           (isMarkdown && rendered ? (
             <div className="markdown-preview">
-              <Markdown text={text} base={base} onOpenPath={show} />
+              <Markdown text={text} variant="document" base={base} onOpenPath={show} />
             </div>
           ) : (
             <Code className="text-preview" text={text} lang={languageOf(path, text.split('\n', 1)[0])} />

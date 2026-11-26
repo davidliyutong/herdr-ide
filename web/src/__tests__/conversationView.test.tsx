@@ -174,7 +174,7 @@ describe('the conversation view’s messages', () => {
 
   it('reads the agent’s last message out, and nothing else', async () => {
     const s = new FakeSource();
-    s.emit(prompt('hi'), say('**Hello** there', 'm1'));
+    s.emit(prompt('hi'), say('<!-- hidden -->**Hello** there', 'm1'));
     await show(s);
     expect(q('[role="log"]')?.getAttribute('aria-live')).toBe('off');
     const live = qa('[aria-live="polite"]');
@@ -182,6 +182,63 @@ describe('the conversation view’s messages', () => {
     expect(live[0].textContent).toBe('Hello there');
     await emit(s, prompt('more'));
     expect(live[0].textContent).toBe('');
+  });
+
+  it('uses unified compact Markdown in Agent Native View: hides HTML comments, renders safe HTML & alerts, resolves relative links/images, and strips XSS', async () => {
+    const s = new FakeSource();
+    const onOpenFile = vi.fn();
+    s.emit(
+      say(
+        [
+          '<!-- hidden single -->',
+          '<!--',
+          'hidden multi',
+          '',
+          'still hidden',
+          '-->',
+          '> [!NOTE]',
+          '> Useful callout',
+          '',
+          '<details open><summary>Trace</summary>',
+          '',
+          'Hit <kbd>Enter</kbd> to see <mark>result</mark>.',
+          '',
+          '</details>',
+          '',
+          '<table><thead><tr><th align="center">Col</th></tr></thead><tbody><tr><td>Val</td></tr></tbody></table>',
+          '',
+          '<img src="./plot.png" alt="Plot" width="240" onerror="alert(1)">',
+          '',
+          '[Open doc](./docs/guide.md) and <a href="javascript:alert(1)">bad</a>',
+          '',
+          '<script>alert(1)</script><iframe src="javascript:alert(1)"></iframe><svg onload="alert(1)"></svg><style>body{color:red}</style>',
+        ].join('\n'),
+        'm1',
+      ),
+    );
+    await show(s, { base: { m: 'box', dir: '/home/u/proj' }, onOpenFile });
+    await until(() => q('.conv-agent details summary'));
+    const md = q('.conv-agent .markdown')!;
+    expect(md.classList.contains('markdown-compact')).toBe(true);
+    expect(md.textContent).not.toContain('hidden single');
+    expect(md.textContent).not.toContain('hidden multi');
+    expect(md.textContent).not.toContain('color:red');
+    expect(md.querySelector('.md-alert-note .md-alert-body')?.textContent).toContain('Useful callout');
+    expect(md.querySelector('details summary')?.textContent).toBe('Trace');
+    expect(md.querySelector('kbd')?.textContent).toBe('Enter');
+    expect(md.querySelector('mark')?.textContent).toBe('result');
+    expect(md.querySelector('table td')?.textContent).toBe('Val');
+    const img = md.querySelector('img')!;
+    expect(img.getAttribute('src')).toBe('/api/m/box/file?path=%2Fhome%2Fu%2Fproj%2Fplot.png');
+    expect(img.getAttribute('width')).toBe('240');
+    expect(img.getAttribute('onerror')).toBeNull();
+    const docLink = [...md.querySelectorAll('a')].find((a) => a.textContent === 'Open doc')!;
+    await click(docLink);
+    expect(onOpenFile).toHaveBeenCalledWith('/home/u/proj/docs/guide.md', undefined);
+    expect([...md.querySelectorAll('a')].find((a) => a.textContent === 'bad')).toBeUndefined();
+    for (const tag of ['script', 'iframe', 'style']) expect(md.querySelector(tag)).toBeNull();
+    expect(md.querySelector('svg:not(.md-alert-icon)')).toBeNull();
+    expect(md.querySelector('[onload]')).toBeNull();
   });
 
   it('shows a thought as one line that opens when it has text', async () => {
