@@ -33,6 +33,9 @@ export const settings = defineModule({
     'files.followFocus': bool({ default: true, section, order: 40 }),
     /** Move to Trash asks first. */
     'files.confirmTrash': bool({ default: false, section, order: 50 }),
+    /** Where Cmd/Ctrl+click on a file path in a terminal opens it by default:
+     * the explorer's preview editor ('editor') or VS Code ('vscode'). */
+    'files.openLinks': enumOf(['editor', 'vscode'], { default: 'editor', section, order: 60 }),
   },
 });
 

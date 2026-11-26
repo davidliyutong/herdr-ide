@@ -132,12 +132,63 @@
   width: var(--ic-sm);
   height: var(--ic-sm);
 }
+.files-editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.files-editor-body[hidden] {
+  display: none;
+}
+.files-editor-body.split {
+  flex-direction: row;
+}
+.files-editor-body.split > .files-editor-host {
+  flex: 1 1 50%;
+  min-width: 0;
+  border-right: 1px solid var(--line);
+}
+.files-editor-body.split > .files-md-preview {
+  flex: 1 1 50%;
+  min-width: 0;
+  padding: 18px 22px 36px;
+}
 .files-editor-host {
   flex: 1;
   min-height: 0;
 }
 .files-editor-host[hidden] {
   display: none;
+}
+.files-md-modes {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  margin-right: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+}
+.files-md-modes .icon.on {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+.files-md-preview {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px 32px 48px;
+  background: var(--bg);
+  font-size: var(--ds-font-size-base);
+}
+.files-md-preview > .markdown {
+  max-width: 860px;
+  margin: 0 auto;
+}
+.monaco-editor .files-target-range {
+  background: var(--accent-soft);
 }
 
 /* The editor's quick diff: bars in the gutter, as VS Code's. */

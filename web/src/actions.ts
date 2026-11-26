@@ -10,7 +10,8 @@ import { describeView, isPluginOn, viewStatus, viewUnopened } from './plugins/re
 import { isLive, type TerminalRecord } from './term/protocol';
 import { terms, useTerms } from './state/terms';
 import { useStore } from './state/store';
-import { withView } from './state/panes';
+import { withView, unsavedPanes } from './state/panes';
+import { settingValue } from './settings';
 import { aggregate, agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } from './lib/machine';
 import { mediaExt } from './terminal/links';
 import { bridge, hasFrame, type BridgeCommand } from './lib/bridge';
@@ -307,6 +308,10 @@ async function putEnabled(m: string, enabled: boolean) {
 export const slotIndex = (from: number, slot: number) => (slot > from ? slot - 1 : slot);
 
 const axisOf = (dir: 'right' | 'down'): L.Axis => (dir === 'right' ? 'horizontal' : 'vertical');
+
+let lastReveal = 0;
+/** A strictly increasing reveal token so repeated jumps to the same line trigger again. */
+const nextReveal = () => (lastReveal = Math.max(Date.now(), lastReveal + 1));
 
 /** Starts, restarts or stops a machine's terminal core
  * (POST /api/m/{id}/hc/{action}) without asking; one action at a time per
@@ -936,16 +941,54 @@ export const actions = {
     return { m: c.m, pane: leaf ? c.focused : undefined, terminal, cwd };
   },
 
-  /** Opens a path found in a pane (from; the focused pane by default): media,
-   * and anything with the VS Code plugin off, in a preview pane
-   * (openPreview), anything else in VS Code at the line:
-   * in a VS Code pane of the workspace, the one of from's tab whose folder
-   * holds the file first, then one of another tab that holds it, then any
-   * of from's tab, then any; else in a new one split beside from, for the
-   * terminal's directory or the workspace's when the file is below it, else
-   * for the file's directory. */
-  async openPath(m: string, path: string, line?: number, col?: number, from?: string) {
-    // Without VS Code, Quick Look shows text as well.
+  /** Opens a file in the File Explorer plugin's editor/preview pane: in a tab
+   * of the workspace by default (or split beside from with side), reusing an
+   * existing editor for the same path or an unedited preview editor. */
+  async openEditor(
+    m: string,
+    path: string,
+    o: { preview?: boolean; side?: boolean; line?: number; col?: number; endLine?: number; endCol?: number; from?: string } = {},
+  ) {
+    await whenLoaded(m);
+    const preview = !!o.preview && !o.side;
+    const hasLine = typeof o.line === 'number' && o.line > 0;
+    const endLine = hasLine && typeof o.endLine === 'number' && o.endLine >= o.line! ? o.endLine : undefined;
+    const endCol = endLine !== undefined && typeof o.endCol === 'number' && o.endCol > 0 ? o.endCol : undefined;
+    const at = hasLine
+      ? {
+          line: o.line,
+          col: o.col && o.col > 0 ? o.col : 1,
+          endLine,
+          endCol,
+          reveal: nextReveal(),
+        }
+      : { line: undefined, col: undefined, endLine: undefined, endCol: undefined, reveal: undefined };
+    const view = { plugin: 'files', kind: 'editor', path, ...at };
+    const tab = !o.side;
+    const layout = terms.layout(m);
+    const ws = layout ? originOf(m, layout, o.from).ws : undefined;
+    const openEditors = ws ? L.pluginViews(ws, 'files', 'editor').map((v) => v.view) : [];
+    if (openEditors.some((v) => v.path === path))
+      return actions.openView(m, preview ? view : { ...view, preview: false }, { reuse: (v) => v.path === path, tab, from: o.from });
+    const replaceable = (v: L.PluginView) => preview && v.preview === true && !unsavedPanes(m, [L.viewKey(v.id)]).length;
+    return actions.openView(m, { ...view, preview }, { reuse: replaceable, tab, from: o.from });
+  },
+
+  /** Opens a path found in a pane (from; the focused pane by default): by
+   * default (files.openLinks = 'editor') in the File Explorer plugin's
+   * preview/editor pane (navigating to line/col/endLine when given); when
+   * files.openLinks is 'vscode' (or when the files plugin is off) non-media
+   * files open in VS Code when its plugin is on, falling back to Quick Look
+   * (openPreview). */
+  async openPath(m: string, path: string, line?: number, col?: number, from?: string, endLine?: number, endCol?: number) {
+    const preferCode = settingValue('files.openLinks') === 'vscode';
+    if (preferCode) {
+      if (!mediaExt.test(path) && isPluginOn('vscode')) return actions.openInCode(m, path, line, col, from);
+      if (isPluginOn('files')) return actions.openEditor(m, path, { preview: true, line, col, endLine, endCol, from });
+      return actions.openPreview(m, path, from);
+    }
+    if (isPluginOn('files')) return actions.openEditor(m, path, { preview: true, line, col, endLine, endCol, from });
+    // Without the files plugin (or VS Code), Quick Look shows text as well.
     if (mediaExt.test(path) || !isPluginOn('vscode')) return actions.openPreview(m, path, from);
     return actions.openInCode(m, path, line, col, from);
   },

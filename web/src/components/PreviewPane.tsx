@@ -16,6 +16,7 @@ import { t } from '../i18n';
 import { usePluginOn } from '../plugins/registry';
 import { Code } from '../highlight/Code';
 import { languageOf } from '../highlight/languages';
+import { isMarkdownPath } from '../markdown/links';
 import { Markdown } from '../markdown/Markdown';
 import { FileBack } from './PluginPane';
 
@@ -32,9 +33,17 @@ export function dirname(p: string) {
 export const isMediaPath = (path: string) => mediaExt.test(path);
 
 /** An image, video, audio file or PDF of a machine, as large as fits. */
-export function MediaView({ m, path }: { m: string; path: string }) {
+export function MediaView({ m, path, shown = true }: { m: string; path: string; shown?: boolean }) {
   const [videoError, setVideoError] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   useEffect(() => setVideoError(false), [path]);
+  useEffect(() => {
+    if (!shown) {
+      videoRef.current?.pause();
+      audioRef.current?.pause();
+    }
+  }, [shown]);
   const url = fileUrl(m, path);
   return (
     <>
@@ -43,9 +52,9 @@ export function MediaView({ m, path }: { m: string; path: string }) {
         (videoError ? (
           <div className="pad muted">{t('preview.videoUnsupported')}</div>
         ) : (
-          <video src={url} controls autoPlay loop muted playsInline onError={() => setVideoError(true)} />
+          <video ref={videoRef} src={url} controls autoPlay={shown} loop muted playsInline onError={() => setVideoError(true)} />
         ))}
-      {audioExt.test(path) && <audio src={url} controls autoPlay />}
+      {audioExt.test(path) && <audio ref={audioRef} src={url} controls autoPlay={shown} />}
       {/\.pdf$/i.test(path) && <iframe className="pdf-frame" src={url} title={path} />}
     </>
   );
@@ -56,7 +65,7 @@ export function MediaView({ m, path }: { m: string; path: string }) {
  * switch draws it afresh) keeps showing them, as an editor keeps a deleted
  * file's text, rather than an error. */
 const shownLast = new Map<string, { text?: string; dirEntries?: RemoteStat[] }>();
-const KEPT_SHOWN = 8;
+const KEPT_SHOWN = 32;
 function keepShown(key: string, shown: { text?: string; dirEntries?: RemoteStat[] }) {
   shownLast.delete(key);
   shownLast.set(key, shown);
@@ -66,13 +75,14 @@ function keepShown(key: string, shown: { text?: string; dirEntries?: RemoteStat[
   }
 }
 
-export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: string }) {
+export function PreviewPane({ m, pane, path, shown = true }: { m: string; pane: string; path: string; shown?: boolean }) {
   const readOnly = useStore((s) => s.readOnly);
   const code = usePluginOn('vscode');
   const [siblings, setSiblings] = useState<RemoteStat[]>([]);
-  const [dirEntries, setDirEntries] = useState<RemoteStat[] | undefined>();
+  const init = shownLast.get(`${m}\n${path}`);
+  const [dirEntries, setDirEntries] = useState<RemoteStat[] | undefined>(() => init?.dirEntries);
   const [error, setError] = useState<string>();
-  const [text, setText] = useState<string>();
+  const [text, setText] = useState<string | undefined>(() => init?.text);
   // Whether a Markdown file shows rendered (per pane, not kept).
   const [rendered, setRendered] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -82,32 +92,39 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
   const isMedia = mediaExt.test(path);
   const url = fileUrl(m, path);
   const show = (next: string) => terms.mutate(m, (l) => L.setPreviewPath(l, pane, next));
-  const isMarkdown = languageOf(path) === 'markdown';
+  const isMarkdown = isMarkdownPath(path);
   const base = useMemo(() => ({ m, dir: dirname(path) }), [m, path]);
 
   useEffect(() => registerPane(m, pane, { focus: () => containerRef.current?.focus() }), [m, pane]);
 
   useEffect(() => {
+    if (!shown) return;
     let cancelled = false;
     const key = `${m}\n${path}`;
+    const last = shownLast.get(key);
     setError(undefined);
-    setText(undefined);
-    setDirEntries(undefined);
+    // Hydrate immediately from cached content (if any) without blanking the view.
+    setText(last?.text);
+    setDirEntries(last?.dirEntries);
     (async () => {
-      // A path without a media extension may be a directory or a text file.
+      // A path without a media extension may be a text file or a directory.
+      // Fetch the file first (single round-trip in the common case) and only
+      // list as a directory when the hub reports 400 is a directory.
       if (!isMedia) {
         try {
-          const d = await listDir(m, path);
-          if (cancelled) return;
-          setDirEntries(d.entries);
-          keepShown(key, { dirEntries: d.entries });
-          return;
-        } catch {
-          /* not a directory */
-        }
-        try {
           const r = await fetch(url, { headers: { Range: 'bytes=0-2097151' } });
-          const last = shownLast.get(key);
+          if (r.status === 400) {
+            const msg = await r.text().catch(() => '');
+            if (/is a directory/i.test(msg)) {
+              const d = await listDir(m, path);
+              if (cancelled) return;
+              setText(undefined);
+              setDirEntries(d.entries);
+              keepShown(key, { dirEntries: d.entries });
+              return;
+            }
+            throw new Error(msg || r.statusText);
+          }
           if (r.status === 404 && last) {
             // Gone since it was shown: what it showed stays.
             if (cancelled) return;
@@ -119,21 +136,27 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
           const buf = new Uint8Array(await r.arrayBuffer());
           if (buf.subarray(0, 8000).includes(0)) throw new Error(t('preview.binary'));
           if (cancelled) return;
-          const shown = new TextDecoder().decode(buf);
-          setText(shown);
-          keepShown(key, { text: shown });
+          const next = new TextDecoder().decode(buf);
+          setDirEntries(undefined);
+          setText(next);
+          keepShown(key, { text: next });
         } catch (e) {
           if (!cancelled) setError(e instanceof Error ? e.message : String(e));
         }
       }
     })();
-    listDir(m, dirname(path))
-      .then((d) => !cancelled && setSiblings(d.entries.filter((e) => !e.is_dir && mediaExt.test(e.name))))
-      .catch(() => {});
+    // Sibling media navigation (← →) only applies to media files.
+    if (isMedia) {
+      listDir(m, dirname(path))
+        .then((d) => !cancelled && setSiblings(d.entries.filter((e) => !e.is_dir && mediaExt.test(e.name))))
+        .catch(() => {});
+    } else {
+      setSiblings([]);
+    }
     return () => {
       cancelled = true;
     };
-  }, [m, path, url, isMedia, loads]);
+  }, [m, path, url, isMedia, loads, shown]);
 
   const index = useMemo(() => siblings.findIndex((s) => dirname(path) + '/' + s.name === path), [siblings, path]);
   const go = (step: number) => {
@@ -188,7 +211,7 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
       </div>
       <div className="preview-body">
         {error && <div className="error pad">{error}</div>}
-        {isMedia && <MediaView m={m} path={path} />}
+        {isMedia && <MediaView m={m} path={path} shown={shown} />}
         {text !== undefined &&
           (isMarkdown && rendered ? (
             <div className="markdown-preview">

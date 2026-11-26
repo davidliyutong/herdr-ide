@@ -439,6 +439,11 @@ export const zhCN: Messages = {
   'preview.source': '显示源码',
   'markdown.copy': '复制代码',
   'markdown.copied': '已复制',
+  'markdown.alert.note': '备注',
+  'markdown.alert.tip': '提示',
+  'markdown.alert.important': '重要',
+  'markdown.alert.warning': '警告',
+  'markdown.alert.caution': '注意',
   'preview.videoUnsupported': '浏览器无法解码这个视频（可能是 HEVC/MKV 等编码）。可以下载，或在 VS Code 中打开。',
   'transfers.close': '关闭',
 

@@ -5,6 +5,9 @@
 import { fileUrl } from '../lib/files';
 import { safeWebUrl } from '../lib/webUrl';
 
+/** Whether a file path is a Markdown document (.md, .mdx, .markdown, …). */
+export const isMarkdownPath = (path: string): boolean => /\.(?:md|mdx|markdown|mdown|mkd|mkdn|mdwn)$/i.test(path);
+
 /** Where relative references of a document resolve: the machine and the
  * directory of the document. */
 export interface MarkdownBase {

@@ -11,15 +11,15 @@
 //    document; a remote one becomes a link;
 //  - formulas go through KaTeX with trust off (terminal/mathRender.ts).
 
-import { isValidElement, useEffect, useMemo, useState, type ComponentProps, type ReactElement, type ReactNode } from 'react';
+import { cloneElement, isValidElement, useEffect, useMemo, useState, type ComponentProps, type ReactElement, type ReactNode } from 'react';
 import type ReactMarkdown from 'react-markdown';
 import type { Components, Options } from 'react-markdown';
-import { Check, Copy } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Info, Lightbulb, MessageSquareWarning, OctagonAlert } from 'lucide-react';
 import { Code } from '../highlight/Code';
 import { languageByAlias } from '../highlight/languages';
 import { renderMath } from '../terminal/mathRender';
 import { openWebLink } from '../terminal/openLink';
-import { t } from '../i18n';
+import { t, type MessageKey } from '../i18n';
 import { imageSource, relativePath, safeLink, type MarkdownBase } from './links';
 
 /** Every URL as written: the components decide, where react-markdown's own
@@ -43,6 +43,78 @@ const slug = (s: string) =>
     .trim()
     .replace(/[^\p{L}\p{N}\s_-]/gu, '')
     .replace(/\s+/g, '-');
+
+/** Extracts leading YAML frontmatter (`---\nkey: value\n---`) when every
+ * non-empty line in the block looks like YAML metadata. Returns undefined for
+ * plain horizontal rules or non-YAML blocks so regular Markdown stays intact. */
+export function parseFrontmatter(text: string): { entries: Array<[string, string]>; body: string } | undefined {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+  if (!m) return undefined;
+  const raw = m[1];
+  const lines = raw.split(/\r?\n/);
+  const entries: Array<[string, string]> = [];
+  let current: [string, string] | undefined;
+  for (const line of lines) {
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    const kv = /^([A-Za-z0-9_.-]+)\s*:\s*(.*)$/.exec(line);
+    if (kv) {
+      const val = kv[2].trim().replace(/^(['"])(.*)\1$/, '$2');
+      current = [kv[1], val];
+      entries.push(current);
+      continue;
+    }
+    if (/^\s+-\s+/.test(line) && current) {
+      const item = line
+        .replace(/^\s+-\s+/, '')
+        .trim()
+        .replace(/^(['"])(.*)\1$/, '$2');
+      current[1] = current[1] ? `${current[1]}, ${item}` : item;
+      continue;
+    }
+    if (/^\s+\S/.test(line) && current) {
+      const more = line.trim();
+      current[1] = current[1] ? `${current[1]} ${more}` : more;
+      continue;
+    }
+    return undefined;
+  }
+  if (!entries.length) return undefined;
+  return { entries, body: text.slice(m[0].length) };
+}
+
+type AlertKind = 'note' | 'tip' | 'important' | 'warning' | 'caution';
+const ALERT_RE = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:[ \t]*(?:\r?\n|$))?/i;
+const ALERT_META: Record<AlertKind, { icon: typeof Info; label: MessageKey }> = {
+  note: { icon: Info, label: 'markdown.alert.note' },
+  tip: { icon: Lightbulb, label: 'markdown.alert.tip' },
+  important: { icon: MessageSquareWarning, label: 'markdown.alert.important' },
+  warning: { icon: AlertTriangle, label: 'markdown.alert.warning' },
+  caution: { icon: OctagonAlert, label: 'markdown.alert.caution' },
+};
+
+/** Detects a GitHub-style alert blockquote (`> [!NOTE]\n> ...`) and strips the
+ * marker from the first paragraph without using raw HTML. */
+function extractAlert(children: ReactNode): { kind: AlertKind; body: ReactNode } | undefined {
+  const list = Array.isArray(children) ? children : [children];
+  const idx = list.findIndex((c) => isValidElement(c));
+  if (idx < 0) return undefined;
+  const first = list[idx] as ReactElement<{ children?: ReactNode }>;
+  const inner = first.props.children;
+  const parts = Array.isArray(inner) ? inner : [inner];
+  const head = parts[0];
+  if (typeof head !== 'string') return undefined;
+  const m = ALERT_RE.exec(head);
+  if (!m) return undefined;
+  const kind = m[1].toLowerCase() as AlertKind;
+  const restHead = head.slice(m[0].length);
+  const nextParts = restHead ? [restHead, ...parts.slice(1)] : parts.slice(1);
+  // Drop a leading <br /> if hard breaks were used right after `[!NOTE]`.
+  const cleaned = nextParts.length > 0 && isValidElement(nextParts[0]) && nextParts[0].type === 'br' ? nextParts.slice(1) : nextParts;
+  const nextList = [...list];
+  if (cleaned.length > 0) nextList[idx] = cloneElement(first, undefined, ...cleaned);
+  else nextList.splice(idx, 1);
+  return { kind, body: nextList };
+}
 
 function MathView({ tex, display }: { tex: string; display: boolean }) {
   const [html, setHtml] = useState<string | null>(null);
@@ -100,16 +172,7 @@ function CodeBlock({ text, info }: { text: string; info: string }) {
   );
 }
 
-const heading =
-  (Tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6') =>
-  ({ node: _node, children, ...rest }: ComponentProps<'h1'> & { node?: unknown }) => {
-    const s = slug(textOf(children));
-    return (
-      <Tag {...rest} id={s ? ID_PREFIX + s : undefined}>
-        {children}
-      </Tag>
-    );
-  };
+type NodeWithPos = { position?: { start?: { offset?: number } } };
 
 /** Scrolls to the element a `#fragment` link names inside the document. */
 function jumpTo(from: HTMLElement, fragment: string) {
@@ -126,6 +189,31 @@ function jumpTo(from: HTMLElement, fragment: string) {
 }
 
 function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) => void) | undefined): Components {
+  // Deterministic, StrictMode-safe heading slug deduplication keyed by source offset.
+  const seenOffsets = new Map<number, string>();
+  const slugCounts = new Map<string, number>();
+  const headingId = (node: unknown, children: ReactNode): string | undefined => {
+    const baseSlug = slug(textOf(children));
+    if (!baseSlug) return undefined;
+    const off = (node as NodeWithPos | undefined)?.position?.start?.offset;
+    if (off !== undefined) {
+      const existing = seenOffsets.get(off);
+      if (existing !== undefined) return existing;
+    }
+    const n = slugCounts.get(baseSlug) ?? 0;
+    slugCounts.set(baseSlug, n + 1);
+    const id = ID_PREFIX + (n === 0 ? baseSlug : `${baseSlug}-${n}`);
+    if (off !== undefined) seenOffsets.set(off, id);
+    return id;
+  };
+  const heading =
+    (Tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6') =>
+    ({ node, children, ...rest }: ComponentProps<'h1'> & { node?: unknown }) => (
+      <Tag {...rest} id={headingId(node, children)}>
+        {children}
+      </Tag>
+    );
+
   // A click on a web link of a machine's document: it opens as a link in
   // one of that machine's terminals does, but a port forward waits for the
   // user's word in the pane.
@@ -145,6 +233,23 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
     h4: heading('h4'),
     h5: heading('h5'),
     h6: heading('h6'),
+    blockquote({ node: _node, children, ...rest }) {
+      const alert = extractAlert(children);
+      if (alert) {
+        const meta = ALERT_META[alert.kind];
+        const Icon = meta.icon;
+        return (
+          <div className={`md-alert md-alert-${alert.kind}`} role="note">
+            <div className="md-alert-title">
+              <Icon className="md-alert-icon" aria-hidden="true" />
+              <span>{t(meta.label)}</span>
+            </div>
+            <div className="md-alert-body">{alert.body}</div>
+          </div>
+        );
+      }
+      return <blockquote {...rest}>{children}</blockquote>;
+    },
     a({ node: _node, href, children }) {
       if (href === undefined) return <span>{children}</span>;
       if (href.startsWith('#')) {
@@ -173,6 +278,7 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
         return (
           <a
             href="#"
+            title={path}
             onClick={(e) => {
               e.preventDefault();
               onOpenPath(path);
@@ -186,7 +292,7 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
     },
     img({ node: _node, src, alt }) {
       const source = typeof src === 'string' ? imageSource(src, base) : undefined;
-      if (source !== undefined) return <img src={source} alt={alt ?? ''} />;
+      if (source !== undefined) return <img src={source} alt={alt ?? ''} loading="lazy" />;
       const remote = typeof src === 'string' && /^https?:/i.test(src.trim()) ? safeLink(src) : undefined;
       if (remote !== undefined) {
         return (
@@ -233,11 +339,26 @@ export interface MarkdownBodyProps {
 /** The renderer made of react-markdown and its plugins (GFM, maths). */
 export function markdownBody(Renderer: typeof ReactMarkdown, remarkPlugins: NonNullable<Options['remarkPlugins']>) {
   return function MarkdownBody({ text, base, onOpenPath }: MarkdownBodyProps) {
-    const comps = useMemo(() => components(base, onOpenPath), [base?.m, base?.dir, onOpenPath]);
+    const fm = useMemo(() => parseFrontmatter(text), [text]);
+    const body = fm ? fm.body : text;
+    // Recreate components when text changes so deduplicated heading slugs reset cleanly.
+    const comps = useMemo(() => components(base, onOpenPath), [text, base?.m, base?.dir, onOpenPath]);
     return (
-      <Renderer remarkPlugins={remarkPlugins} components={comps} urlTransform={urlTransform}>
-        {text}
-      </Renderer>
+      <>
+        {fm && (
+          <dl className="md-frontmatter">
+            {fm.entries.map(([k, v], i) => (
+              <div key={`${k}:${i}`} className="md-frontmatter-row">
+                <dt>{k}</dt>
+                <dd>{v}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        <Renderer remarkPlugins={remarkPlugins} components={comps} urlTransform={urlTransform}>
+          {body}
+        </Renderer>
+      </>
     );
   };
 }

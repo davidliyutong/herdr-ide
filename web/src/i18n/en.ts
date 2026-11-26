@@ -448,6 +448,11 @@ export const en = {
   'preview.source': 'Show source',
   'markdown.copy': 'Copy code',
   'markdown.copied': 'Copied',
+  'markdown.alert.note': 'Note',
+  'markdown.alert.tip': 'Tip',
+  'markdown.alert.important': 'Important',
+  'markdown.alert.warning': 'Warning',
+  'markdown.alert.caution': 'Caution',
   'preview.videoUnsupported': 'The browser cannot decode this video (e.g. HEVC or MKV). Download it or open it in VS Code.',
   'transfers.close': 'Close',
 

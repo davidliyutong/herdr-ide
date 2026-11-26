@@ -63,6 +63,13 @@ class FakeModel {
   }
   /** Changes made as edits undo takes back (pushEditOperations). */
   edits = 0;
+  getLineCount() {
+    return this.value.split('\n').length;
+  }
+  getLineMaxColumn(line: number) {
+    const lines = this.value.split('\n');
+    return (lines[line - 1]?.length ?? 0) + 1;
+  }
   getPositionAt(offset: number) {
     const lines = this.value.slice(0, offset).split('\n');
     return { lineNumber: lines.length, column: lines[lines.length - 1].length + 1 };
@@ -115,14 +122,22 @@ const editor = {
     this.readOnly = o.readOnly;
   },
   focus: focusSpy,
-  /** Where the cursor was put and which lines were shown (revealAt). */
+  /** Where the cursor was put and which lines/ranges were shown (revealAt). */
   positions: [] as Array<{ lineNumber: number; column: number }>,
+  selections: [] as Array<{ startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }>,
   revealed: [] as number[],
+  revealedRanges: [] as Array<{ startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }>,
   setPosition(p: { lineNumber: number; column: number }) {
     this.positions.push(p);
   },
+  setSelection(r: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }) {
+    this.selections.push(r);
+  },
   revealLineInCenter(line: number) {
     this.revealed.push(line);
+  },
+  revealRangeInCenter(r: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }) {
+    this.revealedRanges.push(r);
   },
   dispose() {},
   savedState: undefined as unknown,
@@ -138,11 +153,19 @@ const editor = {
     this.model?.onDidChangeContent(l);
     return { dispose() {} };
   },
-  /** The quick diff's decorations shown last. */
-  decorations: [] as FakeDecoration[],
+  /** Active decoration collections (quick diff, target line ranges, etc.). */
+  _decorationSets: new Set<FakeDecoration[]>(),
+  get decorations(): FakeDecoration[] {
+    return [...this._decorationSets].flat();
+  },
   createDecorationsCollection(d: FakeDecoration[]) {
-    editor.decorations = d;
-    return { clear: () => (editor.decorations = []) };
+    const entry = [...d];
+    editor._decorationSets.add(entry);
+    return {
+      clear: () => {
+        editor._decorationSets.delete(entry);
+      },
+    };
   },
 };
 let separate = false;
@@ -210,9 +233,12 @@ import { settle } from './fakeTerms';
 let file: { text: string | Uint8Array<ArrayBuffer>; size: number; mtime: number } | undefined;
 /** The status /file answers with instead of the file (a stat that failed). */
 let fileStatus: number | undefined;
+let fileErrorBody: string | undefined;
 /** While set, reading the file's contents waits for it. */
 let hold: Promise<void> | undefined;
 const writes: Array<{ q: URLSearchParams; body: string; raw: Uint8Array }> = [];
+const fileRequests: Array<{ method: string; path: string; maxSize: string | null }> = [];
+const statRequests: string[][] = [];
 /** The next write stops partway (the machine's disk is full). */
 let failWrite = false;
 
@@ -221,7 +247,8 @@ function stubFetch() {
     const url = new URL(input, 'http://x');
     const method = init?.method ?? 'GET';
     if (url.pathname === '/api/m/m/file') {
-      if (fileStatus) return new Response('lstat: input/output error', { status: fileStatus });
+      fileRequests.push({ method, path: url.searchParams.get('path') ?? '', maxSize: url.searchParams.get('max_size') });
+      if (fileStatus) return new Response(fileErrorBody ?? 'lstat: input/output error', { status: fileStatus });
       if (!file) return new Response('not found', { status: 404 });
       const etag = `W/"${file.size.toString(16)}-${file.mtime.toString(16)}"`;
       const headers = { ETag: etag, 'Content-Length': String(file.size) };
@@ -230,6 +257,7 @@ function stubFetch() {
     }
     if (url.pathname === '/api/m/m/p/files/stat') {
       const { paths } = JSON.parse(init!.body as string) as { paths: string[] };
+      statRequests.push(paths);
       return new Response(
         JSON.stringify({
           entries: paths.map((path) => (file ? { path, exists: true, size: file.size, mtime: file.mtime } : { path, exists: false })),
@@ -280,14 +308,22 @@ describe('EditorPane', () => {
   beforeEach(() => {
     file = { text: 'hello', size: 5, mtime: 7000 };
     fileStatus = undefined;
+    fileErrorBody = undefined;
     hold = undefined;
     writes.length = 0;
+    fileRequests.length = 0;
+    statRequests.length = 0;
     failWrite = false;
     useStore.setState({ toasts: [] });
     editor.model = undefined;
     editor.save = undefined;
     editor.savedState = undefined;
     editor.restoredStates = [];
+    editor.positions = [];
+    editor.selections = [];
+    editor.revealed = [];
+    editor.revealedRanges = [];
+    editor._decorationSets.clear();
     useTerms.setState({ machines: {} });
     resetViewStates();
     stubFetch();
@@ -547,6 +583,11 @@ describe('EditorPane', () => {
     fileStatus = 502;
     expect(await loadText('m', '/a.txt')).toEqual({ kind: 'error', message: t('files.error.transport') });
     fileStatus = 500;
+    expect(await loadText('m', '/a.txt')).toEqual({
+      kind: 'error',
+      message: t('files.readFailed', { error: 'lstat: input/output error' }),
+    });
+    fileErrorBody = '';
     expect(await loadText('m', '/a.txt')).toEqual({ kind: 'error', message: t('files.readFailed', { error: 'HTTP 500' }) });
     expect(writes).toEqual([]);
   });
@@ -863,6 +904,363 @@ describe('EditorPane', () => {
       rootEl.focus();
     });
     expect(focusSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('selects and highlights target line ranges when endLine is provided', async () => {
+    const lines = Array.from({ length: 25 }, (_, i) => `line ${i + 1}`).join('\n');
+    file = { text: lines, size: lines.length, mtime: 7000 };
+    await act(async () =>
+      root.render(
+        createElement(EditorPane, {
+          m: 'm',
+          pane: 'view:v1',
+          view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/mvtrack.yaml', line: 17, col: 1, endLine: 20, reveal: 1 },
+          focused: true,
+        }),
+      ),
+    );
+    await flush();
+    await flush();
+    expect(editor.positions).toEqual([{ lineNumber: 17, column: 1 }]);
+    expect(editor.selections).toEqual([{ startLineNumber: 17, startColumn: 1, endLineNumber: 20, endColumn: 8 }]);
+    expect(editor.revealedRanges).toEqual([{ startLineNumber: 17, startColumn: 1, endLineNumber: 20, endColumn: 8 }]);
+    expect(editor.decorations).toMatchObject([{ range: { start: 17, end: 20 }, options: { className: 'files-target-range' } }]);
+  });
+
+  describe('Markdown preview view', () => {
+    it('opens .md, .mdx and .markdown files in Preview mode by default without creating Monaco until toggled', async () => {
+      const { createEditor } = await import('../plugins/monaco');
+      vi.mocked(createEditor).mockClear();
+      const md = '# Hello Preview\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n- [x] shipped\n\n<script>alert(1)</script>';
+      file = { text: md, size: md.length, mtime: 7000 };
+      await render('/home/u/README.md');
+      await vi.waitFor(() => expect(host.querySelector('.files-md-preview h1')?.textContent).toBe('Hello Preview'), { timeout: 5000 });
+      expect(host.querySelector('.files-md-preview table td')?.textContent).toBe('1');
+      expect(host.querySelector('.files-md-preview script')).toBeNull();
+      // Preview-first did not initialize Monaco.
+      expect(createEditor).not.toHaveBeenCalled();
+      expect(button(t('files.markdown.preview'))?.getAttribute('aria-pressed')).toBe('true');
+
+      // Switch to Split mode: creates Monaco and updates the live preview on edit.
+      await act(async () => button(t('files.markdown.split'))!.click());
+      await flush();
+      await flush();
+      expect(createEditor).toHaveBeenCalledTimes(1);
+      expect(host.querySelector('.files-editor-body.split')).not.toBeNull();
+      expect(host.querySelector('.files-md-preview')).not.toBeNull();
+
+      await act(async () => editor.model!.setValue('# Live Updated\n\nBody text'));
+      await flush();
+      await vi.waitFor(() => expect(host.querySelector('.files-md-preview h1')?.textContent).toBe('Live Updated'), { timeout: 5000 });
+
+      // Switch to Source mode: hides preview.
+      await act(async () => button(t('files.markdown.source'))!.click());
+      await flush();
+      expect(host.querySelector('.files-md-preview')).toBeNull();
+
+      // Switch back to Preview mode: keeps live unsaved edit without re-creating Monaco.
+      await act(async () => button(t('files.markdown.preview'))!.click());
+      await flush();
+      await vi.waitFor(() => expect(host.querySelector('.files-md-preview h1')?.textContent).toBe('Live Updated'), { timeout: 5000 });
+      expect(createEditor).toHaveBeenCalledTimes(1);
+    });
+
+    it('opens .mdx files with a target line in Source mode and reveals the line range', async () => {
+      const mdx = 'line 1\nline 2\n# Heading\nline 4\nline 5';
+      file = { text: mdx, size: mdx.length, mtime: 7000 };
+      await act(async () =>
+        root.render(
+          createElement(EditorPane, {
+            m: 'm',
+            pane: 'view:v1',
+            view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/doc.mdx', line: 3, col: 1, endLine: 4, reveal: 1 },
+            focused: true,
+          }),
+        ),
+      );
+      await flush();
+      await flush();
+      expect(button(t('files.markdown.source'))?.getAttribute('aria-pressed')).toBe('true');
+      expect(host.querySelector('.files-md-preview')).toBeNull();
+      expect(editor.selections).toEqual([{ startLineNumber: 3, startColumn: 1, endLineNumber: 4, endColumn: 7 }]);
+    });
+
+    it('live-updates Markdown Preview when the file changes on disk even before Monaco is created', async () => {
+      const { createEditor } = await import('../plugins/monaco');
+      vi.mocked(createEditor).mockClear();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+      try {
+        file = { text: '# Initial Title\n', size: 16, mtime: 7000 };
+        await act(async () =>
+          root.render(
+            createElement(EditorPane, {
+              m: 'm',
+              pane: 'view:v1',
+              view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/live.markdown' },
+              focused: true,
+            }),
+          ),
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        expect(host.querySelector('.files-md-preview h1')?.textContent).toBe('Initial Title');
+        expect(createEditor).not.toHaveBeenCalled();
+
+        // File updates on disk while still in Preview-only mode.
+        file = { text: '# Updated From Disk\n', size: 20, mtime: 8000 };
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(CHECK_MS);
+        });
+        expect(host.querySelector('.files-md-preview h1')?.textContent).toBe('Updated From Disk');
+        expect(createEditor).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('remote file performance & tab-switch caching', () => {
+    it('revalidates stale cache silently in the background on tab switch without flashing "Loading…"', async () => {
+      const { REVALIDATE_MS, putCachedFile } = await import('../plugins/files/fileCache');
+      file = { text: 'v2 from disk', size: 12, mtime: 9000 };
+      // Seed cache with an older (stale) version verified > REVALIDATE_MS ago.
+      putCachedFile('m', '/home/u/stale.txt', 'v1 cached', { size: 9, mtime: 7000, bom: false }, Date.now() - REVALIDATE_MS - 500);
+      await act(async () =>
+        root.render(
+          createElement(EditorPane, {
+            m: 'm',
+            pane: 'view:v1',
+            view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/stale.txt' },
+            focused: true,
+          }),
+        ),
+      );
+      // Immediately hydrated without flashing "Loading…".
+      expect(host.textContent).not.toContain(t('files.loading'));
+      await flush();
+      await flush();
+      // Background stat detected mtime change and reloaded smoothly to v2.
+      expect(statRequests).toEqual([['/home/u/stale.txt']]);
+      expect(fileRequests).toHaveLength(1);
+      expect(editor.model?.getValue()).toBe('v2 from disk');
+      expect(host.textContent).not.toContain(t('files.loading'));
+    });
+    it('loads in a single GET request (no HEAD) and hydrates immediately without "Loading…" on tab switch', async () => {
+      file = { text: 'cached content', size: 14, mtime: 7000 };
+      await render('/home/u/remote.yaml');
+      // Single GET with max_size — zero HEAD round-trips!
+      expect(fileRequests).toHaveLength(1);
+      expect(fileRequests[0].method).toBe('GET');
+      expect(fileRequests[0].maxSize).toBe(String(8 << 20));
+      expect(editor.model?.getValue()).toBe('cached content');
+
+      // Switch away (unmount) and return (remount): NO "Loading…" and NO extra /file fetch!
+      fileRequests.length = 0;
+      await act(async () => root.unmount());
+      root = createRoot(host);
+      await act(async () =>
+        root.render(
+          createElement(EditorPane, {
+            m: 'm',
+            pane: 'view:v1',
+            view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/remote.yaml' },
+            focused: true,
+          }),
+        ),
+      );
+      // Immediately rendered without "Loading…".
+      expect(host.textContent).not.toContain(t('files.loading'));
+      await flush();
+      await flush();
+      expect(fileRequests).toHaveLength(0);
+      expect(editor.model?.getValue()).toBe('cached content');
+    });
+
+    it('hydrates dirty kept files immediately on tab switch without waiting for GET /file', async () => {
+      useTerms.setState({
+        machines: {
+          m: {
+            terminals: {},
+            layout: {
+              workspaces: [
+                { id: 'w', tabs: [{ root: { view: { id: 'v1', plugin: 'files', kind: 'editor' } }, focused: 'view:v1' }], selected: 0 },
+              ],
+              selected: 0,
+            } as unknown as Layout,
+          },
+        },
+      });
+      await render('/home/u/dirty.txt');
+      await act(async () => editor.model!.setValue('unsaved work'));
+      await act(async () => root.unmount());
+
+      // Block GET /file indefinitely — tab switch back must NOT wait on it or show "Loading…".
+      fileRequests.length = 0;
+      hold = new Promise(() => {});
+      root = createRoot(host);
+      await act(async () =>
+        root.render(
+          createElement(EditorPane, {
+            m: 'm',
+            pane: 'view:v1',
+            view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/dirty.txt' },
+            focused: true,
+          }),
+        ),
+      );
+      expect(host.textContent).not.toContain(t('files.loading'));
+      await flush();
+      await flush();
+      expect(fileRequests).toHaveLength(0);
+      expect(editor.model?.getValue()).toBe('unsaved work');
+      dropEdit('m', 'view:v1');
+    });
+
+    it('pauses disk polling while a kept pane is hidden (shown=false)', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+      try {
+        await act(async () =>
+          root.render(
+            createElement(EditorPane, {
+              m: 'm',
+              pane: 'view:v1',
+              view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/bg.txt' },
+              focused: false,
+              shown: false,
+            }),
+          ),
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(CHECK_MS * 3);
+        });
+        expect(statRequests).toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('shows a folder notice with Show in Explorer when /file reports a directory', async () => {
+      fileStatus = 400;
+      fileErrorBody = 'is a directory\n';
+      await render('/home/u/configs');
+      expect(host.textContent).toContain(t('files.isDir', { name: 'configs' }));
+      expect(button(t('files.reveal'))).toBeDefined();
+    });
+
+    it('switches a mounted preview pane from file A to delayed cold-loaded file B without showing A’s content', async () => {
+      const { createEditor } = await import('../plugins/monaco');
+      file = { text: 'content of A', size: 12, mtime: 7000 };
+      await render('/home/u/a.ts');
+      expect(editor.model?.getValue()).toBe('content of A');
+
+      // Switch the same mounted pane to cold-loaded file B whose remote fetch is slow.
+      vi.mocked(createEditor).mockClear();
+      file = { text: 'content of B', size: 12, mtime: 8000 };
+      let release = () => {};
+      hold = new Promise<void>((r) => (release = r));
+      await act(async () =>
+        root.render(
+          createElement(EditorPane, {
+            m: 'm',
+            pane: 'view:v1',
+            view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/b.ts', preview: true },
+            focused: true,
+          }),
+        ),
+      );
+      await flush();
+      // Monaco must NOT mount with A's stale text while B is still loading.
+      expect(createEditor).not.toHaveBeenCalled();
+      expect(host.textContent).toContain(t('files.loading'));
+
+      // Once B finishes loading, Monaco mounts with B's text (never A's).
+      hold = undefined;
+      release();
+      await flush();
+      await flush();
+      expect(createEditor).toHaveBeenCalledTimes(1);
+      expect(editor.model?.getValue()).toBe('content of B');
+    });
+
+    it('switches a mounted preview pane from .ts to .md in Preview mode without mounting Monaco', async () => {
+      const { createEditor } = await import('../plugins/monaco');
+      file = { text: 'const x = 1;\n', size: 13, mtime: 7000 };
+      await render('/home/u/app.ts');
+      expect(editor.model?.getValue()).toBe('const x = 1;\n');
+
+      vi.mocked(createEditor).mockClear();
+      file = { text: '# Switched Markdown\n', size: 20, mtime: 8000 };
+      await render('/home/u/doc.md');
+      await vi.waitFor(() => expect(host.querySelector('.files-md-preview h1')?.textContent).toBe('Switched Markdown'), { timeout: 5000 });
+      expect(createEditor).not.toHaveBeenCalled();
+      expect(button(t('files.markdown.preview'))?.getAttribute('aria-pressed')).toBe('true');
+    });
+
+    it('mounts Monaco when reloading after an initial read error (both text and missing file)', async () => {
+      const { createEditor } = await import('../plugins/monaco');
+      vi.mocked(createEditor).mockClear();
+      fileStatus = 500;
+      await render('/home/u/flaky.ts');
+      expect(host.querySelector('.files-editor-note.error')).not.toBeNull();
+      expect(createEditor).not.toHaveBeenCalled();
+
+      // Reload succeeds with text: Monaco mounts and displays it.
+      fileStatus = undefined;
+      file = { text: 'recovered text', size: 14, mtime: 9000 };
+      await act(async () => button(t('files.revert'))!.click());
+      await flush();
+      await flush();
+      expect(createEditor).toHaveBeenCalledTimes(1);
+      expect(editor.model?.getValue()).toBe('recovered text');
+
+      // Reload after initial error into a missing (404) file opens an empty editable buffer.
+      vi.mocked(createEditor).mockClear();
+      fileStatus = 500;
+      await render('/home/u/missing-after-err.ts');
+      expect(createEditor).not.toHaveBeenCalled();
+      fileStatus = undefined;
+      file = undefined;
+      await act(async () => button(t('files.revert'))!.click());
+      await flush();
+      await flush();
+      expect(createEditor).toHaveBeenCalledTimes(1);
+      expect(editor.model?.getValue()).toBe('');
+    });
+
+    it('pauses audio/video playback when a media pane is hidden (shown=false)', async () => {
+      const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+      try {
+        await act(async () =>
+          root.render(
+            createElement(EditorPane, {
+              m: 'm',
+              pane: 'view:v1',
+              view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/track.mp3' },
+              focused: true,
+              shown: true,
+            }),
+          ),
+        );
+        expect(host.querySelector('audio')).not.toBeNull();
+        pauseSpy.mockClear();
+        await act(async () =>
+          root.render(
+            createElement(EditorPane, {
+              m: 'm',
+              pane: 'view:v1',
+              view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/track.mp3' },
+              focused: false,
+              shown: false,
+            }),
+          ),
+        );
+        expect(pauseSpy).toHaveBeenCalled();
+      } finally {
+        pauseSpy.mockRestore();
+      }
+    });
   });
 });
 

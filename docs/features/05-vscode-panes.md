@@ -71,7 +71,7 @@ Where VS Code opens:
 | --- | --- | --- |
 | **Open in VS Code** (`code.open`: header button, menu, palette, `cmd+j` / `ctrl+shift+j` in the desktop app) | a new tab for the terminal's directory, else the workspace's folder | the workspace's VS Code pane for that folder, in any tab |
 | **Show Changes in VS Code** (`code.diff`), **Open Git Graph** (`code.gitGraph`) | a split to the right of the source pane, then runs the command | the tab's VS Code pane for that folder |
-| cmd/ctrl+click on a file in a terminal | the file at its line, in a VS Code pane whose folder holds it, else a split beside the terminal | the closest such pane: same tab first, then any |
+| cmd/ctrl+click on a file in a terminal (when `files.openLinks` is `vscode` or the File Explorer plugin is off) | the file at its line, in a VS Code pane whose folder holds it, else a split beside the terminal | the closest such pane: same tab first, then any |
 
 The Git plugin ([31](31-git.md)) shows changes and the graph without VS Code; these commands remain for VS Code's own views.
 

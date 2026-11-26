@@ -22,20 +22,20 @@ Non-goals: browsing, changing and editing files. The file explorer ([28](28-file
 
 `web/src/terminal/links.ts` finds links, `openLink.ts` opens them.
 
-- With ⌘ or Ctrl held, the row under the pointer is scanned for OSC 8 hyperlinks first, then URLs, paths, `~`-paths and bare file names with known extensions, optionally with `:line[:col]`. Requiring the modifier leaves plain clicks to mouse-aware programs.
-- A row whose text reaches the last column is joined with the next one (up to 20 rows). Programs that wrap their own text (Claude Code, Codex) leave no soft-wrap marks, so this one signal covers both kinds of wrapping. A path wrapped in a way detection does not join is opened by selecting it.
+- With ⌘ or Ctrl held, the row under the pointer is scanned for OSC 8 hyperlinks first, then URLs, paths, `~`-paths and bare file names with known extensions, optionally with line/column or line-range suffixes (`:line`, `:line:col`, `:line-endLine`, `:line:col-endLine:endCol`, `:L17-L20`, `#L17-L20`, `(17,5)`). Path and URL boundaries stop before CJK characters and Chinese/ASCII wrapper punctuation (`“”‘’（）【】《》。，；：、`), and trailing sentence periods are stripped so paths inside Chinese or English prose are recognized cleanly. Requiring the modifier leaves plain clicks to mouse-aware programs.
+- A row whose text reaches the last column is joined with the next one (up to 20 rows). Programs that wrap their own text (Claude Code, Codex) leave no soft-wrap marks, so this one signal covers both kinds of wrapping. A path wrapped in a way detection does not join is opened by selecting it (stripping surrounding ASCII or CJK quotes, brackets and punctuation).
 - A right click offers **Preview**, **Open in VS Code** and **Copy full path** for a path (or the selection), **Open** and **Copy link** for a URL.
 - Relative paths resolve against the terminal's directory, `~` against the machine's home.
-- Media opens in the workspace's preview pane, else a new one split beside the terminal. Other files open at the line in a VS Code pane of the workspace whose folder holds the file, else a new one beside the terminal (`actions.openPath`, [05](05-vscode-panes.md)).
+- By default (`files.openLinks = "editor"`), ⌘/Ctrl-clicking a file path opens it in the File Explorer plugin's preview editor ([28](28-file-explorer.md)), jumping to and highlighting the target line or line range when present (and rendering Markdown files in Preview mode when no line is given). Setting `files.openLinks` to `"vscode"` opens non-media files in VS Code when the VS Code plugin is on ([05](05-vscode-panes.md)); when the File Explorer plugin is off, files fall back to VS Code or Quick Look (`actions.openPath`).
 
 ### Preview
 
 `web/src/components/PreviewPane.tsx`.
 
 - A preview is a pane of the layout document (`{"preview": {"id", "path"}}`, [22](22-terminal-protocol.md)). It splits, moves and survives reloads like any pane ([04](04-layout-and-keyboard.md)). Stepping to a sibling or into a directory changes the document's path, so every client follows.
-- `GET /api/m/<machine>/file?path=` streams through the agent (`fs.stat`, `fs.read`) with single HTTP ranges, ETags and `download=1`.
-- Images, video and audio use native elements, PDFs an iframe. Text shows the first 2 MiB, highlighted (`web/src/highlight`), and refuses binary content. Directories list up to 20 000 entries (`GET /api/m/<machine>/list`). An undecodable video codec shows a hint with download and VS Code options.
-- Markdown renders (`web/src/markdown`, loaded on first use) with GitHub's extensions, KaTeX formulas and highlighted code blocks; a button shows the source. See [Security](#security) for what the renderer refuses.
+- `GET /api/m/<machine>/file?path=` streams through the agent (`fs.read` directly in one round-trip for plain GETs, or `fs.stat` + `fs.read` for `HEAD`/ranges/validators) with single HTTP ranges, optional `max_size`, ETags and `download=1`.
+- Images, video and audio use native elements, PDFs an iframe. Text shows the first 2 MiB, highlighted (`web/src/highlight`), and refuses binary content. Directories list up to 20 000 entries (`GET /api/m/<machine>/list`) when `/file` reports a directory. An undecodable video codec shows a hint with download and VS Code options.
+- Markdown (`.md`, `.mdx`, `.markdown`, …) renders (`web/src/markdown`, loaded on first use) with GitHub's extensions, alerts, YAML frontmatter cards, KaTeX formulas and highlighted code blocks; a button shows the source. See [Security](#security) for what the renderer refuses.
 - A file deleted or moved away is struck through in the header, as in the explorer's editors ([28](28-file-explorer.md)), and the preview keeps the last content it showed. It loads again once the file is back.
 
 ### Downloads

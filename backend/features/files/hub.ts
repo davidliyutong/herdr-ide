@@ -45,7 +45,7 @@ import {
   type Entry,
   type Result,
 } from './protocol.ts';
-import { FILE_CSP, TransferFail, attachment, failCode, serveFile } from './serve.ts';
+import { FILE_CSP, TransferFail, attachment, failCode, serveFile, serveFileDirect } from './serve.ts';
 import { settings } from './settings.ts';
 
 /** How long a stat or a listing may take (a machine that does not answer). */
@@ -139,12 +139,21 @@ export const fileTransfersFeature = (o: FileTransfersOptions = {}) =>
       const one = ctx.route('/api/m/:id');
 
       // A file, with ranges so that videos seek without downloading
-      // everything; as an attachment with download=1.
+      // everything; as an attachment with download=1. Plain GET requests
+      // without Range/If-None-Match open Op.FsRead directly in a single
+      // remote round-trip (the reply carries stat before the body).
       one.get('/file', plainErrors, async (c) => {
         const q = queryOf(c);
         const path = q.get('path') ?? '';
         if (!path) throw new Fail('bad_request', 400, 'path required');
         const signal = c.req.raw.signal;
+        const maxRaw = q.get('max_size');
+        const maxNum = maxRaw !== null && /^\d+$/.test(maxRaw) ? Number(maxRaw) : undefined;
+        const maxSize = maxNum !== undefined && Number.isSafeInteger(maxNum) && maxNum < Number.MAX_SAFE_INTEGER ? maxNum : undefined;
+        const dl = q.get('download') === '1';
+        if (c.req.method === 'GET' && !c.req.raw.headers.get('Range') && !c.req.raw.headers.get('If-None-Match')) {
+          return serveFileDirect(c.var.machine, path, dl, maxSize, { request: signal }, statStatus);
+        }
         let st: Stat;
         try {
           st = await statOf(c.var.machine, path, signal);
@@ -152,7 +161,8 @@ export const fileTransfersFeature = (o: FileTransfersOptions = {}) =>
           throw new Fail('stat', statStatus(e), (e as Error).message);
         }
         if (st.is_dir) throw new Fail('is_dir', 400, 'is a directory');
-        return serveFile(c.var.machine, c.req.raw, st, q.get('download') === '1', { request: signal });
+        if (maxSize !== undefined && st.size > maxSize) throw new Fail('too_large', 413, 'file too large');
+        return serveFile(c.var.machine, c.req.raw, st, dl, { request: signal });
       });
 
       // A directory: its stat and entries (an empty list for an empty one).

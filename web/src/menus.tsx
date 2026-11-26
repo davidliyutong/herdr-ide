@@ -235,13 +235,23 @@ export function surfaceMenu(o: {
     out.push('sep', {
       label: t('link.menuPreview', { name }),
       icon: <Eye />,
-      run: () => void actions.openPreview(o.ctx.m, r.path, o.ctx.pane),
+      run: () =>
+        void (isPluginOn('files')
+          ? actions.openEditor(o.ctx.m, r.path, {
+              preview: true,
+              line: r.line,
+              col: r.col,
+              endLine: r.endLine,
+              endCol: r.endCol,
+              from: o.ctx.pane,
+            })
+          : actions.openPreview(o.ctx.m, r.path, o.ctx.pane)),
     });
     if (!mediaExt.test(r.path) && isPluginOn('vscode'))
       out.push({
         label: t('link.menuCode', { name }),
         icon: <CodeIcon />,
-        run: () => void actions.openPath(o.ctx.m, r.path, r.line, r.col, o.ctx.pane),
+        run: () => void actions.openInCode(o.ctx.m, r.path, r.line, r.col, o.ctx.pane),
       });
     if (canDownload(o.ctx.m))
       out.push({ label: t('link.menuDownload', { name }), icon: <Download />, run: () => void downloadPath(o.ctx.m, r.path) });

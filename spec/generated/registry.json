@@ -648,6 +648,9 @@
     "settings.files.confirmTrash",
     "settings.files.exclude",
     "settings.files.followFocus",
+    "settings.files.openLinks",
+    "settings.files.openLinks.editor",
+    "settings.files.openLinks.vscode",
     "settings.files.showHidden",
     "settings.files.sortOrder",
     "settings.files.sortOrder.default",
@@ -1612,6 +1615,7 @@
       "Thumbs.db"
     ],
     "files.followFocus": true,
+    "files.openLinks": "editor",
     "files.showHidden": false,
     "files.sortOrder": "default",
     "git.autoFetch": 0,

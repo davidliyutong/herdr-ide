@@ -18,7 +18,19 @@ export function pluginName(id: string): string {
   return p ? t(p.title) : id;
 }
 
-export function PluginPane({ m, pane, view, focused }: { m: string; pane: string; view: L.PluginView; focused: boolean }) {
+export function PluginPane({
+  m,
+  pane,
+  view,
+  focused,
+  shown = true,
+}: {
+  m: string;
+  pane: string;
+  view: L.PluginView;
+  focused: boolean;
+  shown?: boolean;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   // Re-rendered when a plugin is turned on or off.
   useSettings((s) => s.values);
@@ -38,7 +50,7 @@ export function PluginPane({ m, pane, view, focused }: { m: string; pane: string
     <div ref={ref} className="plugin-pane" tabIndex={-1}>
       {Body ? (
         <PluginBoundary plugin={pluginName(view.plugin)} resetKey={JSON.stringify(view)}>
-          <Body m={m} pane={pane} view={view} focused={focused} />
+          <Body m={m} pane={pane} view={view} focused={focused} shown={shown} />
         </PluginBoundary>
       ) : (
         <div className="plugin-pane-off muted">{t(def ? 'plugins.paneOff' : 'plugins.paneUnknown', { plugin: view.plugin })}</div>

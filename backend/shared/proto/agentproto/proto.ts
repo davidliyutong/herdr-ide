@@ -139,6 +139,8 @@ export interface Header {
   path?: string;
   offset?: number;
   length?: number;
+  /** fs.read: refuse with code 'too_large' when the file exceeds this many bytes. */
+  max_size?: number;
   mkdirs?: boolean;
   unique?: boolean;
   paths?: string[];

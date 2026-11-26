@@ -16,7 +16,7 @@ import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
 import { startTabDrag } from '../tabDrag';
-import { keepPanes, resetKeptPanes } from '../keptPanes';
+import { isKeepableFileLeaf, keepFilePanes, keepPanes, resetKeptPanes } from '../keptPanes';
 import { usePrefs } from '../prefs';
 import { openMenu } from '../contextMenu';
 import { newTabMenu, tabMenu, tabsMenu } from '../menus';
@@ -443,9 +443,11 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
   const rects = zoom ? new Map([[zoom, { x: 0, y: 0, w: 1, h: 1 }]]) : paneRects(tab.root);
   const bars = zoom || readOnly ? [] : splitBars(tab.root);
   const keptLimit = usePrefs((s) => s.prefs.keptTerminals);
-  // The terminals shown last stay mounted, hidden (keptPanes.ts). They are
-  // children of the same list under the same keys as when they are shown,
-  // so a terminal keeps its emulator and its stream from one to the other.
+  // The terminals and file editor/preview panes shown last stay mounted,
+  // hidden (keptPanes.ts). They are children of the same list under the same
+  // keys as when they are shown, so a terminal keeps its emulator and stream
+  // and a file editor/preview keeps its Monaco/Markdown state across tab
+  // switches without remounting or flashing "Loading...".
   const shownTerminals = [...rects].flatMap(([pane, rect]) => {
     const leaf = L.leafOf(tab.root, pane);
     return leaf && L.isTerminalLeaf(leaf) ? [{ m, pane, rect }] : [];
@@ -453,6 +455,15 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
   const kept = keepPanes(shownTerminals, keptLimit, (k) => {
     const layout = terms.layout(k.m);
     return !!layout && L.locate(layout, k.pane) !== null;
+  });
+  const shownFilePanes = [...rects].flatMap(([pane, rect]) => {
+    const leaf = L.leafOf(tab.root, pane);
+    return leaf && isKeepableFileLeaf(leaf) ? [{ m, pane, rect, leaf }] : [];
+  });
+  const keptFiles = keepFilePanes(shownFilePanes, (k) => {
+    const layout = terms.layout(k.m);
+    const live = layout ? L.findLeaf(layout, k.pane) : null;
+    return live && isKeepableFileLeaf(live) ? live : null;
   });
   // Without a tab shown the kept terminals unmount with this view: they are
   // forgotten, not mounted again hidden, where they would not attach.
@@ -528,9 +539,9 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
               ) : L.isCodeLeaf(leaf) ? (
                 <CodeSlot m={m} pane={key} view={leaf.code} />
               ) : L.isPluginLeaf(leaf) ? (
-                <PluginPane m={m} pane={key} view={leaf.view} focused={focused} />
+                <PluginPane m={m} pane={key} view={leaf.view} focused={focused} shown />
               ) : (
-                <PreviewPane m={m} pane={key} path={leaf.preview.path} />
+                <PreviewPane m={m} pane={key} path={leaf.preview.path} shown />
               )}
             </div>
           );
@@ -547,6 +558,22 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
             {/* The header's place, so that the terminal stays the second child. */}
             {null}
             <TerminalView m={k.m} terminal={k.pane} focused={false} shown={false} onActivate={() => {}} />
+          </div>
+        )),
+        ...keptFiles.map((k) => (
+          <div
+            key={`${k.m}\n${k.pane}`}
+            className="pane kept"
+            style={{ left: pct(k.rect.x), top: pct(k.rect.y), width: pct(k.rect.w), height: pct(k.rect.h) }}
+            aria-hidden
+          >
+            {/* The header's place, so that the file pane stays the second child. */}
+            {null}
+            {L.isPluginLeaf(k.leaf) ? (
+              <PluginPane m={k.m} pane={k.pane} view={k.leaf.view} focused={false} shown={false} />
+            ) : (
+              <PreviewPane m={k.m} pane={k.pane} path={k.leaf.preview.path} shown={false} />
+            )}
           </div>
         )),
       ]}

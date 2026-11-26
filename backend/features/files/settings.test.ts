@@ -49,3 +49,11 @@ test('settings section', () => {
   for (const [key, s] of Object.entries(settings.settings ?? {})) expect([key, s.section]).toEqual([key, 'files']);
   expect(settings.sections).toEqual([{ id: 'files', order: 66, plugin: 'files' }]);
 });
+
+test('files.openLinks defaults to editor and accepts vscode', () => {
+  const openLinks = settings.settings!['files.openLinks'];
+  expect(openLinks.default).toBe('editor');
+  expect(validate(openLinks, 'editor')).toEqual({ ok: true, value: 'editor' });
+  expect(validate(openLinks, 'vscode')).toEqual({ ok: true, value: 'vscode' });
+  expect(validate(openLinks, 'invalid').ok).toBe(false);
+});

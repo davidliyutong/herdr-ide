@@ -10,8 +10,9 @@ import { createRoot, type Root } from 'react-dom/client';
 const renderMath = vi.fn(async (tex: string, display: boolean) => `<span class="katex-mock">${display ? 'D' : 'I'}:${tex}</span>`);
 vi.mock('../terminal/mathRender', () => ({ renderMath: (tex: string, display: boolean) => renderMath(tex, display) }));
 
-import { imageSource, relativePath, safeLink } from '../markdown/links';
+import { imageSource, isMarkdownPath, relativePath, safeLink } from '../markdown/links';
 import { Markdown, type MarkdownProps } from '../markdown/Markdown';
+import { parseFrontmatter } from '../markdown/MarkdownBody';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -312,5 +313,64 @@ describe('Markdown', () => {
       await sleep(20);
     });
     expect(q('.md-math-source code')?.textContent).toBe('\\bad');
+  });
+
+  it('recognizes .md, .mdx and .markdown paths', () => {
+    for (const p of ['README.md', '/docs/a.mdx', 'notes.markdown', 'GUIDE.MD', 'doc.mkd']) expect(isMarkdownPath(p)).toBe(true);
+    for (const p of ['main.ts', 'mvtrack.yaml', 'README.txt', 'md']) expect(isMarkdownPath(p)).toBe(false);
+  });
+
+  it('renders GitHub-style alert callouts safely and leaves regular blockquotes alone', async () => {
+    await show({
+      text: [
+        '> [!NOTE]',
+        '> Important detail here.',
+        '',
+        '> [!WARNING]',
+        '> Watch out for `<script>alert(1)</script>`.',
+        '',
+        '> Plain quote.',
+      ].join('\n'),
+    });
+    expect(q('.md-alert-note .md-alert-title')?.textContent).toBe('Note');
+    expect(q('.md-alert-note .md-alert-body')?.textContent).toContain('Important detail here.');
+    expect(q('.md-alert-warning .md-alert-title')?.textContent).toBe('Warning');
+    expect(q('script')).toBeNull();
+    expect(q('blockquote')?.textContent?.trim()).toBe('Plain quote.');
+  });
+
+  it('renders YAML frontmatter as escaped metadata without corrupting headings or horizontal rules', async () => {
+    expect(parseFrontmatter('---\nnot valid yaml line\n---\nbody')).toBeUndefined();
+    await show({
+      text: ['---', 'title: "<script>alert(1)</script>"', 'tags:', '  - docs', '  - preview', '---', '', '# Real Title'].join('\n'),
+    });
+    expect(q('script')).toBeNull();
+    expect(q('.md-frontmatter dt')?.textContent).toBe('title');
+    expect(q('.md-frontmatter dd')?.textContent).toBe('<script>alert(1)</script>');
+    expect(q('h1')?.textContent).toBe('Real Title');
+  });
+
+  it('deduplicates repeated heading anchor ids cleanly', async () => {
+    await show({ text: '# Setup\n\n## Setup\n\n### Setup' });
+    expect([...host.querySelectorAll('h1, h2, h3')].map((h) => h.id)).toEqual([
+      'user-content-setup',
+      'user-content-setup-1',
+      'user-content-setup-2',
+    ]);
+  });
+
+  it('neutralizes SVG/iframe/MDX XSS payloads', async () => {
+    await show({
+      text: [
+        '<svg onload="alert(1)"></svg>',
+        '',
+        '<iframe src="javascript:alert(1)"></iframe>',
+        '',
+        '<CustomComponent onClick={() => alert(1)} />',
+      ].join('\n'),
+    });
+    expect(q('svg')).toBeNull();
+    expect(q('iframe')).toBeNull();
+    expect(q('script')).toBeNull();
   });
 });

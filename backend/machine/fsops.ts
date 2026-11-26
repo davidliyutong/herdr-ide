@@ -53,12 +53,13 @@ export function statOf(path: string, fi: Stats, isLink: boolean): Stat {
   };
 }
 
-/** A failed reply; code not_found or denied when the system said so. */
+/** A failed reply; code not_found, denied or is_dir when the system said so. */
 function failFS(e: unknown): Reply {
   const code = errCode(e);
   const rep: Reply = { ok: false, error: message(e) };
   if (code === 'ENOENT' || code === 'ENOTDIR') rep.code = 'not_found';
   else if (code === 'EACCES' || code === 'EPERM') rep.code = 'denied';
+  else if (code === 'EISDIR') rep.code = 'is_dir';
   return rep;
 }
 
@@ -70,7 +71,11 @@ export async function openRegular(path: string): Promise<{ fh: fsp.FileHandle; f
   const fh = await fsp.open(path, READ_FLAGS);
   try {
     const fi = await fh.stat();
-    if (fi.isDirectory()) throw new Error(`${path} is a directory`);
+    if (fi.isDirectory()) {
+      const err = new Error(`${path} is a directory`) as NodeJS.ErrnoException;
+      err.code = 'EISDIR';
+      throw err;
+    }
     if (!fi.isFile()) throw new Error(`${path} is not a regular file`);
     return { fh, fi };
   } catch (e) {
@@ -145,11 +150,14 @@ export async function serveFS(conn: Conn, h: Header, path: string, fs: FsCalls =
       try {
         f = await openRegular(path);
       } catch (e) {
-        return writeLine(st, fail(e));
+        return writeLine(st, failFS(e));
       }
       const { fh, fi } = f;
       let owned = true;
       try {
+        if (h.max_size !== undefined && h.max_size >= 0 && fi.size > h.max_size) {
+          return await writeLine(st, { ok: false, code: 'too_large', error: 'file too large', stat: statOf(path, fi, false) });
+        }
         const offset = h.offset ?? 0;
         if (offset < 0 || offset > fi.size) return await writeLine(st, fail('offset out of range'));
         let length = h.length ?? 0;

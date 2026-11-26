@@ -31,6 +31,8 @@ export interface PaneViewProps {
   pane: string;
   view: PluginView;
   focused: boolean;
+  /** False while the pane stays mounted hidden across tab switches (keptPanes.ts). */
+  shown?: boolean;
 }
 
 /** A kind of pane a plugin draws: the layout's leaf {view: {id, plugin,

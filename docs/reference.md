@@ -165,6 +165,7 @@ Every setting is defined in the hub (`backend/kernel/config` and the features' `
 | `files.sortOrder` | `default`, `mixed`, `filesFirst`, `type`, `modified` | `"default"` | – | – |
 | `files.followFocus` | `true`, `false` | `true` | – | – |
 | `files.confirmTrash` | `true`, `false` | `false` | – | – |
+| `files.openLinks` | `editor`, `vscode` | `"editor"` | – | – |
 | `git.mixedLineEndings` | `keep`, `unify`, `readOnly` | `"keep"` | – | – |
 | `git.changesView` | `list`, `tree` | `"list"` | – | – |
 | `git.untrackedChanges` | `mixed`, `separate` | `"mixed"` | – | – |
@@ -380,7 +381,7 @@ Every endpoint passes the same guards (Host, Origin, proxy secret, [SECURITY.md]
 
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
-| `GET /api/m/{id}/file` | – | A file (`?path=`, `&download=1` as attachment) with HTTP ranges; `404` missing, `403` denied, `502` machine error. |
+| `GET /api/m/{id}/file` | – | A file (`?path=`, `&download=1` as attachment, `&max_size=` byte cap returning `413` if larger) with HTTP ranges; `404` missing, `403` denied, `502` machine error. |
 | `GET /api/m/{id}/list` | – | A directory's entries (`?path=`), at most 20 000. |
 | `GET /api/m/{id}/download` | – | One file, or several paths as a zip (`?path=`…, `&dl=<id>` to follow on `/ws`). |
 | `POST /api/m/{id}/upload` | writes | Writes the body to a file (`?name=`, `&dir=` absolute, else the upload directory). |

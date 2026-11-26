@@ -177,6 +177,18 @@ describe('file', () => {
     expect([res.status, await res.text(), res.headers.get('Content-Type')]).toEqual([400, 'is a directory\n', 'text/plain; charset=utf-8']);
     res = await fetch(`${fc.url}/api/m/local/file`);
     expect(res.status).toBe(400);
+
+    // Direct single-RTT GET with max_size: accepts files within limit, rejects
+    // oversized ones with 413 without streaming, and handles empty 0-byte files.
+    res = await file(at('proj/a.txt'), {}, '&max_size=10');
+    expect([res.status, await res.text(), res.headers.get('Content-Length')]).toEqual([200, 'alpha', '5']);
+    res = await file(at('proj/a.txt'), {}, '&max_size=4');
+    expect(res.status).toBe(413);
+    writeFileSync(join(dir, 'empty.txt'), '');
+    res = await file(at('empty.txt'), {}, '&max_size=1024');
+    expect([res.status, await res.text(), res.headers.get('Content-Length')]).toEqual([200, '', '0']);
+    res = await file(at('missing.txt'), {}, '&max_size=1024');
+    expect(res.status).toBe(404);
   });
 
   test('statStatus', () => {

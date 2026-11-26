@@ -8,6 +8,7 @@ import { Op, type Stat } from '#shared/proto/agentproto/index.ts';
 import { Fail } from '#kernel/fail.ts';
 import { breakableResponse } from '#kernel/http/breakable.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
+import { AgentError, closeStream } from '#kernel/machines/transport/session.ts';
 import { agentBody, type Transfer } from './body.ts';
 import { baseName } from './names.ts';
 
@@ -121,11 +122,8 @@ export class TransferFail extends Fail {
  * connected, or the path is not there. */
 export const failCode = (e: unknown): string => (e instanceof Fail && e.code === 'offline' ? 'unavailable' : 'not_found');
 
-/** Answers req with the file of machine m that st describes (its path and
- * size), or the range asked for, as an attachment when download. The body
- * comes from the agent (fs.read) as the client takes it; t follows how it
- * goes. Throws a TransferFail when the file cannot be read. */
-export async function serveFile(m: Machine, req: Request, st: Stat, download: boolean, t: Transfer): Promise<Response> {
+/** Builds standard security, caching and content-type headers for a served file. */
+function fileHeaders(st: Stat, download: boolean): { headers: Headers; etag: string } {
   const path = st.path ?? '';
   const etag = `W/"${hex(st.size)}-${hex(st.mtime)}"`;
   const h = new Headers({
@@ -140,6 +138,16 @@ export async function serveFile(m: Machine, req: Request, st: Stat, download: bo
   // The browser's PDF viewer refuses sandboxed documents.
   if (ctype !== 'application/pdf') h.set('Content-Security-Policy', FILE_CSP);
   if (download) h.set('Content-Disposition', attachment(baseName(path)));
+  return { headers: h, etag };
+}
+
+/** Answers req with the file of machine m that st describes (its path and
+ * size), or the range asked for, as an attachment when download. The body
+ * comes from the agent (fs.read) as the client takes it; t follows how it
+ * goes. Throws a TransferFail when the file cannot be read. */
+export async function serveFile(m: Machine, req: Request, st: Stat, download: boolean, t: Transfer): Promise<Response> {
+  const path = st.path ?? '';
+  const { headers: h, etag } = fileHeaders(st, download);
   const answer = (status: number, how: 'complete' | 'broken' = 'complete', body: string | null = null) => {
     t.ended?.(how);
     return new Response(body, { status, headers: h });
@@ -179,4 +187,65 @@ export async function serveFile(m: Machine, req: Request, st: Stat, download: bo
     throw new TransferFail(code === 'unavailable' ? 502 : 404, (e as Error).message, code);
   }
   return breakableResponse(agentBody(conn, { length }, t), { status, headers: h });
+}
+
+/** Serves a whole file in one agent round-trip (Op.FsRead returns stat on the
+ * reply line before streaming bytes), avoiding the extra fs.stat RTT on plain
+ * GET requests. When maxSize is set, files larger than maxSize are rejected
+ * with 413 without streaming their contents (also safe against older agents
+ * that ignore max_size). */
+export async function serveFileDirect(
+  m: Machine,
+  path: string,
+  download: boolean,
+  maxSize: number | undefined,
+  t: Transfer,
+  statusOf: (e: unknown) => number,
+): Promise<Response> {
+  const signal = t.cancelled ? AbortSignal.any([t.request, t.cancelled]) : t.request;
+  let reply;
+  let conn;
+  try {
+    ({ reply, conn } = await m.open(
+      {
+        op: Op.FsRead,
+        path,
+        offset: 0,
+        length: maxSize !== undefined ? maxSize + 1 : 0,
+        ...(maxSize !== undefined ? { max_size: maxSize } : {}),
+      },
+      { signal },
+    ));
+  } catch (e) {
+    if (e instanceof AgentError && e.reply) {
+      if (e.reply.code === 'too_large') throw new Fail('too_large', 413, 'file too large');
+      if (e.reply.code === 'is_dir' || e.reply.error?.includes('is a directory')) throw new Fail('is_dir', 400, 'is a directory');
+    }
+    throw new Fail('stat', statusOf(e), (e as Error).message);
+  }
+  const st = reply.stat;
+  if (!st) {
+    conn.reader.release();
+    conn.stream.destroy();
+    throw new Fail('stat', 502, 'missing stat');
+  }
+  if (st.is_dir) {
+    conn.reader.release();
+    conn.stream.destroy();
+    throw new Fail('is_dir', 400, 'is a directory');
+  }
+  if (maxSize !== undefined && st.size > maxSize) {
+    conn.reader.release();
+    conn.stream.destroy();
+    throw new Fail('too_large', 413, 'file too large');
+  }
+  const { headers: h } = fileHeaders({ ...st, path: st.path || path }, download);
+  h.set('Content-Length', String(st.size));
+  if (st.size === 0) {
+    conn.reader.release();
+    closeStream(conn.stream);
+    t.ended?.('complete');
+    return new Response(null, { status: 200, headers: h });
+  }
+  return breakableResponse(agentBody(conn, { length: st.size }, t), { status: 200, headers: h });
 }

@@ -12,6 +12,17 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { safeUrl } from '../terminal/links';
 import { openLink } from '../terminal/openLink';
+import * as L from '../term/layout';
+import { useStore } from '../state/store';
+import type { MachineState } from '../lib/machine';
+import { useSettings } from '../settings';
+import { definePlugins } from '../plugins/registry';
+import { filesPlugin } from '../plugins/files';
+import { vscodePlugin } from '../plugins/vscode';
+import { surfaceMenu } from '../menus';
+import { isItem } from '../contextMenu';
+import { FakeHub, settle } from './fakeTerms';
+import { vscodeOn } from './fakeSettings';
 
 describe('safeUrl', () => {
   const cases: [string, boolean][] = [
@@ -76,5 +87,101 @@ describe('openLink', () => {
     ])
       openLink({ kind: 'url', text }, { m: 'a' });
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+describe('openLink default file routing (File Explorer preview vs VS Code)', () => {
+  let hub: FakeHub;
+  const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+
+  beforeEach(async () => {
+    posts.length = 0;
+    definePlugins([vscodePlugin, filesPlugin]);
+    vscodeOn();
+    useSettings.setState((s) => ({
+      values: {
+        ...s.values,
+        'plugins.files.enabled': { value: true, source: 'default' },
+        'files.openLinks': { value: 'editor', source: 'default' },
+      },
+    }));
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      posts.push({ url, body: init?.body ? JSON.parse(String(init.body)) : {} });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    hub = new FakeHub();
+    hub.machine('a', [FakeHub.term('s1', { cwd: '/home/u/proj' })], {
+      version: 2,
+      workspaces: [{ id: 'w1', name: '', cwd: '/home/u/proj', tabs: [{ root: { terminal: 's1' }, focused: 's1' }], selected: 0 }],
+      selected: 0,
+    });
+    hub.install();
+    const s = useStore.getState();
+    s.setReadOnly(false);
+    s.setMachines([{ id: 'a', label: 'a', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
+    s.selectMachine('a');
+    hub.model.subscribe('a');
+    await settle();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('opens terminal file links in the File Explorer preview editor by default with line ranges', async () => {
+    openLink(
+      { kind: 'path', text: 'configs/simple_plane/hardware/local/mvtrack.yaml:17-20' },
+      { m: 'a', pane: 's1', cwd: '/home/u/proj', home: '/home/u' },
+    );
+    await settle();
+    const ws = hub.model.layout('a')!.workspaces[0];
+    const editors = L.pluginViews(ws, 'files', 'editor');
+    expect(editors).toHaveLength(1);
+    expect(editors[0].view).toMatchObject({
+      plugin: 'files',
+      kind: 'editor',
+      path: '/home/u/proj/configs/simple_plane/hardware/local/mvtrack.yaml',
+      preview: true,
+      line: 17,
+      col: 1,
+      endLine: 20,
+    });
+    // Did not launch or bridge into VS Code.
+    expect(L.codeViews(ws)).toHaveLength(0);
+    expect(posts).toEqual([]);
+  });
+
+  it('routes to VS Code when files.openLinks is set to vscode', async () => {
+    useSettings.setState((s) => ({
+      values: { ...s.values, 'files.openLinks': { value: 'vscode', source: 'global' } },
+    }));
+    openLink({ kind: 'path', text: 'src/main.ts:12:4' }, { m: 'a', pane: 's1', cwd: '/home/u/proj', home: '/home/u' });
+    await settle();
+    const ws = hub.model.layout('a')!.workspaces[0];
+    expect(L.pluginViews(ws, 'files', 'editor')).toHaveLength(0);
+    expect(L.codeViews(ws)).toHaveLength(1);
+    expect(posts[0].body).toMatchObject({ cmd: 'openFile', path: '/home/u/proj/src/main.ts', line: 12, col: 4 });
+  });
+
+  it('keeps right-click Open in VS Code working even when default Cmd+Click opens File Explorer preview', async () => {
+    const entries = surfaceMenu({
+      ctx: { m: 'a', pane: 's1', cwd: '/home/u/proj', home: '/home/u' },
+      link: { kind: 'path', text: 'src/app.ts:10-20' },
+    });
+    const previewItem = entries.filter(isItem).find((i) => i.label.includes('Preview'))!;
+    const codeItem = entries.filter(isItem).find((i) => i.label.includes('VS Code'))!;
+    previewItem.run!();
+    await settle();
+    const ws = hub.model.layout('a')!.workspaces[0];
+    expect(L.pluginViews(ws, 'files', 'editor')[0].view).toMatchObject({
+      path: '/home/u/proj/src/app.ts',
+      preview: true,
+      line: 10,
+      endLine: 20,
+    });
+    codeItem.run!();
+    await settle();
+    expect(L.codeViews(hub.model.layout('a')!.workspaces[0])).toHaveLength(1);
+    expect(posts[0].body).toMatchObject({ cmd: 'openFile', path: '/home/u/proj/src/app.ts', line: 10 });
   });
 });

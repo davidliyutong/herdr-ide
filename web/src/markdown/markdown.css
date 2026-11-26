@@ -1,9 +1,11 @@
-/* Rendered Markdown. Sizes follow the surrounding font; colors are the
-   design tokens'. */
+/* Rendered Markdown: VS Code / GitHub-grade typography. Sizes follow the
+   surrounding font; all colors derive from the design tokens for full
+   dark/light theme parity. */
 .markdown {
   color: var(--ds-color-foreground);
-  line-height: 1.6;
+  line-height: 1.65;
   overflow-wrap: anywhere;
+  -webkit-font-smoothing: antialiased;
 }
 .markdown-plain {
   margin: 0;
@@ -23,14 +25,16 @@
 .markdown h4,
 .markdown h5,
 .markdown h6 {
-  margin: 1.4em 0 0.5em;
+  margin: 1.5em 0 0.6em;
   line-height: 1.25;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  scroll-margin-top: 16px;
 }
 .markdown h1 {
-  font-size: 1.8em;
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid var(--ds-color-border);
+  font-size: 1.85em;
+  padding-bottom: 0.35em;
+  border-bottom: 1px solid var(--ds-color-border-strong);
 }
 .markdown h2 {
   font-size: 1.45em;
@@ -41,17 +45,21 @@
   font-size: 1.2em;
 }
 .markdown h4 {
-  font-size: 1em;
+  font-size: 1.02em;
 }
-.markdown h5,
+.markdown h5 {
+  font-size: 0.92em;
+}
 .markdown h6 {
-  font-size: 0.9em;
+  font-size: 0.88em;
   color: var(--ds-color-muted);
 }
 .markdown p,
 .markdown ul,
 .markdown ol,
 .markdown blockquote,
+.markdown .md-alert,
+.markdown .md-frontmatter,
 .markdown .md-table,
 .markdown .md-code,
 .markdown .md-math-display {
@@ -61,8 +69,20 @@
 .markdown ol {
   padding-left: 2em;
 }
+.markdown ul ul {
+  list-style-type: circle;
+}
+.markdown ul ul ul {
+  list-style-type: square;
+}
 .markdown li + li {
   margin-top: 0.25em;
+}
+.markdown li > p {
+  margin-bottom: 0.5em;
+}
+.markdown li > p:last-child {
+  margin-bottom: 0;
 }
 .markdown li > ul,
 .markdown li > ol {
@@ -70,20 +90,95 @@
 }
 .markdown ul.contains-task-list {
   list-style: none;
-  padding-left: 1.2em;
+  padding-left: 1.4em;
+}
+.markdown li.task-list-item {
+  position: relative;
 }
 .markdown li.task-list-item input {
-  margin: 0 0.5em 0 -1.2em;
+  margin: 0 0.55em 0 -1.4em;
   vertical-align: middle;
+  accent-color: var(--ds-accent);
+}
+.markdown li.task-list-item:has(> input:checked) {
+  color: var(--ds-color-muted);
 }
 .markdown blockquote {
-  padding: 0 1em;
+  padding: 0.5em 1em;
   color: var(--ds-color-muted);
-  border-left: 0.25em solid var(--ds-color-border-strong);
+  background: color-mix(in srgb, var(--ds-color-hover) 55%, transparent);
+  border-left: 3px solid var(--ds-color-border-strong);
+  border-radius: 0 var(--ds-metric-radius-small) var(--ds-metric-radius-small) 0;
+}
+.markdown blockquote > :first-child {
+  margin-top: 0;
+}
+.markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
+.markdown .md-alert {
+  --md-alert-color: var(--ds-accent);
+  padding: 0.65em 1em;
+  border-left: 3px solid var(--md-alert-color);
+  border-radius: 0 var(--ds-metric-radius-small) var(--ds-metric-radius-small) 0;
+  background: color-mix(in srgb, var(--md-alert-color) 10%, transparent);
+}
+.markdown .md-alert-tip {
+  --md-alert-color: var(--ds-status-done);
+}
+.markdown .md-alert-important {
+  --md-alert-color: var(--ds-chart-purple);
+}
+.markdown .md-alert-warning {
+  --md-alert-color: var(--ds-color-warning);
+}
+.markdown .md-alert-caution {
+  --md-alert-color: var(--ds-status-error);
+}
+.markdown .md-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-weight: 600;
+  font-size: 0.92em;
+  color: var(--md-alert-color);
+  margin-bottom: 0.35em;
+}
+.markdown .md-alert-icon {
+  width: 1em;
+  height: 1em;
+  flex: none;
+}
+.markdown .md-alert-body > :first-child {
+  margin-top: 0;
+}
+.markdown .md-alert-body > :last-child {
+  margin-bottom: 0;
+}
+.markdown .md-frontmatter {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25em 1em;
+  padding: 0.65em 0.9em;
+  font-size: 0.88em;
+  background: var(--ds-color-sidebar);
+  border: 1px solid var(--ds-color-border-strong);
+  border-radius: var(--ds-metric-radius);
+}
+.markdown .md-frontmatter-row {
+  display: contents;
+}
+.markdown .md-frontmatter dt {
+  font-weight: 600;
+  color: var(--ds-color-muted);
+}
+.markdown .md-frontmatter dd {
+  margin: 0;
+  color: var(--ds-color-foreground);
 }
 .markdown hr {
   height: 0;
-  margin: 1.5em 0;
+  margin: 1.6em 0;
   border: 0;
   border-top: 1px solid var(--ds-color-border-strong);
 }
@@ -97,61 +192,89 @@
 .markdown img {
   max-width: 100%;
   height: auto;
+  border-radius: var(--ds-metric-radius-small);
 }
 .markdown code {
   font-family: var(--mono);
   font-size: 0.88em;
 }
 .markdown :not(pre) > code {
-  padding: 0.15em 0.4em;
+  padding: 0.14em 0.42em;
   background: var(--ds-color-hover);
-  border-radius: 0.3em;
+  border: 1px solid var(--ds-color-border);
+  border-radius: 0.32em;
 }
 .markdown .md-code {
-  background: var(--ds-color-hover);
-  border-radius: 0.4em;
+  background: var(--ds-color-sidebar);
+  border: 1px solid var(--ds-color-border-strong);
+  border-radius: var(--ds-metric-radius);
   overflow: hidden;
 }
 .markdown .md-code-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.2em 0.4em 0.2em 0.8em;
-  color: var(--ds-color-faint);
+  min-height: 2em;
+  padding: 0.15em 0.35em 0.15em 0.85em;
+  background: color-mix(in srgb, var(--ds-color-hover) 65%, transparent);
+  color: var(--ds-color-muted);
   font-size: 0.8em;
   border-bottom: 1px solid var(--ds-color-border);
 }
+.markdown .md-code-lang {
+  font-family: var(--mono);
+  text-transform: lowercase;
+}
 .markdown .md-code pre {
   margin: 0;
-  padding: 0.7em 0.9em;
+  padding: 0.75em 0.95em;
   overflow-x: auto;
   font-size: 0.88em;
-  line-height: 1.5;
+  line-height: 1.55;
   white-space: pre;
   background: none;
 }
 .markdown .md-code pre code {
   padding: 0;
+  border: 0;
   background: none;
   font-size: inherit;
 }
 .markdown .md-table {
   overflow-x: auto;
+  border: 1px solid var(--ds-color-border-strong);
+  border-radius: var(--ds-metric-radius);
 }
 .markdown table {
   border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
 }
 .markdown th,
 .markdown td {
-  padding: 0.4em 0.8em;
-  border: 1px solid var(--ds-color-border-strong);
+  padding: 0.45em 0.85em;
+  border-bottom: 1px solid var(--ds-color-border);
+  border-right: 1px solid var(--ds-color-border);
+  text-align: left;
+}
+.markdown th:last-child,
+.markdown td:last-child {
+  border-right: 0;
+}
+.markdown tbody tr:last-child td {
+  border-bottom: 0;
 }
 .markdown th {
   font-weight: 600;
-  background: var(--ds-color-hover);
+  background: var(--ds-color-sidebar);
+  border-bottom-color: var(--ds-color-border-strong);
+}
+.markdown tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--ds-color-hover) 40%, transparent);
 }
 .markdown .md-math-display {
   overflow-x: auto;
+  padding: 0.25em 0;
 }
 .markdown .md-math-source code {
   color: var(--ds-color-muted);
@@ -159,12 +282,15 @@
 .markdown del {
   color: var(--ds-color-muted);
 }
+.markdown strong {
+  font-weight: 600;
+}
 .markdown section[data-footnotes] {
   margin-top: 2em;
-  padding-top: 0.5em;
+  padding-top: 0.6em;
   font-size: 0.9em;
   color: var(--ds-color-muted);
-  border-top: 1px solid var(--ds-color-border);
+  border-top: 1px solid var(--ds-color-border-strong);
 }
 .markdown section[data-footnotes] h2 {
   font-size: 1em;
