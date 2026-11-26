@@ -9,7 +9,7 @@ theirs under Added, Changed and Fixed, after
 
 ## [Unreleased]
 
-## [0.6.0] - 2026-11-25
+## [0.6.0] - 2026-11-26
 
 - **Breaking:** renamed from herdr-ide to veldr: the executable, the
   `~/.veldr` directories on machines, `VELDR_*` variables, the
@@ -41,7 +41,14 @@ theirs under Added, Changed and Fixed, after
 - The desktop app runs its server inside the app and listens on no port,
   so other programs on the computer cannot reach it. It shares the
   machines' terminals, workspaces and chats with a server of the default
-  instance reaching the same machines.
+  instance reaching the same machines. Its server is the same executable
+  as the command line's, and the app carries the build of every machine
+  platform, so it sets up Linux and macOS machines without fetching the
+  release from GitHub.
+
+- While a machine connects, the sidebar and its settings show what its
+  setup is doing: checking the machine, the machine's own download,
+  the upload of its build with a progress bar, installing and starting.
 
 - Several servers and desktop apps reaching one machine share its
   terminals, workspaces, chats, VS Code and program windows, as tmux
@@ -138,6 +145,14 @@ theirs under Added, Changed and Fixed, after
   macOS no longer asks for keychain access at every launch. **Task
   Manager** refuses process ids outside the valid range: a crafted request
   could make a machine signal every process of the user.
+
+- Terminals, chats, program windows and the page's connection to the
+  server reconnect after a drop with growing, randomized delays. A
+  machine's slow disk no longer holds up its other panes while terminal
+  history, AI usage and chats store their data, several servers setting
+  up one machine share its download and install, and machines whose home
+  directory has a long path keep their sockets in a short private
+  directory under `/tmp`.
 
 ## [0.5.0] - 2026-11-22
 
