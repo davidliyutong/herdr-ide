@@ -67,10 +67,12 @@ async function takeOver(app: import('@playwright/test').Page, instance: Instance
     await watch;
     expect([...seen]).toEqual(['ready']);
 
-    // Both hubs work through the new node: the terminal goes on.
+    // Both hubs work through the new node: the terminal goes on. The hub's
+    // connection to the terminal core moves with the node, so a call made
+    // just as the machine moved may find it unavailable for a moment.
     const other = new TermClient(newer.baseURL);
     try {
-      expect(await term.screen(rec.address)).toMatch(/before-42/);
+      await term.waitScreen(rec.address, /before-42/);
       const next = await term.call<{ address: string }>('terminal.run', { argv: ['/bin/sh', '-c', 'echo "after-$((6*7))"; sleep 600'] });
       await other.waitScreen(next.address, /after-42/);
       await run(app, term, pane, 'echo "typed-$((6*7))"', /^typed-42$/m);
