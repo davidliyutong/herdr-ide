@@ -39,6 +39,7 @@
     "hono": "4.13.21",
     "jsonc-parser": "3.3.1",
     "re2js": "2.9.1",
+    "reflect-metadata": "0.2.2",
     "ssh-config": "5.3.1",
     "tar": "7.5.23",
     "ws": "8.23.0",

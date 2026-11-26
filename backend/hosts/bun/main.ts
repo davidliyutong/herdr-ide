@@ -6,6 +6,12 @@
 // runs here. Each subcommand is imported dynamically so starting one
 // command (e.g. `desktop` or `node`) does not evaluate the modules of the
 // others.
+//
+// The Reflect polyfill comes first: @simplewebauthn/server's tsyringe (via
+// @peculiar/x509) needs it at evaluation, and its own side-effect import is
+// evaluated after tsyringe once the vault's modules sit behind a dynamic
+// import in the compiled executable.
+import 'reflect-metadata';
 import { posix } from 'node:path';
 import { HUB_BIN, SLUG } from '#shared/lib/brand.ts';
 import { isForeignRuntimeVar } from '#shared/lib/bunenv.ts';
