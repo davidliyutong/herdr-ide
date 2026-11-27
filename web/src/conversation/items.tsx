@@ -80,43 +80,91 @@ function UserMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
   const actions = useContext(TimelineActionsContext);
   const text = blocksText(item.content);
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [panel, setPanel] = useState<'closed' | 'rewind' | 'edit' | 'rewind-unsupported' | 'fork-lossy'>('closed');
   const [draft, setDraft] = useState('');
   const [restoreFiles, setRestoreFiles] = useState(false);
   const [saving, setSaving] = useState(false);
   const [forking, setForking] = useState(false);
   const [failed, setFailed] = useState<string | undefined>(undefined);
   const editRef = useRef<HTMLTextAreaElement>(null);
+  const confirmBtnRef = useRef<HTMLButtonElement>(null);
+  const lastRewindNonce = useRef(0);
+
+  const canRewind = item.seq !== undefined && !!actions.rewind;
+  const showUnsupportedRewind = !canRewind && item.seq !== undefined && actions.rewindUnsupported;
+  const canFork = item.seq !== undefined && !!actions.fork;
+  const isLastUserTurn = item.seq !== undefined && item.seq === actions.lastUserSeq;
+  const losslessFork = isLastUserTurn ? actions.nativeFork : actions.nativePartialFork;
 
   useEffect(() => {
-    if (editing) {
+    if (panel === 'edit') {
       const el = editRef.current;
       if (el) {
         el.focus();
         el.setSelectionRange(el.value.length, el.value.length);
       }
+    } else if (panel === 'rewind' || panel === 'rewind-unsupported' || panel === 'fork-lossy') {
+      confirmBtnRef.current?.focus();
     }
-  }, [editing]);
+  }, [panel]);
+
+  useEffect(() => {
+    const req = actions.rewindTarget;
+    if (!req || !canRewind || item.seq !== req.seq || req.nonce === lastRewindNonce.current) return;
+    lastRewindNonce.current = req.nonce;
+    setDraft(text);
+    setRestoreFiles(false);
+    setFailed(undefined);
+    setPanel('rewind');
+  }, [actions.rewindTarget, canRewind, item.seq, text]);
 
   let lines = 1;
   for (let i = text.indexOf('\n'); i >= 0 && lines <= LONG_PROMPT_LINES; i = text.indexOf('\n', i + 1)) lines++;
   const long = text.length > LONG_PROMPT || lines > LONG_PROMPT_LINES;
 
-  const canRewind = item.seq !== undefined && !!actions.rewind;
-  const canFork = item.seq !== undefined && !!actions.fork;
   const nonTextBlocks = useMemo(() => item.content.filter((b) => b.type !== 'text'), [item.content]);
+
+  const startRewind = () => {
+    setDraft(text);
+    setRestoreFiles(false);
+    setFailed(undefined);
+    setPanel('rewind');
+  };
 
   const startEdit = () => {
     setDraft(text);
     setRestoreFiles(false);
     setFailed(undefined);
-    setEditing(true);
+    setPanel('edit');
   };
 
-  const cancelEdit = () => {
-    if (saving) return;
-    setEditing(false);
+  const cancelPanel = () => {
+    if (saving || forking) return;
+    setPanel('closed');
     setFailed(undefined);
+    actions.clearRewindTarget?.();
+  };
+
+  const submitRewindOnly = (prefillText: string) => {
+    if (saving || item.seq === undefined || !actions.rewind) return;
+    setSaving(true);
+    setFailed(undefined);
+    actions
+      .rewind(item.seq, {
+        ...(actions.rewindFiles && restoreFiles ? { restoreFiles: true } : {}),
+      })
+      .then(
+        () => {
+          setSaving(false);
+          setPanel('closed');
+          actions.clearRewindTarget?.();
+          if (prefillText) actions.prefillComposer?.(prefillText);
+        },
+        (e: unknown) => {
+          setSaving(false);
+          setFailed(errorText(e, ctx.agent, 'conversation.commandFailed'));
+        },
+      );
   };
 
   const submitEdit = () => {
@@ -135,7 +183,8 @@ function UserMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
       .then(
         () => {
           setSaving(false);
-          setEditing(false);
+          setPanel('closed');
+          actions.clearRewindTarget?.();
         },
         (e: unknown) => {
           setSaving(false);
@@ -147,22 +196,136 @@ function UserMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
   const onEditKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Escape') {
       e.preventDefault();
-      cancelEdit();
+      cancelPanel();
     } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submitEdit();
     }
   };
 
-  const triggerFork = () => {
+  const executeFork = () => {
     if (forking || item.seq === undefined || !actions.fork) return;
     setForking(true);
-    Promise.resolve(actions.fork(item.seq)).finally(() => setForking(false));
+    Promise.resolve(actions.fork(item.seq)).finally(() => {
+      setForking(false);
+      setPanel('closed');
+    });
+  };
+
+  const onForkClick = () => {
+    if (forking || item.seq === undefined || !actions.fork) return;
+    if (losslessFork) {
+      executeFork();
+      return;
+    }
+    setFailed(undefined);
+    setPanel('fork-lossy');
   };
 
   return (
     <div className="conv-item conv-user" data-item={item.id} data-seq={item.seq}>
-      {editing ? (
+      {panel === 'rewind-unsupported' ? (
+        <div
+          className="conv-bubble conv-user-edit conv-user-info"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              cancelPanel();
+            }
+          }}
+        >
+          <span className="conv-sr">{t('conversation.you')}: </span>
+          {text && (
+            <div className="conv-user-text clamped">
+              <Markdown text={text} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-user-md" />
+            </div>
+          )}
+          <div className="conv-edit-warn" role="note">
+            <TriangleAlert aria-hidden />
+            <span>{t('conversation.rewind.unsupported', { agent: ctx.agent })}</span>
+          </div>
+          <div className="conv-edit-actions">
+            <button ref={confirmBtnRef} type="button" className="sm" onClick={cancelPanel}>
+              {t('conversation.rewind.dismiss')}
+            </button>
+          </div>
+        </div>
+      ) : panel === 'fork-lossy' ? (
+        <div
+          className="conv-bubble conv-user-edit conv-user-fork-lossy"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              cancelPanel();
+            }
+          }}
+        >
+          <span className="conv-sr">{t('conversation.you')}: </span>
+          {text && (
+            <div className="conv-user-text clamped">
+              <Markdown text={text} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-user-md" />
+            </div>
+          )}
+          <div className="conv-edit-warn" role="note">
+            <TriangleAlert aria-hidden />
+            <span>{t('conversation.fork.lossyWarning', { agent: ctx.agent })}</span>
+          </div>
+          <div className="conv-edit-actions">
+            <button ref={confirmBtnRef} type="button" className="primary sm" disabled={forking} onClick={executeFork}>
+              <GitFork aria-hidden />
+              {t('conversation.fork.lossyConfirm')}
+            </button>
+            <button type="button" className="sm" disabled={forking} onClick={cancelPanel}>
+              {t('conversation.rewind.cancel')}
+            </button>
+          </div>
+        </div>
+      ) : panel === 'rewind' ? (
+        <div
+          className="conv-bubble conv-user-edit conv-user-rewind"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              cancelPanel();
+            }
+          }}
+        >
+          <span className="conv-sr">{t('conversation.you')}: </span>
+          {text && (
+            <div className="conv-user-text clamped">
+              <Markdown text={text} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-user-md" />
+            </div>
+          )}
+          <div className="conv-edit-warn" role="note">
+            <TriangleAlert aria-hidden />
+            <span>{t('conversation.rewind.warning')}</span>
+          </div>
+          {actions.rewindFiles && (
+            <label className="conv-edit-check">
+              <input type="checkbox" checked={restoreFiles} disabled={saving} onChange={(e) => setRestoreFiles(e.target.checked)} />
+              <span>{t('conversation.rewind.restoreFiles')}</span>
+            </label>
+          )}
+          {failed && (
+            <div className="conv-ask-error" role="alert">
+              {failed}
+            </div>
+          )}
+          <div className="conv-edit-actions">
+            <button ref={confirmBtnRef} type="button" className="primary sm" disabled={saving} onClick={() => submitRewindOnly(text)}>
+              <RotateCcw aria-hidden />
+              {t('conversation.rewind.confirm')}
+            </button>
+            <button type="button" className="sm" disabled={saving} onClick={startEdit}>
+              <Pencil aria-hidden />
+              {t('conversation.rewind.edit')}
+            </button>
+            <button type="button" className="sm" disabled={saving} onClick={cancelPanel}>
+              {t('conversation.rewind.cancel')}
+            </button>
+          </div>
+        </div>
+      ) : panel === 'edit' ? (
         <div className="conv-bubble conv-user-edit">
           <span className="conv-sr">{t('conversation.you')}: </span>
           <textarea
@@ -195,15 +358,41 @@ function UserMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
               <RotateCcw aria-hidden />
               {t('conversation.rewind.submit')}
             </button>
-            <button type="button" className="sm" disabled={saving} onClick={cancelEdit}>
+            <button type="button" className="sm" disabled={saving} onClick={() => submitRewindOnly(draft)}>
+              {t('conversation.rewind.only')}
+            </button>
+            <button type="button" className="sm" disabled={saving} onClick={cancelPanel}>
               {t('conversation.rewind.cancel')}
             </button>
           </div>
         </div>
       ) : (
         <div className="conv-user-wrap">
-          {(canRewind || canFork) && (
+          {(canRewind || showUnsupportedRewind || canFork) && (
             <div className="conv-user-actions" role="toolbar" aria-label={t('conversation.you')}>
+              {canRewind && (
+                <button
+                  type="button"
+                  className="conv-user-action"
+                  aria-label={t('conversation.user.rewind')}
+                  title={t('conversation.user.rewindHint')}
+                  onClick={startRewind}
+                >
+                  <RotateCcw aria-hidden />
+                </button>
+              )}
+              {showUnsupportedRewind && (
+                <button
+                  type="button"
+                  className="conv-user-action is-unsupported"
+                  aria-disabled="true"
+                  aria-label={t('conversation.user.rewindUnsupported', { agent: ctx.agent })}
+                  title={t('conversation.user.rewindUnsupportedHint', { agent: ctx.agent })}
+                  onClick={() => setPanel('rewind-unsupported')}
+                >
+                  <RotateCcw aria-hidden />
+                </button>
+              )}
               {canRewind && (
                 <button
                   type="button"
@@ -219,10 +408,13 @@ function UserMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
                 <button
                   type="button"
                   className="conv-user-action"
+                  data-lossy={!losslessFork || undefined}
                   aria-label={t('conversation.user.forkHere')}
-                  title={t('conversation.user.forkHereHint')}
+                  title={
+                    losslessFork ? t('conversation.user.forkHereHint') : t('conversation.user.forkHereLossyHint', { agent: ctx.agent })
+                  }
                   disabled={forking}
-                  onClick={triggerFork}
+                  onClick={onForkClick}
                 >
                   <GitFork aria-hidden />
                 </button>
@@ -413,6 +605,7 @@ function Notice({ item, ctx }: { item: NoticeItem; ctx: ItemContext }) {
   let untrusted = false;
   let command: string | undefined;
   let output: string | undefined;
+  let sourceChat: { id: string; kind?: string } | undefined;
   switch (item.method) {
     case NOTICES.compacted:
       text = t('conversation.notice.compacted');
@@ -450,12 +643,37 @@ function Notice({ item, ctx }: { item: NoticeItem; ctx: ItemContext }) {
       text = t('conversation.notice.fullAccessOff');
       break;
     case CHAT_NOTICES.forked:
-      text = t('conversation.notice.forked');
+      text = t(p.native === false ? 'conversation.notice.forkedLossy' : 'conversation.notice.forked');
       break;
     case CHAT_NOTICES.switched: {
       const fromKind = str(p.fromKind);
+      const fromChat = str(p.fromChat);
+      if (fromChat) sourceChat = { id: fromChat, kind: fromKind };
       const fromAgent = fromKind ? (agentKind(fromKind)?.title ?? fromKind) : undefined;
-      text = fromAgent ? t('conversation.notice.switchedFrom', { agent: fromAgent }) : t('conversation.notice.switched');
+      const total = typeof p.totalTurns === 'number' && p.totalTurns > 0 ? Math.trunc(p.totalTurns) : undefined;
+      const kept = typeof p.keptTurns === 'number' && p.keptTurns >= 0 ? Math.trunc(p.keptTurns) : undefined;
+      const omitted = typeof p.omittedTurns === 'number' && p.omittedTurns >= 0 ? Math.trunc(p.omittedTurns) : 0;
+      const est = typeof p.estimatedTokens === 'number' && p.estimatedTokens > 0 ? Math.trunc(p.estimatedTokens) : undefined;
+      const native = p.injection === 'native_history';
+      if (fromAgent && total !== undefined && kept !== undefined && est !== undefined) {
+        const tokens = est >= 1000 ? `${(est / 1000).toFixed(1)}k` : String(est);
+        text =
+          omitted > 0
+            ? t(native ? 'conversation.notice.switchedBudgetedNative' : 'conversation.notice.switchedBudgeted', {
+                agent: fromAgent,
+                kept,
+                total,
+                omitted,
+                tokens,
+              })
+            : t(native ? 'conversation.notice.switchedFullNative' : 'conversation.notice.switchedFull', {
+                agent: fromAgent,
+                kept,
+                tokens,
+              });
+      } else {
+        text = fromAgent ? t('conversation.notice.switchedFrom', { agent: fromAgent }) : t('conversation.notice.switched');
+      }
       break;
     }
     case CHAT_NOTICES.rewound:
@@ -487,6 +705,11 @@ function Notice({ item, ctx }: { item: NoticeItem; ctx: ItemContext }) {
         {output && (
           <button type="button" className="conv-link" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
             {t('conversation.notice.output')}
+          </button>
+        )}
+        {sourceChat && ctx.openChat && (
+          <button type="button" className="conv-link" onClick={() => ctx.openChat?.(sourceChat!.id, sourceChat!.kind)}>
+            {t('conversation.notice.openSourceChat')}
           </button>
         )}
         {untrusted && <TrustButton cwd={str(p.cwd) ?? ''} ctx={ctx} trusting={trusting} set={setTrusting} />}
@@ -538,6 +761,9 @@ export function subagentType(item: ToolItem): string | undefined {
   const tm = taskMeta(item);
   if (tm?.subagentType) return tm.subagentType;
   if (inputText(item.rawInput, 'tool') === 'spawnAgent') return 'subagent';
+  if (item.title.trim() === 'Run invoke_subagent' || (inputText(item.rawInput, 'TypeName') && inputText(item.rawInput, 'Prompt'))) {
+    return inputText(item.rawInput, 'TypeName', 'Role') ?? 'subagent';
+  }
   return undefined;
 }
 
@@ -568,12 +794,13 @@ function SubagentTaskMeta({
   const rawToolCallId = item.id.startsWith('tool:') ? item.id.slice(5) : item.id;
   const liveTask = actions.tasksByToolCall.get(rawToolCallId);
   const isBg = liveTask?.backgrounded === true || tm?.backgrounded === true;
-  const taskId = liveTask?.id ?? tm?.taskId;
-  const model = inputText(item.rawInput, 'model');
+  const rawModel = inputText(item.rawInput, 'model', 'Model');
+  const model = rawModel && rawModel !== 'inherit' ? rawModel : undefined;
   const stepCount = steps > 0 ? steps : (liveTask?.toolUses ?? tm?.toolUses ?? 0);
   const tokens = liveTask?.tokens ?? tm?.tokens;
   const durationMs = liveTask?.durationMs ?? tm?.durationMs;
-  const stoppable = status === 'in_progress' && !!actions.stopTask && !!taskId && liveTask?.stoppable !== false && tm?.stoppable !== false;
+  const stoppable =
+    !!actions.stopTask && (liveTask?.status === 'running' || liveTask?.status === 'pending') && liveTask.stoppable !== false;
   const statusLabel = t(`conversation.toolStatus.${status}`);
 
   return (
@@ -591,7 +818,7 @@ function SubagentTaskMeta({
       {(status === 'failed' || status === 'cancelled') && (
         <span className={status === 'failed' ? 'conv-bad' : undefined}>{statusLabel}</span>
       )}
-      {stoppable && <TaskStopButton taskId={taskId} name={label} agent={agent} stopTask={actions.stopTask!} />}
+      {stoppable && <TaskStopButton taskId={liveTask.id} name={label} agent={agent} stopTask={actions.stopTask!} />}
     </span>
   );
 }
@@ -604,8 +831,8 @@ function SubagentView({ item, ctx }: { item: ToolItem; ctx: ItemContext }) {
   const status = item.status ?? 'pending';
   const tm = useMemo(() => taskMeta(item), [item]);
   const type = subagentType(item);
-  const description = inputText(item.rawInput, 'description') ?? tm?.description ?? (item.title.trim() || undefined);
-  const prompt = inputText(item.rawInput, 'prompt');
+  const description = inputText(item.rawInput, 'description', 'Role') ?? tm?.description ?? (item.title.trim() || undefined);
+  const prompt = inputText(item.rawInput, 'prompt', 'Prompt');
   const items = item.sub?.items ?? [];
   const results = item.content.filter((c) => c.type !== 'diff');
   const statusLabel = t(`conversation.toolStatus.${status}`);
@@ -627,7 +854,9 @@ function SubagentView({ item, ctx }: { item: ToolItem; ctx: ItemContext }) {
             <Bot className="conv-kind-icon" aria-hidden />
           )}
           <span className="conv-tool-label">{rowLabel}</span>
-          {description && <span className="conv-tool-subject conv-subagent-desc">{description.split('\n')[0]}</span>}
+          {description && description !== rowLabel && (
+            <span className="conv-tool-subject conv-subagent-desc">{description.split('\n')[0]}</span>
+          )}
           <span className="conv-sr">, {statusLabel}</span>
         </button>
         <SubagentTaskMeta item={item} status={status} steps={items.length} label={description ?? rowLabel} agent={ctx.agent} />

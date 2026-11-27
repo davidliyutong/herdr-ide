@@ -14,7 +14,7 @@ import type { UnopenedAgent, ViewStatusDef } from '../api';
 import { chatApi } from './api';
 import { agentName, openChat } from './ops';
 import { CHAT_STATUSES, isChatId } from './protocol';
-import { chatState, follow, useChats } from './state';
+import { chatState, follow, liveKey, useChats } from './state';
 import { chatPane, chatRef } from './view';
 
 export { chatPane };
@@ -63,6 +63,15 @@ export const chatViewStatus: ViewStatusDef = {
     const chat = chatRef(view).chat;
     const st = chat ? useChats.getState().states[m]?.[chat] : undefined;
     return st && (CHAT_STATUSES as readonly string[]).includes(st.status) ? (st.status as AgentStatus) : undefined;
+  },
+  isActive(m, view) {
+    const chat = chatRef(view).chat;
+    if (!chat) return false;
+    const s = useChats.getState();
+    const state = s.live[liveKey(m, chat)]?.state ?? s.states[m]?.[chat]?.state;
+    if (state === 'working' || state === 'waiting' || state === 'starting') return true;
+    const status = s.states[m]?.[chat]?.status;
+    return status === 'working' || status === 'blocked';
   },
   subscribe(fn) {
     follow();

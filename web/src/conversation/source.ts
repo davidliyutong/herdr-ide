@@ -67,25 +67,31 @@ export interface ModelPickerConfig {
 /** Shared optional props added to ConversationProps (Conversation.tsx) and
  * supplied by ChatPane.tsx. */
 export interface ConversationExtras {
-  /** Brand logo element for the active agent kind (shown bottom-left of composer, #8). */
+  /** Brand logo element for the active agent kind. */
   agentIcon?: ReactNode;
-  /** Model visibility allowlist & "Manage models…" shortcut (#3). */
+  /** Active Git branch name (or detached commit short hash) of the chat's workspace. */
+  branch?: string;
+  /** Model visibility allowlist (#3). */
   modelPicker?: ModelPickerConfig;
   /** Fork the conversation up to `upToSeq` (or its end when omitted) (#6). */
   onFork?(upToSeq?: number): void | Promise<void>;
+  /** Open a referenced chat (e.g. the source chat of a cross-agent handoff). */
+  onOpenChat?(chatId: string, kind?: string): void;
 }
 
 /** Shared optional props forwarded from Conversation.tsx into Composer.tsx. */
 export interface ComposerExtras {
   /** Agent kind id (e.g. 'claude', 'codex', 'agy'). */
   kind?: string;
-  /** Brand logo element rendered at bottom-left of the composer (#8). */
+  /** Brand logo element for the active agent kind. */
   agentIcon?: ReactNode;
-  /** Machine & directory base for Markdown preview and local FilePicker (#5, #7). */
+  /** Machine & directory base for project label, Markdown preview and local FilePicker. */
   base?: MarkdownBase;
+  /** Active Git branch name (or detached commit short hash) of the chat's workspace. */
+  branch?: string;
   /** Current turn activity (e.g. 'compacting' for #9 loading indicator). */
   activity?: 'compacting';
-  /** Model visibility allowlist & "Manage models…" shortcut (#3). */
+  /** Model visibility allowlist (#3). */
   modelPicker?: ModelPickerConfig;
 }
 
@@ -173,7 +179,7 @@ export interface ChatSource {
   rewind?(seq: number, opts?: RewindOptions): Promise<void>;
   /** The files of the chat's directory that match what the user typed
    * after `@`, the best first; absent when the source cannot tell. */
-  suggestFiles?(query: string): Promise<FileSuggestion[]>;
+  suggestFiles?(query: string, signal?: AbortSignal): Promise<FileSuggestion[]>;
   /** Trusts the chat's folder, and those below it, on its machine: an
    * agent started there from then on loads the project's own settings
    * (the notice untrusted_folder says it did not). Absent when the source

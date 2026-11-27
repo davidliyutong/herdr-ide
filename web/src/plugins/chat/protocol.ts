@@ -297,6 +297,7 @@ export interface HostSettings {
   maxTotalBytes?: number;
   maxChatBytes?: number;
   defaultMode?: Mode;
+  defaultModes?: Record<string, Mode>;
   allowFull?: boolean;
 }
 
@@ -435,6 +436,7 @@ export const HOST_CODES = [
   'unknown_chat',
   'too_many',
   'busy',
+  'probe_busy',
   'not_found',
   'start_failed',
   'protocol',

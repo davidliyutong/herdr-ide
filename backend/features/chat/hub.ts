@@ -18,10 +18,12 @@ import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { open } from '#kernel/agent.ts';
 import { defineFeature, type FeatureDef } from '#kernel/feature.ts';
 import { offline } from '#kernel/fail.ts';
+import type { Client } from '#kernel/http/env.ts';
 import type { Opener } from './hostconn.ts';
 import { ChatSwitchboard } from './switchboard.ts';
 import { SdkProvision, type SdkProvisionOptions } from './sdkprovision.ts';
 import { chatProtocol } from './protocol.ts';
+import { invalidateOverviews } from './overview.ts';
 import { routes } from './routes.ts';
 import { settings } from './settings.ts';
 import { DEFAULT_LIMITS, DEFAULT_TIMING, type Limits, type Timing } from './timing.ts';
@@ -45,6 +47,7 @@ export interface ChatOptions {
   workspaceEnv?: (
     machine: string,
     workspace: string,
+    client: Client,
   ) => Promise<{
     presets: string[];
     env: Record<string, string>;
@@ -101,6 +104,7 @@ export function chatFeature(o: ChatOptions = {}): ChatFeature {
       ctx.onForget((m) => {
         h.forget(m);
         h.o.sdk.forget(m);
+        invalidateOverviews(h);
       });
     },
   });

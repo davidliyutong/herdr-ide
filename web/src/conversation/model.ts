@@ -439,7 +439,8 @@ export const CHAT_NOTICES = {
   fullAccessOff: noticeMethod('full_access_off'),
   /** The chat was forked from an earlier conversation. */
   forked: noticeMethod('forked'),
-  /** The chat was switched from another agent with exported context (params: {fromKind?, fromChat?}). */
+  /** The chat was switched from another agent with transferred context
+   * (params: {fromKind?, fromChat?, fromSeq?, injection?, totalTurns?, keptTurns?, omittedTurns?, estimatedTokens?}). */
   switched: noticeMethod('switched'),
   /** The conversation was rewound to an earlier user turn (params: {restoreFiles?}). */
   rewound: noticeMethod('rewound'),
@@ -569,6 +570,8 @@ export interface Usage {
   size: number;
   /** The agent's own measure of the context in use, 0 to 100. */
   percentage?: number;
+  /** True after compaction until the agent reports fresh usage. */
+  stale?: boolean;
   cost?: Cost;
   limits?: Limit[];
 }
@@ -837,6 +840,7 @@ export function readUsage(u: unknown): Usage | undefined {
   const out: Usage = { used, size: count(u.size) ?? 0 };
   const pct = count(u.percentage);
   if (pct !== undefined && pct > 0) out.percentage = Math.min(100, pct);
+  if (u.stale === true) out.stale = true;
   if (isCost(u.cost)) out.cost = { amount: u.cost.amount, currency: u.cost.currency };
   if (Array.isArray(u.limits)) {
     const limits = u.limits.slice(0, MAX_LIST.limits).flatMap((l) => readLimit(l) ?? []);

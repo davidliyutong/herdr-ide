@@ -1,20 +1,18 @@
-// The composer of a chat: a field that sends on Enter (Shift+Enter or
-// Alt+Enter: a new line with Markdown list/quote/fence continuation),
-// Markdown formatting shortcuts and Write/Preview toggle, images attached by
-// pasting, dropping or picking them (each at most MAX_IMAGE bytes, the
-// message at most MAX_PROMPT), workspace files named with `@` (including
-// directory drill-down and space-safe chips) or browsed via FilePicker, the
-// agent's commands with `/` (and compact, where the agent can), bottom-left
-// agent kind badge, selectors of the model (filtered by visibleModels with
-// "Manage models…"), effort and permission mode, a Slack-style queued
-// messages stack (edit, steer/send-now, withdraw), explicit steer/interrupt
-// controls while a turn runs, a stop button (and Escape), and a usage line
-// with interactive click-to-compact context meter and session cost.
+// The composer of a chat (Claude-Code-inspired layout):
+// - Rounded input box with a left `+` menu (workspace files, images, Markdown
+//   preview toggle), an auto-growing Markdown textarea with valid leading
+//   slash-command highlighting, floating `/` command and `@` file menus above
+//   the box, and right-aligned Stop / Steer / Send controls.
+// - Bottom meta bar below the input box: project directory & Git branch on
+//   the left; combined Model + Effort selector (without "More models"),
+//   permission mode selector, and circular SVG context-usage ring (hover
+//   details + click-to-compact) on the right.
 
 import {
   useCallback,
   useEffect,
   useId,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -22,34 +20,32 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
+  type ReactNode,
   type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowUp,
-  Check,
-  ChevronDown,
   Clock,
-  Eye,
   FastForward,
   FileText,
+  Folder,
+  GitBranch,
   Image as ImageIcon,
-  ImagePlus,
   ListPlus,
   LoaderCircle,
-  Paperclip,
   Pencil,
-  SlidersHorizontal,
   Square,
   SquareSlash,
   TriangleAlert,
   X,
   Zap,
 } from 'lucide-react';
+import { APP_SLUG } from '../brand';
 import { FilePicker } from '../components/FilePicker';
 import { useDismiss } from '../components/useDismiss';
 import { FileIcon } from '../fileIcons';
-import { locale, t, type MessageKey } from '../i18n';
+import { t, type MessageKey } from '../i18n';
 import { Markdown } from '../markdown/Markdown';
 import {
   AttachError,
@@ -64,7 +60,17 @@ import {
   readImage,
   type Attachment,
 } from './attach';
-import { contextPercent, formatCost, formatTokens } from './format';
+import {
+  ConfigSelect,
+  ModelEffortSelect,
+  PlusMenu,
+  UsageLine,
+  modeName,
+  placeConfigMenu,
+  type ConfigMenuPlace,
+  type FullBlocked,
+  type UsageLineProps,
+} from './ComposerControls';
 import { handleMarkdownKey } from './markdownEdit';
 import {
   blocksText,
@@ -82,30 +88,237 @@ import {
 } from './model';
 import { errorText } from './parts';
 import type { ChatSource, ComposerExtras, Delivery, FileSuggestion } from './source';
-import type { ConfigOption, ConfigValue } from '../plugins/chat/protocol';
+import type { SlashCommand } from '../plugins/chat/protocol';
 import './composer.css';
 
-/** The user's text not sent yet, by chat (the source's id) or by source:
- * it outlives the view until it is sent. */
-const drafts = new WeakMap<ChatSource, string>();
-const namedDrafts = new Map<string, string>();
-/** The most drafts kept by name. */
-const MAX_DRAFTS = 200;
+export { placeConfigMenu, UsageLine, type ConfigMenuPlace, type FullBlocked, type UsageLineProps };
 
-function draftOf(s: ChatSource): string {
-  return (s.id ? namedDrafts.get(s.id) : drafts.get(s)) ?? '';
+/** The user's unsent draft (text, pasted/picked images, file chips, and inline
+ * mentions), keyed by chat (the source's id) or by source: it outlives the
+ * view across tab/window switches until it is sent. */
+interface ComposerDraft {
+  text: string;
+  attachments: Attachment[];
+  attachedFiles: FileSuggestion[];
+  mentions: FileSuggestion[];
 }
 
-function keepDraft(s: ChatSource, text: string) {
+const emptyDraft = (): ComposerDraft => ({ text: '', attachments: [], attachedFiles: [], mentions: [] });
+
+const isEmptyDraft = (d: ComposerDraft): boolean =>
+  !d.text && d.attachments.length === 0 && d.attachedFiles.length === 0 && d.mentions.length === 0;
+
+const cloneDraft = (d: ComposerDraft): ComposerDraft => ({
+  text: d.text,
+  attachments: d.attachments.map((a) => ({ ...a })),
+  attachedFiles: d.attachedFiles.map((f) => ({ ...f })),
+  mentions: d.mentions.map((m) => ({ ...m })),
+});
+
+const draftAttachmentBytes = (d: ComposerDraft): number => d.attachments.reduce((n, a) => n + a.data.length, 0);
+
+const drafts = new WeakMap<ChatSource, ComposerDraft>();
+const namedDrafts = new Map<string, ComposerDraft>();
+/** Generation counters incremented on clear() so in-flight image reads never
+ * resurrect attachments after a message was sent. */
+const sourceClearGen = new WeakMap<ChatSource, number>();
+const namedClearGen = new Map<string, number>();
+/** The most drafts kept by name, and the total base64 attachment bytes kept
+ * across them so background drafts stay bounded in memory. */
+const MAX_DRAFTS = 200;
+const MAX_DRAFT_ATTACHMENT_BYTES = 64 << 20;
+
+type DraftListener = (draft: ComposerDraft | null, isReply: boolean) => void;
+const draftListeners = new Map<string, Set<DraftListener>>();
+
+type DraftWireMsg = { type: 'draft'; id: string; draft: ComposerDraft | null; reply?: boolean } | { type: 'need'; id: string };
+
+let draftBc: BroadcastChannel | null | undefined;
+let draftBcName = '';
+
+function sanitizeAttachment(v: unknown): Attachment | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const a = v as Partial<Attachment>;
+  if (
+    typeof a.id !== 'string' ||
+    typeof a.name !== 'string' ||
+    typeof a.mimeType !== 'string' ||
+    typeof a.data !== 'string' ||
+    typeof a.size !== 'number' ||
+    !Number.isFinite(a.size)
+  ) {
+    return undefined;
+  }
+  return { id: a.id, name: a.name, mimeType: a.mimeType, data: a.data, size: a.size };
+}
+
+function sanitizeFile(v: unknown): FileSuggestion | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const f = v as Partial<FileSuggestion>;
+  if (typeof f.path !== 'string' || typeof f.label !== 'string') return undefined;
+  return f.isDir ? { path: f.path, label: f.label, isDir: true } : { path: f.path, label: f.label };
+}
+
+function sanitizeDraft(v: unknown): ComposerDraft | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const d = v as Partial<ComposerDraft>;
+  const text = typeof d.text === 'string' ? d.text : '';
+  const attachments = Array.isArray(d.attachments)
+    ? d.attachments
+        .map(sanitizeAttachment)
+        .filter((x): x is Attachment => !!x)
+        .slice(0, MAX_ATTACHMENTS)
+    : [];
+  const attachedFiles = Array.isArray(d.attachedFiles)
+    ? d.attachedFiles
+        .map(sanitizeFile)
+        .filter((x): x is FileSuggestion => !!x)
+        .slice(0, MAX_FILE_ATTACHMENTS)
+    : [];
+  const mentions = Array.isArray(d.mentions) ? d.mentions.map(sanitizeFile).filter((x): x is FileSuggestion => !!x) : [];
+  return { text, attachments, attachedFiles, mentions };
+}
+
+function getDraftChannel(): BroadcastChannel | null {
+  if (typeof BroadcastChannel === 'undefined') return null;
+  const name = `${APP_SLUG}:composer-drafts`;
+  if (draftBc && draftBcName === name) return draftBc;
+  if (draftBc) {
+    try {
+      draftBc.close();
+    } catch {
+      // Ignore close errors.
+    }
+    draftBc = null;
+  }
+  try {
+    const ch = new BroadcastChannel(name);
+    ch.onmessage = (ev: MessageEvent<unknown>) => {
+      const msg = ev.data as Partial<DraftWireMsg> | null;
+      if (!msg || typeof msg !== 'object' || typeof msg.id !== 'string' || !msg.id) return;
+      if (msg.type === 'need') {
+        const cur = namedDrafts.get(msg.id);
+        if (cur && !isEmptyDraft(cur)) {
+          try {
+            ch.postMessage({ type: 'draft', id: msg.id, draft: cloneDraft(cur), reply: true } satisfies DraftWireMsg);
+          } catch {
+            // Ignore postMessage failures in restricted contexts.
+          }
+        }
+        return;
+      }
+      if (msg.type === 'draft') {
+        const incoming = msg.draft === null ? null : sanitizeDraft(msg.draft);
+        if (incoming === undefined) return;
+        const isReply = msg.reply === true;
+        if (isReply) {
+          const existing = namedDrafts.get(msg.id);
+          if (existing && !isEmptyDraft(existing)) return;
+        }
+        if (incoming === null || isEmptyDraft(incoming)) {
+          namedDrafts.delete(msg.id);
+          bumpNamedClearGen(msg.id);
+        } else {
+          storeNamedDraft(msg.id, incoming);
+        }
+        const subs = draftListeners.get(msg.id);
+        if (subs) for (const fn of subs) fn(incoming && !isEmptyDraft(incoming) ? cloneDraft(incoming) : null, isReply);
+      }
+    };
+    draftBc = ch;
+    draftBcName = name;
+    return ch;
+  } catch {
+    draftBc = null;
+    return null;
+  }
+}
+
+function broadcastDraft(msg: DraftWireMsg) {
+  const ch = getDraftChannel();
+  if (!ch) return;
+  try {
+    ch.postMessage(msg);
+  } catch {
+    // Ignore postMessage errors (e.g. closed channel).
+  }
+}
+
+function subscribeDraft(id: string, fn: DraftListener): () => void {
+  getDraftChannel();
+  let set = draftListeners.get(id);
+  if (!set) {
+    set = new Set();
+    draftListeners.set(id, set);
+  }
+  set.add(fn);
+  return () => {
+    set.delete(fn);
+    if (set.size === 0) draftListeners.delete(id);
+  };
+}
+
+function storeNamedDraft(id: string, draft: ComposerDraft) {
+  namedDrafts.delete(id);
+  if (isEmptyDraft(draft)) return;
+  namedDrafts.set(id, cloneDraft(draft));
+  let totalBytes = 0;
+  for (const d of namedDrafts.values()) totalBytes += draftAttachmentBytes(d);
+  while (namedDrafts.size > MAX_DRAFTS || (namedDrafts.size > 1 && totalBytes > MAX_DRAFT_ATTACHMENT_BYTES)) {
+    const oldestKey = namedDrafts.keys().next().value!;
+    if (oldestKey === id) break;
+    const evicted = namedDrafts.get(oldestKey);
+    namedDrafts.delete(oldestKey);
+    if (evicted) totalBytes -= draftAttachmentBytes(evicted);
+  }
+}
+
+function clearGenOf(s: ChatSource): number {
+  return (s.id ? namedClearGen.get(s.id) : sourceClearGen.get(s)) ?? 0;
+}
+
+function bumpNamedClearGen(id: string) {
+  const next = (namedClearGen.get(id) ?? 0) + 1;
+  namedClearGen.delete(id);
+  namedClearGen.set(id, next);
+  if (namedClearGen.size > MAX_DRAFTS * 2) namedClearGen.delete(namedClearGen.keys().next().value!);
+}
+
+function bumpClearGen(s: ChatSource) {
+  if (s.id) bumpNamedClearGen(s.id);
+  else sourceClearGen.set(s, (sourceClearGen.get(s) ?? 0) + 1);
+}
+
+function draftOf(s: ChatSource): ComposerDraft {
+  const d = s.id ? namedDrafts.get(s.id) : drafts.get(s);
+  return d ? cloneDraft(d) : emptyDraft();
+}
+
+function keepDraft(s: ChatSource, draft: ComposerDraft, sync = true) {
+  const empty = isEmptyDraft(draft);
   if (!s.id) {
-    if (text) drafts.set(s, text);
-    else drafts.delete(s);
+    if (empty) drafts.delete(s);
+    else drafts.set(s, cloneDraft(draft));
     return;
   }
-  namedDrafts.delete(s.id);
-  if (!text) return;
-  namedDrafts.set(s.id, text);
-  if (namedDrafts.size > MAX_DRAFTS) namedDrafts.delete(namedDrafts.keys().next().value!);
+  if (empty) namedDrafts.delete(s.id);
+  else storeNamedDraft(s.id, draft);
+  if (sync) broadcastDraft({ type: 'draft', id: s.id, draft: empty ? null : cloneDraft(draft) });
+}
+
+/** Clears cached named drafts (for tests). */
+export function clearDrafts() {
+  namedDrafts.clear();
+  namedClearGen.clear();
+  if (draftBc) {
+    try {
+      draftBc.close();
+    } catch {
+      // Ignore close errors.
+    }
+    draftBc = undefined;
+    draftBcName = '';
+  }
 }
 
 /** A field's height to fit its text (up to its CSS max-height). */
@@ -197,508 +410,57 @@ function attachErrorText(e: unknown, agent: string): string {
   return t('conversation.attach.unreadable', { name: agent });
 }
 
-/** A mode's name in the view's words when it is one of the host's. */
-function modeName(v: ConfigValue): string {
-  switch (v.value) {
-    case 'default':
-    case 'acceptEdits':
-    case 'plan':
-    case 'auto':
-    case 'full':
-      return t(`conversation.mode.${v.value}`);
-    case 'bypassPermissions':
-      return t('conversation.mode.full');
-    default:
-      return v.name;
+/** Ranks slash commands by match quality:
+ * 0 = exact name match, 1 = prefix match, 2 = segment prefix after `:`/`-`/`_`,
+ * 3 = substring match. Preserves agent order when query is empty. */
+export function matchSlashCommands(commands: readonly SlashCommand[], query: string): SlashCommand[] {
+  const seen = new Set<string>();
+  const normalized: SlashCommand[] = [];
+  for (const c of commands) {
+    const clean = c.name.replace(/^\/+/, '');
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(clean === c.name ? c : { ...c, name: clean });
   }
-}
+  const q = query.toLowerCase();
+  if (!q) return normalized;
 
-/** Why the values that give an agent full access (ConfigValue.full) are
- * not offered: the machine's settings do not allow it, or the view is
- * read-only. */
-export type FullBlocked = 'off' | 'readOnly' | undefined;
-
-export interface ConfigMenuPlace {
-  placement: 'top' | 'bottom';
-  left: number;
-  minWidth: number;
-  maxWidth: number;
-  maxHeight: number;
-  top?: number;
-  bottom?: number;
-}
-
-/** Places a popover below or above its trigger button, preferring upward
- * placement when near the bottom of the viewport. */
-export function placeConfigMenu(
-  anchor: { left: number; top: number; right: number; bottom: number },
-  wanted: number,
-  view: { width: number; height: number },
-  maxWidthLimit = 340,
-  minWidthFloor = 160,
-): ConfigMenuPlace {
-  const margin = 8;
-  const gap = 4;
-  const availW = Math.max(0, view.width - 2 * margin);
-  const minWidth = Math.min(Math.max(anchor.right - anchor.left, minWidthFloor), availW);
-  const maxWidth = Math.min(maxWidthLimit, Math.max(minWidth, availW));
-  const left = Math.max(margin, Math.min(anchor.left, view.width - minWidth - margin));
-  const below = view.height - anchor.bottom - margin - gap;
-  const above = anchor.top - margin - gap;
-  if (wanted <= below || (below >= above && below >= 120)) {
-    return {
-      placement: 'bottom',
-      left,
-      minWidth,
-      maxWidth,
-      top: anchor.bottom + gap,
-      maxHeight: Math.max(80, below),
-    };
+  const scored: Array<{ cmd: SlashCommand; tier: number; idx: number; order: number }> = [];
+  for (let order = 0; order < normalized.length; order++) {
+    const cmd = normalized[order];
+    const lower = cmd.name.toLowerCase();
+    const idx = lower.indexOf(q);
+    if (idx < 0) continue;
+    let tier = 3;
+    if (lower === q) tier = 0;
+    else if (idx === 0) tier = 1;
+    else if (lower[idx - 1] === ':' || lower[idx - 1] === '-' || lower[idx - 1] === '_') tier = 2;
+    scored.push({ cmd, tier, idx, order });
   }
-  return {
-    placement: 'top',
-    left,
-    minWidth,
-    maxWidth,
-    bottom: view.height - anchor.top + gap,
-    maxHeight: Math.max(80, above),
-  };
+  scored.sort((a, b) => a.tier - b.tier || a.idx - b.idx || a.cmd.name.length - b.cmd.name.length || a.order - b.order);
+  return scored.map((s) => s.cmd);
 }
 
-function ConfigSelect({
-  option,
-  label,
-  nameOf,
-  disabled,
-  fullBlocked,
-  onSet,
-  footerAction,
-}: {
-  option: ConfigOption;
-  label: string;
-  nameOf?: (v: ConfigValue) => string;
-  disabled: boolean;
-  fullBlocked: FullBlocked;
-  onSet: (id: string, value: string) => Promise<void>;
-  footerAction?: { label: string; onClick(): void };
-}) {
-  /** The value asked for until the host took it. */
-  const [asked, setAsked] = useState<string | undefined>(undefined);
-  const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
-  const [place, setPlace] = useState<ConfigMenuPlace>();
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const popupId = useId();
-
-  const value = asked ?? option.currentValue;
-  const values = option.options.some((o) => o.value === value) ? option.options : [{ value, name: value }, ...option.options];
-  const blocked = (v: ConfigValue) => !!fullBlocked && v.full === true;
-  const labelOf = (v: ConfigValue) => {
-    const name = nameOf ? nameOf(v) : v.name;
-    return blocked(v) ? t(fullBlocked === 'readOnly' ? 'conversation.config.fullReadOnly' : 'conversation.config.fullOff', { name }) : name;
-  };
-  const current = values.find((v) => v.value === value);
-  const currentLabel = current ? labelOf(current) : value;
-  const isDisabled = disabled || asked !== undefined;
-
-  let title = option.description ? `${label}: ${option.description}` : label;
-  if (fullBlocked === 'off' && values.some(blocked)) title += `\n${t('conversation.config.fullOffHint')}`;
-
-  const close = useCallback((returnFocus = false) => {
-    setOpen(false);
-    if (returnFocus) buttonRef.current?.focus({ preventScroll: true });
-  }, []);
-
-  useDismiss(open, menuRef, () => close(false), buttonRef);
-
-  const enabledIndexes = useMemo(
-    () => values.map((v, i) => (!blocked(v) ? i : -1)).filter((i) => i >= 0),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [values, fullBlocked],
-  );
-
-  const openMenu = (preferred?: 'first' | 'last') => {
-    if (isDisabled) return;
-    const curIdx = values.findIndex((v) => v.value === value && !blocked(v));
-    const init =
-      preferred === 'last'
-        ? (enabledIndexes[enabledIndexes.length - 1] ?? 0)
-        : preferred === 'first'
-          ? (enabledIndexes[0] ?? 0)
-          : curIdx >= 0
-            ? curIdx
-            : (enabledIndexes[0] ?? 0);
-    setActive(init);
-    setOpen(true);
-  };
-
-  useEffect(() => {
-    if (isDisabled && open) setOpen(false);
-  }, [isDisabled, open]);
-
-  const updatePlace = useCallback(() => {
-    const btn = buttonRef.current;
-    if (!btn) return;
-    const estimated = Math.min(Math.max(menuRef.current?.scrollHeight ?? 0, values.length * 32 + (footerAction ? 44 : 12)), 320);
-    setPlace(placeConfigMenu(btn.getBoundingClientRect(), estimated, { width: window.innerWidth, height: window.innerHeight }));
-  }, [values.length, footerAction]);
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setPlace(undefined);
-      return;
-    }
-    updatePlace();
-    menuRef.current?.focus({ preventScroll: true });
-    window.addEventListener('resize', updatePlace);
-    window.addEventListener('scroll', updatePlace, true);
-    return () => {
-      window.removeEventListener('resize', updatePlace);
-      window.removeEventListener('scroll', updatePlace, true);
-    };
-  }, [open, updatePlace]);
-
-  const choose = (v: ConfigValue) => {
-    if (blocked(v)) return;
-    close(true);
-    if (v.value === value) return;
-    setAsked(v.value);
-    onSet(option.id, v.value).finally(() => setAsked(undefined));
-  };
-
-  const stepActive = (delta: number) => {
-    if (!enabledIndexes.length) return;
-    const pos = enabledIndexes.indexOf(active);
-    const next = pos < 0 ? 0 : (pos + delta + enabledIndexes.length) % enabledIndexes.length;
-    setActive(enabledIndexes[next]);
-  };
-
-  const onMenuKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      close(true);
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      stepActive(1);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      stepActive(-1);
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      if (enabledIndexes.length) setActive(enabledIndexes[0]);
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      if (enabledIndexes.length) setActive(enabledIndexes[enabledIndexes.length - 1]);
-    } else if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      const item = values[active];
-      if (item && !blocked(item)) choose(item);
-    } else if (e.key === 'Tab') {
-      close(false);
-    }
-  };
-
+/** Highlights the first case-insensitive occurrence of `query` inside `label`. */
+function highlightMatch(label: string, query: string): ReactNode {
+  if (!query) return label;
+  const idx = label.toLowerCase().indexOf(query.toLowerCase());
+  if (idx < 0) return label;
   return (
     <>
-      <button
-        ref={buttonRef}
-        type="button"
-        className="conv-select"
-        data-config={option.category}
-        data-value={value}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={open ? popupId : undefined}
-        aria-label={label}
-        title={title}
-        disabled={isDisabled}
-        onClick={() => (open ? close(false) : openMenu())}
-        onKeyDown={(e) => {
-          if (open) return;
-          if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            openMenu();
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            openMenu('last');
-          }
-        }}
-      >
-        <span className="conv-select-label ellipsis">{currentLabel}</span>
-        <ChevronDown className="conv-select-chevron" aria-hidden />
-      </button>
-      {open &&
-        createPortal(
-          <div
-            ref={menuRef}
-            id={popupId}
-            className="conv-select-menu"
-            role="listbox"
-            tabIndex={-1}
-            data-config={option.category}
-            data-placement={place?.placement}
-            aria-label={label}
-            aria-activedescendant={active >= 0 ? `${popupId}-${active}` : undefined}
-            style={
-              place
-                ? {
-                    left: place.left,
-                    minWidth: place.minWidth,
-                    maxWidth: place.maxWidth,
-                    maxHeight: place.maxHeight,
-                    ...(place.top !== undefined ? { top: place.top } : { bottom: place.bottom }),
-                  }
-                : { visibility: 'hidden' }
-            }
-            onKeyDown={onMenuKeyDown}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {values.map((v, i) => {
-              const isBlocked = blocked(v);
-              const isSelected = v.value === value;
-              const isActive = i === active && !isBlocked;
-              return (
-                <div
-                  key={v.value}
-                  id={`${popupId}-${i}`}
-                  role="option"
-                  data-value={v.value}
-                  data-full={isBlocked ? fullBlocked : undefined}
-                  aria-selected={isSelected}
-                  aria-disabled={isBlocked || undefined}
-                  title={v.description}
-                  className={['conv-select-option', isActive && 'active', isSelected && 'selected', isBlocked && 'disabled']
-                    .filter(Boolean)
-                    .join(' ')}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onMouseEnter={() => !isBlocked && setActive(i)}
-                  onClick={() => choose(v)}
-                >
-                  <span className="conv-select-option-text">
-                    <span className="conv-select-option-label ellipsis">{labelOf(v)}</span>
-                    {v.description && <span className="conv-select-option-desc ellipsis">{v.description}</span>}
-                  </span>
-                  {isSelected && <Check className="conv-select-option-check" aria-hidden />}
-                </div>
-              );
-            })}
-            {footerAction && (
-              <div className="conv-select-footer">
-                <button
-                  type="button"
-                  className="conv-select-manage"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    close(false);
-                    footerAction.onClick();
-                  }}
-                >
-                  <SlidersHorizontal aria-hidden />
-                  <span>{footerAction.label}</span>
-                </button>
-              </div>
-            )}
-          </div>,
-          document.body,
-        )}
+      {label.slice(0, idx)}
+      <mark className="conv-menu-match">{label.slice(idx, idx + query.length)}</mark>
+      {label.slice(idx + query.length)}
     </>
   );
 }
 
-export interface UsageLineProps {
-  usage: Usage;
-  /** Whether the agent supports manual compaction. */
-  canCompact?: boolean;
-  /** Whether manual compaction can run right now. */
-  compactReady?: boolean;
-  /** Tooltip explanation when compaction is currently unavailable. */
-  compactDisabledReason?: string;
-  /** True while compaction is running. */
-  compacting?: boolean;
-  /** Runs manual compaction, optionally with user focus instructions. */
-  onCompact?(instructions?: string): Promise<void> | void;
-}
-
-/** The chat's usage: the context in use (clickable to compact when the agent
- * supports it) and the session cost so far. Quota/rate-limit windows belong
- * to the AI Usage plugin's status bar item rather than here. */
-export function UsageLine({ usage, canCompact, compactReady, compactDisabledReason, compacting, onCompact }: UsageLineProps) {
-  const pct = contextPercent(usage);
-  const level = (p: number) => (p >= 90 ? 'high' : p >= 75 ? 'mid' : undefined);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [instructions, setInstructions] = useState('');
-  const [place, setPlace] = useState<ConfigMenuPlace>();
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const popRef = useRef<HTMLDivElement>(null);
-  const instrRef = useRef<HTMLInputElement>(null);
-
-  const closeConfirm = useCallback((returnFocus = false) => {
-    setConfirmOpen(false);
-    setInstructions('');
-    if (returnFocus) triggerRef.current?.focus({ preventScroll: true });
-  }, []);
-
-  useDismiss(confirmOpen, popRef, () => closeConfirm(false), triggerRef);
-
-  useEffect(() => {
-    if ((!compactReady || compacting) && confirmOpen) closeConfirm(false);
-  }, [compactReady, compacting, confirmOpen, closeConfirm]);
-
-  const updatePlace = useCallback(() => {
-    const btn = triggerRef.current;
-    if (!btn) return;
-    setPlace(placeConfigMenu(btn.getBoundingClientRect(), 150, { width: window.innerWidth, height: window.innerHeight }, 290, 260));
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!confirmOpen) {
-      setPlace(undefined);
-      return;
-    }
-    updatePlace();
-    instrRef.current?.focus({ preventScroll: true });
-    window.addEventListener('resize', updatePlace);
-    window.addEventListener('scroll', updatePlace, true);
-    return () => {
-      window.removeEventListener('resize', updatePlace);
-      window.removeEventListener('scroll', updatePlace, true);
-    };
-  }, [confirmOpen, updatePlace]);
-
-  const runCompact = () => {
-    const note = instructions.trim() || undefined;
-    closeConfirm(false);
-    void onCompact?.(note);
-  };
-
-  const parts = [];
-  const baseCtxTitle =
-    usage.size > 0
-      ? t('conversation.context', { used: formatTokens(usage.used), size: formatTokens(usage.size) })
-      : t('conversation.contextUsed');
-  const interactive = !!(canCompact && onCompact);
-  const ctxTitle = interactive
-    ? `${baseCtxTitle}\n${
-        compacting ? t('conversation.compact.running') : compactReady ? t('conversation.compact.clickHint') : (compactDisabledReason ?? '')
-      }`.trim()
-    : baseCtxTitle;
-
-  if (pct !== undefined || usage.used > 0 || (interactive && compacting)) {
-    const n = pct !== undefined ? Math.round(pct) : undefined;
-    const content = compacting ? (
-      <>
-        <LoaderCircle className="conv-spin" aria-hidden />
-        <span>{t('conversation.compact.running')}</span>
-      </>
-    ) : n !== undefined ? (
-      <span
-        className="conv-meter"
-        role="meter"
-        aria-label={t('conversation.contextUsed')}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={n}
-        title={interactive ? undefined : baseCtxTitle}
-        data-level={level(pct!)}
-      >
-        <span className="conv-meter-bar">
-          <span style={{ width: `${n}%` }} />
-        </span>
-        <span className="conv-meter-pct">{t('conversation.usage.context', { pct: n })}</span>
-      </span>
-    ) : (
-      <span className="conv-usage-tokens">{t('conversation.usage.tokens', { n: formatTokens(usage.used) })}</span>
-    );
-
-    if (interactive) {
-      parts.push(
-        <button
-          key="ctx"
-          ref={triggerRef}
-          type="button"
-          className="conv-compact-btn"
-          aria-haspopup="dialog"
-          aria-expanded={confirmOpen}
-          aria-busy={compacting || undefined}
-          title={ctxTitle}
-          disabled={!compactReady || compacting}
-          onClick={() => (confirmOpen ? closeConfirm(false) : setConfirmOpen(true))}
-        >
-          {content}
-        </button>,
-      );
-    } else {
-      parts.push(<span key="ctx">{content}</span>);
-    }
-  }
-  if (usage.cost)
-    parts.push(
-      <span key="cost" className="conv-usage-cost" title={t('conversation.usage.costTitle')}>
-        {formatCost(usage.cost, locale)}
-      </span>,
-    );
-  if (!parts.length) return null;
-  return (
-    <div className="conv-usage" aria-label={t('conversation.usage.label')}>
-      {parts}
-      {confirmOpen &&
-        createPortal(
-          <div
-            ref={popRef}
-            className="conv-compact-popover"
-            role="dialog"
-            aria-label={t('conversation.compact.title')}
-            style={
-              place
-                ? {
-                    left: place.left,
-                    ...(place.top !== undefined ? { top: place.top } : { bottom: place.bottom }),
-                  }
-                : { visibility: 'hidden' }
-            }
-            onMouseDown={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopPropagation();
-                closeConfirm(true);
-              }
-            }}
-          >
-            <div className="conv-compact-title">{t('conversation.compact.title')}</div>
-            <div className="conv-compact-desc">{t('conversation.compact.desc')}</div>
-            <input
-              ref={instrRef}
-              type="text"
-              className="conv-compact-input"
-              value={instructions}
-              placeholder={t('conversation.compact.instructions')}
-              aria-label={t('conversation.compact.instructions')}
-              onChange={(e) => setInstructions(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  runCompact();
-                }
-              }}
-            />
-            <div className="conv-compact-actions">
-              <button type="button" className="ghost sm" onClick={() => closeConfirm(true)}>
-                {t('conversation.compact.cancel')}
-              </button>
-              <button type="button" className="primary sm" onClick={runCompact}>
-                {t('conversation.compact.confirm')}
-              </button>
-            </div>
-          </div>,
-          document.body,
-        )}
-    </div>
-  );
+/** Imperative handle for a parent to prefill the composer draft (e.g. after Rewind). */
+export interface ComposerHandle {
+  /** Replaces the composer text, persists it as draft, and focuses the input at end. */
+  setDraft(value: string): void;
 }
 
 export interface ComposerProps extends ComposerExtras {
@@ -723,6 +485,7 @@ export interface ComposerProps extends ComposerExtras {
    * agent took it, or it is queued). */
   delivered?(clientId: string): boolean;
   inputRef: RefObject<HTMLTextAreaElement | null>;
+  composerRef?: RefObject<ComposerHandle | null>;
 }
 
 /** Whether a command's refusal leaves its outcome unknown: it was sent,
@@ -733,9 +496,8 @@ const unsureOf = (e: unknown): boolean => typeof e === 'object' && e !== null &&
 export function Composer({
   source,
   agent,
-  kind,
-  agentIcon,
   base,
+  branch,
   activity,
   modelPicker,
   chat,
@@ -750,12 +512,16 @@ export function Composer({
   onShowWaiting,
   delivered,
   inputRef,
+  composerRef,
 }: ComposerProps) {
   const caps = chat?.capabilities ?? NO_CAPABILITIES;
-  const [text, setText] = useState(() => draftOf(source));
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [attachedFiles, setAttachedFiles] = useState<FileSuggestion[]>([]);
-  const [mentions, setMentions] = useState<FileSuggestion[]>([]);
+  const initialDraft = useRef<ComposerDraft | null>(null);
+  if (initialDraft.current === null) initialDraft.current = draftOf(source);
+  const draftRef = useRef<ComposerDraft>(initialDraft.current);
+  const [text, setText] = useState(() => initialDraft.current!.text);
+  const [attachments, setAttachments] = useState<Attachment[]>(() => initialDraft.current!.attachments);
+  const [attachedFiles, setAttachedFiles] = useState<FileSuggestion[]>(() => initialDraft.current!.attachedFiles);
+  const [mentions, setMentions] = useState<FileSuggestion[]>(() => initialDraft.current!.mentions);
   const [pending, setPending] = useState(false);
   const [compactPending, setCompactPending] = useState(false);
   const [steeringId, setSteeringId] = useState<string | undefined>(undefined);
@@ -783,8 +549,10 @@ export function Composer({
   const live = useRef(true);
   const nextSelection = useRef<{ start: number; end: number } | undefined>(undefined);
   const picker = useRef<HTMLInputElement>(null);
-  const fileBtnRef = useRef<HTMLButtonElement>(null);
+  const plusBtnRef = useRef<HTMLButtonElement>(null);
   const filePopRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const menuListRef = useRef<HTMLDivElement>(null);
   const listId = useId();
 
   useEffect(() => {
@@ -794,6 +562,29 @@ export function Composer({
     };
   }, []);
 
+  // Sync named drafts with peer windows (e.g. detached tab windows and docking
+  // back) so pasted images and unsent text survive moving a tab across windows.
+  useEffect(() => {
+    const id = source.id;
+    if (!id) return;
+    const off = subscribeDraft(id, (incoming, isReply) => {
+      if (!live.current) return;
+      if (isReply && !isEmptyDraft(draftRef.current)) return;
+      const next = incoming ? cloneDraft(incoming) : emptyDraft();
+      draftRef.current = next;
+      setText(next.text);
+      setAttachments(next.attachments);
+      setAttachedFiles(next.attachedFiles);
+      setMentions(next.mentions);
+      if (!incoming) {
+        setCaret(0);
+        setPreview(false);
+      }
+    });
+    if (isEmptyDraft(draftRef.current)) broadcastDraft({ type: 'need', id });
+    return off;
+  }, [source.id]);
+
   useEffect(() => {
     if (readOnly && preview) setPreview(false);
     if (readOnly && filePickerOpen) setFilePickerOpen(false);
@@ -802,6 +593,7 @@ export function Composer({
   useLayoutEffect(() => {
     const el = inputRef.current;
     grow(el);
+    if (el && backdropRef.current) backdropRef.current.scrollTop = el.scrollTop;
     if (el && nextSelection.current !== undefined) {
       el.setSelectionRange(nextSelection.current.start, nextSelection.current.end);
       setCaret(nextSelection.current.start);
@@ -811,16 +603,16 @@ export function Composer({
 
   const closeFilePicker = useCallback((returnFocus = false) => {
     setFilePickerOpen(false);
-    if (returnFocus) fileBtnRef.current?.focus({ preventScroll: true });
+    if (returnFocus) plusBtnRef.current?.focus({ preventScroll: true });
   }, []);
 
-  useDismiss(filePickerOpen, filePopRef, () => closeFilePicker(false), fileBtnRef);
+  useDismiss(filePickerOpen, filePopRef, () => closeFilePicker(false), plusBtnRef);
 
   const updateFilePickerPlace = useCallback(() => {
-    const btn = fileBtnRef.current;
+    const btn = plusBtnRef.current;
     if (!btn) return;
     setFilePickerPlace(
-      placeConfigMenu(btn.getBoundingClientRect(), 360, { width: window.innerWidth, height: window.innerHeight }, 400, 340),
+      placeConfigMenu(btn.getBoundingClientRect(), 360, { width: window.innerWidth, height: window.innerHeight }, 400, 340, 'left'),
     );
   }, []);
 
@@ -846,7 +638,26 @@ export function Composer({
       .then(p)
       .catch((e: unknown) => fail(errorText(e, agent, fallback)));
 
-  // ---- the list at the caret ----
+  // ---- slash commands & @ mentions ----
+  const allCommands = useMemo((): SlashCommand[] => {
+    const list = [...(chat?.commands ?? [])];
+    if (caps.compact && !list.some((c) => c.name.replace(/^\/+/, '').toLowerCase() === 'compact')) {
+      list.push({ name: 'compact', description: t('conversation.command.compact') });
+    }
+    return list;
+  }, [chat?.commands, caps.compact]);
+
+  const knownCommands = useMemo(
+    () => new Set(allCommands.map((c) => c.name.replace(/^\/+/, '').toLowerCase()).filter(Boolean)),
+    [allCommands],
+  );
+
+  const validSlashToken = useMemo(() => {
+    const m = /^(\/[^\s/]+)(?=\s|$)/.exec(text);
+    if (!m) return undefined;
+    return knownCommands.has(m[1].slice(1).toLowerCase()) ? m[1] : undefined;
+  }, [text, knownCommands]);
+
   const at = readOnly || preview ? undefined : menuAt(text, caret);
   const menuKey = at ? `${at.type}:${at.start}` : undefined;
   const suggest = source.suggestFiles?.bind(source);
@@ -854,20 +665,22 @@ export function Composer({
   useEffect(() => {
     if (query === undefined || menuKey === dismissed) return;
     let current = true;
+    const ac = new AbortController();
     const id = setTimeout(() => {
-      suggest!(query).then(
+      suggest!(query, ac.signal).then(
         (items) => current && setFiles({ query, items: Array.isArray(items) ? items.slice(0, MAX_MENU) : [] }),
-        () => current && setFiles({ query, items: [] }),
+        () => current && !ac.signal.aborted && setFiles({ query, items: [] }),
       );
     }, SUGGEST_MS);
     return () => {
       current = false;
+      ac.abort();
       clearTimeout(id);
     };
     // suggest is the source's: a new one comes with a new source.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, menuKey, dismissed, source]);
-  const commands = chat?.commands;
+
   const menuItems = useMemo((): MenuItem[] => {
     if (!at) return [];
     if (at.type === 'mention') {
@@ -889,55 +702,83 @@ export function Composer({
           };
         });
     }
-    const all = [...(commands ?? [])];
-    if (caps.compact && !all.some((c) => c.name === 'compact'))
-      all.push({ name: 'compact', description: t('conversation.command.compact') });
-    const q = at.query.toLowerCase();
-    const starts = all.filter((c) => c.name.toLowerCase().startsWith(q));
-    const within = all.filter((c) => !c.name.toLowerCase().startsWith(q) && c.name.toLowerCase().includes(q));
-    return [...starts, ...within]
+    return matchSlashCommands(allCommands, at.query)
       .slice(0, MAX_MENU)
       .map((c) => ({ key: c.name, label: `/${c.name}`, detail: c.description, hint: c.argumentHint, insert: `/${c.name} ` }));
-  }, [at?.type, at?.query, files, commands, caps.compact]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [at?.type, at?.query, files, allCommands]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const menuOpen = !!at && menuKey !== dismissed && menuItems.length > 0;
   const shown = Math.min(active, Math.max(0, menuItems.length - 1));
   useEffect(() => setActive(0), [menuKey, at?.query]);
 
-  const change = (v: string, pos?: number) => {
-    setText(v);
-    setFailed(undefined);
-    setUnsure(false);
-    if (pos !== undefined) setCaret(pos);
-    // A list closed stays closed until its word ends.
-    if (!menuAt(v, pos ?? v.length)) setDismissed(undefined);
-    keepDraft(source, v);
-  };
+  useEffect(() => {
+    if (!menuOpen) return;
+    const row = menuListRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    row?.scrollIntoView?.({ block: 'nearest' });
+  }, [menuOpen, shown]);
+
+  const updateDraft = useCallback(
+    (patch: Partial<ComposerDraft>) => {
+      const next: ComposerDraft = { ...draftRef.current, ...patch };
+      draftRef.current = next;
+      keepDraft(source, next);
+      return next;
+    },
+    [source],
+  );
+
+  const change = useCallback(
+    (v: string, pos?: number) => {
+      setText(v);
+      setFailed(undefined);
+      setUnsure(false);
+      if (pos !== undefined) setCaret(pos);
+      // A list closed stays closed until its word ends.
+      if (!menuAt(v, pos ?? v.length)) setDismissed(undefined);
+      updateDraft({ text: v });
+    },
+    [updateDraft],
+  );
+
+  useImperativeHandle(
+    composerRef,
+    () => ({
+      setDraft(value: string) {
+        setPreview(false);
+        nextSelection.current = { start: value.length, end: value.length };
+        change(value, value.length);
+        queueMicrotask(() => inputRef.current?.focus());
+      },
+    }),
+    [change, inputRef],
+  );
 
   const addFileChips = (list: FileSuggestion[]) => {
     if (!list.length) return;
-    setAttachedFiles((prev) => {
-      const byPath = new Map(prev.map((f) => [f.path, f]));
-      for (const f of list) {
-        if (f.path.startsWith('/')) byPath.set(f.path, f);
-      }
-      const next = [...byPath.values()];
-      if (next.length > MAX_FILE_ATTACHMENTS) {
-        fail(t('conversation.attach.tooManyFiles', { n: MAX_FILE_ATTACHMENTS }));
-        return next.slice(0, MAX_FILE_ATTACHMENTS);
-      }
-      return next;
-    });
+    const byPath = new Map(draftRef.current.attachedFiles.map((f) => [f.path, f]));
+    for (const f of list) {
+      if (f.path.startsWith('/')) byPath.set(f.path, f);
+    }
+    let next = [...byPath.values()];
+    if (next.length > MAX_FILE_ATTACHMENTS) {
+      fail(t('conversation.attach.tooManyFiles', { n: MAX_FILE_ATTACHMENTS }));
+      next = next.slice(0, MAX_FILE_ATTACHMENTS);
+    }
+    updateDraft({ attachedFiles: next });
+    setAttachedFiles(next);
   };
 
   const replaceFileChips = (list: FileSuggestion[]) => {
     const clean = list.filter((f) => f.path.startsWith('/'));
+    let next = clean;
     if (clean.length > MAX_FILE_ATTACHMENTS) {
       fail(t('conversation.attach.tooManyFiles', { n: MAX_FILE_ATTACHMENTS }));
-      setAttachedFiles(clean.slice(0, MAX_FILE_ATTACHMENTS));
+      next = clean.slice(0, MAX_FILE_ATTACHMENTS);
     } else {
-      setAttachedFiles(clean);
+      setFailed(undefined);
     }
-    setFailed(undefined);
+    updateDraft({ attachedFiles: next });
+    setAttachedFiles(next);
   };
 
   const choose = (item: MenuItem) => {
@@ -949,7 +790,9 @@ export function Composer({
       if (item.attachAsChip) {
         addFileChips([item.mention]);
       } else if (!item.isDir) {
-        setMentions((m) => [...m, item.mention!]);
+        const nextMentions = [...draftRef.current.mentions, item.mention];
+        updateDraft({ mentions: nextMentions });
+        setMentions(nextMentions);
       }
     }
     change(text.slice(0, at.start) + item.insert + tail, caretPos);
@@ -961,10 +804,12 @@ export function Composer({
   const addFiles = (list: File[]) => {
     if (!list.length || readOnly) return;
     if (!caps.images) return fail(t('conversation.attach.noImages', { agent }));
-    const room = MAX_ATTACHMENTS - attachments.length;
+    const room = MAX_ATTACHMENTS - draftRef.current.attachments.length;
     if (room <= 0) return fail(t('conversation.attach.tooMany', { n: MAX_ATTACHMENTS }));
+    const target = source;
+    const gen = clearGenOf(target);
     Promise.allSettled(list.slice(0, room).map(readImage)).then((results) => {
-      if (!live.current) return;
+      if (clearGenOf(target) !== gen) return;
       let error: string | undefined;
       const ok: Attachment[] = [];
       for (const r of results) {
@@ -972,25 +817,39 @@ export function Composer({
         else ok.push(r.value);
       }
       if (list.length > room) error ??= t('conversation.attach.tooMany', { n: MAX_ATTACHMENTS });
-      setAttachments((prev) => {
-        // The images that keep the message within its limit.
-        const out = prev.slice();
-        let bytes = prev.reduce((n, a) => n + a.data.length, 0);
-        for (const a of ok) {
-          if (bytes + a.data.length > MAX_PROMPT - (64 << 10)) {
-            error ??= t('conversation.attach.promptTooLarge', { max: formatBytes(MAX_PROMPT) });
-            continue;
-          }
-          bytes += a.data.length;
-          out.push(a);
+      const base = live.current ? draftRef.current : draftOf(target);
+      // The images that keep the message within its limit.
+      const out = base.attachments.slice();
+      let bytes = out.reduce((n, a) => n + a.data.length, 0);
+      for (const a of ok) {
+        if (out.length >= MAX_ATTACHMENTS) {
+          error ??= t('conversation.attach.tooMany', { n: MAX_ATTACHMENTS });
+          continue;
         }
-        return out;
-      });
+        if (bytes + a.data.length > MAX_PROMPT - (64 << 10)) {
+          error ??= t('conversation.attach.promptTooLarge', { max: formatBytes(MAX_PROMPT) });
+          continue;
+        }
+        bytes += a.data.length;
+        out.push(a);
+      }
+      if (!live.current) {
+        if (out.length !== base.attachments.length) keepDraft(target, { ...base, attachments: out });
+        return;
+      }
+      updateDraft({ attachments: out });
+      setAttachments(out);
       setFailed(error);
     });
   };
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    const list = Array.from(e.clipboardData?.files ?? []);
+    const raw = Array.from(e.clipboardData?.files ?? []);
+    const list = raw.length
+      ? raw
+      : Array.from(e.clipboardData?.items ?? [])
+          .filter((item) => item.kind === 'file')
+          .map((item) => item.getAsFile())
+          .filter((f): f is File => f !== null);
     if (!list.length) return;
     if (!e.clipboardData.types.includes('text/plain')) e.preventDefault();
     addFiles(list);
@@ -1048,7 +907,10 @@ export function Composer({
   const canSteerNow = showSteerAction && !pending && !starting && hasBody;
 
   const clear = () => {
-    keepDraft(source, '');
+    bumpClearGen(source);
+    const empty = emptyDraft();
+    draftRef.current = empty;
+    keepDraft(source, empty);
     if (!live.current) return;
     setText('');
     setCaret(0);
@@ -1131,11 +993,14 @@ export function Composer({
         }
       }
       if (qImages.length) {
-        setAttachments((prev) => [...qImages, ...prev].slice(0, MAX_ATTACHMENTS));
+        const nextImages = [...qImages, ...draftRef.current.attachments].slice(0, MAX_ATTACHMENTS);
+        updateDraft({ attachments: nextImages });
+        setAttachments(nextImages);
       }
       if (qLinks.length) addFileChips(qLinks);
-      const merged = qText ? (text.trim() ? `${qText}\n\n${text}` : qText) : text;
-      const caretPos = qText ? qText.length : text.length;
+      const curText = draftRef.current.text;
+      const merged = qText ? (curText.trim() ? `${qText}\n\n${curText}` : qText) : curText;
+      const caretPos = qText ? qText.length : curText.length;
       nextSelection.current = { start: caretPos, end: caretPos };
       setPreview(false);
       change(merged, caretPos);
@@ -1160,15 +1025,19 @@ export function Composer({
     });
   };
 
+  const togglePreview = () => {
+    setPreview((p) => {
+      const next = !p;
+      if (!next) queueMicrotask(() => inputRef.current?.focus());
+      return next;
+    });
+  };
+
   const onBoxKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (readOnly) return;
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
       e.preventDefault();
-      setPreview((p) => {
-        const next = !p;
-        if (!next) queueMicrotask(() => inputRef.current?.focus());
-        return next;
-      });
+      togglePreview();
     }
   };
 
@@ -1192,6 +1061,21 @@ export function Composer({
         setDismissed(menuKey);
         return;
       }
+    } else if (
+      e.key === 'Tab' &&
+      !e.shiftKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      at &&
+      menuKey === dismissed &&
+      menuItems.length > 0
+    ) {
+      // Pressing Tab on a dismissed `/command` or `@file` token re-opens its menu
+      // instead of silently guessing or leaving the input.
+      e.preventDefault();
+      setDismissed(undefined);
+      return;
     }
     if (e.key === 'Escape' && working && !readOnly) {
       e.preventDefault();
@@ -1253,6 +1137,8 @@ export function Composer({
   const handedOff = !!chat?.handedOff;
   const modLabel = isMac() ? '⌘' : 'Ctrl';
   const canBrowseFiles = !!(base?.m && base?.dir);
+  const projectName = base?.dir ? baseNameOf(base.dir) || base.dir : undefined;
+  const showMetaBar = !!(projectName || branch || model || effort || mode || usage);
 
   return (
     <div className="conv-composer">
@@ -1359,6 +1245,39 @@ export function Composer({
         onDrop={onDrop}
         onKeyDown={onBoxKeyDown}
       >
+        {menuOpen && (
+          <div
+            ref={menuListRef}
+            id={listId}
+            className="conv-menu"
+            role="listbox"
+            data-type={at!.type}
+            aria-label={at!.type === 'slash' ? t('conversation.command.list') : t('conversation.mention.list')}
+          >
+            {menuItems.map((m, i) => (
+              <div
+                key={m.key}
+                id={`${listId}-${i}`}
+                role="option"
+                aria-selected={i === shown}
+                className="conv-menu-item"
+                data-dir={m.isDir || undefined}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => choose(m)}
+              >
+                {at!.type === 'slash' ? (
+                  <SquareSlash aria-hidden />
+                ) : (
+                  <FileIcon name={baseNameOf(m.label)} kind={m.isDir ? 'dir' : 'file'} />
+                )}
+                <span className="conv-menu-label">{highlightMatch(m.label, at!.query)}</span>
+                {m.hint && <span className="conv-menu-hint">{m.hint}</span>}
+                {m.detail && <span className="conv-menu-detail">{m.detail}</span>}
+              </div>
+            ))}
+          </div>
+        )}
         {waiting && !readOnly && (
           <div className="conv-banner" role="status">
             <span>{t('conversation.waiting', { agent })}</span>
@@ -1418,7 +1337,11 @@ export function Composer({
                     type="button"
                     className="conv-file-chip-remove"
                     aria-label={t('conversation.attach.remove', { name: f.label })}
-                    onClick={() => setAttachedFiles((list) => list.filter((x) => x.path !== f.path))}
+                    onClick={() => {
+                      const next = draftRef.current.attachedFiles.filter((x) => x.path !== f.path);
+                      updateDraft({ attachedFiles: next });
+                      setAttachedFiles(next);
+                    }}
                   >
                     <X aria-hidden />
                   </button>
@@ -1437,7 +1360,11 @@ export function Composer({
                     type="button"
                     className="conv-attachment-remove"
                     aria-label={t('conversation.attach.remove', { name: a.name })}
-                    onClick={() => setAttachments((list) => list.filter((x) => x.id !== a.id))}
+                    onClick={() => {
+                      const next = draftRef.current.attachments.filter((x) => x.id !== a.id);
+                      updateDraft({ attachments: next });
+                      setAttachments(next);
+                    }}
                   >
                     <X aria-hidden />
                   </button>
@@ -1446,217 +1373,165 @@ export function Composer({
             ))}
           </div>
         )}
-        <div className="conv-field">
-          {menuOpen && (
-            <div
-              id={listId}
-              className="conv-menu"
-              role="listbox"
-              aria-label={at!.type === 'slash' ? t('conversation.command.list') : t('conversation.mention.list')}
-            >
-              {menuItems.map((m, i) => (
-                <div
-                  key={m.key}
-                  id={`${listId}-${i}`}
-                  role="option"
-                  aria-selected={i === shown}
-                  className="conv-menu-item"
-                  data-dir={m.isDir || undefined}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onMouseEnter={() => setActive(i)}
-                  onClick={() => choose(m)}
-                >
-                  {at!.type === 'slash' ? (
-                    <SquareSlash aria-hidden />
-                  ) : (
-                    <FileIcon name={baseNameOf(m.label)} kind={m.isDir ? 'dir' : 'file'} />
-                  )}
-                  <span className="conv-menu-label">{m.label}</span>
-                  {m.hint && <span className="conv-menu-hint">{m.hint}</span>}
-                  {m.detail && <span className="conv-menu-detail">{m.detail}</span>}
-                </div>
-              ))}
-            </div>
-          )}
-          {preview && (
-            <div className="conv-composer-preview" role="region" aria-label={t('conversation.markdown.previewLabel')}>
-              {text.trim() ? (
-                <Markdown text={text} variant="compact" base={base} className="conv-md" codeCopy={false} />
-              ) : (
-                <span className="conv-composer-preview-empty">{t('conversation.markdown.previewEmpty')}</span>
-              )}
-            </div>
-          )}
-          <textarea
-            ref={inputRef}
-            hidden={preview}
-            className={pending ? 'conv-input pending' : 'conv-input'}
-            rows={1}
-            value={text}
-            disabled={readOnly}
-            readOnly={pending}
-            aria-busy={pending || undefined}
-            aria-label={t('conversation.composer.label', { agent })}
-            aria-keyshortcuts="Enter"
-            aria-autocomplete="list"
-            aria-controls={menuOpen ? listId : undefined}
-            aria-activedescendant={menuOpen ? `${listId}-${shown}` : undefined}
-            placeholder={
-              readOnly
-                ? t('conversation.composer.readOnly')
-                : working && caps.queue
-                  ? t('conversation.composer.queuePlaceholder', { agent })
-                  : t('conversation.composer.placeholder', { agent })
-            }
-            spellCheck
-            onChange={(e) => change(e.target.value, e.target.selectionStart)}
-            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
-            onBlur={() => setDismissed(menuKey)}
-            onFocus={() => setDismissed(undefined)}
+        <div className="conv-input-row">
+          <PlusMenu
+            buttonRef={plusBtnRef}
+            canBrowseFiles={canBrowseFiles}
+            canImages={caps.images}
+            preview={preview}
+            modLabel={modLabel}
+            disabled={readOnly || pending}
+            onPickFiles={() => setFilePickerOpen(true)}
+            onPickImages={() => picker.current?.click()}
+            onTogglePreview={togglePreview}
           />
-        </div>
-        <div className="conv-foot">
-          <span className="conv-agent-badge" data-kind={kind || undefined} title={agent}>
-            {agentIcon && (
-              <span className="conv-agent-badge-icon" aria-hidden="true">
-                {agentIcon}
-              </span>
-            )}
-            <span className="conv-agent-badge-name">{agent}</span>
-          </span>
-          {canBrowseFiles && (
-            <button
-              ref={fileBtnRef}
-              type="button"
-              className="ghost sm icon conv-attach-file"
-              aria-label={t('conversation.attach.pickFiles')}
-              aria-haspopup="dialog"
-              aria-expanded={filePickerOpen}
-              title={t('conversation.attach.pickFilesHint')}
-              disabled={readOnly || pending}
-              onClick={() => (filePickerOpen ? closeFilePicker(false) : setFilePickerOpen(true))}
-            >
-              <Paperclip aria-hidden />
-            </button>
-          )}
           {caps.images && (
-            <>
+            <input
+              ref={picker}
+              type="file"
+              accept={IMAGE_TYPES.join(',')}
+              multiple
+              hidden
+              tabIndex={-1}
+              onChange={(e) => {
+                addFiles(Array.from(e.target.files ?? []));
+                e.target.value = '';
+              }}
+            />
+          )}
+          <div className="conv-field" data-valid-slash={validSlashToken || undefined}>
+            {preview && (
+              <div className="conv-composer-preview" role="region" aria-label={t('conversation.markdown.previewLabel')}>
+                {text.trim() ? (
+                  <Markdown text={text} variant="compact" base={base} className="conv-md" codeCopy={false} />
+                ) : (
+                  <span className="conv-composer-preview-empty">{t('conversation.markdown.previewEmpty')}</span>
+                )}
+              </div>
+            )}
+            {!preview && validSlashToken && (
+              <div ref={backdropRef} className="conv-input-backdrop" aria-hidden="true">
+                <span className="conv-slash-highlight">{validSlashToken}</span>
+                {text.slice(validSlashToken.length)}
+              </div>
+            )}
+            <textarea
+              ref={inputRef}
+              hidden={preview}
+              className={pending ? 'conv-input pending' : 'conv-input'}
+              rows={1}
+              value={text}
+              disabled={readOnly}
+              readOnly={pending}
+              aria-busy={pending || undefined}
+              aria-label={t('conversation.composer.label', { agent })}
+              aria-keyshortcuts="Enter"
+              aria-autocomplete="list"
+              aria-controls={menuOpen ? listId : undefined}
+              aria-activedescendant={menuOpen ? `${listId}-${shown}` : undefined}
+              placeholder={
+                readOnly
+                  ? t('conversation.composer.readOnly')
+                  : working && caps.queue
+                    ? t('conversation.composer.queuePlaceholder', { agent })
+                    : t('conversation.composer.placeholder', { agent })
+              }
+              spellCheck
+              onChange={(e) => change(e.target.value, e.target.selectionStart)}
+              onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+              onScroll={(e) => {
+                if (backdropRef.current) backdropRef.current.scrollTop = e.currentTarget.scrollTop;
+              }}
+              onKeyDown={onKeyDown}
+              onPaste={onPaste}
+              onBlur={() => setDismissed(menuKey)}
+              onFocus={() => setDismissed(undefined)}
+            />
+          </div>
+          <div className="conv-input-actions">
+            {working && !readOnly && (
               <button
                 type="button"
-                className="ghost sm icon conv-attach"
-                aria-label={t('conversation.attach.pick')}
-                title={t('conversation.attach.pickHint', { max: formatBytes(MAX_IMAGE) })}
-                disabled={readOnly || pending}
-                onClick={() => picker.current?.click()}
+                className="sm conv-stop"
+                title={t('conversation.stopHint', { agent })}
+                aria-keyshortcuts="Escape"
+                onClick={stop}
               >
-                <ImagePlus aria-hidden />
+                <Square aria-hidden />
+                {t('conversation.stop')}
               </button>
-              <input
-                ref={picker}
-                type="file"
-                accept={IMAGE_TYPES.join(',')}
-                multiple
-                hidden
-                tabIndex={-1}
-                onChange={(e) => {
-                  addFiles(Array.from(e.target.files ?? []));
-                  e.target.value = '';
-                }}
-              />
-            </>
-          )}
-          {!readOnly && (
+            )}
+            {showSteerAction && (
+              <button
+                type="button"
+                className="ghost sm conv-steer"
+                data-delivery={caps.steer ? 'steer' : 'interrupt'}
+                title={t(caps.steer ? 'conversation.steerHint' : 'conversation.interruptSendHint', { key: `${modLabel}+Enter` })}
+                disabled={!canSteerNow}
+                onClick={() => send(caps.steer ? 'steer' : 'interrupt')}
+              >
+                {caps.steer ? <Zap aria-hidden /> : <FastForward aria-hidden />}
+                <span>{t(caps.steer ? 'conversation.steer' : 'conversation.interruptSend')}</span>
+              </button>
+            )}
             <button
               type="button"
-              className="ghost sm icon conv-preview-toggle"
-              aria-label={preview ? t('conversation.markdown.edit') : t('conversation.markdown.preview')}
-              aria-pressed={preview}
-              title={t(preview ? 'conversation.markdown.editHint' : 'conversation.markdown.previewHint', { key: `${modLabel}+Shift+P` })}
-              disabled={pending}
-              onClick={() =>
-                setPreview((p) => {
-                  const next = !p;
-                  if (!next) queueMicrotask(() => inputRef.current?.focus());
-                  return next;
-                })
-              }
+              className="primary conv-send"
+              aria-label={queues ? t('conversation.queue') : t('conversation.send')}
+              title={queues ? t('conversation.queueHint', { agent }) : t('conversation.sendHint')}
+              disabled={!canSend}
+              onClick={() => send()}
             >
-              {preview ? <Pencil aria-hidden /> : <Eye aria-hidden />}
+              {pending ? <LoaderCircle className="conv-spin" aria-hidden /> : queues ? <ListPlus aria-hidden /> : <ArrowUp aria-hidden />}
             </button>
-          )}
-          {model && (
-            <ConfigSelect
-              option={model}
-              label={t('conversation.config.model')}
-              disabled={readOnly}
-              fullBlocked={fullBlocked}
-              onSet={setConfig}
-              footerAction={
-                modelPicker?.onManageModels
-                  ? { label: t('conversation.config.manageModels'), onClick: modelPicker.onManageModels }
-                  : undefined
-              }
-            />
-          )}
-          {effort && (
-            <ConfigSelect
-              option={effort}
-              label={t('conversation.config.effort')}
-              disabled={readOnly}
-              fullBlocked={fullBlocked}
-              onSet={setConfig}
-            />
-          )}
-          {mode && (
-            <ConfigSelect
-              option={mode}
-              label={t('conversation.config.mode')}
-              nameOf={modeName}
-              disabled={readOnly}
-              fullBlocked={fullBlocked}
-              onSet={setConfig}
-            />
-          )}
-          <span className="spacer" />
-          {working && !readOnly && (
-            <button
-              type="button"
-              className="sm conv-stop"
-              title={t('conversation.stopHint', { agent })}
-              aria-keyshortcuts="Escape"
-              onClick={stop}
-            >
-              <Square aria-hidden />
-              {t('conversation.stop')}
-            </button>
-          )}
-          {showSteerAction && (
-            <button
-              type="button"
-              className="ghost sm conv-steer"
-              data-delivery={caps.steer ? 'steer' : 'interrupt'}
-              title={t(caps.steer ? 'conversation.steerHint' : 'conversation.interruptSendHint', { key: `${modLabel}+Enter` })}
-              disabled={!canSteerNow}
-              onClick={() => send(caps.steer ? 'steer' : 'interrupt')}
-            >
-              {caps.steer ? <Zap aria-hidden /> : <FastForward aria-hidden />}
-              <span>{t(caps.steer ? 'conversation.steer' : 'conversation.interruptSend')}</span>
-            </button>
-          )}
-          <button
-            type="button"
-            className="primary conv-send"
-            aria-label={queues ? t('conversation.queue') : t('conversation.send')}
-            title={queues ? t('conversation.queueHint', { agent }) : t('conversation.sendHint')}
-            disabled={!canSend}
-            onClick={() => send()}
-          >
-            {pending ? <LoaderCircle className="conv-spin" aria-hidden /> : queues ? <ListPlus aria-hidden /> : <ArrowUp aria-hidden />}
-          </button>
+          </div>
         </div>
       </div>
+      {showMetaBar && (
+        <div className="conv-meta-bar">
+          <div className="conv-meta-left">
+            {projectName && (
+              <span className="conv-meta-item conv-project" title={t('conversation.project.label', { path: base!.dir })}>
+                <Folder aria-hidden />
+                <span className="ellipsis">{projectName}</span>
+              </span>
+            )}
+            {branch && (
+              <span className="conv-meta-item conv-branch" title={t('conversation.branch.label', { branch })}>
+                <GitBranch aria-hidden />
+                <span className="ellipsis">{branch}</span>
+              </span>
+            )}
+          </div>
+          <div className="conv-meta-right">
+            {(model || effort) && (
+              <ModelEffortSelect model={model} effort={effort} disabled={readOnly} fullBlocked={fullBlocked} onSet={setConfig} />
+            )}
+            {mode && (
+              <ConfigSelect
+                option={mode}
+                label={t('conversation.config.mode')}
+                nameOf={modeName}
+                disabled={readOnly}
+                fullBlocked={fullBlocked}
+                onSet={setConfig}
+              />
+            )}
+            {usage && (
+              <UsageLine
+                usage={usage}
+                canCompact={caps.compact}
+                compactReady={canCompactNow}
+                compactDisabledReason={compactDisabledReason}
+                compacting={compacting}
+                onCompact={(instructions) => {
+                  void runCompact(instructions);
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
       {filePickerOpen &&
         base &&
         createPortal(
@@ -1683,18 +1558,6 @@ export function Composer({
           </div>,
           document.body,
         )}
-      {usage && (
-        <UsageLine
-          usage={usage}
-          canCompact={caps.compact}
-          compactReady={canCompactNow}
-          compactDisabledReason={compactDisabledReason}
-          compacting={compacting}
-          onCompact={(instructions) => {
-            void runCompact(instructions);
-          }}
-        />
-      )}
     </div>
   );
 }

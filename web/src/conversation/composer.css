@@ -187,68 +187,195 @@
   color: var(--fg);
 }
 
-/* ---- Bottom-left agent kind badge (#8) ---- */
-.conv-agent-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: none;
-  height: var(--ctl-sm);
-  padding: 0 6px 0 4px;
-  border-radius: var(--radius-sm);
-  color: var(--fg-dim);
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  user-select: none;
+/* ---- Valid slash-command highlight backdrop ---- */
+.conv-input-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  padding: 4px 4px;
+  overflow: hidden;
+  pointer-events: none;
+  color: transparent;
+  font: inherit;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
-.conv-agent-badge-icon {
+.conv-slash-highlight {
+  color: transparent;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 4px;
+  box-shadow: inset 0 -1.5px 0 color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
+/* ---- Left `+` button & menu inside input bar ---- */
+.conv-plus-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
 }
-.conv-agent-badge-icon .ai-logo,
-.conv-agent-badge-icon svg {
-  width: var(--ic-sm);
-  height: var(--ic-sm);
-  display: block;
+.conv-plus-btn:hover:not(:disabled),
+.conv-plus-btn[aria-expanded='true'] {
+  background: var(--bg-2);
+  color: var(--fg);
 }
-.conv-agent-badge-name {
-  max-width: 9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.conv-plus-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
-
-/* ---- Model picker "Manage models…" footer (#3) ---- */
-.conv-select-footer {
-  margin-top: 3px;
-  padding-top: 3px;
-  border-top: 1px solid var(--line);
+.conv-plus-btn > .lucide {
+  width: 16px;
+  height: 16px;
 }
-.conv-select-manage {
+.conv-plus-menu {
+  padding: 5px;
+  border-radius: var(--radius-lg);
+}
+.conv-plus-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  min-height: var(--h-row);
-  padding: 4px 8px;
+  min-height: 30px;
+  padding: 5px 9px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-dim);
-  font-size: var(--fs-sm);
+  color: var(--fg);
+  font-size: var(--fs-md);
   text-align: left;
   cursor: pointer;
 }
-.conv-select-manage:hover {
+.conv-plus-item:hover {
   background: var(--bg-3);
-  color: var(--fg);
 }
-.conv-select-manage > .lucide {
+.conv-plus-item > .lucide {
+  flex: none;
   width: var(--ic-sm);
   height: var(--ic-sm);
+  color: var(--fg-dim);
+}
+.conv-plus-shortcut {
+  margin-left: auto;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+}
+
+/* ---- Bottom meta bar below composer box (Claude Code layout) ---- */
+.conv-meta-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  max-width: calc(56rem - 36px);
+  margin: 6px auto 0;
+  padding: 0 4px;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  min-height: var(--ctl-sm);
+}
+.conv-meta-left,
+.conv-meta-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.conv-meta-left {
+  flex: 1 1 auto;
+  gap: 12px;
+  overflow: hidden;
+}
+.conv-meta-right {
   flex: none;
+}
+.conv-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 14rem;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  user-select: none;
+}
+.conv-meta-item > .lucide {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--fg-mute);
+}
+.conv-branch {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+/* ---- Combined Model + Effort trigger & flyout submenu ---- */
+.conv-model-effort {
+  gap: 6px;
+}
+.conv-me-model {
+  color: var(--fg);
+  font-weight: 500;
+}
+.conv-me-effort {
+  flex: none;
+  color: var(--fg-mute);
+  font-weight: 400;
+}
+.conv-menu-section-head {
+  padding: 5px 8px 4px;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  user-select: none;
+}
+.conv-menu-sep {
+  height: 1px;
+  margin: 4px 4px;
+  background: var(--line);
+}
+.conv-me-effort-row {
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+.conv-me-effort-val {
+  margin-left: auto;
+  color: var(--fg-mute);
+  font-size: var(--fs-sm);
+}
+.conv-select-option.active .conv-me-effort-val,
+.conv-select-option.active .conv-me-effort-arrow {
+  color: inherit;
+  opacity: 0.9;
+}
+.conv-me-effort-arrow {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-mute);
+}
+.conv-me-effort-hint {
+  padding: 5px 8px 6px;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
 }
 
 /* ---- Explicit steer / interrupt-send button (#4) ---- */
@@ -257,8 +384,8 @@
   align-items: center;
   gap: 4px;
   flex: none;
-  height: var(--ctl-sm);
-  min-height: var(--ctl-sm);
+  height: 28px;
+  min-height: 0;
   padding: 0 8px;
   font-size: var(--fs-sm);
 }
@@ -267,36 +394,54 @@
   height: var(--ic-sm);
 }
 
-/* ---- Interactive context compact button & confirm popover (#9) ---- */
-.conv-compact-btn {
+/* ---- Circular context usage ring & hover/click details popover ---- */
+.conv-ctx-ring-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: auto;
+  justify-content: center;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
   min-height: 0;
-  padding: 2px 6px;
-  margin: -2px -4px;
+  padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: transparent;
-  color: inherit;
-  font: inherit;
+  color: var(--fg-dim);
   cursor: pointer;
 }
-.conv-compact-btn:hover:not(:disabled),
-.conv-compact-btn[aria-expanded='true'] {
-  border-color: var(--line-2);
+.conv-ctx-ring-btn:hover,
+.conv-ctx-ring-btn[aria-expanded='true'] {
   background: var(--bg-2);
+  border-color: var(--line-2);
   color: var(--fg);
 }
-.conv-compact-btn:disabled {
-  cursor: default;
-  opacity: 0.7;
+.conv-ring-svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  transform: rotate(-90deg);
 }
-.conv-compact-btn > .lucide {
-  width: 12px;
-  height: 12px;
-  flex: none;
+.conv-ring-track {
+  fill: none;
+  stroke: var(--line-2);
+  stroke-width: 2.2;
+}
+.conv-ring-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.2s ease;
+}
+.conv-ctx-ring-btn[data-level='mid'] .conv-ring-fill {
+  stroke: var(--warning);
+}
+.conv-ctx-ring-btn[data-level='high'] .conv-ring-fill {
+  stroke: var(--error);
+}
+.conv-ring-spin {
+  width: 14px;
+  height: 14px;
 }
 .conv-compact-popover {
   position: fixed;
@@ -304,21 +449,105 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 280px;
+  width: 270px;
   padding: 10px 12px;
   background: var(--bg-2);
   border: 1px solid var(--line-2);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   box-shadow: 0 12px 32px var(--shadow);
   font-size: var(--fs-sm);
   color: var(--fg);
 }
-.conv-compact-title {
+.conv-ctx-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.conv-ctx-head-title {
+  color: var(--fg-dim);
+  font-weight: 500;
+}
+.conv-ctx-pct {
+  color: var(--fg);
   font-weight: 600;
-  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+.conv-ctx-bar {
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line-2);
+}
+.conv-ctx-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.conv-ctx-bar[data-level='mid'] > span {
+  background: var(--warning);
+}
+.conv-ctx-bar[data-level='high'] > span {
+  background: var(--error);
+}
+.conv-ctx-details {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.conv-ctx-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.conv-ctx-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.conv-ctx-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+}
+.conv-ctx-stale {
+  color: var(--fg-mute);
+}
+.conv-ctx-ring-btn[data-stale='true'] .conv-ring-track {
+  stroke-dasharray: 2.5 2;
+  opacity: 0.7;
+}
+.conv-ctx-note > .lucide {
+  width: 12px;
+  height: 12px;
+}
+.conv-ctx-compact-link {
+  align-self: flex-start;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.conv-ctx-compact-link:hover {
+  text-decoration: underline;
 }
 .conv-compact-desc {
   color: var(--fg-dim);
+  font-size: var(--fs-xs);
   line-height: 1.4;
 }
 .conv-compact-input {
@@ -466,9 +695,10 @@
   margin-right: auto;
 }
 
-/* Narrow panes collapse agent badge text to icon-only when an icon is shown. */
-@container (max-width: 520px) {
-  .conv-agent-badge:has(.conv-agent-badge-icon) .conv-agent-badge-name {
-    display: none;
+/* Narrow panes hide the branch label text first if space gets tight. */
+@container (max-width: 460px) {
+  .conv-meta-bar {
+    flex-wrap: wrap;
+    row-gap: 4px;
   }
 }

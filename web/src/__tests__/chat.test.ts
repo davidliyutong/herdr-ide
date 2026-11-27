@@ -48,12 +48,23 @@ describe('the chat plugin', () => {
         .sort(),
     ).toEqual([
       'chat.allowFullAccess',
+      'chat.handoffMaxKB',
       'chat.idleStopMinutes',
       'chat.maxChatMB',
       'chat.maxChats',
       'chat.maxLive',
       'chat.maxTotalMB',
       'chat.permissionMode',
+      'chat.permissionMode.agy',
+      'chat.permissionMode.claude',
+      'chat.permissionMode.codex',
+      'chat.permissionMode.grok',
+      'chat.permissionMode.kimi',
+      'chat.providers.agy',
+      'chat.providers.claude',
+      'chat.providers.codex',
+      'chat.providers.grok',
+      'chat.providers.kimi',
       'chat.retentionDays',
       'chat.visibleModels.agy',
       'chat.visibleModels.claude',
@@ -61,7 +72,11 @@ describe('the chat plugin', () => {
       'chat.visibleModels.grok',
       'chat.visibleModels.kimi',
     ]);
-    for (const k of ['claude', 'codex', 'agy', 'kimi', 'grok']) expect(defaults[`chat.visibleModels.${k}`]).toEqual([]);
+    for (const k of ['claude', 'codex', 'agy', 'kimi', 'grok']) {
+      expect(defaults[`chat.permissionMode.${k}`]).toBe('inherit');
+      expect(defaults[`chat.providers.${k}`]).toBe(true);
+      expect(defaults[`chat.visibleModels.${k}`]).toEqual([]);
+    }
     for (const mode of P.MODES) expect(registry.i18n).toContain(`settings.chat.permissionMode.${mode}`);
     definePlugins([chatPlugin]);
     vi.stubGlobal(

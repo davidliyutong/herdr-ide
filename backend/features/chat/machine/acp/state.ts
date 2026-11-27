@@ -19,6 +19,25 @@ export const MAX_TEXT = 2000;
 export const LEGACY_MODE_ID = 'mode';
 export const LEGACY_MODE_ID_ALT = '_mode';
 
+/** Client-enforced permission mode option for ACP agents (such as Grok) that
+ * advertise neither a mode configOption nor legacy session modes. Enforced in
+ * the adapter's session/request_permission handler via allow_once only, so the
+ * agent's own configuration files are never modified. */
+export function clientModeOption(id: string, currentValue: string = chat.Mode.Default): chat.ConfigOption {
+  return {
+    id,
+    name: 'Mode',
+    category: chat.Category.Mode,
+    type: chat.CONFIG_SELECT,
+    currentValue,
+    options: [
+      { value: chat.Mode.Default, name: 'Default' },
+      { value: chat.Mode.AcceptEdits, name: 'Accept Edits' },
+      { value: chat.Mode.Full, name: 'Full Access', full: true },
+    ],
+  };
+}
+
 /** s cut to n characters (code points). */
 export function clip(s: string, n: number): string {
   let i = 0;
@@ -162,14 +181,16 @@ export const cloneConfig = (opts: readonly chat.ConfigOption[]): chat.ConfigOpti
 
 /** For each of the host's permission modes, the ids an agent's mode of that
  * meaning has, as the agents name them. A mode the agent has none of is
- * left at the agent's default: Kimi Code's "auto" approves what it deems
- * safe, which is not acceptEdits, and an agent without a full-access mode
- * keeps asking. */
+ * left at the agent's default. For Mode.Full, explicit full-access values
+ * (such as Kimi Code's "yolo") take precedence over "auto", while agents whose
+ * autonomous full-access mode is named "auto" (such as Antigravity's
+ * "Run autonomously") map cleanly to it (still gated by allowFullAccess via
+ * markFull). */
 export const MODE_CANDIDATES: Readonly<Record<string, readonly string[]>> = {
   [chat.Mode.Default]: ['default', 'ask'],
   [chat.Mode.AcceptEdits]: ['acceptEdits', 'accept_edits', 'accept-edits'],
   [chat.Mode.Plan]: ['plan'],
-  [chat.Mode.Full]: ['yolo', 'bypassPermissions', 'full', 'full-access', 'full_access'],
+  [chat.Mode.Full]: ['yolo', 'bypassPermissions', 'full', 'full-access', 'full_access', 'auto'],
 };
 
 /** Whether an agent's mode is known not to give it full access. */

@@ -411,6 +411,47 @@ describe('new chats', () => {
     expect(permissionMode(values({ 'chat.permissionMode': 'plan' }), 'm')).toBe('plan');
     expect(permissionMode(values({ 'chat.permissionMode': 'rm -rf' }), 'm')).toBe('default');
     expect(permissionMode({}, 'm')).toBe('default');
+    // Per-agent permission mode overrides global chat.permissionMode when not 'inherit',
+    // and still enforces allowFullAccess.
+    expect(
+      permissionMode(
+        values({
+          'chat.permissionMode': 'default',
+          'chat.permissionMode.agy': 'full',
+          'chat.permissionMode.claude': 'plan',
+          'chat.permissionMode.codex': 'inherit',
+        }),
+        'm',
+        'agy',
+      ),
+    ).toBeUndefined();
+    expect(
+      permissionMode(
+        values({
+          'chat.permissionMode': 'default',
+          'chat.permissionMode.agy': 'full',
+          'chat.permissionMode.claude': 'plan',
+          'chat.permissionMode.codex': 'inherit',
+          'chat.allowFullAccess': true,
+        }),
+        'm',
+        'agy',
+      ),
+    ).toBe('full');
+    expect(
+      permissionMode(
+        values({ 'chat.permissionMode': 'acceptEdits', 'chat.permissionMode.claude': 'plan', 'chat.permissionMode.codex': 'inherit' }),
+        'm',
+        'claude',
+      ),
+    ).toBe('plan');
+    expect(
+      permissionMode(
+        values({ 'chat.permissionMode': 'acceptEdits', 'chat.permissionMode.claude': 'plan', 'chat.permissionMode.codex': 'inherit' }),
+        'm',
+        'codex',
+      ),
+    ).toBe('acceptEdits');
     // A machine's own value first, then the app's; off by default.
     expect(fullAccessAllowed({}, 'm')).toBe(false);
     const own = { 'chat.allowFullAccess': { value: false, source: 'global' as const, machines: { m: true } } };

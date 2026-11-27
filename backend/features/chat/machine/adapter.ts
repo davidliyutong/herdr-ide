@@ -142,6 +142,12 @@ export interface Session {
   /** Rewinds an idle session to just before the named message/turn boundary,
    * optionally reverting file edits when capabilities.rewindFiles is true. */
   rewind?(p: RewindParams, signal: AbortSignal): Promise<RewindResult>;
+  /** Appends structured handoff messages directly into a fresh session's
+   * model-visible history without starting a turn (e.g. Codex
+   * `thread/inject_items`). Throws Code.Unsupported when the running agent
+   * version does not support direct injection so the host falls back to
+   * prompt-time attributed context injection. */
+  injectHistory?(messages: readonly HandoffMessage[], signal: AbortSignal): Promise<void>;
   /** Ends the agent process gracefully; resolves once it is gone or signal
    * ends. */
   close(signal: AbortSignal): Promise<void>;
@@ -277,11 +283,24 @@ export interface RewindResult {
   sessionId?: string;
 }
 
+/** A structured conversation message for native history injection on handoff. */
+export interface HandoffMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  /** Agent kind id that authored an assistant message (e.g. 'claude', 'codex'). */
+  agentKind?: string;
+}
+
 /** A message of the user. */
 export interface PromptParams {
   /** ACP content blocks (text, image, resource_link), checked by the host
-   * against MAX_PROMPT and MAX_IMAGE. */
+   * against MAX_PROMPT and MAX_IMAGE. Always the user's untouched content
+   * (never includes handoff context, so stored User/Queued events stay clean). */
   content: unknown[];
+  /** Optional attributed handoff context prepended ONLY on the wire to the
+   * agent for backends without native history injection. Never written into
+   * EventType.User or EventType.Queued. */
+  handoffContext?: string;
   /** The host's id of the message, which queued events, cancelQueued and
    * steerQueued name. */
   message: string;

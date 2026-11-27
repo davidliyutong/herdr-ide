@@ -28,6 +28,7 @@ import { useStore } from '../state/store';
 import { useDialog } from '../dialog';
 import { isItem, useMenu, closeMenu } from '../contextMenu';
 import { LeafIcon } from '../components/PluginPane';
+import { PaneHeader } from '../components/PaneHeader';
 import { Workspace } from '../components/Workspace';
 import { setLocale, t } from '../i18n';
 import type { MachineState } from '../lib/machine';
@@ -133,7 +134,17 @@ afterEach(async () => {
 
 async function pane(v: L.PluginView, m = 'm') {
   const Pane = chatPlugin.paneViews!.chat.component;
-  await act(async () => root.render(createElement(Pane, { m, pane: L.viewKey(v.id), view: v, focused: true })));
+  const key = L.viewKey(v.id);
+  await act(async () =>
+    root.render(
+      createElement(
+        'div',
+        { className: 'pane focused' },
+        createElement(PaneHeader, { m, pane: key, leaf: { view: v }, ws: 'w1w1w1w1', focused: true, zoomed: false }),
+        createElement(Pane, { m, pane: key, view: v, focused: true }),
+      ),
+    ),
+  );
   await tick();
 }
 
@@ -149,10 +160,16 @@ describe('the chat pane', () => {
       },
     ]);
     await pane(view(A));
-    expect(q('.chat-agent')!.textContent).toBe('Claude Code');
-    expect(q('.chat-title')!.textContent).toBe('Fix the build');
-    expect(q('.chat-cwd')!.textContent).toBe('~/proj');
-    expect(q('.chat-state')!.textContent).toBe(t('chat.state.idle'));
+    expect(q('.chat-head')).toBeNull();
+    expect(qa('.pane-header')).toHaveLength(1);
+    expect(qa('.pane-header .dot')).toHaveLength(1);
+    expect(qa('.pane-header .pane-kind')).toHaveLength(1);
+    expect(q('.pane-header .chat-agent')!.textContent).toBe('Claude Code');
+    expect(q('.pane-header .chat-title')!.textContent).toBe('Fix the build');
+    expect(q('.pane-header .chat-cwd')!.textContent).toBe('~/proj');
+    expect(q('.pane-header .chat-state')!.textContent).toBe(t('chat.state.idle'));
+    expect(q('.pane-header .chat-action-fork')).not.toBeNull();
+    expect(q('.pane-header .pane-actions')).not.toBeNull();
     await vi.waitFor(async () => {
       await tick();
       expect(host.textContent).toContain('A missing import.');
@@ -161,7 +178,7 @@ describe('the chat pane', () => {
     expect(q<HTMLTextAreaElement>('textarea')!.disabled).toBe(false);
     // The state follows the chat's events.
     await act(async () => chats.event(A, { seq: 3, t: 'state', state: 'working' }));
-    expect(q('.chat-state')!.textContent).toBe(t('chat.state.working'));
+    expect(q('.pane-header .chat-state')!.textContent).toBe(t('chat.state.working'));
   });
 
   it('passes machine and cwd to unified Markdown so relative images and HTML render safely in Chat', async () => {
@@ -268,6 +285,7 @@ describe('the chat pane', () => {
     await pane(view(A));
     await act(async () => q('.chat-title')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
     expect(q('.chat-title-edit')).toBeNull();
+    expect(q('.chat-action-rewind')).toBeNull();
     expect(q('.chat-action-fork')).toBeNull();
     expect(q('.chat-action-switch')).toBeNull();
     expect(q('.chat-action-export')).toBeNull();
@@ -317,18 +335,41 @@ describe('the chat pane', () => {
           if (String(url) === `/api/m/m/p/chat/export?chat=${A}` && method === 'GET') {
             return new Response(JSON.stringify({ markdown: '# Conversation Handoff\n\n### User\n\nHello' }), { status: 200 });
           }
+          if (String(url) === `/api/m/m/p/chat/export?chat=${A}&format=json` && method === 'GET') {
+            return new Response(JSON.stringify({ format: 'json', data: { version: 1, chat: { id: A }, events: [] } }), { status: 200 });
+          }
           return new Response('{}', { status: 200 });
         }),
       );
-      chats.chat(A, { kind: 'claude', title: 'Orig / Spec', cwd: '/home/u/proj', state: 'idle' });
+      chats.chat(
+        A,
+        { kind: 'claude', title: 'Orig / Spec', cwd: '/home/u/proj', state: 'idle', capabilities: { fork: true, rewind: true } },
+        [
+          { seq: 1, t: 'user', content: [{ type: 'text', text: 'First prompt' }] },
+          { seq: 2, t: 'user', content: [{ type: 'text', text: 'Second prompt' }] },
+        ],
+      );
       await pane(view(A));
+      // Rewind header button lists user turns newest-first and opens inline rewind confirmation.
+      await act(async () => q<HTMLButtonElement>('.chat-action-rewind')!.click());
+      const rewindEntries = useMenu.getState().menu?.entries ?? [];
+      expect(rewindEntries.filter(isItem).map((e) => e.label)).toEqual(['#2 · Second prompt', '#1 · First prompt']);
+      await act(async () => {
+        const firstTurn = rewindEntries.find((e) => isItem(e) && e.label === '#1 · First prompt');
+        if (firstTurn && isItem(firstTurn)) firstTurn.run?.();
+      });
+      await tick();
+      expect(q('.conv-user-rewind')).not.toBeNull();
+
       await act(async () => q<HTMLButtonElement>('.chat-action-fork')!.click());
       await tick();
       expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/fork')).toBe(true);
       expect(useChats.getState().states.m?.[E]?.title).toBe('Forked');
 
       await act(async () => q<HTMLButtonElement>('.chat-action-switch')!.click());
-      const codexItem = (useMenu.getState().menu?.entries ?? []).find((e) => isItem(e) && e.label === 'Codex');
+      const switchEntries = useMenu.getState().menu?.entries ?? [];
+      expect(switchEntries.some((e) => isItem(e) && e.label === t('chat.handoff.budget') && !!e.submenu?.length)).toBe(true);
+      const codexItem = switchEntries.find((e) => isItem(e) && e.label === 'Codex');
       expect(codexItem && isItem(codexItem)).toBe(true);
       await act(async () => {
         if (codexItem && isItem(codexItem)) codexItem.run?.();
@@ -337,7 +378,17 @@ describe('the chat pane', () => {
       expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/switch')).toBe(true);
       expect(useChats.getState().states.m?.[F]?.kind).toBe('codex');
 
+      // Export opens dropdown with Markdown, Raw JSON, and Digest Budget submenu.
       await act(async () => q<HTMLButtonElement>('.chat-action-export')!.click());
+      const exportEntries = useMenu.getState().menu?.entries ?? [];
+      const mdItem = exportEntries.find((e) => isItem(e) && e.label === t('chat.export.markdown'));
+      const jsonItem = exportEntries.find((e) => isItem(e) && e.label === t('chat.export.json'));
+      expect(mdItem && isItem(mdItem)).toBe(true);
+      expect(jsonItem && isItem(jsonItem)).toBe(true);
+      expect(exportEntries.some((e) => isItem(e) && e.label === t('chat.handoff.budget') && !!e.submenu?.length)).toBe(true);
+      await act(async () => {
+        if (mdItem && isItem(mdItem)) mdItem.run?.();
+      });
       await tick();
       expect(calls.some((c) => c.method === 'GET' && c.url === `/api/m/m/p/chat/export?chat=${A}`)).toBe(true);
       await vi.waitFor(() => expect(downloads).toHaveLength(1));
@@ -345,6 +396,47 @@ describe('the chat pane', () => {
         name: `Orig-Spec-${A.slice(0, 8)}.md`,
         text: '# Conversation Handoff\n\n### User\n\nHello',
       });
+
+      await act(async () => {
+        if (jsonItem && isItem(jsonItem)) jsonItem.run?.();
+      });
+      await tick();
+      expect(calls.some((c) => c.method === 'GET' && c.url === `/api/m/m/p/chat/export?chat=${A}&format=json`)).toBe(true);
+      await vi.waitFor(() => expect(downloads).toHaveLength(2));
+      expect(downloads[1].name).toBe(`Orig-Spec-${A.slice(0, 8)}.json`);
+      expect(JSON.parse(downloads[1].text)).toEqual({ version: 1, chat: { id: A }, events: [] });
+
+      // ACP chat without native rewind/fork (agy): header rewind shows unsupported notice,
+      // and header fork warns via confirmDialog that the fork is lossy before calling POST /fork.
+      chats.chat(
+        C,
+        { kind: 'agy', title: 'Agy Session', cwd: '/home/u/proj', state: 'idle', capabilities: { fork: false, rewind: false } },
+        [{ seq: 1, t: 'user', content: [{ type: 'text', text: 'Hello agy' }] }],
+      );
+      await pane(view(C, { agent: 'agy' }));
+      const agyRewind = q<HTMLButtonElement>('.chat-action-rewind')!;
+      expect(agyRewind.classList.contains('is-unsupported')).toBe(true);
+      await act(async () => agyRewind.click());
+      const agyRewindEntries = useMenu.getState().menu?.entries ?? [];
+      expect(agyRewindEntries.filter(isItem).map((e) => [e.label, e.disabled])).toEqual([
+        [t('chat.rewindUnsupported', { agent: 'Antigravity' }), true],
+      ]);
+
+      const agyFork = q<HTMLButtonElement>('.chat-action-fork')!;
+      expect(agyFork.dataset.lossy).toBe('true');
+      calls = [];
+      await act(async () => agyFork.click());
+      // Waiting for lossy confirmation dialog; POST /fork has not fired yet.
+      expect(calls.some((c) => c.url === '/api/m/m/p/chat/fork')).toBe(false);
+      const dlg = useDialog.getState().current;
+      expect(dlg?.kind).toBe('confirm');
+      if (dlg?.kind === 'confirm') {
+        expect(dlg.title).toBe(t('chat.forkLossyTitle'));
+        expect(dlg.message).toBe(t('chat.forkLossyMessage', { agent: 'Antigravity' }));
+        await act(async () => dlg.resolve(true));
+      }
+      await tick();
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/fork')).toBe(true);
     } finally {
       clickSpy.mockRestore();
       URL.createObjectURL = origCreateObjectURL;
@@ -434,7 +526,8 @@ describe('the chat pane', () => {
 
   it('says that a leaf names no chat', async () => {
     await pane(view('nope'));
-    expect(host.textContent).toBe(t('chat.noChat'));
+    expect(q('.chat-pane')).toBeNull();
+    expect(q('.empty-state')!.textContent).toBe(t('chat.noChat'));
     expect(chats.sockets).toHaveLength(0);
   });
 });
@@ -505,7 +598,7 @@ describe('the Chats panel', () => {
     expect(rows()).toEqual(['one']);
     expect(useStore.getState().toasts.at(-1)).toMatchObject({
       msg: t('chat.archived', { title: 'two' }),
-      action: { label: t('chat.restore') },
+      action: { label: t('chat.restore'), ttl: 4000 },
       position: 'bottom-left',
     });
     const toggle = q<HTMLButtonElement>('.chat-archived-toggle')!;

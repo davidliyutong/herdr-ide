@@ -46,7 +46,8 @@ import type {
   StartParams,
 } from '../adapter.ts';
 import type { AgentProcess } from '../agentproc.ts';
-import { Items, contentUpdate } from './items.ts';
+import { Items, UPDATE_TOOL, UPDATE_TOOL_CALL, contentUpdate } from './items.ts';
+import { agyDataDirs, agySubagentInput, isAgySubagentCall, loadAgySubagentHistory, normalizeAgySubagentCall } from './agysubagents.ts';
 import { Conn, initialize, permissionCancelled, RequestError, type Handler, type InitializeResult } from './rpc.ts';
 import { ACP_TIMING, AcpSession, callError, startError, type AcpTiming } from './session.ts';
 import { clip, isObj, modelOptions, str, type Obj } from './state.ts';
@@ -303,12 +304,27 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
      * is emitted; nothing when the replay has no such item. */
     async history(p: HistoryParams, emit: (ev: Event) => void, signal: AbortSignal): Promise<void> {
       const h = new History(p.after, emit);
+      const agySubCalls: Array<{ toolCallId: string; raw: Obj }> = [];
+      const agySubSeen = new Set<string>();
       const { pr, init } = await startProbe(
         p,
         probeHandler((method, params) => {
           if (method !== 'session/update' || !isObj(params) || params.sessionId !== p.sessionId) return;
           const u = params.update;
           if (!isObj(u) || typeof u.sessionUpdate !== 'string' || !contentUpdate(u.sessionUpdate)) return;
+          if (p.kind === 'agy' && (u.sessionUpdate === UPDATE_TOOL_CALL || u.sessionUpdate === UPDATE_TOOL) && isAgySubagentCall(u)) {
+            const id = str(u.toolCallId);
+            if (id) {
+              if (!agySubSeen.has(id)) {
+                agySubSeen.add(id);
+                agySubCalls.push({ toolCallId: id, raw: { ...u } });
+              }
+              const { typeName, role } = agySubagentInput(u);
+              const status = str(u.status) || 'completed';
+              h.update(UPDATE_TOOL_CALL, normalizeAgySubagentCall(u, { status, role, typeName }));
+              return;
+            }
+          }
           h.update(u.sessionUpdate, u);
         }),
         signal,
@@ -330,6 +346,9 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
           logger(p.logger)(
             `acp ${p.kind}: the import's last item ${JSON.stringify(p.after)} is not in the replay of ${p.sessionId}: nothing imported`,
           );
+        else if (p.kind === 'agy' && p.after === '' && agySubCalls.length > 0) {
+          loadAgySubagentHistory(p.sessionId, agySubCalls, agyDataDirs(p.argv, p.env, p.cwd), emit);
+        }
       } finally {
         h.close();
         await pr.end();

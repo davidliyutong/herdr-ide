@@ -20,6 +20,8 @@ export interface ItemContext {
   base?: MarkdownBase;
   /** Opens a file the agent named (a location, a link to a resource). */
   openFile?: (path: string, line?: number) => void;
+  /** Opens a referenced chat (e.g. the previous chat after switching agents). */
+  openChat?: (chatId: string, kind?: string) => void;
   /** Trusts the chat's folder (ChatSource.trust); absent when the source
    * cannot or the view is read-only. */
   trust?: () => Promise<void>;
@@ -104,12 +106,28 @@ export const AnsweringContext = createContext<Answering>({
  * ItemContext so memoized agent messages do not re-render when turn state or
  * background task lists change. */
 export interface TimelineActions {
-  /** Rewind an idle chat to just before the user turn at `seq`. */
+  /** Native lossless rewind of an idle chat to just before the user turn at `seq`. */
   rewind?: (seq: number, opts?: RewindOptions) => Promise<void>;
+  /** True when the chat is idle and writable, but the agent lacks native rewind
+   * (so UI surfaces an explicit "unsupported" notice instead of a lossy reset). */
+  rewindUnsupported: boolean;
   /** Whether rewind supports restoring file checkpoints. */
   rewindFiles: boolean;
+  /** Prefills the composer draft (used by truncate-only Rewind). */
+  prefillComposer?: (text: string) => void;
+  /** External rewind target requested from the pane header turn picker. */
+  rewindTarget?: { seq: number; nonce: number };
+  /** Clears the active external rewind target once cancelled or completed. */
+  clearRewindTarget?: () => void;
   /** Fork the conversation up to `upToSeq`. */
   fork?: (upToSeq?: number) => void | Promise<void>;
+  /** Whether a full-session fork (including forking from the last user turn) is native/lossless. */
+  nativeFork: boolean;
+  /** Whether a mid-conversation fork (from an earlier user turn) is native/lossless. */
+  nativePartialFork: boolean;
+  /** Sequence number of the latest user turn in the timeline (used to tell
+   * full-session fork apart from partial mid-history fork). */
+  lastUserSeq?: number;
   /** Terminate a running background task or subagent by BackgroundTask.id. */
   stopTask?: (taskId: string) => Promise<void>;
   /** Authoritative live background tasks indexed by toolCallId (from ChatInfo.tasks). */
@@ -123,7 +141,10 @@ const EMPTY_TASKS: ReadonlyMap<string, BackgroundTask> = new Map();
 const EMPTY_STRINGS: ReadonlySet<string> = new Set();
 
 export const TimelineActionsContext = createContext<TimelineActions>({
+  rewindUnsupported: false,
   rewindFiles: false,
+  nativeFork: false,
+  nativePartialFork: false,
   tasksByToolCall: EMPTY_TASKS,
   questionSourceItems: EMPTY_STRINGS,
 });

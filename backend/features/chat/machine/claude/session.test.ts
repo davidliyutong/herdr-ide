@@ -1152,6 +1152,54 @@ describe('manual compact instructions (#9)', () => {
 });
 
 describe('background tasks, subagents & stopTask (#10)', () => {
+  test('late task events from an older run leave the resumed task running', async () => {
+    const { r, s } = await started([
+      ...initLines(),
+      userIn('run bg'),
+      stateOut('running'),
+      outL({
+        type: 'system',
+        subtype: 'background_tasks_changed',
+        tasks: [{ task_id: 'agent-1', run_id: 'r2', task_type: 'local_agent', description: 'Resumed run' }],
+      }),
+      outL({
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 'agent-1',
+        run_id: 'r1',
+        tool_use_id: 'toolu_old',
+        description: 'Old run',
+      }),
+      outL({ type: 'system', subtype: 'task_updated', task_id: 'agent-1', run_id: 'r1', patch: { status: 'failed' } }),
+      outL({ type: 'system', subtype: 'task_notification', task_id: 'agent-1', run_id: 'r1', status: 'stopped' }),
+      outL({ type: 'system', subtype: 'task_notification', task_id: 'agent-1', run_id: 'r2', status: 'completed' }),
+      outL({
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 'agent-1',
+        run_id: 'r1',
+        tool_use_id: 'toolu_old',
+        description: 'Old run',
+      }),
+      resultOut(),
+      stateOut('idle'),
+    ]);
+    const snapshots: Array<chat.BackgroundTask[] | undefined> = [];
+    const update = r.host.update.bind(r.host);
+    r.host.update = (fn) => {
+      update(fn);
+      snapshots.push(r.host.chat.tasks);
+    };
+    await r.until(s, 2);
+    await s.prompt({ content: text('run bg'), message: 'm1', clientId: 'c1', recorded: true }, sig());
+    await r.until(s, -1);
+    const live = snapshots.filter((tasks) => tasks !== undefined);
+    expect(live.length).toBeGreaterThan(0);
+    for (const tasks of live) expect(tasks).toMatchObject([{ id: 'agent-1', status: 'running', description: 'Resumed run' }]);
+    expect(r.host.chat.tasks).toBeUndefined();
+    expect(r.eventsOf(EventType.Update).some((e) => e.item === 'toolu_old')).toBe(false);
+  });
+
   test('tracks background_tasks_changed, task_started without tool_use_id, task_updated is_backgrounded/error, cancelled on stopped, and stopTask()', async () => {
     const { r, s } = await started([
       ...initLines(),

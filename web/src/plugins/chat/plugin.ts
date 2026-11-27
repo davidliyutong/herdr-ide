@@ -10,7 +10,8 @@ import { openMenu } from '../../contextMenu';
 import { t } from '../../i18n';
 import { useStore } from '../../state/store';
 import type { PaneViewProps, PluginDef, PluginSettingsLayoutProps, PluginSettingsProps } from '../api';
-import { agentName, brandKindIcon, chatMenu, kindIcon, kindsMenu, newChat, newTabTitle } from './ops';
+import { ChatHeader } from './ChatHeader';
+import { agentName, brandKindIcon, chatMenu, kindIcon, kindsMenu, newChat, newTabTitle, startRename } from './ops';
 import { chatViewStatus } from './status';
 import { applyMessage, chatCwd, chatGone, follow, loadAgents, offeredKinds, useChats } from './state';
 import { watchHosts } from './hostReminder';
@@ -75,6 +76,11 @@ export function makeChatPlugin(ui: ChatPluginComponents): PluginDef {
           const chat = chatRef(v).chat;
           const gone = useChats((s) => !!chat && chatGone(s, m, chat));
           return gone ? t('chat.gone') : undefined;
+        },
+        header: ChatHeader,
+        startRename(m, v) {
+          const chat = chatRef(v).chat;
+          if (chat && !chatGone(useChats.getState(), m, chat)) startRename(m, v.id);
         },
         menu: chatMenu,
         component: ui.ChatPane,

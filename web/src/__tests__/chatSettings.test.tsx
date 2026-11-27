@@ -15,7 +15,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: vi.fn() } }))
 import { setLocale, t } from '../i18n';
 import type { MachineState } from '../lib/machine';
 import { ChatSettingsPage } from '../plugins/chat/SettingsPage';
-import { resetChats } from '../plugins/chat/state';
+import { offeredKinds, resetChats } from '../plugins/chat/state';
 import { useSettings, type SettingDef } from '../settings';
 import { useStore } from '../state/store';
 import { settle } from './fakeTerms';
@@ -33,6 +33,26 @@ const qa = <E extends Element = HTMLElement>(sel: string) => Array.from(host.que
 
 const DEFS: SettingDef[] = [
   { key: 'chat.permissionMode', type: 'enum', default: 'default', scope: 'machine', section: 'chat', order: 10 },
+  {
+    key: 'chat.permissionMode.claude',
+    type: 'enum',
+    enum: ['inherit', 'default', 'acceptEdits', 'plan', 'full'],
+    default: 'inherit',
+    scope: 'machine',
+    section: 'chat',
+    group: 'chatModels',
+    order: 80,
+  },
+  {
+    key: 'chat.permissionMode.agy',
+    type: 'enum',
+    enum: ['inherit', 'default', 'acceptEdits', 'plan', 'full'],
+    default: 'inherit',
+    scope: 'machine',
+    section: 'chat',
+    group: 'chatModels',
+    order: 82,
+  },
   {
     key: 'chat.visibleModels.claude',
     type: 'list',
@@ -162,11 +182,12 @@ describe('ChatSettingsPage (provider submenus & model list visibility)', () => {
     expect(qa('.chat-settings-row').map((el) => el.dataset.provider)).toEqual(['claude', 'codex', 'agy', 'kimi', 'grok']);
     expect(q('.chat-settings-row[data-provider="agy"]')?.textContent).toContain('Antigravity');
 
-    // Open Claude sub-page: footer hidden, empty cache prompt shown.
+    // Open Claude sub-page: footer hidden, per-agent permission mode row & empty cache prompt shown.
     await act(async () => q<HTMLButtonElement>('.chat-settings-row[data-provider="claude"]')!.click());
     await act(settle);
     expect(q('[data-footer]')).toBeNull();
     expect(q('.chat-settings-provider')?.dataset.provider).toBe('claude');
+    expect(q('.chat-provider-mode-row [data-general-rows]')?.getAttribute('data-general-rows')).toBe('chat.permissionMode.claude');
     expect(host.textContent).toContain(t('chat.settings.noModels', { agent: 'Claude Code' }));
 
     // Refresh Model List triggers POST /models and renders checkboxes (all checked by default).
@@ -187,25 +208,70 @@ describe('ChatSettingsPage (provider submenus & model list visibility)', () => {
     });
     expect(boxes().map((b) => b.checked)).toEqual([true, true, false]);
 
-    // Unchecking Sonnet keeps Opus; trying to uncheck the last model keeps it checked with hint.
+    // Unchecking Sonnet keeps Opus; unchecking the last model enters draft-cleared state with hint.
     await act(async () => boxes()[1].click());
     await act(settle);
     expect(boxes().map((b) => b.checked)).toEqual([true, false, false]);
     await act(async () => boxes()[0].click());
     await act(settle);
-    expect(boxes().map((b) => b.checked)).toEqual([true, false, false]);
+    expect(boxes().map((b) => b.checked)).toEqual([false, false, false]);
     expect(host.textContent).toContain(t('chat.settings.keepOne'));
 
-    // Show All resets setting via DELETE /api/settings.
-    await act(async () => q<HTMLButtonElement>('.chat-models-show-all')!.click());
+    // Checking one model from cleared state immediately saves just that model (does not revert to all).
+    await act(async () => boxes()[2].click());
+    await act(settle);
+    expect(calls.filter((c) => c.method === 'PUT' && c.url === '/api/settings').at(-1)?.body).toEqual({
+      key: 'chat.visibleModels.claude',
+      value: ['claude-haiku-4-5'],
+      machine: undefined,
+    });
+    expect(boxes().map((b) => b.checked)).toEqual([false, false, true]);
+
+    // Select All resets setting via DELETE /api/settings.
+    await act(async () => q<HTMLButtonElement>('.chat-models-select-all')!.click());
     await act(settle);
     expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('chat.visibleModels.claude'))).toBe(true);
     expect(boxes().every((b) => b.checked)).toBe(true);
+
+    // Deselect All unchecks every model at once so user can pick only desired models.
+    await act(async () => q<HTMLButtonElement>('.chat-models-deselect-all')!.click());
+    await act(settle);
+    expect(boxes().every((b) => !b.checked)).toBe(true);
+    expect(q<HTMLButtonElement>('.chat-models-deselect-all')!.disabled).toBe(true);
+    await act(async () => boxes()[0].click());
+    await act(settle);
+    expect(calls.filter((c) => c.method === 'PUT' && c.url === '/api/settings').at(-1)?.body).toEqual({
+      key: 'chat.visibleModels.claude',
+      value: ['claude-opus-4-6'],
+      machine: undefined,
+    });
 
     // Back returns to root page with footer restored.
     await act(async () => q<HTMLButtonElement>('[data-action="back"]')!.click());
     expect(q('[data-footer]')).not.toBeNull();
     expect(q('.chat-settings-providers')).not.toBeNull();
+  });
+
+  it('toggles chat providers directly on the first-level list and filters offeredKinds', async () => {
+    let savedSetting: Record<string, { value: unknown; source: string }> = {};
+    answers['PUT /api/settings'] = (_url, body) => {
+      const b = body as { key: string; value: unknown };
+      savedSetting = { ...savedSetting, [b.key]: { value: b.value, source: 'global' } };
+      return new Response(JSON.stringify({ values: savedSetting, problems: [] }), { status: 200 });
+    };
+    await renderPage();
+    const row = () => q<HTMLElement>('.chat-settings-row[data-provider="grok"]')!;
+    const sw = () => row().querySelector<HTMLButtonElement>('[role="switch"]')!;
+    expect(sw().getAttribute('aria-checked')).toBe('true');
+    expect(offeredKinds('m1').some((k) => k.id === 'grok')).toBe(true);
+
+    // Clicking the switch toggles the provider without opening its sub-page.
+    await act(async () => sw().click());
+    await act(settle);
+    expect(q('.chat-settings-provider')).toBeNull();
+    expect(sw().getAttribute('aria-checked')).toBe('false');
+    expect(row().classList.contains('off')).toBe(true);
+    expect(offeredKinds('m1').some((k) => k.id === 'grok')).toBe(false);
   });
 
   it('deep-links to a provider via openSettings({ row }) and resets to root when visit changes', async () => {

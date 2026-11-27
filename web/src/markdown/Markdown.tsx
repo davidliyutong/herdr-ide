@@ -49,6 +49,10 @@ export interface MarkdownProps {
    * are converted into remark-math delimiters. Defaults to `false` for
    * 'document' and `true` for 'compact'. */
   mathDelimiters?: boolean;
+  /** Whether single newlines render as hard line breaks (`<br>`) instead of
+   * CommonMark soft-break continuation. Defaults to `false` for 'document'
+   * and `true` for 'compact' (Agent Native View). */
+  hardBreaks?: boolean;
   /** Whether fenced code blocks offer the copy button. Defaults to `true`. */
   codeCopy?: boolean;
   className?: string;
@@ -64,6 +68,7 @@ export function Markdown({
   frontmatter,
   headingAnchors,
   mathDelimiters,
+  hardBreaks,
   codeCopy,
   className,
 }: MarkdownProps) {
@@ -82,6 +87,7 @@ export function Markdown({
           frontmatter={frontmatter}
           headingAnchors={headingAnchors}
           mathDelimiters={mathDelimiters}
+          hardBreaks={hardBreaks}
           codeCopy={codeCopy}
         />
       </Suspense>

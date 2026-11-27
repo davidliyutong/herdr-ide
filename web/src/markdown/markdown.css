@@ -505,6 +505,14 @@
 .markdown.markdown-compact .md-math-display {
   padding: 2px 0;
 }
+.markdown > :first-child,
+.markdown.markdown-compact > :first-child {
+  margin-top: 0;
+}
+.markdown > :last-child,
+.markdown.markdown-compact > :last-child {
+  margin-bottom: 0;
+}
 .md-stream > .markdown + .markdown {
   margin-top: 0;
 }

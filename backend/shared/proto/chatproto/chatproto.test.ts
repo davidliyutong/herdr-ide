@@ -527,7 +527,7 @@ describe('chatproto', () => {
       2 << 10,
     ]);
     expect(Object.values(Code).join(' ')).toBe(
-      'bad_request unknown_chat too_many busy not_found start_failed protocol auth_required unsupported too_large ended failed in_terminal handed_off sleeping not_allowed unsafe_folder sdk_unavailable',
+      'bad_request unknown_chat too_many busy probe_busy not_found start_failed protocol auth_required unsupported too_large ended failed in_terminal handed_off sleeping not_allowed unsafe_folder sdk_unavailable',
     );
     const states = [State.Starting, State.Idle, State.Working, State.Waiting, State.Sleeping, State.Failed, State.Closed];
     expect(states.join(' ')).toBe('starting idle working waiting sleeping failed closed');

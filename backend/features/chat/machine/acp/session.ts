@@ -26,7 +26,19 @@ import * as chat from '#shared/proto/chatproto/index.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import type { AgentProcess } from '../agentproc.ts';
 import type { PromptParams, Session, Sink, StartParams } from '../adapter.ts';
-import { Items, UPDATE_COMMANDS, UPDATE_CONFIG, UPDATE_INFO, UPDATE_MODE, UPDATE_USAGE, UPDATE_USER, contentUpdate } from './items.ts';
+import {
+  Items,
+  UPDATE_COMMANDS,
+  UPDATE_CONFIG,
+  UPDATE_INFO,
+  UPDATE_MODE,
+  UPDATE_TOOL,
+  UPDATE_TOOL_CALL,
+  UPDATE_USAGE,
+  UPDATE_USER,
+  contentUpdate,
+} from './items.ts';
+import { AgySubagentTracker, agyDataDirs, DEFAULT_POLL_MS } from './agysubagents.ts';
 import {
   AbortedError,
   ClosedError,
@@ -47,6 +59,7 @@ import {
   MAX_NAME,
   USD_PER_TICK,
   clip,
+  clientModeOption,
   cloneConfig,
   cloneUsage,
   configOptions,
@@ -80,6 +93,9 @@ export interface AcpTiming {
   term: number;
   /** How long the output of an agent that exited is read on. */
   drain: number;
+  /** Poll interval for Antigravity on-disk subagent transcripts (defaults to
+   * DEFAULT_POLL_MS; 0 disables background polling in tests). */
+  subagentPollMs?: number;
 }
 
 export const ACP_TIMING: AcpTiming = {
@@ -119,6 +135,7 @@ interface Queued {
   message: string;
   clientId: string;
   content: unknown[];
+  wireContent?: unknown[];
 }
 
 /** The error of a command or a turn, from the error of the call to the
@@ -170,6 +187,7 @@ export function permissionKind(toolKind: string): string {
     case 'execute':
       return chat.PermissionKind.Command;
     case 'edit':
+    case 'write':
     case 'delete':
     case 'move':
       return chat.PermissionKind.File;
@@ -226,6 +244,9 @@ export class AcpSession implements Session {
   };
   private readonly it: Items;
   private turn: Turn | null = null;
+  private compactingTurn: Turn | null = null;
+  private preCompactUsed = 0;
+  private lastUsed = 0;
   private queue: Queued[] = [];
   /** session/load replays what the chat's log has. */
   private replaying = false;
@@ -236,6 +257,10 @@ export class AcpSession implements Session {
   private config: ConfigOption[] = [];
   /** The id of the option made of the agent's session modes; "" for none. */
   private legacy = '';
+  /** The id of the client-enforced permission mode option (for agents like
+   * Grok that advertise no mode option); "" when the agent has native modes. */
+  private clientModeId = '';
+  private clientMode: string = chat.Mode.Default;
   private commands: SlashCommand[] = [];
   /** Context windows by model id. */
   private sizes = new Map<string, number>();
@@ -247,6 +272,7 @@ export class AcpSession implements Session {
   private readonly logger: Logger;
   private readonly sink: Sink;
   private readonly t: AcpTiming;
+  private agySub: AgySubagentTracker | null = null;
 
   constructor(kind: string, logger: Logger, sink: Sink, t: AcpTiming, itemPrefix: string) {
     this.kind = kind;
@@ -304,13 +330,16 @@ export class AcpSession implements Session {
 
   /** Takes the agent's configuration options, its session modes, or both:
    * an agent without an option of category mode has its session modes as an
-   * option of the chat's own (LEGACY_MODE_ID), which session/set_mode sets.
-   * undefined leaves what the session has. */
+   * option of the chat's own (LEGACY_MODE_ID), which session/set_mode sets;
+   * an agent with neither gets a client-enforced permission mode option
+   * applied in session/request_permission via allow_once. undefined leaves
+   * what the session has. */
   takeConfig(options: unknown, modes: unknown): void {
     let mode: ConfigOption | undefined;
     let cfg: ConfigOption[] = [];
     for (const o of this.config) {
       if (this.legacy !== '' && o.id === this.legacy) mode = cloneConfig([o])[0];
+      else if (this.clientModeId !== '' && o.id === this.clientModeId) continue;
       else cfg.push(o);
     }
     if (present(options)) cfg = configOptions(options) ?? [];
@@ -319,10 +348,17 @@ export class AcpSession implements Session {
       if (o) mode = o;
     }
     this.legacy = '';
-    if (mode && !optionOf(cfg, chat.Category.Mode)) {
-      mode.id = optionByID(cfg, LEGACY_MODE_ID) ? LEGACY_MODE_ID_ALT : LEGACY_MODE_ID;
-      cfg.push(mode);
-      this.legacy = mode.id;
+    this.clientModeId = '';
+    if (!optionOf(cfg, chat.Category.Mode)) {
+      const id = optionByID(cfg, LEGACY_MODE_ID) ? LEGACY_MODE_ID_ALT : LEGACY_MODE_ID;
+      if (mode) {
+        mode.id = id;
+        cfg.push(mode);
+        this.legacy = id;
+      } else {
+        cfg.push(clientModeOption(id, this.clientMode));
+        this.clientModeId = id;
+      }
     }
     markFull(cfg);
     this.config = cfg;
@@ -336,7 +372,7 @@ export class AcpSession implements Session {
 
   /** Whether the agent advertises a /compact slash command. */
   private hasCompactCommand(): boolean {
-    return this.commands.some((c) => c.name === 'compact');
+    return this.commands.some((c) => c.name.replace(/^\/+/, '').toLowerCase() === 'compact');
   }
 
   /** Speaks the protocol up to the session, and sets what the chat starts
@@ -406,6 +442,23 @@ export class AcpSession implements Session {
       rewindFiles: false,
     };
     this.sid = id;
+    if (this.kind === 'agy') {
+      this.agySub = new AgySubagentTracker(
+        {
+          emit: (ev) => this.emit(ev),
+          updateTasks: (tasks) => {
+            if (this.ended || this.closing) return;
+            this.sink.update((c) => {
+              if (tasks.length > 0) c.tasks = tasks;
+              else delete c.tasks;
+            });
+          },
+          logf: (line) => this.logf(line),
+        },
+        { dirs: agyDataDirs(p.argv, p.env, p.cwd), pollMs: this.t.subagentPollMs ?? DEFAULT_POLL_MS },
+      );
+      this.agySub.setSession(id);
+    }
     this.sizes = contextSizes(r.models);
     this.sink.update((c) => {
       c.sessionId = id;
@@ -413,6 +466,9 @@ export class AcpSession implements Session {
       else delete c.agentVersion;
       c.capabilities = { ...caps };
     });
+    if (p.options.mode === chat.Mode.AcceptEdits || p.options.mode === chat.Mode.Full) {
+      this.clientMode = p.options.mode;
+    }
     this.takeConfig(r.configOptions, r.modes);
     await this.applyOptions(p.options, signal);
   }
@@ -472,6 +528,13 @@ export class AcpSession implements Session {
         this.once(`update ${kind}`);
         return; // the host states the user's prompts
       }
+      if (this.agySub && (kind === UPDATE_TOOL_CALL || kind === UPDATE_TOOL)) {
+        const norm = this.agySub.onToolUpdate(u);
+        if (norm) {
+          this.it.update(UPDATE_TOOL_CALL, norm);
+          return;
+        }
+      }
       this.it.update(kind, u);
       return;
     }
@@ -515,9 +578,20 @@ export class AcpSession implements Session {
         }
         this.sawUsage = true;
         if (n.cost) this.sawCost = true;
+        // During a /compact turn, some ACP agents emit the summarization LLM
+        // call's pre-compact prompt size (>= preCompactUsed) instead of the
+        // compacted context size: keep context usage invalidated until a real
+        // post-compact or next-turn update arrives.
+        const ignoreSpike =
+          this.turn !== null && this.turn === this.compactingTurn && n.used > 0 && this.preCompactUsed > 0 && n.used >= this.preCompactUsed;
+        if (!ignoreSpike) this.lastUsed = n.used;
         this.sink.update((c) => {
           const usage = cloneUsage(c.usage);
-          withContext(usage, n.used, n.size);
+          if (!ignoreSpike) {
+            const size = n.size > 0 ? n.size : usage.size;
+            withContext(usage, n.used, size);
+            delete usage.stale;
+          }
           if (n.cost) usage.cost = { ...n.cost };
           c.usage = usage;
         });
@@ -544,15 +618,27 @@ export class AcpSession implements Session {
       const tc = isObj(req.toolCall) ? req.toolCall : {};
       let kind = this.it.toolKind(typeof tc.toolCallId === 'string' ? tc.toolCallId : '');
       if (typeof tc.kind === 'string' && tc.kind !== '') kind = tc.kind;
+      if (!kind || kind.toLowerCase() === 'other') {
+        const xai = isObj(tc._meta) && isObj(tc._meta['x.ai/tool']) ? tc._meta['x.ai/tool'] : undefined;
+        if (xai && typeof xai.kind === 'string' && xai.kind !== '') kind = xai.kind;
+      }
       const options = permissionOptions(req.options);
       if (options.length === 0) return permissionCancelled();
+      const permKind = permissionKind(kind);
+      if (
+        this.clientModeId !== '' &&
+        (this.clientMode === chat.Mode.Full || (this.clientMode === chat.Mode.AcceptEdits && permKind === chat.PermissionKind.File))
+      ) {
+        const allow = options.find((o) => o.kind === chat.OptionKind.AllowOnce);
+        if (allow) return permissionSelected(allow.optionId);
+      }
       const wait = AbortSignal.any([(this.turn?.ac ?? this.ac).signal, signal]);
       if (wait.aborted) return permissionCancelled();
       // The host has what came before the request: the tool call's events
       // went to the sink synchronously, before this request was read.
       let ans;
       try {
-        ans = await this.sink.permission({ kind: permissionKind(kind), toolCall, options, parent: '' }, wait);
+        ans = await this.sink.permission({ kind: permKind, toolCall, options, parent: '' }, wait);
       } catch {
         return permissionCancelled();
       }
@@ -579,12 +665,18 @@ export class AcpSession implements Session {
     this.checkContent(p.content);
     const e = this.usable();
     if (e) throw e;
+    const wireContent = p.handoffContext ? [{ type: 'text', text: p.handoffContext }, ...p.content] : [...p.content];
     if (this.turn || this.queue.length > 0) {
       if (p.delivery === chat.Delivery.Steer) {
         throw perr(Code.Unsupported, 'the agent does not support mid-turn steering');
       }
       if (this.queue.length >= MAX_QUEUE) throw perr(Code.Busy, 'too many messages wait for the turn');
-      const q: Queued = { message: p.message, clientId: p.clientId, content: [...p.content] };
+      const q: Queued = {
+        message: p.message,
+        clientId: p.clientId,
+        content: [...p.content],
+        ...(p.handoffContext ? { wireContent } : {}),
+      };
       if (p.delivery === chat.Delivery.Interrupt) {
         this.queue.unshift(q);
         this.emit(queuedEvent(QueuedState.Waiting, q, true));
@@ -604,7 +696,27 @@ export class AcpSession implements Session {
           ...(p.clientId ? { clientId: p.clientId } : {}),
           ...(p.uuid ? { item: p.uuid } : {}),
         };
-    this.startTurn([...p.content], user);
+    const isDirectCompact = this.hasCompactCommand() && isCompactPrompt(p.content);
+    if (isDirectCompact) {
+      this.invalidateUsageForCompact();
+      this.emit({ t: EventType.Notice, method: noticeMethod(Notice.Compacting) });
+    }
+    const t = this.startTurn(wireContent, user);
+    if (isDirectCompact) this.compactingTurn = t;
+  }
+
+  /** Resets displayed context usage to 0 (stale/invalid) upon compaction,
+   * preserving context window size, cost and limits until the next real
+   * usage_update arrives. */
+  private invalidateUsageForCompact(): void {
+    this.preCompactUsed = this.lastUsed;
+    this.lastUsed = 0;
+    this.sink.update((c) => {
+      const usage = cloneUsage(c.usage);
+      withContext(usage, 0, usage.size);
+      usage.stale = true;
+      c.usage = usage;
+    });
   }
 
   /** Refuses content blocks the agent did not say it takes. */
@@ -636,7 +748,7 @@ export class AcpSession implements Session {
   /** Sends a prompt as a turn, after the prompt's user event when user is
    * given. No turn runs. The prompt is written before startTurn returns, so
    * a cancel after it goes after it. */
-  private startTurn(content: unknown[], user: Event | undefined): void {
+  private startTurn(content: unknown[], user: Event | undefined): Turn {
     this.it.endTurn(); // what the agent said between turns
     if (user) this.emit(user);
     const t: Turn = { ac: new AbortController() };
@@ -644,6 +756,7 @@ export class AcpSession implements Session {
     this.emit({ t: EventType.Turn, state: TurnState.Start });
     const answer = this.conn.call('session/prompt', { sessionId: this.sid, prompt: content }, { signal: this.ac.signal });
     this.runTurn(t, answer).catch((e: unknown) => this.logf(`a turn: ${(e as Error).message}`));
+    return t;
   }
 
   /** Waits for the agent's end of a turn, then sends the next queued
@@ -660,7 +773,11 @@ export class AcpSession implements Session {
     }
     // The session's end ends the turn.
     if (this.turn !== t || err instanceof ClosedError || this.ac.signal.aborted) return;
-    this.it.endTurn();
+    const wasCompacting = this.compactingTurn === t;
+    if (wasCompacting) this.compactingTurn = null;
+    const aborted = err !== undefined || (isObj(res) && res.stopReason === 'cancelled');
+    this.agySub?.onTurnEnd(aborted);
+    this.it.endTurn(aborted ? (id) => !this.agySub?.tracks(id) : undefined);
     this.turn = null;
     t.ac.abort();
     if (err !== undefined) {
@@ -668,13 +785,16 @@ export class AcpSession implements Session {
     } else {
       const r: Obj = isObj(res) ? res : {};
       const stopReason = str(r.stopReason)!;
+      if (wasCompacting && stopReason !== 'cancelled') {
+        this.emit({ t: EventType.Notice, method: noticeMethod(Notice.Compacted) });
+      }
       this.emit({ t: EventType.Turn, state: TurnState.End, ...(stopReason ? { stopReason } : {}) });
-      this.turnUsage(r);
+      this.turnUsage(r, wasCompacting);
     }
     const q = this.queue.shift();
     if (q && !this.closing) {
       this.emit(queuedEvent(QueuedState.Taken, q, true));
-      this.startTurn(q.content, undefined);
+      this.startTurn(q.wireContent ?? q.content, undefined);
     } else if (q) {
       this.queue.unshift(q);
     }
@@ -683,18 +803,24 @@ export class AcpSession implements Session {
   /** Takes what an answer's _meta tells of the turn (Grok's): the context
    * in use, when the agent sends no usage_update, and the turn's cost, added
    * to the session's, when it sends no cost. */
-  private turnUsage(res: Obj): void {
+  private turnUsage(res: Obj, wasCompacting = false): void {
     if (!present(res._meta)) return;
     const m = turnMeta(res._meta);
     if (!m) return;
-    const setContext = !this.sawUsage && m.totalTokens > 0;
+    const ignoreSpike = wasCompacting && m.totalTokens > 0 && this.preCompactUsed > 0 && m.totalTokens >= this.preCompactUsed;
+    const setContext = !this.sawUsage && m.totalTokens > 0 && !ignoreSpike;
     const used = m.totalTokens;
     const size = this.sizes.get(m.modelId) ?? 0;
     const cost = !this.sawCost && m.costUsdTicks > 0 ? m.costUsdTicks * USD_PER_TICK : 0;
     if (!setContext && cost === 0) return;
+    if (setContext) this.lastUsed = used;
     this.sink.update((c) => {
       const usage = cloneUsage(c.usage);
-      if (setContext) withContext(usage, used, size);
+      if (setContext) {
+        const effectiveSize = size > 0 ? size : usage.size;
+        withContext(usage, used, effectiveSize);
+        delete usage.stale;
+      }
       if (cost > 0) {
         if (!usage.cost || usage.cost.currency !== 'USD') usage.cost = { amount: 0, currency: 'USD' };
         usage.cost.amount += cost;
@@ -763,6 +889,15 @@ export class AcpSession implements Session {
 
   /** Sets an option the agent has to one of its values. */
   private async set(signal: AbortSignal, session: string, id: string, value: string, legacy: boolean): Promise<void> {
+    if (this.clientModeId !== '' && id === this.clientModeId) {
+      this.clientMode = value;
+      const o = optionByID(this.config, id);
+      if (o && !this.ended) {
+        o.currentValue = value;
+        this.stateConfig();
+      }
+      return;
+    }
     if (legacy) {
       try {
         await this.conn.call('session/set_mode', { sessionId: session, modeId: value }, { ms: this.t.call, signal });
@@ -796,7 +931,10 @@ export class AcpSession implements Session {
   }
 
   /** Compacts the conversation via the agent's advertised /compact slash
-   * command when idle; unsupported if the agent did not advertise compact. */
+   * command when idle; unsupported if the agent did not advertise compact.
+   * Immediately invalidates context usage (used: 0, stale: true) and emits
+   * Notice.Compacting so the UI reflects compaction state and waits cleanly
+   * for the agent's next usage update. */
   async compact(_signal?: AbortSignal, instructions?: string): Promise<void> {
     const e = this.usable();
     if (e) throw e;
@@ -804,8 +942,14 @@ export class AcpSession implements Session {
     if (this.turn || this.queue.length > 0) throw perr(Code.Busy, 'a turn is running');
     const extra = instructions?.trim();
     const text = extra ? `/compact ${extra}` : '/compact';
-    this.emit({ t: EventType.Notice, method: noticeMethod(Notice.Command), params: { name: '/compact' } });
-    this.startTurn([{ type: 'text', text }], undefined);
+    this.invalidateUsageForCompact();
+    this.emit({
+      t: EventType.Notice,
+      method: noticeMethod(Notice.Command),
+      params: extra ? { name: '/compact', instructions: extra } : { name: '/compact' },
+    });
+    this.emit({ t: EventType.Notice, method: noticeMethod(Notice.Compacting) });
+    this.compactingTurn = this.startTurn([{ type: 'text', text }], undefined);
   }
 
   /** Ends the agent gracefully: calls session/close (bounded by 2s) when
@@ -859,13 +1003,15 @@ export class AcpSession implements Session {
   private finish(): void {
     if (this.ended) return;
     this.ended = true;
+    this.agySub?.stop();
     if (!this.closing) {
       const status = this.proc.status();
       const stderr = this.proc.stderr();
       this.err = { code: Code.Ended, message: 'the agent exited' + (status ? ` (${status})` : ''), ...(stderr ? { stderr } : {}) };
     }
     const t = this.turn;
-    this.it.endTurn();
+    this.compactingTurn = null;
+    this.it.endTurn((id) => !this.agySub?.tracks(id));
     if (t) {
       this.turn = null;
       t.ac.abort();
@@ -875,6 +1021,13 @@ export class AcpSession implements Session {
     this.ac.abort();
     this.resolveDone(this.err);
   }
+}
+
+/** Whether a prompt's content is a standalone /compact command. */
+function isCompactPrompt(content: readonly unknown[]): boolean {
+  if (content.length !== 1) return false;
+  const b = content[0];
+  return isObj(b) && b.type === 'text' && typeof b.text === 'string' && /^\/compact(?:\s+[\s\S]+)?$/.test(b.text.trim());
 }
 
 /** A queued event of a message: with its content while it waits and when

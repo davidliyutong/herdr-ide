@@ -2,11 +2,33 @@
 // and its agents' sessions, for the panel that shows them. It starts no
 // host.
 import * as chat from '#shared/proto/chatproto/index.ts';
+import { CoalesceCache } from '#shared/lib/cache.ts';
 import { asChatError } from './errors.ts';
 import type { HostConn, Response } from './hostconn.ts';
 import type { ChatSwitchboard } from './switchboard.ts';
 import { NOT_RUNNING } from './protocol.ts';
 import { ZERO_TIME } from './wire.ts';
+
+/** How long a /hosts overview fan-out is cached on the hub (coalesces
+ * multi-tab polling while staying fresh after host changes). */
+export const OVERVIEW_CACHE_TTL_MS = 2_000;
+
+const caches = new WeakMap<ChatSwitchboard, CoalesceCache<HostOverview[]>>();
+
+function cacheOf(board: ChatSwitchboard): CoalesceCache<HostOverview[]> {
+  let c = caches.get(board);
+  if (!c) {
+    c = new CoalesceCache<HostOverview[]>({ ttlMs: OVERVIEW_CACHE_TTL_MS, maxEntries: 1 });
+    caches.set(board, c);
+  }
+  return c;
+}
+
+/** Drops any cached host overview for board (called after host lifecycle
+ * changes or machine removals). */
+export function invalidateOverviews(board: ChatSwitchboard): void {
+  caches.get(board)?.clear();
+}
 
 /** One machine's chat host and its active sessions. */
 export interface HostOverview {
@@ -56,8 +78,19 @@ function overview(o: HostOverview): HostOverview {
   return out as unknown as HostOverview;
 }
 
-/** Every machine's chat host, as it is now; each asked within ms. */
-export async function overviews(board: ChatSwitchboard, signal: AbortSignal, ms: number): Promise<HostOverview[]> {
+/** Every machine's chat host, as it is now; each asked within ms. Concurrent
+ * callers share one fan-out and reuse the result for OVERVIEW_CACHE_TTL_MS
+ * unless refresh is true. */
+export async function overviews(
+  board: ChatSwitchboard,
+  signal: AbortSignal,
+  ms: number,
+  o: { refresh?: boolean } = {},
+): Promise<HostOverview[]> {
+  return cacheOf(board).get('hosts', { signal, refresh: o.refresh }, (shared) => fetchOverviews(board, shared, ms));
+}
+
+async function fetchOverviews(board: ChatSwitchboard, signal: AbortSignal, ms: number): Promise<HostOverview[]> {
   const states = board.o.machines.states();
   return Promise.all(
     states.map(async (st) => {

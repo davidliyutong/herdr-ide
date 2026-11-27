@@ -212,12 +212,12 @@ export class Items {
       this.tools.set(id, t);
       this.order.push(id);
     }
-    const settled = status === 'completed' || status === 'failed';
+    const settled = status === 'completed' || status === 'failed' || status === 'cancelled';
     let changed = kind === UPDATE_TOOL_CALL || settled || t.fields.size === 0;
     // A tool_call states the call whole.
     if (kind === UPDATE_TOOL_CALL) t.fields = new Map();
     for (const [k, v] of Object.entries(raw)) {
-      if (k === 'sessionUpdate') continue;
+      if (k === 'sessionUpdate' || (k === 'status' && status === '')) continue;
       if (!STREAMED.has(k) && (!t.fields.has(k) || text(t.fields.get(k)) !== text(v))) changed = true;
       t.fields.set(k, v);
     }
@@ -264,13 +264,16 @@ export class Items {
     return typeof k === 'string' ? k : '';
   }
 
-  /** Ends what streams: the message, and the tool calls that changed live
-   * since they were last stored. A new turn starts with no tool calls and
-   * no plan. */
-  endTurn(): void {
+  /** Stores live changes and cancels unfinished tools when a turn aborts. */
+  endTurn(cancelPending?: (id: string) => boolean): void {
     this.close();
     for (const id of this.order) {
       const t = this.tools.get(id)!;
+      const status = t.fields.get('status');
+      if ((status === 'pending' || status === 'in_progress' || status === 'paused') && cancelPending?.(id)) {
+        t.fields.set('status', 'cancelled');
+        t.dirty = true;
+      }
       if (t.dirty) this.storeTool(id, t);
     }
     this.tools = new Map();

@@ -10,7 +10,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Conversation, SHOWN_ITEMS, stickToEnd, type ConversationHandle, type ConversationProps } from '../conversation/Conversation';
+import {
+  clearSavedScrolls,
+  Conversation,
+  SHOWN_ITEMS,
+  stickToEnd,
+  type ConversationHandle,
+  type ConversationProps,
+} from '../conversation/Conversation';
 import { MAX_DIFF_LINES } from '../conversation/diff';
 import {
   CHAT_NOTICES,
@@ -29,6 +36,7 @@ import { t } from '../i18n';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class FakeSource implements ChatSource {
+  id?: string;
   readOnly?: boolean;
   events: SourceEvent[] = [];
   subs = new Set<(ev: SourceEvent) => void>();
@@ -66,6 +74,7 @@ const notice = (method: string, params?: unknown): ChatEvent => ({ seq: next(), 
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  clearSavedScrolls();
   seq = 0;
   host = document.createElement('div');
   document.body.append(host);
@@ -146,6 +155,8 @@ describe('the conversation view’s messages', () => {
     await show(s);
     await until(() => q('.conv-user-text strong'));
     expect(q('.conv-user-text strong')?.textContent).toBe('table');
+    // Multi-line user messages preserve single newlines as explicit line breaks.
+    expect(qa('.conv-user-text p br')).toHaveLength(1);
     await until(() => q('.conv-agent table'));
     expect(qa('.conv-agent th').map((th) => th.textContent)).toEqual(['Name', 'Value']);
     expect(qa('.conv-agent td').map((td) => td.textContent)).toEqual(['a', '1']);
@@ -336,6 +347,51 @@ describe('the conversation view’s messages', () => {
     expect(q('.conv-notice .conv-pre')).toBeNull();
     await click(q('.conv-notice .conv-link'));
     expect(q('.conv-notice .conv-pre')?.textContent).toBe('Tokens: 12k');
+  });
+
+  it('shows structured handoff transfer summary and opens the previous chat on click', async () => {
+    const opened: Array<[string, string | undefined]> = [];
+    const s = new FakeSource();
+    s.emit(
+      notice(CHAT_NOTICES.switched, {
+        fromChat: 'c0123456789abcdef',
+        fromKind: 'claude',
+        injection: 'native_history',
+        totalTurns: 12,
+        keptTurns: 4,
+        omittedTurns: 8,
+        estimatedTokens: 3200,
+      }),
+      notice(CHAT_NOTICES.switched, {
+        fromChat: 'c1111111111111111',
+        fromKind: 'codex',
+        injection: 'attributed_context',
+        totalTurns: 3,
+        keptTurns: 3,
+        omittedTurns: 0,
+        estimatedTokens: 450,
+      }),
+    );
+    await show(s, { onOpenChat: (id, kind) => opened.push([id, kind]) });
+    expect(qa('.conv-notice-text').map((n) => n.textContent)).toEqual([
+      t('conversation.notice.switchedBudgetedNative', {
+        agent: 'Claude Code',
+        kept: 4,
+        total: 12,
+        omitted: 8,
+        tokens: '3.2k',
+      }),
+      t('conversation.notice.switchedFull', {
+        agent: 'Codex',
+        kept: 3,
+        tokens: '450',
+      }),
+    ]);
+    const links = qa('.conv-notice .conv-link');
+    expect(links).toHaveLength(2);
+    expect(links[0]!.textContent).toBe(t('conversation.notice.openSourceChat'));
+    await click(links[0]!);
+    expect(opened).toEqual([['c0123456789abcdef', 'claude']]);
   });
 
   it('says how to start while there is no conversation, and that entries are not shown', async () => {
@@ -772,9 +828,12 @@ describe('the conversation view’s composer', () => {
     });
     // No size: tokens; rate-limit windows are rendered in the status bar by the AI Usage plugin, not here (#1).
     expect(q('[role="meter"]')).toBeNull();
-    expect(q('.conv-usage-tokens')?.textContent).toBe(t('conversation.usage.tokens', { n: '1k' }));
-    expect(q('.conv-usage-cost')?.textContent).toBe('$1.50');
-    expect(q('.conv-usage-limit')).toBeNull();
+    await click(q('.conv-ctx-ring-btn')!);
+    const pop = document.body.querySelector<HTMLElement>('.conv-ctx-popover')!;
+    expect(pop.querySelector('.conv-usage-tokens')?.textContent).toBe(t('conversation.usage.tokens', { n: '1k' }));
+    expect(pop.querySelector('.conv-usage-cost')?.textContent).toBe('$1.50');
+    expect(pop.querySelector('.conv-usage-limit')).toBeNull();
+    await click(q('.conv-ctx-ring-btn')!);
     // The agent's own measure.
     await emit(s, { seq: next(), t: 'info', chat: { usage: { used: 1000, size: 0, percentage: 12 } } });
     expect(q('[role="meter"]')?.getAttribute('aria-valuenow')).toBe('12');
@@ -909,6 +968,46 @@ describe('the conversation view’s list', () => {
     await emit(s, { t: 'reset', seq: 99 }, prompt('new'));
     expect(qa('.conv-user-text').map((e) => e.textContent)).toEqual(['new']);
   });
+
+  it('preserves browsing scroll state across unmount/remount for stopped chats and across shown toggles', async () => {
+    const s = new FakeSource();
+    s.id = 'chat-scroll-1';
+    s.emit(prompt('first'), say('reply one'), prompt('second'), say('reply two'));
+    await show(s);
+    const log = q('[role="log"]')!;
+    let top = 420;
+    let hiddenHeight = false;
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => (hiddenHeight ? 0 : 2000) });
+    Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => (hiddenHeight ? 0 : 500) });
+    Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => (top = v) });
+    await act(async () => void log.dispatchEvent(new Event('scroll')));
+    expect(q('.conv-jump')).not.toBeNull();
+
+    // Hiding the kept pane (display: none -> clientHeight 0, browser resets scrollTop to 0)
+    // and showing it again restores the saved scrollTop before paint.
+    hiddenHeight = true;
+    top = 0;
+    await show(s, { shown: false });
+    await act(async () => void log.dispatchEvent(new Event('scroll')));
+    hiddenHeight = false;
+    await show(s, { shown: true });
+    expect(top).toBe(420);
+    expect(q('.conv-jump')).not.toBeNull();
+
+    // Unmounting and remounting a stopped chat restores the exact saved scroll position.
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    let restoredTop = 0;
+    await act(async () => root.render(createElement(Conversation, { source: s, kind: 'claude' })));
+    const log2 = q('[role="log"]')!;
+    Object.defineProperty(log2, 'scrollHeight', { configurable: true, get: () => 2000 });
+    Object.defineProperty(log2, 'clientHeight', { configurable: true, get: () => 500 });
+    Object.defineProperty(log2, 'scrollTop', { configurable: true, get: () => restoredTop, set: (v: number) => (restoredTop = v) });
+    // Trigger layout update after mocking jsdom geometry.
+    await emit(s, say('more text while away'));
+    expect(restoredTop).toBe(420);
+    expect(q('.conv-jump')).not.toBeNull();
+  });
 });
 
 describe('user message edit & rewind and fork-from-here (#6)', () => {
@@ -985,5 +1084,89 @@ describe('user message edit & rewind and fork-from-here (#6)', () => {
     await emit(s, { seq: next(), t: 'state', state: 'idle' });
     await show(s, { onFork, readOnly: true });
     expect(q('.conv-user-actions')).toBeNull();
+  });
+
+  it('supports truncate-only native rewind prefilling the composer, reports unsupported rewind on ACP, and warns before lossy in-message fork', async () => {
+    // 1. Native rewind-only prefills the rewound prompt text into the composer.
+    const nativeSrc = new FakeSource();
+    nativeSrc.id = 'native-rewind-chat';
+    const nativeRewind = vi.fn(async () => {});
+    Object.assign(nativeSrc, { rewind: nativeRewind });
+    const turn = prompt('rewrite this prompt');
+    nativeSrc.emit(
+      { seq: next(), t: 'info', chat: { state: 'idle', capabilities: { rewind: true, rewindFiles: false, fork: true } } },
+      turn,
+      say('claude reply'),
+    );
+    await show(nativeSrc, { kind: 'claude' });
+
+    await click(q<HTMLButtonElement>(`button[aria-label="${t('conversation.user.rewind')}"]`));
+    expect(q('.conv-user-rewind')).not.toBeNull();
+    await click(q('.conv-edit-actions .primary'));
+    await settle();
+    expect(nativeRewind).toHaveBeenCalledWith(turn.seq, {});
+    expect(q<HTMLTextAreaElement>('textarea.conv-input')?.value).toBe('rewrite this prompt');
+
+    // 2. ACP agent without native rewind/fork (agy): shows explicit unsupported rewind notice
+    //    (never invokes source.rewind) and warns that in-message fork is lossy before proceeding.
+    const agySrc = new FakeSource();
+    agySrc.id = 'acp-unsupported-chat';
+    const agyRewind = vi.fn(async () => {});
+    const onFork = vi.fn();
+    Object.assign(agySrc, { rewind: agyRewind });
+    const agyTurn = prompt('agy prompt');
+    agySrc.emit(
+      { seq: next(), t: 'info', chat: { state: 'idle', capabilities: { rewind: false, rewindFiles: false, fork: false } } },
+      agyTurn,
+      say('agy reply'),
+      notice(CHAT_NOTICES.forked, { native: false }),
+    );
+    await show(agySrc, { kind: 'agy', onFork });
+
+    expect(qa('.conv-notice-text').map((n) => n.textContent)).toContain(t('conversation.notice.forkedLossy'));
+    expect(q(`button[aria-label="${t('conversation.user.editRewind')}"]`)).toBeNull();
+    const unsupBtn = q<HTMLButtonElement>(`button[aria-label="${t('conversation.user.rewindUnsupported', { agent: 'Antigravity' })}"]`)!;
+    expect(unsupBtn).not.toBeNull();
+    expect(unsupBtn.classList.contains('is-unsupported')).toBe(true);
+    await click(unsupBtn);
+    expect(q('.conv-user-info')?.textContent).toContain(t('conversation.rewind.unsupported', { agent: 'Antigravity' }));
+    expect(agyRewind).not.toHaveBeenCalled();
+    await click(q('.conv-user-info .conv-edit-actions button'));
+    expect(q('.conv-user-info')).toBeNull();
+
+    // Clicking Fork on a lossy turn opens inline confirmation rather than forking immediately.
+    const forkBtn = q<HTMLButtonElement>(`button[aria-label="${t('conversation.user.forkHere')}"]`)!;
+    expect(forkBtn.dataset.lossy).toBe('true');
+    await click(forkBtn);
+    expect(onFork).not.toHaveBeenCalled();
+    expect(q('.conv-user-fork-lossy')?.textContent).toContain(t('conversation.fork.lossyWarning', { agent: 'Antigravity' }));
+    await click(q('.conv-user-fork-lossy .conv-edit-actions .primary'));
+    await settle();
+    expect(onFork).toHaveBeenCalledWith(agyTurn.seq);
+
+    // 3. ACP agent with full-session fork only (kimi): earlier turn warns lossy, last turn forks natively without warning.
+    const kimiSrc = new FakeSource();
+    kimiSrc.id = 'kimi-fork-chat';
+    const onKimiFork = vi.fn();
+    const k1 = prompt('kimi first');
+    const k2 = prompt('kimi second');
+    kimiSrc.emit(
+      { seq: next(), t: 'info', chat: { state: 'idle', capabilities: { rewind: false, rewindFiles: false, fork: true } } },
+      k1,
+      say('kimi a1'),
+      k2,
+      say('kimi a2'),
+    );
+    await show(kimiSrc, { kind: 'kimi', onFork: onKimiFork });
+    const forkBtns = qa<HTMLButtonElement>(`button[aria-label="${t('conversation.user.forkHere')}"]`);
+    expect(forkBtns).toHaveLength(2);
+    expect(forkBtns[0].dataset.lossy).toBe('true');
+    expect(forkBtns[1].dataset.lossy).toBeUndefined();
+    await click(forkBtns[1]);
+    expect(onKimiFork).toHaveBeenCalledWith(k2.seq);
+    expect(q('.conv-user-fork-lossy')).toBeNull();
+    await click(forkBtns[0]);
+    expect(onKimiFork).toHaveBeenCalledTimes(1);
+    expect(q('.conv-user-fork-lossy')).not.toBeNull();
   });
 });

@@ -51,11 +51,11 @@ import * as chat from '#shared/proto/chatproto/index.ts';
 import { Fail } from '#kernel/fail.ts';
 import type { FeatureContext } from '#kernel/feature.ts';
 import { readBody } from '#kernel/http/app.ts';
-import type { Ctx } from '#kernel/http/env.ts';
+import type { Client, Ctx } from '#kernel/http/env.ts';
 import { auditText } from './audit.ts';
 import { badRequest, failOf, protocolError } from './errors.ts';
 import type { ChatSwitchboard } from './switchboard.ts';
-import { overviews } from './overview.ts';
+import { invalidateOverviews, overviews } from './overview.ts';
 import type { Timing } from './timing.ts';
 import { HubCode } from './wire.ts';
 
@@ -106,6 +106,12 @@ const newBody = z.object({
 });
 
 const optSeq = z.number().int().positive().nullish();
+const optMaxBytes = z
+  .number()
+  .int()
+  .min(2048)
+  .max(512 * 1024)
+  .nullish();
 
 const modelsBody = z.object({
   kind: opt,
@@ -117,12 +123,14 @@ const forkBody = z.object({
   chat: opt,
   upToSeq: optSeq,
   title: opt,
+  maxBytes: optMaxBytes,
 });
 
 const switchBody = z.object({
   chat: opt,
   targetKind: opt,
   upToSeq: optSeq,
+  maxBytes: optMaxBytes,
   options: z.object({ model: opt, effort: opt, mode: opt }).nullish(),
 });
 
@@ -130,6 +138,7 @@ export interface WorkspaceEnvLookup {
   (
     machine: string,
     workspace: string,
+    client: Client,
   ): Promise<{
     presets: string[];
     env: Record<string, string>;
@@ -178,16 +187,18 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
   /** Which kinds the machine can start; start starts its host. */
   const agents = async (c: Ctx, start: boolean) => {
     const kinds = chatKinds();
-    const res = await ask(c, { op: chat.Op.Agents, kinds }, { start });
-    const out = (res.agents ?? [])
-      .filter((a) => kinds.includes(a.kind))
-      .map((a) => ({
-        kind: a.kind,
-        available: a.available ?? false,
-        ...(a.version ? { version: a.version } : {}),
-        ...(a.reason ? { reason: a.reason } : {}),
-      }));
-    return c.json({ agents: out });
+    const refresh = query(c, 'refresh') === '1' || query(c, 'refresh') === 'true';
+    try {
+      const out = await board.agents(c.var.machine.id, {
+        kinds,
+        start,
+        refresh,
+        signal: bounded(c, timing.shortMs),
+      });
+      return c.json({ agents: out });
+    } catch (e) {
+      throw failOf(e);
+    }
   };
   api.get('/agents', async (c) => {
     // The host asks the agents' programs: nothing a reader starts.
@@ -207,17 +218,25 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
     const kind = query(c, 'kind');
     const cwd = query(c, 'cwd');
     const cursor = query(c, 'cursor');
+    const refresh = query(c, 'refresh') === '1' || query(c, 'refresh') === 'true';
     if (!chatKinds().includes(kind)) throw badRequest('kind: an agent kind with a chat');
     c.var.audit.kind = kind;
     cwdParam(c, cwd);
     if (Buffer.byteLength(cursor) > MAX_CURSOR) throw badRequest('cursor: too long');
-    // Listing them may run the agent (Codex, ACP agents).
-    const res = await ask(
-      c,
-      { op: chat.Op.Sessions, kind, cwd, ...(cursor ? { cursor } : {}) },
-      { ms: timing.sessionsMs, start: true, agent: true },
-    );
-    return c.json({ sessions: res.sessions ?? [], nextCursor: res.nextCursor ?? '' });
+    // Listing them may run the agent (Codex, ACP agents); served through the
+    // hub's bounded TTL + coalescing cache unless ?refresh=1 is requested.
+    try {
+      const res = await board.sessions(c.var.machine.id, {
+        kind,
+        cwd,
+        cursor,
+        refresh,
+        signal: bounded(c, timing.sessionsMs),
+      });
+      return c.json({ sessions: res.sessions, nextCursor: res.nextCursor });
+    } catch (e) {
+      throw failOf(e);
+    }
   });
 
   api.post('/new', ctx.mutating('new'), async (c) => {
@@ -251,7 +270,7 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
     let env: Record<string, string> | undefined;
     let vault: { injected: number; locked?: boolean; missing?: string[]; logFailed?: boolean; corrupt?: boolean } | undefined;
     if (b.workspace && workspaceEnv) {
-      const resolved = await workspaceEnv(c.var.machine.id, b.workspace);
+      const resolved = await workspaceEnv(c.var.machine.id, b.workspace, c.var.client);
       if (resolved.presets.length > 0 || resolved.corrupt) {
         if (resolved.names.length) {
           env = resolved.env;
@@ -345,6 +364,8 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
 
   api.post('/host/stop', ctx.mutating('host_stop'), async (c) => {
     await ask(c, { op: chat.Op.Shutdown }, { start: false });
+    board.invalidateMachine(c.var.machine.id);
+    invalidateOverviews(board);
     return c.json(OK);
   });
 
@@ -414,6 +435,7 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
     const id = b.chat || query(c, 'chat');
     if (!chat.validChatID(id)) throw badRequest("chat: a chat's id");
     const upToSeq = b.upToSeq ?? undefined;
+    const maxBytes = b.maxBytes ?? undefined;
     const title = b.title ? b.title.trim() : '';
     if (title && Buffer.byteLength(title) > 512) throw badRequest('title: too long');
     c.var.audit.chat = id;
@@ -431,7 +453,13 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
     }
     const res = await ask(
       c,
-      { op: chat.Op.Fork, chat: id, ...(upToSeq ? { upToSeq } : {}), ...(title ? { title } : {}) },
+      {
+        op: chat.Op.Fork,
+        chat: id,
+        ...(upToSeq ? { upToSeq } : {}),
+        ...(title ? { title } : {}),
+        ...(maxBytes !== undefined ? { maxBytes } : {}),
+      },
       { ms: timing.sessionsMs, start: true, agent: true },
     );
     const newId = res.chat?.id;
@@ -479,6 +507,7 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
         chat: b.chat,
         targetKind: b.targetKind,
         ...(b.upToSeq ? { upToSeq: b.upToSeq } : {}),
+        ...(b.maxBytes != null ? { maxBytes: b.maxBytes } : {}),
         ...(options ? { options } : {}),
       },
       { ms: timing.sessionsMs, start: true, agent: true },
@@ -489,7 +518,9 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
     return c.json({ chat: res.chat });
   });
 
-  /** Exports a chat's conversation as a bounded Markdown digest. */
+  /** Exports a chat's conversation as a bounded Markdown digest (default) or
+   * lossless raw JSON (?format=json). Optional ?maxBytes= sets the Markdown
+   * byte budget (2 KiB – 512 KiB). */
   api.get('/export', async (c) => {
     const id = chatParam(c);
     const rawSeq = query(c, 'upToSeq');
@@ -499,11 +530,44 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
       if (!/^[1-9][0-9]*$/.test(rawSeq) || !Number.isSafeInteger(n)) throw badRequest('upToSeq: a positive sequence number');
       upToSeq = n;
     }
-    const res = await ask(c, { op: chat.Op.Export, chat: id, ...(upToSeq ? { upToSeq } : {}) }, { start: false });
+    const rawFormat = query(c, 'format');
+    if (rawFormat !== '' && rawFormat !== 'markdown' && rawFormat !== 'json') {
+      throw badRequest('format: markdown or json');
+    }
+    const format = rawFormat === 'json' ? 'json' : undefined;
+    const rawMax = query(c, 'maxBytes');
+    let maxBytes: number | undefined;
+    if (rawMax !== '') {
+      const n = Number(rawMax);
+      if (!/^[1-9][0-9]*$/.test(rawMax) || !Number.isSafeInteger(n) || n < 2048 || n > 512 * 1024) {
+        throw badRequest('maxBytes: an integer between 2048 and 524288');
+      }
+      maxBytes = n;
+    }
+    const res = await ask(
+      c,
+      {
+        op: chat.Op.Export,
+        chat: id,
+        ...(upToSeq ? { upToSeq } : {}),
+        ...(format ? { format } : {}),
+        ...(maxBytes !== undefined ? { maxBytes } : {}),
+      },
+      { start: false },
+    );
+    if (format === 'json') {
+      let data = res.data as chat.ChatExport | undefined;
+      if (data && ctx.readOnly && Array.isArray(data.events)) {
+        data = { ...data, events: data.events.map(chat.redactedEvent) };
+      }
+      return c.json({ format: 'json', data: data ?? null });
+    }
     return c.json({ markdown: res.markdown ?? '' });
   });
 
-  ctx.api.get('/hosts', async (c) => c.json({ hosts: await overviews(board, c.req.raw.signal, timing.overviewMs) }));
+  ctx.api.get('/hosts', async (c) =>
+    c.json({ hosts: await overviews(board, c.req.raw.signal, timing.overviewMs, { refresh: query(c, 'refresh') === '1' }) }),
+  );
   ctx.api.get('/states', (c) => c.json(board.watch.snapshot()));
   ctx.api.get('/ws', (c) => {
     if (!c.env.upgrade) throw new Fail('upgrade_required', 426);

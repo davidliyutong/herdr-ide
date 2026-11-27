@@ -269,7 +269,10 @@ describe('BackgroundTasksBar and inline task controls', () => {
         chat: {
           state: 'working',
           capabilities: { stopTask: true },
-          tasks: [{ id: 'proc-7', kind: 'shell', status: 'running', command: 'sleep 60', toolCallId: 'cmd1', stoppable: true }],
+          tasks: [
+            { id: 'proc-7', kind: 'shell', status: 'running', command: 'sleep 60', toolCallId: 'cmd1', stoppable: true },
+            { id: 'thr-1', kind: 'subagent', status: 'running', toolCallId: 'codex-sub1', stoppable: true },
+          ],
         } as ChatEvent['chat'],
       },
       {
@@ -320,32 +323,119 @@ describe('BackgroundTasksBar and inline task controls', () => {
     await show(s, { kind: 'codex', readOnly: true });
     expect(q('.conv-task-stop')).toBeNull();
 
-    // Once tasks finish and no running background items remain, tray disappears.
-    await emit(
-      s,
-      { seq: next(), t: 'info', chat: { state: 'idle', capabilities: { stopTask: true }, tasks: [] } as ChatEvent['chat'] },
-      {
-        seq: next(),
-        t: 'update',
-        update: { sessionUpdate: 'tool_call_update', toolCallId: 'cmd1', status: 'completed' } as ChatEvent['update'],
-      },
-      {
-        seq: next(),
-        t: 'update',
-        update: {
-          sessionUpdate: 'tool_call_update',
-          toolCallId: 'codex-sub1',
-          status: 'completed',
-          _meta: { [APP_SLUG]: { task: { summary: 'All auth checks passed.' } } },
-        } as ChatEvent['update'],
-      },
-    );
+    // Codex's live list can clear while both calls still appear open in the timeline.
+    await show(s, { kind: 'codex' });
+    await emit(s, { seq: next(), t: 'info', chat: { state: 'idle', capabilities: { stopTask: true }, tasks: [] } as ChatEvent['chat'] });
     expect(q('.conv-tasks')).toBeNull();
+    expect(q('.conv-task-stop')).toBeNull();
+    await emit(s, {
+      seq: next(),
+      t: 'update',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'codex-sub1',
+        status: 'completed',
+        _meta: { [APP_SLUG]: { task: { summary: 'All auth checks passed.' } } },
+      } as ChatEvent['update'],
+    });
     // Opening completed subagent shows fallback task summary when content is empty.
     await click(q('.conv-subagent[data-item="tool:codex-sub1"] .conv-toggle'));
     await vi.waitFor(async () => {
       await settle();
       expect(q('.conv-subagent[data-item="tool:codex-sub1"] .conv-subagent-body')?.textContent).toContain('All auth checks passed.');
     });
+  });
+
+  it('renders Antigravity invoke_subagent calls (both normalized and legacy PascalCase) as SubagentView with nested steps', async () => {
+    const s = new FakeSource();
+    s.emit(
+      {
+        seq: next(),
+        t: 'info',
+        chat: {
+          state: 'working',
+          capabilities: { stopTask: false },
+          tasks: [
+            {
+              id: '22222222-2222-4222-8222-222222222222',
+              kind: 'subagent',
+              status: 'running',
+              description: 'Shell Command Runner',
+              agentType: 'self',
+              toolCallId: 'agy-sub1',
+              backgrounded: true,
+              stoppable: false,
+            },
+          ],
+        } as ChatEvent['chat'],
+      },
+      {
+        seq: next(),
+        t: 'update',
+        item: 'agy-sub1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'agy-sub1',
+          title: 'Shell Command Runner',
+          kind: 'think',
+          status: 'in_progress',
+          rawInput: {
+            TypeName: 'self',
+            Role: 'Shell Command Runner',
+            Prompt: 'Run ls',
+            agent_type: 'self',
+            description: 'Shell Command Runner',
+            prompt: 'Run ls',
+          },
+          _meta: { [APP_SLUG]: { subagent: { threadId: '22222222-2222-4222-8222-222222222222', agentPath: 'Shell Command Runner' } } },
+        } as ChatEvent['update'],
+      },
+      {
+        seq: next(),
+        t: 'update',
+        item: 'agy-sub-22222222-s1-c0',
+        parent: 'agy-sub1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'agy-sub-22222222-s1-c0',
+          title: 'List directory contents',
+          kind: 'execute',
+          status: 'completed',
+          rawInput: { command: 'ls' },
+          content: [{ type: 'content', content: { type: 'text', text: 'AGENTS.md' } }],
+        } as ChatEvent['update'],
+      },
+      {
+        seq: next(),
+        t: 'update',
+        item: 'agy-legacy',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'agy-legacy',
+          title: 'Run invoke_subagent',
+          kind: 'other',
+          status: 'completed',
+          rawInput: { TypeName: 'research', Role: 'Code Explorer', Prompt: 'Find docs', Model: 'inherit' },
+        } as ChatEvent['update'],
+      },
+    );
+    await show(s, { kind: 'agy' });
+
+    const active = q('.conv-subagent[data-item="tool:agy-sub1"]')!;
+    expect(active).not.toBeNull();
+    expect(q('.conv-tool-label', active)?.textContent).toBe('self');
+    expect(q('.conv-subagent-desc', active)?.textContent).toBe('Shell Command Runner');
+    expect(q('.conv-subagent-count', active)?.textContent).toBe(t('conversation.subagent.steps', { n: 1 }));
+    await click(q('.conv-toggle', active));
+    await vi.waitFor(async () => {
+      await settle();
+      expect(q('.conv-subagent-items .conv-tool[data-kind="execute"]', active)).not.toBeNull();
+    });
+
+    const legacy = q('.conv-subagent[data-item="tool:agy-legacy"]')!;
+    expect(legacy).not.toBeNull();
+    expect(q('.conv-tool-label', legacy)?.textContent).toBe('research');
+    expect(q('.conv-subagent-desc', legacy)?.textContent).toBe('Code Explorer');
+    expect(q('.conv-model-badge', legacy)).toBeNull();
   });
 });

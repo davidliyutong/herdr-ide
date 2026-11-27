@@ -300,10 +300,10 @@ function ToolTaskControls({
   const actions = useContext(TimelineActionsContext);
   const liveTask = actions.tasksByToolCall.get(toolCallId);
   const isBg = liveTask?.backgrounded === true || tm?.backgrounded === true || liveTask?.kind === 'shell';
-  const taskId = liveTask?.id ?? tm?.taskId;
   const durationMs = liveTask?.durationMs ?? tm?.durationMs;
   const tokens = liveTask?.tokens ?? tm?.tokens;
-  const stoppable = status === 'in_progress' && !!actions.stopTask && !!taskId && liveTask?.stoppable !== false && tm?.stoppable !== false;
+  const stoppable =
+    !!actions.stopTask && (liveTask?.status === 'running' || liveTask?.status === 'pending') && liveTask.stoppable !== false;
 
   if (!isBg && !tm?.lastTool && !durationMs && !tokens && !stoppable) return null;
   return (
@@ -316,7 +316,7 @@ function ToolTaskControls({
         <span className="conv-task-stat">{t('conversation.task.tokens', { tokens: formatTokens(tokens) })}</span>
       )}
       {durationMs !== undefined && durationMs > 0 && <span className="conv-task-stat">{formatDuration(durationMs)}</span>}
-      {stoppable && <TaskStopButton taskId={taskId} name={label} agent={agent} stopTask={actions.stopTask!} />}
+      {stoppable && <TaskStopButton taskId={liveTask.id} name={label} agent={agent} stopTask={actions.stopTask!} />}
     </>
   );
 }

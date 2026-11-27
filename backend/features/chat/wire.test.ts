@@ -147,6 +147,7 @@ describe('wire', () => {
       chat.Code.UnknownChat,
       chat.Code.TooMany,
       chat.Code.Busy,
+      chat.Code.ProbeBusy,
       chat.Code.NotFound,
       chat.Code.StartFailed,
       chat.Code.Protocol,
@@ -193,18 +194,25 @@ describe('settings', () => {
     const st = new Settings('', { modules: [settings] });
     expect(hostSettings(st, 'm')).toEqual(chat.defaultHostSettings());
     for (const d of st.defs()) {
-      const wantScope = d.key.startsWith('chat.visibleModels.') ? 'app' : 'machine';
+      const wantScope =
+        d.key.startsWith('chat.visibleModels.') || d.key.startsWith('chat.providers.') || d.key === 'chat.handoffMaxKB' ? 'app' : 'machine';
       expect([d.key, d.scope, d.section]).toEqual([d.key, wantScope, 'chat']);
     }
-    // Per-provider visible model allowlists default to empty (= show all).
+    // Per-provider visible model allowlists default to empty (= show all),
+    // and per-provider permission modes default to 'inherit'.
     for (const k of ['claude', 'codex', 'agy', 'kimi', 'grok']) {
       expect(st.get(`chat.visibleModels.${k}`, '')).toEqual([]);
+      expect(st.get(`chat.permissionMode.${k}`, 'm')).toBe('inherit');
     }
     st.set('chat.visibleModels.claude', '', ['claude-sonnet-4-6', 'claude-opus-4-6']);
     expect(st.get('chat.visibleModels.claude', '')).toEqual(['claude-sonnet-4-6', 'claude-opus-4-6']);
     expect(() => st.set('chat.visibleModels.claude', '', [''])).toThrow();
     st.set('chat.permissionMode', 'gpu', chat.Mode.Full);
     expect(hostSettings(st, 'gpu')).toEqual(chat.defaultHostSettings());
+    // Per-provider full access is clamped to default until allowFullAccess is enabled.
+    st.set('chat.permissionMode.agy', 'gpu', chat.Mode.Full);
+    st.set('chat.permissionMode.claude', 'gpu', chat.Mode.Plan);
+    expect(hostSettings(st, 'gpu').defaultModes).toEqual({ claude: chat.Mode.Plan, agy: chat.Mode.Default });
     st.set('chat.allowFullAccess', 'gpu', true);
     st.set('chat.idleStopMinutes', 'gpu', 1440);
     st.set('chat.maxLive', '', 2);
@@ -220,10 +228,12 @@ describe('settings', () => {
       maxTotalBytes: 2048 * 2 ** 20,
       maxChatBytes: 8 << 20,
       defaultMode: chat.Mode.Full,
+      defaultModes: { claude: chat.Mode.Plan, agy: chat.Mode.Full },
       allowFull: true,
     });
     expect(hostSettings(st, 'other')).toMatchObject({ maxLive: 2, defaultMode: 'default', maxTotalBytes: 512 << 20 });
     expect(hostSettings(st, 'other')).not.toHaveProperty('allowFull');
+    expect(hostSettings(st, 'other')).not.toHaveProperty('defaultModes');
     // Values beyond the host's bounds are not settings.
     for (const [key, v] of [
       ['chat.idleStopMinutes', 4],

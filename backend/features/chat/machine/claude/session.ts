@@ -265,7 +265,6 @@ interface QueuedPrompt {
 /** A live task or subagent tracked by this session. */
 interface TrackedTask {
   id: string;
-  runId?: string;
   kind: chat.TaskKind;
   rawType: string;
   status: chat.TaskStatus;
@@ -379,6 +378,7 @@ export class ClaudeSession implements Session {
    * belongs to ("" for the main agent). */
   private tasks = new Map<string, string>();
   private liveTasks = new Map<string, TrackedTask>();
+  private taskRuns = new Map<string, string>();
   private lastTasksJson = '';
   private toolParent = new Map<string, string>();
   /** The program's requests that wait for the user. */
@@ -694,10 +694,7 @@ export class ClaudeSession implements Session {
     this.sent.clear();
     this.byMessage.clear();
     for (const q of this.pendingQueue.splice(0)) this.emit(this.queuedEvent(QueuedState.Cancelled, q, false));
-    if (this.liveTasks.size > 0) {
-      this.liveTasks.clear();
-      this.tasksChanged();
-    }
+    this.clearTasks();
     const e = err ?? gone().error;
     const error: ChatError = { code: Code.Ended, message: e.message };
     if (e.stderr) error.stderr = e.stderr;
@@ -753,6 +750,27 @@ export class ClaudeSession implements Session {
       if (list.length > 0) c.tasks = list;
       else delete c.tasks;
     });
+  }
+
+  private clearTasks(): void {
+    for (const task of this.liveTasks.values()) {
+      if (task.toolCallId) this.task(task.toolCallId, 'cancelled', { taskId: task.id });
+    }
+    this.tasks.clear();
+    this.taskRuns.clear();
+    this.liveTasks.clear();
+    this.tasksChanged();
+  }
+
+  /** The SDK orders a task's successive run IDs lexicographically. Keep
+   * the last ID after it ends so older events cannot reopen the task. */
+  private staleTaskRun(task: string, run: string): boolean {
+    if (!task || !run) return false;
+    const last = this.taskRuns.get(task);
+    if (last && run <= last) return run < last;
+    if (!last && this.taskRuns.size >= MAX_TRACKED) this.taskRuns.delete(this.taskRuns.keys().next().value!);
+    this.taskRuns.set(task, run);
+    return false;
   }
 
   private usageChanged(): void {
@@ -1098,6 +1116,8 @@ export class ClaudeSession implements Session {
         return;
       case 'task_started': {
         const task = str(m.task_id);
+        const prev = this.liveTasks.get(task);
+        if (this.staleTaskRun(task, str(m.run_id))) return;
         const tool = str(m.tool_use_id);
         const type = str(m.task_type);
         const desc = cut(str(m.description), MAX_TEXT);
@@ -1110,11 +1130,9 @@ export class ClaudeSession implements Session {
             if (this.tasks.size >= MAX_TRACKED) this.tasks = new Map();
             this.tasks.set(task, tool);
           }
-          const prev = this.liveTasks.get(task);
           if (this.liveTasks.size >= MAX_TRACKED && !prev) this.liveTasks = new Map();
           const entry: TrackedTask = {
             id: task,
-            ...(str(m.run_id) ? { runId: str(m.run_id) } : prev?.runId ? { runId: prev.runId } : {}),
             kind: taskKind(type || prev?.rawType || ''),
             rawType: type || prev?.rawType || '',
             status: chat.TaskStatus.Running,
@@ -1143,11 +1161,12 @@ export class ClaudeSession implements Session {
       }
       case 'task_progress': {
         const task = str(m.task_id);
+        const entry = this.liveTasks.get(task);
+        if (this.staleTaskRun(task, str(m.run_id))) return;
         const tool = firstOf(str(m.tool_use_id), task ? (this.tasks.get(task) ?? '') : '');
         const desc = cut(str(m.description), MAX_TEXT);
         const subagent = str(m.subagent_type);
         if (task !== '') {
-          const entry = this.liveTasks.get(task);
           if (entry) {
             if (desc) entry.description = desc;
             if (subagent) entry.agentType = subagent;
@@ -1180,6 +1199,7 @@ export class ClaudeSession implements Session {
         const statusStr = str(patch.status);
         const toolStatus = taskStatus(statusStr);
         const entry = this.liveTasks.get(task);
+        if (this.staleTaskRun(task, str(m.run_id))) return;
         if (entry) {
           if (typeof patch.description === 'string' && patch.description !== '') entry.description = cut(patch.description, MAX_TEXT);
           if (typeof patch.is_backgrounded === 'boolean') entry.backgrounded = patch.is_backgrounded;
@@ -1210,6 +1230,7 @@ export class ClaudeSession implements Session {
       }
       case 'task_notification': {
         const task = str(m.task_id);
+        if (this.staleTaskRun(task, str(m.run_id))) return;
         const tool = firstOf(str(m.tool_use_id), task ? (this.tasks.get(task) ?? '') : '');
         if (task !== '') {
           this.tasks.delete(task);
@@ -1228,9 +1249,9 @@ export class ClaudeSession implements Session {
         return;
       }
       case 'background_tasks_changed': {
-        const list = Array.isArray(m.tasks) ? m.tasks : [];
+        if (!Array.isArray(m.tasks)) return;
         const present = new Set<string>();
-        for (const raw of list.slice(0, 128)) {
+        for (const raw of m.tasks.slice(0, 128)) {
           if (!isObj(raw)) continue;
           const id = str(raw.task_id);
           if (id === '') continue;
@@ -1240,11 +1261,10 @@ export class ClaudeSession implements Session {
           const desc = cut(str(raw.description), MAX_TEXT);
           const subagent = str(raw.subagent_type);
           const parentTask = str(raw.parent_task_id);
-          const runId = str(raw.run_id);
+          if (this.staleTaskRun(id, str(raw.run_id))) continue;
           const tool = prev?.toolCallId ?? (this.tasks.get(id) || undefined);
           const entry: TrackedTask = {
             id,
-            ...(runId ? { runId } : prev?.runId ? { runId: prev.runId } : {}),
             kind: taskKind(type || prev?.rawType || ''),
             rawType: type || prev?.rawType || '',
             status: chat.TaskStatus.Running,
@@ -1458,7 +1478,8 @@ export class ClaudeSession implements Session {
     const run = this.current();
     signal.throwIfAborted();
     if (this.sent.size + this.pendingQueue.length >= MAX_PENDING_PROMPTS) throw busy();
-    const content = claudeContent(p.content, this.p.cwd);
+    const wireBlocks = p.handoffContext ? [textBlock(p.handoffContext), ...p.content] : p.content;
+    const content = claudeContent(wireBlocks, this.p.cwd);
     const uuid = p.uuid || randomUUID();
     const delivery = p.delivery ?? chat.Delivery.Queue;
 
@@ -1767,11 +1788,7 @@ export class ClaudeSession implements Session {
       this._id = opts.newSessionId;
       this.hasConversation = false;
     }
-    this.tasks.clear();
-    if (this.liveTasks.size > 0) {
-      this.liveTasks.clear();
-      this.tasksChanged();
-    }
+    this.clearTasks();
     this.toolParent.clear();
     this.blocks.clear();
     this.sent.clear();

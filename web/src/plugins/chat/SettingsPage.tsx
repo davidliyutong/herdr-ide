@@ -8,17 +8,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { CATEGORY_MODEL } from '../../conversation/model';
 import { chatKinds, usageProvider } from '../../conversation/kinds';
-import { locale, t } from '../../i18n';
+import { hasMessage, locale, t, type MessageKey } from '../../i18n';
 import { resetSetting, setSetting, useSettings, type SettingDef } from '../../settings';
 import { useStore } from '../../state/store';
 import type { PluginSettingsLayoutProps } from '../api';
 import { ProviderLogo } from '../usage/logos';
-import { CHAT_PROVIDERS, ChatFailure, chatApi, failureText, visibleModelsFor } from './api';
+import { CHAT_PROVIDERS, ChatFailure, chatApi, failureText, isChatProviderEnabled, visibleModelsFor } from './api';
 import { agentName } from './ops';
 import type { ModelOption } from './protocol';
 import { useChats } from './state';
 
+const PROVIDER_PREFIX = 'chat.providers.';
 const VISIBLE_PREFIX = 'chat.visibleModels.';
+const MODE_PREFIX = 'chat.permissionMode.';
 
 /** The chat providers shown on the settings page, in canonical order. */
 export function chatProviderIds(defs: readonly SettingDef[]): string[] {
@@ -31,12 +33,19 @@ export function chatProviderIds(defs: readonly SettingDef[]): string[] {
   };
   for (const id of CHAT_PROVIDERS) add(id);
   for (const k of chatKinds()) add(k.id);
-  for (const d of defs) if (d.key.startsWith(VISIBLE_PREFIX)) add(d.key.slice(VISIBLE_PREFIX.length));
+  for (const d of defs) {
+    if (d.key.startsWith(PROVIDER_PREFIX)) add(d.key.slice(PROVIDER_PREFIX.length));
+    else if (d.key.startsWith(VISIBLE_PREFIX)) add(d.key.slice(VISIBLE_PREFIX.length));
+    else if (d.key.startsWith(MODE_PREFIX)) add(d.key.slice(MODE_PREFIX.length));
+  }
   return out;
 }
 
 function providerOfRow(row?: string): string | undefined {
-  return row?.startsWith(VISIBLE_PREFIX) ? row.slice(VISIBLE_PREFIX.length) : undefined;
+  if (row?.startsWith(VISIBLE_PREFIX)) return row.slice(VISIBLE_PREFIX.length);
+  if (row?.startsWith(PROVIDER_PREFIX)) return row.slice(PROVIDER_PREFIX.length);
+  if (row?.startsWith(MODE_PREFIX)) return row.slice(MODE_PREFIX.length);
+  return undefined;
 }
 
 function formatTime(iso?: string): string {
@@ -72,11 +81,19 @@ export function ChatSettingsPage({ defs, rows, lead, footer, machine, readOnly, 
     seenVisit.current = visit;
   }, [visit]);
 
-  // Machine scope shows only machine-scoped rows (visible models are app-scoped).
-  const generalDefs = useMemo(() => defs.filter((d) => !d.key.startsWith(VISIBLE_PREFIX)), [defs]);
+  // User scope groups per-provider permission modes inside each provider's sub-page;
+  // machine scope shows all machine-scoped rows including per-agent overrides.
+  const generalDefs = useMemo(
+    () =>
+      defs.filter(
+        (d) => !d.key.startsWith(VISIBLE_PREFIX) && !d.key.startsWith(PROVIDER_PREFIX) && (machine ? true : !d.key.startsWith(MODE_PREFIX)),
+      ),
+    [defs, machine],
+  );
 
   if (!machine && open && providers.includes(open)) {
-    return <ProviderModelsPage kind={open} readOnly={readOnly} onBack={() => setOpen(undefined)} />;
+    const modeDef = defs.find((d) => d.key === `${MODE_PREFIX}${open}`);
+    return <ProviderModelsPage kind={open} modeDef={modeDef} rows={rows} readOnly={readOnly} onBack={() => setOpen(undefined)} />;
   }
 
   return (
@@ -88,24 +105,57 @@ export function ChatSettingsPage({ defs, rows, lead, footer, machine, readOnly, 
           <h4 className="settings-group">{t('settings.group.chatModels')}</h4>
           <div className="chat-settings-providers">
             {providers.map((id) => {
-              const key = `${VISIBLE_PREFIX}${id}`;
+              const switchKey = `${PROVIDER_PREFIX}${id}`;
+              const visibleKey = `${VISIBLE_PREFIX}${id}`;
+              const modeKey = `${MODE_PREFIX}${id}`;
+              const on = isChatProviderEnabled(values, id);
+              const switchLocked = !!values[switchKey]?.locked;
               const selected = visibleModelsFor(values, id);
-              const modified = values[key]?.source === 'global' && selected.length > 0;
-              const summary =
+              const rawMode = values[modeKey]?.value;
+              const customMode = typeof rawMode === 'string' && rawMode !== 'inherit' ? rawMode : undefined;
+              const modified =
+                values[switchKey]?.source === 'global' ||
+                (values[visibleKey]?.source === 'global' && selected.length > 0) ||
+                (values[modeKey]?.source === 'global' && !!customMode);
+              const modelSummary =
                 selected.length > 0 ? t('chat.settings.modelsSelected', { n: selected.length }) : t('chat.settings.modelsAll');
+              const modeSummaryKey = customMode ? `settings.${modeKey}.${customMode}` : '';
+              const modeSummary = customMode && hasMessage(modeSummaryKey) ? t(modeSummaryKey as MessageKey) : customMode;
+              const summary = !on ? t('settings.off') : [modeSummary, modelSummary].filter(Boolean).join(' · ');
+              const name = agentName(id);
               return (
-                <button
+                <div
                   key={id}
-                  type="button"
-                  className={['setting chat-settings-row', modified && 'modified'].filter(Boolean).join(' ')}
+                  className={['setting chat-settings-row', !on && 'off', modified && 'modified'].filter(Boolean).join(' ')}
                   data-provider={id}
                   onClick={() => setOpen(id)}
                 >
-                  <ProviderLogo provider={usageProvider(id) ?? id} />
-                  <span className="setting-title ellipsis">{agentName(id)}</span>
-                  <span className="muted">{summary}</span>
-                  <ChevronRight aria-hidden />
-                </button>
+                  <button
+                    type="button"
+                    className="chat-settings-open"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpen(id);
+                    }}
+                  >
+                    <ProviderLogo provider={usageProvider(id) ?? id} />
+                    <span className="setting-title ellipsis">{name}</span>
+                    <span className="muted">{summary}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="switch"
+                    className="switch"
+                    aria-checked={on}
+                    aria-label={t('chat.settings.providerToggle', { agent: name })}
+                    disabled={readOnly || switchLocked}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void setSetting(switchKey, !on);
+                    }}
+                  />
+                  <ChevronRight className="chat-settings-chevron" aria-hidden />
+                </div>
               );
             })}
           </div>
@@ -116,7 +166,19 @@ export function ChatSettingsPage({ defs, rows, lead, footer, machine, readOnly, 
   );
 }
 
-function ProviderModelsPage({ kind, readOnly, onBack }: { kind: string; readOnly: boolean; onBack(): void }) {
+function ProviderModelsPage({
+  kind,
+  modeDef,
+  rows,
+  readOnly,
+  onBack,
+}: {
+  kind: string;
+  modeDef?: SettingDef;
+  rows: PluginSettingsLayoutProps['rows'];
+  readOnly: boolean;
+  onBack(): void;
+}) {
   const values = useSettings((s) => s.values);
   const machines = useStore((s) => s.machines);
   const order = useStore((s) => s.order);
@@ -144,13 +206,23 @@ function ProviderModelsPage({ kind, readOnly, onBack }: { kind: string; readOnly
   const [error, setError] = useState<string | undefined>();
   const [hint, setHint] = useState<string | undefined>();
   const [filter, setFilter] = useState('');
+  /** Local draft state when the user clicks Deselect All (empty setting means
+   * "show all", so we hold 0 selected locally until they pick at least one). */
+  const [cleared, setCleared] = useState(false);
   const reqRef = useRef(0);
 
+  const switchKey = `${PROVIDER_PREFIX}${kind}`;
+  const providerOn = isChatProviderEnabled(values, kind);
+  const switchLocked = !!values[switchKey]?.locked;
   const settingKey = `${VISIBLE_PREFIX}${kind}`;
   const locked = !!values[settingKey]?.locked;
   const saved = useMemo(() => visibleModelsFor(values, kind), [values, kind]);
   const agent = agentName(kind);
   const provider = usageProvider(kind) ?? kind;
+
+  useEffect(() => {
+    setCleared(false);
+  }, [kind]);
 
   // Read cached models on mount / machine switch without spawning host or agent.
   useEffect(() => {
@@ -195,7 +267,13 @@ function ProviderModelsPage({ kind, readOnly, onBack }: { kind: string; readOnly
       setFetchedAt(res.fetchedAt);
     } catch (e: unknown) {
       if (seq !== reqRef.current) return;
-      setError(failureText(e, agent, 'chat.settings.refreshFailed'));
+      if (e instanceof ChatFailure && e.code === 'not_found') {
+        setError(t('conversation.error.start_not_found', { agent }));
+      } else if (e instanceof ChatFailure && (e.code === 'probe_busy' || e.code === 'busy')) {
+        setError(t('conversation.error.probe_busy', { agent }));
+      } else {
+        setError(failureText(e, agent, 'chat.settings.refreshFailed'));
+      }
     } finally {
       if (seq === reqRef.current) setRefreshing(false);
     }
@@ -223,8 +301,9 @@ function ProviderModelsPage({ kind, readOnly, onBack }: { kind: string; readOnly
   }, [cached, liveChats, chatStates, kind, saved]);
 
   const savedSet = useMemo(() => new Set(saved), [saved]);
-  const allShown = saved.length === 0;
-  const shownCount = allShown ? allModels.length : allModels.filter((m) => savedSet.has(m.value)).length;
+  const allShown = !cleared && saved.length === 0;
+  const isChecked = useCallback((id: string) => !cleared && (allShown || savedSet.has(id)), [cleared, allShown, savedSet]);
+  const shownCount = cleared ? 0 : allShown ? allModels.length : allModels.filter((m) => savedSet.has(m.value)).length;
 
   const filteredModels = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -235,8 +314,14 @@ function ProviderModelsPage({ kind, readOnly, onBack }: { kind: string; readOnly
     );
   }, [allModels, filter]);
 
+  const hasFilter = filter.trim().length > 0;
+  const targetModels = hasFilter ? filteredModels : allModels;
+  const allTargetChecked = targetModels.length > 0 && targetModels.every((m) => isChecked(m.value));
+  const anyTargetChecked = targetModels.some((m) => isChecked(m.value));
+
   const saveList = useCallback(
     async (next: string[]) => {
+      setCleared(false);
       setHint(undefined);
       setError(undefined);
       const err = next.length === 0 ? await resetSetting(settingKey) : await setSetting(settingKey, next);
@@ -249,13 +334,14 @@ function ProviderModelsPage({ kind, readOnly, onBack }: { kind: string; readOnly
     (id: string) => {
       if (readOnly || locked) return;
       const allIds = allModels.map((m) => m.value);
-      const cur = new Set(allShown ? allIds : saved);
+      const cur = new Set(cleared ? [] : allShown ? allIds : saved);
       if (cur.has(id)) {
-        if (cur.size <= 1) {
+        cur.delete(id);
+        if (cur.size === 0) {
+          setCleared(true);
           setHint(t('chat.settings.keepOne'));
           return;
         }
-        cur.delete(id);
       } else {
         cur.add(id);
       }
@@ -268,8 +354,46 @@ function ProviderModelsPage({ kind, readOnly, onBack }: { kind: string; readOnly
       for (const x of cur) if (!ordered.includes(x)) ordered.push(x);
       void saveList(ordered);
     },
-    [readOnly, locked, allModels, allShown, saved, saveList],
+    [readOnly, locked, allModels, cleared, allShown, saved, saveList],
   );
+
+  const handleSelectAll = useCallback(() => {
+    if (readOnly || locked) return;
+    if (!hasFilter) {
+      void saveList([]);
+      return;
+    }
+    const allIds = allModels.map((m) => m.value);
+    const cur = new Set(cleared ? [] : allShown ? allIds : saved);
+    for (const m of filteredModels) cur.add(m.value);
+    if (allIds.length > 0 && allIds.every((x) => cur.has(x))) {
+      void saveList([]);
+      return;
+    }
+    const ordered = allIds.filter((x) => cur.has(x));
+    for (const x of cur) if (!ordered.includes(x)) ordered.push(x);
+    void saveList(ordered);
+  }, [readOnly, locked, hasFilter, allModels, cleared, allShown, saved, filteredModels, saveList]);
+
+  const handleDeselectAll = useCallback(() => {
+    if (readOnly || locked) return;
+    if (!hasFilter) {
+      setCleared(true);
+      setHint(t('chat.settings.keepOne'));
+      return;
+    }
+    const allIds = allModels.map((m) => m.value);
+    const cur = new Set(cleared ? [] : allShown ? allIds : saved);
+    for (const m of filteredModels) cur.delete(m.value);
+    if (cur.size === 0) {
+      setCleared(true);
+      setHint(t('chat.settings.keepOne'));
+      return;
+    }
+    const ordered = allIds.filter((x) => cur.has(x));
+    for (const x of cur) if (!ordered.includes(x)) ordered.push(x);
+    void saveList(ordered);
+  }, [readOnly, locked, hasFilter, allModels, cleared, allShown, saved, filteredModels, saveList]);
 
   const disabled = readOnly || locked;
 
@@ -282,6 +406,22 @@ function ProviderModelsPage({ kind, readOnly, onBack }: { kind: string; readOnly
         <ProviderLogo provider={provider} />
         <span>{agent}</span>
       </h4>
+      <div className="setting chat-provider-switch-row" data-key={switchKey}>
+        <div className="setting-head">
+          <span className="setting-title">{t('chat.settings.providerEnabled')}</span>
+          <button
+            type="button"
+            role="switch"
+            className="switch"
+            aria-checked={providerOn}
+            aria-label={t('chat.settings.providerToggle', { agent })}
+            disabled={readOnly || switchLocked}
+            onClick={() => void setSetting(switchKey, !providerOn)}
+          />
+        </div>
+        <div className="setting-desc">{t('chat.settings.providerEnabledDesc', { agent })}</div>
+      </div>
+      {modeDef && <div className="chat-provider-mode-row">{rows([modeDef])}</div>}
       <div className="setting chat-models-section">
         <div className="setting-head">
           <span className="setting-title">{t('chat.settings.modelsTitle')}</span>
@@ -308,17 +448,32 @@ function ProviderModelsPage({ kind, readOnly, onBack }: { kind: string; readOnly
             <RefreshCw className={refreshing ? 'spin' : undefined} aria-hidden />
             {refreshing ? t('chat.settings.refreshing') : t('chat.settings.refresh')}
           </button>
-          {!allShown && !disabled && (
-            <button type="button" className="ghost sm chat-models-show-all" onClick={() => void saveList([])}>
-              {t('chat.settings.showAll')}
-            </button>
-          )}
         </div>
         <div className="setting-desc">{t('chat.settings.modelsDesc', { agent })}</div>
         {(fetchedAt || allModels.length > 0) && (
           <div className="chat-models-meta muted small">
             {allModels.length > 0 && <span>{t('chat.settings.modelsCount', { shown: shownCount, total: allModels.length })}</span>}
             {fetchedAt && <span>{t('chat.settings.refreshedAt', { when: formatTime(fetchedAt) })}</span>}
+            {allModels.length > 0 && !disabled && (
+              <span className="chat-models-bulk">
+                <button
+                  type="button"
+                  className="ghost sm chat-models-select-all chat-models-show-all"
+                  disabled={allTargetChecked}
+                  onClick={handleSelectAll}
+                >
+                  {t(hasFilter ? 'chat.settings.selectShown' : 'chat.settings.selectAll')}
+                </button>
+                <button
+                  type="button"
+                  className="ghost sm chat-models-deselect-all"
+                  disabled={!anyTargetChecked}
+                  onClick={handleDeselectAll}
+                >
+                  {t(hasFilter ? 'chat.settings.deselectShown' : 'chat.settings.deselectAll')}
+                </button>
+              </span>
+            )}
           </div>
         )}
         {error && (
@@ -348,7 +503,7 @@ function ProviderModelsPage({ kind, readOnly, onBack }: { kind: string; readOnly
         ) : (
           <div className="chat-models-list" role="group" aria-label={t('chat.settings.modelsTitle')}>
             {filteredModels.map((m) => {
-              const checked = allShown || savedSet.has(m.value);
+              const checked = isChecked(m.value);
               return (
                 <label key={m.value} className={['chat-model-row', !checked && 'unchecked'].filter(Boolean).join(' ')} data-model={m.value}>
                   <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleModel(m.value)} />

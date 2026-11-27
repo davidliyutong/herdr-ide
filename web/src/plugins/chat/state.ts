@@ -20,7 +20,7 @@ import type { ChatInfo, Usage } from '../../conversation/model';
 import { isPluginOn } from '../registry';
 import { useSettings } from '../../settings';
 import { useStore } from '../../state/store';
-import { chatApi, MAX_CHATS, readStates, type States } from './api';
+import { chatApi, isChatProviderEnabled, MAX_CHATS, readStates, type States } from './api';
 import { CHAT_PLUGIN } from './view';
 import { STATE_DELETED, type AgentStatus, type ChatError, type ChatState } from './protocol';
 
@@ -303,14 +303,15 @@ export function loadAgents(m: string, force = false): Promise<void> {
   return p;
 }
 
-/** The chat kinds to offer on machine m: those it can start once it said
- * which; every kind with a chat until then. */
+/** The chat kinds to offer on machine m: enabled providers that it can start
+ * once it said which; every enabled kind with a chat until then. */
 export function offeredKinds(m: string): AgentKind[] {
+  const values = useSettings.getState().values;
+  const enabled = chatKinds().filter((k) => isChatProviderEnabled(values, k.id));
   const known = useChats.getState().agents[m];
-  const all = chatKinds();
-  if (!known) return all;
+  if (!known) return enabled;
   const ok = new Set(known.list.filter((a) => a.available).map((a) => a.kind));
-  return all.filter((k) => ok.has(k.id));
+  return enabled.filter((k) => ok.has(k.id));
 }
 
 // ---- following the page's connection and the machines ----

@@ -86,6 +86,7 @@ export class FakeChatHost {
   sessions: chat.Session[] = [];
   modelsByKind = new Map<string, { models: chat.ModelOption[]; fetchedAt: string }>();
   exportedMarkdown = '# Conversation Handoff\n';
+  exportedData: chat.ChatExport | undefined;
   trusted: chat.TrustedFolder[] = [];
   hostStatus: chat.HostStatus | undefined;
   /** Refuses the requests of an op; answers the commands of an op with an
@@ -198,6 +199,26 @@ export class FakeChatHost {
       case chat.Op.Export: {
         const src = this.chats.get(req.chat ?? '');
         if (!src) return void (await c.write({ error: { code: chat.Code.UnknownChat, message: 'no such chat' } }));
+        if (req.format === 'json') {
+          const data: chat.ChatExport = this.exportedData ?? {
+            version: 1,
+            exportedAt: '2026-01-01T00:00:00Z',
+            chat: {
+              id: src.id,
+              kind: src.kind,
+              title: src.title,
+              cwd: src.cwd,
+              sessionId: src.sessionId,
+              state: src.state,
+              created: src.created,
+              updated: src.updated,
+              seq: src.seq,
+            },
+            ...(req.upToSeq !== undefined ? { upToSeq: req.upToSeq } : {}),
+            events: [],
+          };
+          return void (await c.write({ ok: true, data }));
+        }
         return void (await c.write({ ok: true, markdown: this.exportedMarkdown }));
       }
       case chat.Op.Trusted:

@@ -1,11 +1,22 @@
-// Serializes a chat's stored events into a bounded Markdown handoff digest
-// for Op.Export, Op.Switch, and fallback Op.Fork / CommandOp.Rewind.
+// Serializes a chat's stored events into:
+// - a structured, size-bounded Markdown handoff digest (exportMarkdown) for
+//   Op.Export (format 'markdown'), Op.Switch, and fallback Op.Fork / Rewind;
+// - a lossless raw JSON export (exportJson) for Op.Export (format 'json').
 import * as chat from '#shared/proto/chatproto/index.ts';
 
-/** Default cap on an exported conversation handoff, in UTF-8 bytes. */
+/** Default cap on an exported Markdown handoff, in UTF-8 bytes (96 KiB). */
 export const MAX_EXPORT_BYTES = 96 << 10;
+/** Minimum allowed Markdown export/handoff byte budget (2 KiB). */
+export const MIN_EXPORT_BYTES = 2 << 10;
+/** Maximum allowed Markdown export/handoff byte budget (512 KiB). */
+export const MAX_EXPORT_BUDGET = 512 << 10;
+/** Maximum serialized byte size for raw JSON exports (12 MiB, safely under MAX_LINE). */
+export const MAX_EXPORT_JSON_BYTES = 12 << 20;
+
 const MAX_TOOL_SUMMARY = 384;
-const MAX_TURN_TEXT = 16 << 10;
+const MAX_ERROR_SUMMARY = 640;
+const MAX_ISSUES = 12;
+const MAX_CHANGED_FILES = 40;
 
 interface ToolSummary {
   id: string;
@@ -14,15 +25,22 @@ interface ToolSummary {
   status: string;
   locations: string[];
   detail: string;
+  error: string;
 }
 
 interface TurnEntry {
-  kind: 'user' | 'assistant' | 'qa';
+  kind: 'user' | 'assistant' | 'qa' | 'notice';
   text: string;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+/** Clamps a requested Markdown export/handoff budget to safe bounds. */
+export function clampExportBytes(maxBytes: number | undefined): number {
+  if (typeof maxBytes !== 'number' || !Number.isFinite(maxBytes) || maxBytes <= 0) return MAX_EXPORT_BYTES;
+  return Math.max(MIN_EXPORT_BYTES, Math.min(MAX_EXPORT_BUDGET, Math.trunc(maxBytes)));
+}
 
 function trimBytes(s: string, max: number): string {
   const b = Buffer.from(s, 'utf8');
@@ -76,17 +94,73 @@ function extractLocations(raw: unknown): string[] {
   return out;
 }
 
+function extractCommand(rawInput: Record<string, unknown>): string {
+  const c = rawInput.command ?? rawInput.cmd;
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c) && c.every((a) => typeof a === 'string')) {
+    const argv = c as string[];
+    if (argv.length === 3 && /(?:^|\/)(?:ba|z|da|k)?sh$/.test(argv[0]!) && /^-l?c$/.test(argv[1]!)) return argv[2]!;
+    return argv.join(' ');
+  }
+  return '';
+}
+
 function summarizeToolDetail(upd: Record<string, unknown>): string {
   if (isObj(upd.rawInput)) {
-    const cmd = str(upd.rawInput.command) || str(upd.rawInput.cmd);
+    const cmd = extractCommand(upd.rawInput);
     if (cmd) return trimBytes(cmd.replace(/\s+/g, ' ').trim(), MAX_TOOL_SUMMARY);
-    const p = str(upd.rawInput.file_path) || str(upd.rawInput.path);
+    const p = str(upd.rawInput.file_path) || str(upd.rawInput.path) || str(upd.rawInput.filePath);
     if (p) return p;
+    const query = str(upd.rawInput.pattern) || str(upd.rawInput.query) || str(upd.rawInput.url) || str(upd.rawInput.uri);
+    if (query) return trimBytes(query.replace(/\s+/g, ' ').trim(), MAX_TOOL_SUMMARY);
   }
   if (Array.isArray(upd.content)) {
     for (const c of upd.content) {
       if (!isObj(c)) continue;
-      if (c.type === 'diff' && str(c.path)) return `diff ${str(c.path)}`;
+      if (c.type === 'diff') {
+        if (str(c.path)) return `diff ${str(c.path)}`;
+        if (Array.isArray(c.changes)) {
+          const paths = c.changes.map((x) => (isObj(x) ? str(x.path) : '')).filter(Boolean);
+          if (paths.length) return `diff ${paths.slice(0, 3).join(', ')}`;
+        }
+      }
+    }
+  }
+  return '';
+}
+
+function extractDiffPaths(upd: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  if (!Array.isArray(upd.content)) return out;
+  for (const c of upd.content) {
+    if (!isObj(c) || c.type !== 'diff') continue;
+    if (str(c.path) && !out.includes(str(c.path))) out.push(str(c.path));
+    if (Array.isArray(c.changes)) {
+      for (const ch of c.changes) {
+        if (!isObj(ch)) continue;
+        const p = str(ch.path);
+        if (p && !out.includes(p)) out.push(p);
+      }
+    }
+  }
+  return out;
+}
+
+function extractToolError(upd: Record<string, unknown>): string {
+  const status = str(upd.status);
+  if (status !== 'failed') return '';
+  if (isObj(upd.rawOutput)) {
+    const msg = str(upd.rawOutput.error) || str(upd.rawOutput.stderr) || str(upd.rawOutput.message) || str(upd.rawOutput.output);
+    if (msg) return trimBytes(msg.replace(/\s+/g, ' ').trim(), MAX_ERROR_SUMMARY);
+  } else if (typeof upd.rawOutput === 'string' && upd.rawOutput.trim()) {
+    return trimBytes(upd.rawOutput.replace(/\s+/g, ' ').trim(), MAX_ERROR_SUMMARY);
+  }
+  if (Array.isArray(upd.content)) {
+    for (const c of upd.content) {
+      if (isObj(c) && c.type === 'content' && isObj(c.content) && c.content.type === 'text') {
+        const t = str(c.content.text).trim();
+        if (t) return trimBytes(t.replace(/\s+/g, ' '), MAX_ERROR_SUMMARY);
+      }
     }
   }
   return '';
@@ -99,27 +173,49 @@ export interface ExportOptions {
   maxBytes?: number;
 }
 
-/** Formats stored chat events into a structured, size-bounded Markdown handoff. */
+/** Formats stored chat events into a structured, size-bounded Markdown export.
+ * Preserves short conversations intact (no per-turn chopping when total fits),
+ * and on long conversations preserves workspace file changes, recent issues,
+ * the original user request, recent turns, and the latest plan. */
 export function exportMarkdown(events: readonly chat.Event[], opts: ExportOptions = {}): string {
-  const maxBytes = Math.max(2048, opts.maxBytes ?? MAX_EXPORT_BYTES);
+  const maxBytes = clampExportBytes(opts.maxBytes);
   const turns: TurnEntry[] = [];
   let assistantChunks: string[] = [];
   let assistantTools = new Map<string, ToolSummary>();
   let latestPlan: string[] = [];
+  const modifiedFiles: string[] = [];
+  const issues: string[] = [];
   const openQuestions = new Map<string, chat.Question[]>();
   const queuedWaiting = new Map<string, unknown[]>();
+
+  const recordModified = (path: string) => {
+    if (!path || modifiedFiles.includes(path) || modifiedFiles.length >= MAX_CHANGED_FILES) return;
+    modifiedFiles.push(path);
+  };
+  const recordIssue = (msg: string) => {
+    const clean = trimBytes(msg.replace(/\s+/g, ' ').trim(), MAX_ERROR_SUMMARY);
+    if (!clean) return;
+    if (issues.at(-1) === clean) return;
+    issues.push(clean);
+    if (issues.length > MAX_ISSUES) issues.shift();
+  };
 
   const flushAssistant = () => {
     const bodyParts: string[] = [];
     const prose = assistantChunks.join('').trim();
-    if (prose) bodyParts.push(trimBytes(prose, MAX_TURN_TEXT));
+    if (prose) bodyParts.push(prose);
     if (assistantTools.size > 0) {
       const lines: string[] = [];
       for (const t of assistantTools.values()) {
         const loc = t.locations.length ? ` (${t.locations.slice(0, 4).join(', ')})` : '';
         const det = t.detail && !loc.includes(t.detail) ? `: \`${t.detail}\`` : '';
         const status = t.status ? ` [${t.status}]` : '';
-        lines.push(`- ${t.title || t.kind || 'tool'}${loc}${det}${status}`);
+        const err = t.error ? ` — ${t.error}` : '';
+        lines.push(`- ${t.title || t.kind || 'tool'}${loc}${det}${status}${err}`);
+        if (t.status === 'failed') {
+          const label = t.title || t.kind || 'tool';
+          recordIssue(`${label}${loc}${t.error ? `: ${t.error}` : ' failed'}`);
+        }
       }
       bodyParts.push('**Tools & files:**\n' + lines.join('\n'));
     }
@@ -136,7 +232,7 @@ export function exportMarkdown(events: readonly chat.Event[], opts: ExportOption
       case chat.EventType.User: {
         flushAssistant();
         const text = formatContent(ev.content);
-        if (text) turns.push({ kind: 'user', text: trimBytes(text, MAX_TURN_TEXT) });
+        if (text) turns.push({ kind: 'user', text });
         break;
       }
       case chat.EventType.Queued: {
@@ -149,7 +245,7 @@ export function exportMarkdown(events: readonly chat.Event[], opts: ExportOption
           const content = Array.isArray(ev.content) ? ev.content : ev.message ? queuedWaiting.get(ev.message) : undefined;
           if (ev.message) queuedWaiting.delete(ev.message);
           const text = formatContent(content);
-          if (text) turns.push({ kind: 'user', text: trimBytes(text, MAX_TURN_TEXT) });
+          if (text) turns.push({ kind: 'user', text });
         }
         break;
       }
@@ -171,14 +267,28 @@ export function exportMarkdown(events: readonly chat.Event[], opts: ExportOption
             status: '',
             locations: [],
             detail: '',
+            error: '',
           };
           const title = str(upd.title) || prev.title;
           const tk = str(upd.kind) || prev.kind;
           const status = str(upd.status) || prev.status;
           const locs = [...prev.locations];
           for (const p of extractLocations(upd.locations)) if (!locs.includes(p)) locs.push(p);
+          const diffPaths = extractDiffPaths(upd);
+          for (const p of diffPaths) {
+            if (!locs.includes(p)) locs.push(p);
+            recordModified(p);
+          }
+          if (tk === 'edit' || tk === 'delete' || tk === 'move') {
+            for (const p of locs) recordModified(p);
+            if (isObj(upd.rawInput)) {
+              const p = str(upd.rawInput.file_path) || str(upd.rawInput.path) || str(upd.rawInput.filePath);
+              if (p) recordModified(p);
+            }
+          }
           const detail = summarizeToolDetail(upd) || prev.detail;
-          assistantTools.set(id, { id, title, kind: tk, status, locations: locs, detail });
+          const error = extractToolError(upd) || prev.error;
+          assistantTools.set(id, { id, title, kind: tk, status, locations: locs, detail, error });
         } else if (kind === 'plan' && Array.isArray(upd.entries)) {
           const lines: string[] = [];
           for (const entry of upd.entries) {
@@ -212,8 +322,28 @@ export function exportMarkdown(events: readonly chat.Event[], opts: ExportOption
         if (ev.id) openQuestions.delete(ev.id);
         break;
       }
+      case chat.EventType.Notice: {
+        const method = str(ev.method);
+        const params = isObj(ev.params) ? ev.params : undefined;
+        if (method.endsWith('/compacted')) {
+          flushAssistant();
+          turns.push({ kind: 'notice', text: '_[Context compacted earlier in session]_' });
+        } else if (method.endsWith('/error') && params && str(params.message)) {
+          recordIssue(str(params.message));
+        }
+        break;
+      }
       case chat.EventType.Turn: {
-        if (ev.state === chat.TurnState.End || ev.state === chat.TurnState.Error) flushAssistant();
+        if (ev.state === chat.TurnState.End) {
+          flushAssistant();
+        } else if (ev.state === chat.TurnState.Error) {
+          flushAssistant();
+          const msg = ev.error?.message ? trimBytes(ev.error.message, MAX_ERROR_SUMMARY) : '';
+          if (msg) {
+            recordIssue(`Turn error: ${msg}`);
+            turns.push({ kind: 'notice', text: `_[Turn failed: ${msg}]_` });
+          }
+        }
         break;
       }
     }
@@ -226,45 +356,139 @@ export function exportMarkdown(events: readonly chat.Event[], opts: ExportOption
   if (opts.cwd) headerLines.push(`- **Working directory:** ${opts.cwd}`);
   const header = headerLines.join('\n');
 
+  const filesCap = Math.min(4096, Math.floor(maxBytes / 8));
+  const filesSection =
+    modifiedFiles.length > 0 ? trimBytes(`\n\n## Files Modified\n\n${modifiedFiles.map((f) => `- \`${f}\``).join('\n')}`, filesCap) : '';
+
+  const issuesCap = Math.min(2048, Math.floor(maxBytes / 10));
+  const issuesSection = issues.length > 0 ? trimBytes(`\n\n## Recent Issues\n\n${issues.map((i) => `- ${i}`).join('\n')}`, issuesCap) : '';
+
   const planCap = Math.min(8192, Math.floor(maxBytes / 4));
   const planSection = latestPlan.length > 0 ? trimBytes(`\n\n## Latest Plan\n\n${latestPlan.join('\n')}`, planCap) : '';
   const omittedNote = '\n\n_[Earlier turns omitted to fit context budget]_\n';
 
   if (turns.length === 0) {
-    return trimBytes(header + planSection, maxBytes);
+    return trimBytes(header + filesSection + issuesSection + planSection, maxBytes);
   }
 
   const formatted = turns.map((t) => {
+    if (t.kind === 'notice') return t.text;
     const label = t.kind === 'user' ? '### User' : t.kind === 'qa' ? '### Clarifications' : '### Assistant';
     return `${label}\n\n${t.text}`;
   });
 
-  const fixedBytes = Buffer.byteLength(header + planSection + '\n\n## Transcript\n\n', 'utf8');
-  const budget = Math.max(512, maxBytes - fixedBytes - Buffer.byteLength(omittedNote, 'utf8'));
+  const auxSections = filesSection + issuesSection;
+  const fullDoc = `${header}${auxSections}\n\n## Transcript\n\n${formatted.join('\n\n')}${planSection}`;
+  if (Buffer.byteLength(fullDoc, 'utf8') <= maxBytes) {
+    return fullDoc;
+  }
+
+  const fixedBytes = Buffer.byteLength(header + auxSections + planSection + '\n\n## Transcript\n\n', 'utf8');
+  const budget = Math.max(256, maxBytes - fixedBytes - Buffer.byteLength(omittedNote, 'utf8'));
+
+  // Reserve space for Original Request when budget >= 4 KiB so a large final turn
+  // never crowds it out.
+  let goalSection = '';
+  let goalBytes = 0;
+  const firstUserIdx = turns.findIndex((t) => t.kind === 'user');
+  if (maxBytes >= 4096 && firstUserIdx >= 0) {
+    const goalCap = Math.min(8192, Math.max(512, Math.floor(maxBytes / 6)));
+    const cand = trimBytes(`\n\n## Original Request\n\n${turns[firstUserIdx]!.text}`, goalCap);
+    const cb = Buffer.byteLength(cand, 'utf8');
+    if (cb < budget - 256) {
+      goalSection = cand;
+      goalBytes = cb;
+    }
+  }
+  const tailBudget = Math.max(256, budget - goalBytes);
 
   // Keep the most recent turns that fit the byte budget.
   const kept: string[] = [];
   let used = 0;
   let truncated = false;
+  let firstKeptIndex = formatted.length;
   for (let i = formatted.length - 1; i >= 0; i--) {
     const chunk = formatted[i]!;
     const cost = Buffer.byteLength(chunk, 'utf8') + (kept.length > 0 ? 2 : 0);
-    if (kept.length > 0 && used + cost > budget) {
+    if (kept.length > 0 && used + cost > tailBudget) {
       truncated = true;
       break;
     }
-    if (cost > budget) {
-      kept.push(trimBytes(chunk, budget));
+    if (cost > tailBudget) {
+      kept.push(trimBytes(chunk, tailBudget));
+      firstKeptIndex = i;
       truncated = i > 0;
       break;
     }
     kept.push(chunk);
     used += cost;
+    firstKeptIndex = i;
   }
   kept.reverse();
 
+  if (!truncated || firstUserIdx >= firstKeptIndex) {
+    goalSection = '';
+  }
+
   const body = (truncated ? omittedNote + '\n' : '\n\n') + kept.join('\n\n');
-  return trimBytes(`${header}\n\n## Transcript${body}${planSection}`, maxBytes);
+  return trimBytes(`${header}${goalSection}${auxSections}\n\n## Transcript${body}${planSection}`, maxBytes);
+}
+
+export interface ExportJsonOptions {
+  chat: chat.Chat;
+  upToSeq?: number;
+  exportedAt: string;
+  maxBytes?: number;
+}
+
+/** Produces a lossless structured JSON export of a chat and its stored events,
+ * keeping the serialized payload safely under MAX_EXPORT_JSON_BYTES so it
+ * always fits a single chatproto Response line. */
+export function exportJson(events: readonly chat.Event[], opts: ExportJsonOptions): chat.ChatExport {
+  const c = opts.chat;
+  const maxBytes = Math.max(64 << 10, Math.min(MAX_EXPORT_JSON_BYTES, opts.maxBytes ?? MAX_EXPORT_JSON_BYTES));
+  const meta: chat.ChatExport['chat'] = {
+    id: c.id,
+    kind: c.kind,
+    title: c.title,
+    cwd: c.cwd,
+    sessionId: c.sessionId,
+    state: c.state,
+    created: c.created,
+    updated: c.updated,
+    seq: c.seq,
+    ...(c.agentVersion ? { agentVersion: c.agentVersion } : {}),
+    ...(c.closed ? { closed: c.closed } : {}),
+    ...(c.archived ? { archived: c.archived } : {}),
+    ...(c.usage ? { usage: c.usage } : {}),
+  };
+  const base: chat.ChatExport = {
+    version: 1,
+    exportedAt: opts.exportedAt,
+    chat: meta,
+    ...(opts.upToSeq !== undefined ? { upToSeq: opts.upToSeq } : {}),
+    events: [],
+  };
+  const stored = events.filter((ev) => !ev.live);
+  const overhead = Buffer.byteLength(JSON.stringify({ ...base, truncated: true, omittedEvents: stored.length }), 'utf8');
+  const budget = Math.max(0, maxBytes - overhead);
+
+  const kept: chat.Event[] = [];
+  let used = 0;
+  for (let i = stored.length - 1; i >= 0; i--) {
+    const ev = stored[i]!;
+    const cost = Buffer.byteLength(JSON.stringify(ev), 'utf8') + (kept.length > 0 ? 1 : 0);
+    if (used + cost > budget) break;
+    kept.push(ev);
+    used += cost;
+  }
+  kept.reverse();
+  const omitted = stored.length - kept.length;
+  return {
+    ...base,
+    ...(omitted > 0 ? { truncated: true, omittedEvents: omitted } : {}),
+    events: kept,
+  };
 }
 
 /** Prepends a conversation handoff digest to a user's first prompt blocks. */

@@ -48,6 +48,7 @@ const REQUESTS = [
   'thread/backgroundTerminals/list',
   'thread/backgroundTerminals/terminate',
   'thread/backgroundTerminals/clean',
+  'thread/inject_items',
   'turn/start',
   'turn/steer',
   'turn/interrupt',

@@ -42,17 +42,19 @@ import { posix } from 'node:path';
 import { Reader } from '#shared/lib/streamio.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { Notice, VERSION, noticeMethod } from '#shared/proto/agentproto/index.ts';
-import type { ChatSpec } from '#shared/agents/kinds.ts';
+import { Adapter as AdapterKind, type ChatSpec } from '#shared/agents/kinds.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { closeQuietly, tryLock } from '#machine/sys/fs.ts';
 import { inode, listenUnix } from '#machine/sockets.ts';
 import { rmSync, lstatSync, openSync, statSync, constants as fsc } from 'node:fs';
+import { LEGACY_MODE_ID, LEGACY_MODE_ID_ALT, clientModeOption, markFull } from '../acp/state.ts';
 import type { Adapter, Adapters, ClientInfo, Session } from '../adapter.ts';
 import { AgentProcesses, signalGroup } from '../agentproc.ts';
-import { Chat, SESSION_ID, errorOf, isUserTurn, now, perr, transcriptUuid, turnBoundaryIdx, validOption } from './chat.ts';
+import { Chat, SESSION_ID, errorOf, isUserTurn, modeOption, now, perr, transcriptUuid, turnBoundaryIdx, validOption } from './chat.ts';
 import { Environment, agentEnv, isDir, lookPath, userHome, type Env } from './env.ts';
 import { AGENT_TITLE_RUNES, clip } from './events.ts';
-import { exportMarkdown } from './export.ts';
+import { clampExportBytes, exportJson, exportMarkdown } from './export.ts';
+import { buildHandoffSeed, clampHandoffBytes, summarizeHandoffNotice, type HandoffSeed, type HandoffSegment } from './handoff.ts';
 import { Journal, timeOf, type Row, emptyCapabilities } from './journal.ts';
 import { parseCommand, parseRequest, type Request } from './requests.ts';
 import { Subscriber, SUBSCRIBER_LIMITS, type SubscriberLimits } from './subscriber.ts';
@@ -106,9 +108,11 @@ export const HOST_TIMING: HostTiming = {
 /** The connections served at a time. */
 const MAX_CONNS = 256;
 const MAX_REFUSING = 8;
-/** The session listings that may run at a time, and the commands one
- * attached connection may have waiting for an agent. */
+/** The session listings and model probes that may run at a time, how many
+ * more wait in FIFO order before refusing, and the commands one attached
+ * connection may have waiting for an agent. */
 const MAX_PROBES = 4;
+const MAX_PROBE_QUEUE = 16;
 const MAX_CALLS = 8;
 /** The most kinds Op.Agents asks about. */
 const MAX_KINDS = 64;
@@ -228,6 +232,7 @@ export class Host {
   private current: chat.ClampedHostSettings;
   private written = 0;
   private probes = 0;
+  private readonly probeQueue: Array<{ grant(): void; abort(): void }> = [];
   readonly chats = new Map<string, Chat>();
   /** The connections served: true for one attached to a chat or watching,
    * which ends when it wrote what it still had. */
@@ -408,11 +413,36 @@ export class Host {
     for (const s of this.ending.keys()) signalGroup(s.pid, 'SIGKILL');
   }
 
+  /** Ensures an ACP chat without a native mode option (Grok, or a sleeping
+   * pre-upgrade ACP chat loaded from the journal) exposes the client-enforced
+   * permission mode option immediately so the UI renders the mode selector
+   * before the agent starts or wakes. */
+  private ensureClientModeConfig(r: Row, fromJournal: boolean): void {
+    const found = this.spec(r.chat.kind);
+    if ('code' in found || found.spec.adapter !== AdapterKind.ACP) return;
+    if (modeOption(r.chat.config)) return;
+    const hasConfig = (r.chat.config?.length ?? 0) > 0;
+    if (!hasConfig && r.chat.kind !== 'grok') return;
+    const cfg: chat.ConfigOption[] = (r.chat.config ?? []).map((o) => ({
+      ...o,
+      options: (o.options ?? []).map((v) => ({ ...v })),
+    }));
+    const id = cfg.some((o) => o.id === LEGACY_MODE_ID) ? LEGACY_MODE_ID_ALT : LEGACY_MODE_ID;
+    const fallback = fromJournal ? chat.Mode.Default : (this.current.defaultModes?.[r.chat.kind] ?? this.current.defaultMode);
+    let cur = r.options.mode || fallback;
+    if (cur !== chat.Mode.AcceptEdits && cur !== chat.Mode.Full) cur = chat.Mode.Default;
+    if (!fromJournal && !this.current.allowFull && cur === chat.Mode.Full) cur = chat.Mode.Default;
+    cfg.push(clientModeOption(id, cur));
+    markFull(cfg);
+    r.chat.config = cfg;
+  }
+
   /** Reads the journal's chats. A chat whose agent ran when the last host
    * ended sleeps now: what waited was cancelled with it, and its turn ended
    * in an error. */
   private async load(): Promise<void> {
     for (const r of await this.journal.loadChats()) {
+      this.ensureClientModeConfig(r, true);
       const c = new Chat(this, r, true);
       c.first = r.first === 0 ? r.chat.seq + 1 : r.first;
       this.chats.set(r.chat.id, c);
@@ -523,51 +553,60 @@ export class Host {
       await this.reply(sock, refusal(chat.Code.BadRequest, 'the request is not a JSON object of the protocol'));
       return;
     }
-    switch (req.op) {
-      case chat.Op.Agents:
-        return void (await this.reply(sock, await this.agents(req)));
-      case chat.Op.Chats:
-        return void (await this.reply(sock, { ok: true, chats: this.sorted().map((c) => c.snapshot()) }));
-      case chat.Op.New:
-        return void (await this.reply(sock, await this.newChat(req)));
-      case chat.Op.Attach:
-        return this.attach(sock, r, req);
-      case chat.Op.Close:
-        return void (await this.reply(sock, await this.closeChat(req.chat)));
-      case chat.Op.Delete:
-        return void (await this.reply(sock, await this.deleteChat(req.chat)));
-      case chat.Op.Archive:
-        return void (await this.reply(sock, await this.archiveChat(req.chat, true)));
-      case chat.Op.Unarchive:
-        return void (await this.reply(sock, await this.archiveChat(req.chat, false)));
-      case chat.Op.Sessions:
-        return void (await this.reply(sock, await this.sessions(req)));
-      case chat.Op.Watch:
-        return this.watch(sock, r);
-      case chat.Op.Seen:
-        return void (await this.reply(sock, this.seen(req)));
-      case chat.Op.Configure:
-        return void (await this.reply(sock, await this.configure(req)));
-      case chat.Op.Shutdown:
-        return void (await this.reply(sock, this.shutdown()));
-      case chat.Op.Trust:
-        return void (await this.reply(sock, await this.trust(req)));
-      case chat.Op.Untrust:
-        return void (await this.reply(sock, await this.untrust(req)));
-      case chat.Op.Trusted:
-        return void (await this.reply(sock, await this.listTrusted()));
-      case chat.Op.HostStatus:
-        return void (await this.reply(sock, this.hostStatus()));
-      case chat.Op.Models:
-        return void (await this.reply(sock, await this.models(req)));
-      case chat.Op.Fork:
-        return void (await this.reply(sock, await this.forkChat(req)));
-      case chat.Op.Switch:
-        return void (await this.reply(sock, await this.switchChat(req)));
-      case chat.Op.Export:
-        return void (await this.reply(sock, await this.exportChat(req)));
+    const connAc = new AbortController();
+    const onClose = () => connAc.abort();
+    sock.once('close', onClose);
+    try {
+      switch (req.op) {
+        case chat.Op.Agents:
+          return void (await this.reply(sock, await this.agents(req)));
+        case chat.Op.Chats:
+          return void (await this.reply(sock, { ok: true, chats: this.sorted().map((c) => c.snapshot()) }));
+        case chat.Op.New:
+          return void (await this.reply(sock, await this.newChat(req)));
+        case chat.Op.Attach:
+          sock.off('close', onClose);
+          return this.attach(sock, r, req);
+        case chat.Op.Close:
+          return void (await this.reply(sock, await this.closeChat(req.chat)));
+        case chat.Op.Delete:
+          return void (await this.reply(sock, await this.deleteChat(req.chat)));
+        case chat.Op.Archive:
+          return void (await this.reply(sock, await this.archiveChat(req.chat, true)));
+        case chat.Op.Unarchive:
+          return void (await this.reply(sock, await this.archiveChat(req.chat, false)));
+        case chat.Op.Sessions:
+          return void (await this.reply(sock, await this.sessions(req, connAc.signal)));
+        case chat.Op.Watch:
+          sock.off('close', onClose);
+          return this.watch(sock, r);
+        case chat.Op.Seen:
+          return void (await this.reply(sock, this.seen(req)));
+        case chat.Op.Configure:
+          return void (await this.reply(sock, await this.configure(req)));
+        case chat.Op.Shutdown:
+          return void (await this.reply(sock, this.shutdown()));
+        case chat.Op.Trust:
+          return void (await this.reply(sock, await this.trust(req)));
+        case chat.Op.Untrust:
+          return void (await this.reply(sock, await this.untrust(req)));
+        case chat.Op.Trusted:
+          return void (await this.reply(sock, await this.listTrusted()));
+        case chat.Op.HostStatus:
+          return void (await this.reply(sock, this.hostStatus()));
+        case chat.Op.Models:
+          return void (await this.reply(sock, await this.models(req, connAc.signal)));
+        case chat.Op.Fork:
+          return void (await this.reply(sock, await this.forkChat(req)));
+        case chat.Op.Switch:
+          return void (await this.reply(sock, await this.switchChat(req)));
+        case chat.Op.Export:
+          return void (await this.reply(sock, await this.exportChat(req)));
+      }
+      await this.reply(sock, refusal(chat.Code.BadRequest, 'unknown op'));
+    } finally {
+      sock.off('close', onClose);
     }
-    await this.reply(sock, refusal(chat.Code.BadRequest, 'unknown op'));
   }
 
   // ---- what chats share
@@ -906,6 +945,7 @@ export class Host {
       renamed: false,
       untrustedTold: false,
     };
+    this.ensureClientModeConfig(r, false);
     try {
       await this.journal.insertChat(r);
     } catch (e) {
@@ -1128,17 +1168,67 @@ export class Host {
     await this.journal.deleteChat(c.id);
   }
 
+  /** A probe's bound: the host's life, startTimeout and the connection.
+   * Waiting for a slot and the probe get one each, so time in the queue
+   * does not shorten the probe's own. */
+  private probeSignal(connSignal?: AbortSignal): AbortSignal {
+    return AbortSignal.any([this.signal, AbortSignal.timeout(this.o.startTimeout), ...(connSignal ? [connSignal] : [])]);
+  }
+
+  /** Acquires one of MAX_PROBES concurrent probe slots, waiting in FIFO order
+   * (up to MAX_PROBE_QUEUE waiters) while busy. Returns null on grant, or an
+   * error response if the queue is full or signal aborts while waiting. */
+  private async acquireProbe(signal: AbortSignal): Promise<chat.Response | null> {
+    if (signal.aborted) return { error: errorOf(signal.reason, signal) };
+    if (this.probes < MAX_PROBES) {
+      this.probes++;
+      return null;
+    }
+    if (this.probeQueue.length >= MAX_PROBE_QUEUE) {
+      return refusal(chat.Code.ProbeBusy, 'too many probes run');
+    }
+    return new Promise<chat.Response | null>((resolve) => {
+      const waiter = {
+        grant: () => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(null);
+        },
+        abort: () => {
+          signal.removeEventListener('abort', onAbort);
+          resolve({ error: errorOf(signal.reason, signal) });
+        },
+      };
+      const onAbort = () => {
+        const i = this.probeQueue.indexOf(waiter);
+        if (i >= 0) this.probeQueue.splice(i, 1);
+        waiter.abort();
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.probeQueue.push(waiter);
+    });
+  }
+
+  /** Releases a probe slot to the next queued waiter, or decrements probes. */
+  private releaseProbe(): void {
+    const next = this.probeQueue.shift();
+    if (next) {
+      next.grant();
+    } else {
+      this.probes = Math.max(0, this.probes - 1);
+    }
+  }
+
   /** Lists the sessions an agent kept for a directory, and which chat has
    * each. */
-  private async sessions(req: Request): Promise<chat.Response> {
+  private async sessions(req: Request, connSignal?: AbortSignal): Promise<chat.Response> {
     const found = this.spec(req.kind);
     if ('code' in found) return { error: found };
     if (!req.cwd || !cleanAbs(req.cwd)) return refusal(chat.Code.BadRequest, 'cwd is not a clean absolute path');
     if ((req.cursor ?? '').length > 4096) return refusal(chat.Code.BadRequest, 'cursor too long');
-    if (this.probes >= MAX_PROBES) return refusal(chat.Code.Busy, 'too many session listings run');
-    this.probes++;
+    const refused = await this.acquireProbe(this.probeSignal(connSignal));
+    if (refused) return refused;
+    const signal = this.probeSignal(connSignal);
     try {
-      const signal = AbortSignal.any([this.signal, AbortSignal.timeout(this.o.startTimeout)]);
       const env = agentEnv(await this.env(signal), found.spec.env, req.cwd);
       const path = await lookPath(found.spec.argv[0]!, env);
       if (!path) return refusal(chat.Code.NotFound, `${found.spec.argv[0]} is not in the user's PATH`);
@@ -1171,7 +1261,7 @@ export class Host {
       });
       return { ok: true, sessions, ...(list.next ? { nextCursor: list.next } : {}) };
     } finally {
-      this.probes--;
+      this.releaseProbe();
     }
   }
 
@@ -1372,7 +1462,7 @@ export class Host {
   }
 
   /** Lists or refreshes the models available for req.kind. */
-  private async models(req: Request): Promise<chat.Response> {
+  private async models(req: Request, connSignal?: AbortSignal): Promise<chat.Response> {
     const found = this.spec(req.kind);
     if ('code' in found) return { error: found };
     const kind = req.kind!;
@@ -1388,13 +1478,13 @@ export class Host {
       }
       return { ok: true, models: cached?.models ?? [], ...(cached?.fetchedAt ? { fetchedAt: cached.fetchedAt } : {}) };
     }
-    if (this.probes >= MAX_PROBES) return refusal(chat.Code.Busy, 'too many probes run');
     const cwd = req.cwd || userHome(this.opts.hostEnv ?? (process.env as Env));
     const bad = await this.checkCwd(cwd);
     if (bad) return { error: bad };
-    this.probes++;
+    const refused = await this.acquireProbe(this.probeSignal(connSignal));
+    if (refused) return refused;
+    const signal = this.probeSignal(connSignal);
     try {
-      const signal = AbortSignal.any([this.signal, AbortSignal.timeout(this.o.startTimeout)]);
       let list: chat.ModelOption[];
       if (found.adapter.models) {
         const env = agentEnv(await this.env(signal), found.spec.env, cwd);
@@ -1430,7 +1520,7 @@ export class Host {
       for (const c of this.chats.values()) if (!c.deleted && c.r.chat.kind === kind && c.sess) c.updateModels(list);
       return { ok: true, models: list, fetchedAt };
     } finally {
-      this.probes--;
+      this.releaseProbe();
     }
   }
 
@@ -1583,6 +1673,7 @@ export class Host {
         renamed: !!(customTitle || src.r.renamed || title),
         untrustedTold: false,
       };
+      this.ensureClientModeConfig(r, false);
       try {
         await this.journal.insertChat(r);
         const copied = await this.journal.copyEventsUpTo(src.id, newId, partial ? resolvedUpToSeq : undefined);
@@ -1601,7 +1692,14 @@ export class Host {
       const c = new Chat(this, r, false, src.envOverrides());
       c.first = 1;
       if (!native && kept.length > 0) {
-        const seed = exportMarkdown(kept, { title: src.r.chat.title, kind: src.r.chat.kind, cwd: src.r.chat.cwd });
+        const lineage = await this.collectLineageSegments(src.id, partial ? resolvedUpToSeq : undefined);
+        const seed = buildHandoffSeed(lineage.segments, {
+          title: src.r.chat.title,
+          cwd: src.r.chat.cwd,
+          targetKind: src.r.chat.kind,
+          ...(req.maxBytes !== undefined ? { maxBytes: clampHandoffBytes(req.maxBytes) } : {}),
+          ...(lineage.fallbackSeed ? { fallbackSeed: lineage.fallbackSeed } : {}),
+        });
         c.setSeed(seed);
         await this.journal.putSetting(`seed:${newId}`, seed).catch(() => {});
       }
@@ -1624,11 +1722,83 @@ export class Host {
     return turn;
   }
 
-  /** Exports conversation context from req.chat and creates a new chat of
-   * req.targetKind in the same cwd seeded with that handoff. */
+  /** Walks `Notice.Switched` lineage backwards from `chatId` (up to depth 8,
+   * cycle-protected) so chained agent switches (A -> B -> C) preserve earlier
+   * history with per-turn agent attribution. Falls back to an unconsumed seed
+   * when an ancestor chat was deleted from the journal. */
+  private async collectLineageSegments(
+    chatId: string,
+    upToSeq?: number,
+  ): Promise<{ segments: HandoffSegment[]; fallbackSeed?: HandoffSeed }> {
+    const MAX_LINEAGE_DEPTH = 8;
+    const visited = new Set<string>();
+    const reversed: HandoffSegment[] = [];
+    let fallbackSeed: HandoffSeed | undefined;
+    let curId: string | undefined = chatId;
+    let curUpToSeq = upToSeq;
+
+    for (let depth = 0; depth < MAX_LINEAGE_DEPTH && curId; depth++) {
+      if (visited.has(curId)) break;
+      visited.add(curId);
+      const c = this.chats.get(curId);
+      if (!c || c.deleted) break;
+      const stored = await this.journal.allEvents(curId, curUpToSeq);
+      const parsed: chat.Event[] = [];
+      let switchedFrom: { chatId: string; upToSeq?: number } | undefined;
+      for (const row of stored) {
+        try {
+          const ev = JSON.parse(row.line) as chat.Event;
+          parsed.push(ev);
+          if (!switchedFrom && ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Switched)) {
+            const p = ev.params as Record<string, unknown> | undefined;
+            const fromChat = typeof p?.fromChat === 'string' && chat.validChatID(p.fromChat) ? p.fromChat : '';
+            if (fromChat) {
+              const rawBound = typeof p?.fromSeq === 'number' ? p.fromSeq : typeof p?.upToSeq === 'number' ? p.upToSeq : undefined;
+              const bound = typeof rawBound === 'number' && Number.isSafeInteger(rawBound) && rawBound > 0 ? rawBound : undefined;
+              switchedFrom = { chatId: fromChat, ...(bound !== undefined ? { upToSeq: bound } : {}) };
+            }
+          }
+        } catch {
+          // skip
+        }
+      }
+      reversed.push({
+        chatId: curId,
+        kind: c.r.chat.kind,
+        cwd: c.r.chat.cwd,
+        ...(curUpToSeq !== undefined ? { upToSeq: curUpToSeq } : {}),
+        events: parsed,
+      });
+      if (!switchedFrom) {
+        // Also honor an unconsumed seed on a fallback-forked chat whose own journal
+        // starts clean.
+        break;
+      }
+      const parent = this.chats.get(switchedFrom.chatId);
+      if (parent && !parent.deleted && !visited.has(switchedFrom.chatId)) {
+        curId = switchedFrom.chatId;
+        curUpToSeq = switchedFrom.upToSeq;
+        continue;
+      }
+      // Ancestor chat is no longer in the journal: recover from an unconsumed seed
+      // on the current chat if still available.
+      const pending = await c.peekSeed();
+      if (pending) fallbackSeed = pending;
+      break;
+    }
+
+    reversed.reverse();
+    return { segments: reversed, ...(fallbackSeed ? { fallbackSeed } : {}) };
+  }
+
+  /** Transfers conversation context from req.chat into a fresh native session of
+   * req.targetKind in the same cwd using budgeted, attributed handoff selection
+   * (native history injection on backends like Codex, attributed context on
+   * prompt otherwise). */
   private async switchChat(req: Request): Promise<chat.Response> {
     const src = this.lookup(req.chat);
     if (!src || src.deleted) return refusal(chat.Code.UnknownChat, 'no such chat');
+    if (src.starting || src.held || src.busy()) return refusal(chat.Code.Busy, 'a turn runs');
     const found = this.spec(req.targetKind);
     if ('code' in found) return { error: found };
     const opts: chat.Options = {};
@@ -1644,19 +1814,22 @@ export class Host {
     if (opts.mode === chat.Mode.Full && !this.current.allowFull)
       return refusal(chat.Code.NotAllowed, 'full access is not allowed on this machine');
     if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
+    if (src.r.chat.handedOff && !src.sess && !src.starting) await src.catchUpNow();
     await src.flush();
     const upToSeq = req.upToSeq;
     if (upToSeq !== undefined && (upToSeq < 1 || upToSeq > src.r.chat.seq)) return refusal(chat.Code.BadRequest, 'upToSeq out of range');
-    const stored = await this.journal.allEvents(src.id, upToSeq);
-    const parsed: chat.Event[] = [];
-    for (const row of stored) {
-      try {
-        parsed.push(JSON.parse(row.line) as chat.Event);
-      } catch {
-        // skip
-      }
-    }
-    const seed = exportMarkdown(parsed, { title: src.r.chat.title, kind: src.r.chat.kind, cwd: src.r.chat.cwd });
+    const snapshotSeq = upToSeq ?? src.r.chat.seq;
+    const lineage = await this.collectLineageSegments(src.id, upToSeq);
+    const seed = buildHandoffSeed(lineage.segments, {
+      title: src.r.chat.title,
+      cwd: src.r.chat.cwd,
+      targetKind: req.targetKind,
+      ...(req.maxBytes !== undefined ? { maxBytes: clampHandoffBytes(req.maxBytes) } : {}),
+      ...(lineage.fallbackSeed ? { fallbackSeed: lineage.fallbackSeed } : {}),
+    });
+    const injection: 'native_history' | 'attributed_context' =
+      found.spec.adapter === AdapterKind.Codex ? 'native_history' : 'attributed_context';
+    const summary = summarizeHandoffNotice(seed, injection);
 
     const turn = this.newTurn.then(async (): Promise<chat.Response> => {
       const room = await this.roomForChat();
@@ -1688,6 +1861,7 @@ export class Host {
         renamed: !!title,
         untrustedTold: false,
       };
+      this.ensureClientModeConfig(r, false);
       try {
         await this.journal.insertChat(r);
         await this.journal.putSetting(`seed:${newId}`, seed);
@@ -1703,7 +1877,13 @@ export class Host {
       c.emit({
         t: chat.EventType.Notice,
         method: noticeMethod(Notice.Switched),
-        params: { fromChat: src.id, fromKind: src.r.chat.kind, ...(upToSeq !== undefined ? { upToSeq } : {}) },
+        params: {
+          fromChat: src.id,
+          fromKind: src.r.chat.kind,
+          ...(snapshotSeq > 0 ? { fromSeq: snapshotSeq } : {}),
+          ...(upToSeq !== undefined ? { upToSeq } : {}),
+          ...summary,
+        },
       });
       c.r.chat.seen = c.madeSeq();
       const st = c.beginStart();
@@ -1718,10 +1898,13 @@ export class Host {
     return turn;
   }
 
-  /** Exports req.chat's conversation up to optional req.upToSeq as Markdown. */
+  /** Exports req.chat's conversation up to optional req.upToSeq as Markdown
+   * (default) or lossless raw JSON (format: 'json'). */
   private async exportChat(req: Request): Promise<chat.Response> {
     const src = this.lookup(req.chat);
     if (!src || src.deleted) return refusal(chat.Code.UnknownChat, 'no such chat');
+    const format = req.format ?? 'markdown';
+    if (format !== 'markdown' && format !== 'json') return refusal(chat.Code.BadRequest, 'format: markdown or json');
     await src.flush();
     const upToSeq = req.upToSeq;
     if (upToSeq !== undefined && (upToSeq < 1 || upToSeq > src.r.chat.seq)) return refusal(chat.Code.BadRequest, 'upToSeq out of range');
@@ -1734,7 +1917,20 @@ export class Host {
         // skip
       }
     }
-    const markdown = exportMarkdown(parsed, { title: src.r.chat.title, kind: src.r.chat.kind, cwd: src.r.chat.cwd });
+    if (format === 'json') {
+      const data = exportJson(parsed, {
+        chat: src.snapshot(),
+        upToSeq,
+        exportedAt: timeOf(now()),
+      });
+      return { ok: true, data };
+    }
+    const markdown = exportMarkdown(parsed, {
+      title: src.r.chat.title,
+      kind: src.r.chat.kind,
+      cwd: src.r.chat.cwd,
+      ...(req.maxBytes !== undefined ? { maxBytes: clampExportBytes(req.maxBytes) } : {}),
+    });
     return { ok: true, markdown };
   }
 

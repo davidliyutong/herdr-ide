@@ -12,7 +12,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Composer, placeConfigMenu, UsageLine, type ComposerProps } from '../conversation/Composer';
+import { APP_SLUG } from '../brand';
+import { clearDrafts, Composer, matchSlashCommands, placeConfigMenu, UsageLine, type ComposerProps } from '../conversation/Composer';
 import { errorText } from '../conversation/parts';
 import { Conversation } from '../conversation/Conversation';
 import { MAX_IMAGE, type ChatEvent, type ContentBlock, type SourceEvent } from '../conversation/model';
@@ -22,7 +23,11 @@ import { setLocale, t } from '../i18n';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class FakeSource implements ChatSource {
+  id?: string;
   readOnly?: boolean;
+  constructor(id?: string) {
+    this.id = id;
+  }
   events: SourceEvent[] = [];
   subs = new Set<(ev: SourceEvent) => void>();
   send = vi.fn(async (_content: ContentBlock[], _clientId: string, _delivery?: Delivery) => {});
@@ -52,6 +57,7 @@ const next = () => ++seq;
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  clearDrafts();
   seq = 0;
   host = document.createElement('div');
   document.body.append(host);
@@ -60,6 +66,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  clearDrafts();
   setLocale('en');
 });
 
@@ -210,7 +217,7 @@ describe('the list at the caret', () => {
     await show(s);
     await type('look at @src/a');
     await until(() => options().length === 2);
-    expect(s.suggestFiles).toHaveBeenLastCalledWith('src/a');
+    expect(s.suggestFiles).toHaveBeenLastCalledWith('src/a', expect.any(AbortSignal));
     expect(options()).toEqual(['src/app.ts', 'src/api.ts']);
     const ta = field();
     expect(ta.getAttribute('aria-activedescendant')).toBe(qa('[role="option"]')[0].id);
@@ -255,10 +262,43 @@ describe('the list at the caret', () => {
     await type('/comp');
     await key({ key: 'Tab' });
     expect(field().value).toBe('/compact ');
+    // Valid leading slash command is highlighted in the backdrop layer.
+    expect(q('.conv-field')?.getAttribute('data-valid-slash')).toBe('/compact');
+    expect(q('.conv-slash-highlight')?.textContent).toBe('/compact');
     await key({ key: 'Enter' });
     expect(s.compact).toHaveBeenCalledTimes(1);
     expect(s.send).not.toHaveBeenCalled();
     expect(field().value).toBe('');
+  });
+
+  it('ranks exact, prefix, segment-prefix and substring slash commands, re-opens dismissed menu on Tab, and highlights only valid commands', async () => {
+    expect(
+      matchSlashCommands([{ name: 'plan-review' }, { name: 'codex:plan' }, { name: 'replan' }, { name: 'plan' }], 'plan').map(
+        (c) => c.name,
+      ),
+    ).toEqual(['plan', 'plan-review', 'codex:plan', 'replan']);
+
+    const s = new FakeSource();
+    s.emit(
+      info({
+        capabilities: caps({ compact: true }),
+        commands: [{ name: 'plan-review' }, { name: 'plan', description: 'Enter plan' }],
+      }),
+    );
+    await show(s);
+    await type('/plan');
+    // Exact match comes first and valid command is highlighted.
+    expect(options()).toEqual(['/plan', '/plan-review']);
+    expect(q('.conv-slash-highlight')?.textContent).toBe('/plan');
+    // Dismiss with Escape, then press Tab to re-open the menu instead of guessing blindly.
+    await key({ key: 'Escape' });
+    expect(q('[role="listbox"]')).toBeNull();
+    await key({ key: 'Tab' });
+    expect(q('[role="listbox"]')).not.toBeNull();
+    expect(options()).toEqual(['/plan', '/plan-review']);
+    // Unrecognized command is not highlighted.
+    await type('/unknowncmd');
+    expect(q('.conv-slash-highlight')).toBeNull();
   });
 });
 
@@ -378,8 +418,18 @@ describe('the chat’s options', () => {
     await settle();
     expect(model.disabled).toBe(false);
     expect(model.dataset.value).toBe('claude-opus-5-5');
-    // The new model has a choice of effort.
-    expect(qa('button.conv-select')).toHaveLength(3);
+    // The new model has a choice of effort, combined into the Model + Effort trigger and flyout submenu.
+    expect(qa('button.conv-select')).toHaveLength(2);
+    expect(model.dataset.effort).toBe('high');
+    expect(model.textContent).toContain('Opus');
+    expect(model.textContent).toContain('High');
+    await click(model);
+    const effortRow = document.body.querySelector<HTMLElement>('.conv-me-effort-row')!;
+    expect(effortRow).not.toBeNull();
+    await click(effortRow);
+    expect(menuOptions('thought_level').map((o) => o.textContent)).toEqual(['Low', 'High']);
+    await click(menuOptions('thought_level')[0]);
+    expect(s.setConfig).toHaveBeenCalledWith('effort', 'low');
     s.setConfig.mockImplementationOnce(async () => {
       throw Object.assign(new Error('x'), { code: 'busy' });
     });
@@ -388,6 +438,32 @@ describe('the chat’s options', () => {
     await settle();
     expect(q('[role="alert"]')?.textContent).toContain(t('conversation.error.busy', { agent: 'Claude Code' }));
     expect(mode.dataset.value).toBe('default');
+  });
+
+  it('displays Antigravity "Extra" and raw "xhigh" effort options clearly as XHigh while preserving protocol values', async () => {
+    const s = new FakeSource();
+    const effortOpt = {
+      id: 'thought_level',
+      name: 'Thinking Level',
+      category: 'thought_level',
+      type: 'select',
+      currentValue: 'high',
+      options: [
+        { value: 'low', name: 'Low' },
+        { value: 'medium', name: 'Medium' },
+        { value: 'high', name: 'High' },
+        { value: 'xhigh', name: 'Extra' },
+      ],
+    };
+    s.emit(info({ config: [effortOpt] }));
+    await show(s);
+    const btn = q<HTMLButtonElement>('button.conv-select[data-config="thought_level"]')!;
+    await click(btn);
+    expect(menuOptions('thought_level').map((o) => o.textContent)).toEqual(['Low', 'Medium', 'High', 'XHigh']);
+    await click(menuOptions('thought_level')[3]);
+    expect(s.setConfig).toHaveBeenCalledWith('thought_level', 'xhigh');
+    await emit(s, info({ config: [{ ...effortOpt, currentValue: 'xhigh' }] }));
+    expect(btn.textContent).toBe('XHigh');
   });
 
   it('support keyboard navigation and upward popover positioning near the bottom', async () => {
@@ -658,7 +734,7 @@ describe('a read-only composer', () => {
     await show(s, true);
     expect(field().disabled).toBe(true);
     expect(q<HTMLButtonElement>('button.conv-select')!.disabled).toBe(true);
-    expect(q<HTMLButtonElement>('.conv-attach')!.disabled).toBe(true);
+    expect(q<HTMLButtonElement>('.conv-plus-btn')!.disabled).toBe(true);
     expect(q<HTMLButtonElement>('.conv-send')!.disabled).toBe(true);
     expect(q('.conv-stop')).toBeNull();
     expect(q('.conv-queued-item button')).toBeNull();
@@ -688,7 +764,7 @@ async function renderComposer(overrides: Partial<ComposerProps> & { source: Chat
 }
 
 describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
-  it('#1 hides quota/rate limits in UsageLine while keeping context and cost', async () => {
+  it('#1 renders circular session context ring with hover/click details and cost, hiding rate-limit windows', async () => {
     await act(async () =>
       root.render(
         createElement(UsageLine, {
@@ -701,14 +777,19 @@ describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
         }),
       ),
     );
-    expect(q('[role="meter"]')?.getAttribute('aria-valuenow')).toBe('30');
-    expect(q('.conv-usage-cost')?.textContent).toBe('$0.75');
-    expect(q('.conv-usage-limit')).toBeNull();
+    const ring = q<HTMLButtonElement>('.conv-ctx-ring-btn')!;
+    expect(ring.getAttribute('role')).toBe('meter');
+    expect(ring.getAttribute('aria-valuenow')).toBe('30');
+    await click(ring);
+    const pop = document.body.querySelector<HTMLElement>('.conv-ctx-popover')!;
+    expect(pop).not.toBeNull();
+    expect(pop.querySelector('.conv-ctx-pct')?.textContent).toBe('30%');
+    expect(pop.querySelector('.conv-usage-cost')?.textContent).toBe('$0.75');
+    expect(pop.querySelector('.conv-usage-limit')).toBeNull();
   });
 
-  it('#3 filters model picker options by visibleModels, preserves currentValue, and exposes Manage models', async () => {
+  it('#3 filters model picker options by visibleModels, preserves currentValue, and omits More models', async () => {
     const s = new FakeSource();
-    const onManageModels = vi.fn();
     const modelOption = {
       id: 'model',
       name: 'Model',
@@ -724,19 +805,15 @@ describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
     await renderComposer({
       source: s,
       chat: { config: [modelOption], commands: [], capabilities: caps({ model: true }) },
-      modelPicker: { visibleModels: ['claude-opus-5-5'], onManageModels },
+      modelPicker: { visibleModels: ['claude-opus-5-5'] },
     });
     const btn = q<HTMLButtonElement>('button.conv-select[data-config="model"]')!;
     await click(btn);
     const menu = document.body.querySelector<HTMLElement>('.conv-select-menu[data-config="model"]')!;
     const labels = Array.from(menu.querySelectorAll<HTMLElement>('[role="option"]')).map((o) => o.dataset.value);
-    // Current model (Haiku) stays visible alongside the allowlisted Opus; Sonnet is hidden.
+    // Current model (Haiku) stays visible alongside the allowlisted Opus; Sonnet is hidden; no "More models" footer.
     expect(labels).toEqual(['claude-haiku-5-5', 'claude-opus-5-5']);
-    const manage = menu.querySelector<HTMLButtonElement>('.conv-select-manage')!;
-    expect(manage.textContent).toContain(t('conversation.config.manageModels'));
-    await click(manage);
-    expect(onManageModels).toHaveBeenCalledTimes(1);
-    expect(document.body.querySelector('.conv-select-menu')).toBeNull();
+    expect(menu.querySelector('.conv-select-manage')).toBeNull();
   });
 
   it('#4 supports Slack-style queue edit, steer, clear-all, and explicit steer/interrupt while working', async () => {
@@ -899,9 +976,11 @@ describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
       expect(field().value).toBe('check ');
       expect(qa('.conv-file-chip').map((c) => c.textContent)).toEqual(['my doc.md']);
 
-      // Attach-file button works even when caps.images is false.
-      const pickBtn = q<HTMLButtonElement>('.conv-attach-file')!;
+      // Attach-file item lives inside the `+` menu and works even when caps.images is false.
+      await click(q<HTMLButtonElement>('.conv-plus-btn')!);
+      const pickBtn = document.body.querySelector<HTMLButtonElement>('.conv-plus-menu .conv-attach-file')!;
       expect(pickBtn).not.toBeNull();
+      expect(document.body.querySelector('.conv-plus-menu .conv-attach')).toBeNull();
       await click(pickBtn);
       await until(() => document.body.querySelector('.file-picker-row[data-path="/w/notes.md"]'));
       await click(document.body.querySelector('.file-picker-row[data-path="/w/notes.md"]'));
@@ -920,7 +999,7 @@ describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
     }
   });
 
-  it('#7 supports Markdown list continuation on Shift+Enter, bold shortcut, and Write/Preview toggle', async () => {
+  it('#7 supports Markdown list continuation on Shift+Enter, bold shortcut, and Write/Preview toggle in the + menu', async () => {
     const s = new FakeSource();
     await renderComposer({ source: s });
     await type('- first item');
@@ -935,32 +1014,33 @@ describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
     await key({ key: 'b', ctrlKey: true });
     expect(field().value).toBe('hello **world**');
 
-    // Toggle Markdown preview.
-    const toggle = q<HTMLButtonElement>('.conv-preview-toggle')!;
+    // Toggle Markdown preview from the + menu.
+    await click(q<HTMLButtonElement>('.conv-plus-btn')!);
+    const toggle = document.body.querySelector<HTMLButtonElement>('.conv-plus-menu .conv-preview-toggle')!;
     await click(toggle);
-    expect(toggle.getAttribute('aria-pressed')).toBe('true');
     expect(field().hidden).toBe(true);
     expect(q('.conv-composer-preview')).not.toBeNull();
-    await click(toggle);
+    await click(q<HTMLButtonElement>('.conv-plus-btn')!);
+    await click(document.body.querySelector<HTMLButtonElement>('.conv-plus-menu .conv-preview-toggle')!);
     expect(field().hidden).toBe(false);
     expect(q('.conv-composer-preview')).toBeNull();
   });
 
-  it('#8 renders the agent kind icon and name at the bottom-left of the composer footer', async () => {
+  it('#8 renders project directory and Git branch at the bottom-left of the composer meta bar', async () => {
     const s = new FakeSource();
     await renderComposer({
       source: s,
       kind: 'agy',
       agent: 'Antigravity',
-      agentIcon: createElement('span', { className: 'test-agy-logo' }, 'AGY'),
+      base: { m: 'local', dir: '/home/u/projects/webherdr' },
+      branch: 'main',
     });
-    const badge = q('.conv-foot .conv-agent-badge')!;
-    expect(badge.getAttribute('data-kind')).toBe('agy');
-    expect(badge.querySelector('.test-agy-logo')?.textContent).toBe('AGY');
-    expect(badge.querySelector('.conv-agent-badge-name')?.textContent).toBe('Antigravity');
+    expect(q('.conv-meta-left .conv-project')?.textContent).toBe('webherdr');
+    expect(q('.conv-meta-left .conv-project')?.getAttribute('title')).toContain('/home/u/projects/webherdr');
+    expect(q('.conv-meta-left .conv-branch')?.textContent).toBe('main');
   });
 
-  it('#9 compacts context via clicking the context meter popover and via /compact instructions', async () => {
+  it('#9 compacts context via clicking the context ring popover and via /compact instructions', async () => {
     const s = new FakeSource();
     await renderComposer({
       source: s,
@@ -991,15 +1071,17 @@ describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
     expect(s.compact).toHaveBeenCalledWith('keep tests');
     expect(document.body.querySelector('.conv-compact-popover')).toBeNull();
 
-    // While compacting: spinner & running label shown, button disabled.
+    // While compacting: spinner shown in ring and running label inside details popover.
     await renderComposer({
       source: s,
       usage: { used: 100_000, size: 200_000 },
       activity: 'compacting',
       chat: { config: [], commands: [], capabilities: caps({ compact: true }) },
     });
-    expect(q<HTMLButtonElement>('.conv-compact-btn')!.disabled).toBe(true);
-    expect(q('.conv-compact-btn')?.textContent).toContain(t('conversation.compact.running'));
+    expect(q('.conv-compact-btn .conv-spin')).not.toBeNull();
+    await click(q('.conv-compact-btn')!);
+    expect(document.body.querySelector('.conv-ctx-popover')?.textContent).toContain(t('conversation.compact.running'));
+    await click(q('.conv-compact-btn')!);
 
     // Slash command with instructions forwards them too.
     s.compact.mockClear();
@@ -1010,5 +1092,186 @@ describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
     await type('/compact preserve diff');
     await key({ key: 'Enter' });
     expect(s.compact).toHaveBeenCalledWith('preserve diff');
+
+    // Stale/invalidated context usage after compact renders 0% with data-stale="true" and waiting hint.
+    await renderComposer({
+      source: s,
+      usage: { used: 0, size: 1_048_576, stale: true },
+      chat: { config: [], commands: [], capabilities: caps({ compact: true }) },
+    });
+    const staleBtn = q<HTMLButtonElement>('.conv-compact-btn')!;
+    expect(staleBtn.dataset.stale).toBe('true');
+    expect(staleBtn.getAttribute('aria-valuenow')).toBe('0');
+    expect(staleBtn.title).toContain(t('conversation.usage.stale'));
+    await click(staleBtn);
+    const stalePop = document.body.querySelector<HTMLElement>('.conv-ctx-popover')!;
+    expect(stalePop.textContent).toContain('0%');
+    expect(stalePop.textContent).toContain(t('conversation.usage.stale'));
+  });
+
+  it('persists pasted images, attached files, and text across unmount/remount and clears them on send', async () => {
+    const s1 = new FakeSource('chat-draft-img');
+    s1.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s1);
+
+    await type('explain this screenshot');
+    await paste([png('shot-1.png', 10), png('shot-2.png', 12)]);
+    await until(() => qa('.conv-attachment').length === 2);
+
+    // Simulate switching away to another workspace/window (unmounting the chat pane).
+    await act(async () => root.unmount());
+    root = createRoot(host);
+
+    // Remount with a fresh ChatSource instance for the same chat id.
+    const s2 = new FakeSource('chat-draft-img');
+    s2.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s2);
+
+    expect(field().value).toBe('explain this screenshot');
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.alt)).toEqual(['shot-1.png', 'shot-2.png']);
+
+    // Removing an image updates the persisted draft so a subsequent remount reflects it.
+    await click(qa('.conv-attachment-remove')[0]);
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.alt)).toEqual(['shot-2.png']);
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    const s3 = new FakeSource('chat-draft-img');
+    s3.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s3);
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.alt)).toEqual(['shot-2.png']);
+
+    // Sending sends the restored image + text and clears the persisted draft.
+    await key({ key: 'Enter' });
+    expect(s3.send).toHaveBeenCalledTimes(1);
+    expect(s3.send.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ type: 'image', mimeType: 'image/png' }),
+      { type: 'text', text: 'explain this screenshot' },
+    ]);
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    const s4 = new FakeSource('chat-draft-img');
+    s4.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s4);
+    expect(field().value).toBe('');
+    expect(qa('.conv-attachment')).toHaveLength(0);
+  });
+
+  it('keeps an image pasted right before switching away while FileReader is still in flight', async () => {
+    const s1 = new FakeSource('chat-inflight-img');
+    s1.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s1);
+
+    // Paste and immediately unmount before FileReader finishes.
+    await paste([png('fast-switch.png', 16)]);
+    await act(async () => root.unmount());
+    await settle(20);
+
+    // Returning to the chat restores the decoded image.
+    root = createRoot(host);
+    const s2 = new FakeSource('chat-inflight-img');
+    s2.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s2);
+    await until(() => qa('.conv-attachment').length === 1);
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.alt)).toEqual(['fast-switch.png']);
+  });
+
+  it('syncs pasted image drafts across windows via BroadcastChannel', async () => {
+    const channels = new Set<{ name: string; onmessage: ((ev: MessageEvent) => void) | null }>();
+    class FakeBroadcastChannel {
+      onmessage: ((ev: MessageEvent) => void) | null = null;
+      constructor(readonly name: string) {
+        channels.add(this);
+      }
+      postMessage(data: unknown) {
+        for (const ch of channels) {
+          if (ch !== this && ch.name === this.name) ch.onmessage?.({ data } as MessageEvent);
+        }
+      }
+      close() {
+        channels.delete(this);
+      }
+    }
+    vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel);
+    try {
+      clearDrafts();
+      // Simulate a detached window mounting empty while a peer window holds a draft with an image.
+      const peer = new FakeBroadcastChannel(`${APP_SLUG}:composer-drafts`);
+      peer.onmessage = (ev) => {
+        const msg = ev.data as { type?: string; id?: string };
+        if (msg.type === 'need' && msg.id === 'chat-peer-img') {
+          peer.postMessage({
+            type: 'draft',
+            id: 'chat-peer-img',
+            reply: true,
+            draft: {
+              text: 'from main window',
+              attachments: [{ id: 'a99', name: 'peer.png', mimeType: 'image/png', data: 'AAAA', size: 3 }],
+              attachedFiles: [],
+              mentions: [],
+            },
+          });
+        }
+      };
+
+      const s = new FakeSource('chat-peer-img');
+      s.emit(info({ capabilities: caps({ images: true }) }));
+      await show(s);
+
+      expect(field().value).toBe('from main window');
+      expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.alt)).toEqual(['peer.png']);
+      peer.close();
+    } finally {
+      clearDrafts();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('renders Grok permission mode selector and allows switching to full access when enabled', async () => {
+    const s = new FakeSource('grok-mode-chat');
+    await renderComposer({
+      source: s,
+      kind: 'grok',
+      agent: 'Grok',
+      allowFull: true,
+      chat: {
+        config: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'grok-4.7',
+            options: [{ value: 'grok-4.7', name: 'Grok 4.7' }],
+          },
+          {
+            id: 'mode',
+            name: 'Mode',
+            category: 'mode',
+            type: 'select',
+            currentValue: 'default',
+            options: [
+              { value: 'default', name: 'Default' },
+              { value: 'acceptEdits', name: 'Accept Edits' },
+              { value: 'full', name: 'Full Access', full: true },
+            ],
+          },
+        ],
+        commands: [],
+        capabilities: caps({ images: true, model: true }),
+      },
+    });
+
+    const modeBtn = q<HTMLButtonElement>('button.conv-select[data-config="mode"]')!;
+    expect(modeBtn).not.toBeNull();
+    expect(modeBtn.dataset.value).toBe('default');
+    await click(modeBtn);
+    const fullOpt = document.body.querySelector<HTMLElement>('.conv-select-menu[data-config="mode"] [data-value="full"]')!;
+    expect(fullOpt).not.toBeNull();
+    expect(fullOpt.getAttribute('aria-disabled')).toBeNull();
+    await click(fullOpt);
+    await settle();
+    expect(s.setConfig).toHaveBeenCalledWith('mode', 'full');
   });
 });

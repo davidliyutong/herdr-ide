@@ -67,14 +67,29 @@ export const timelineEn = {
   'conversation.question.optional': 'Optional',
   'conversation.question.followUp': 'Follow-up questions',
   // User message edit/rewind and fork actions.
+  'conversation.user.rewind': 'Rewind to here',
+  'conversation.user.rewindHint': 'Rewind the conversation to just before this message',
+  'conversation.user.rewindUnsupported': 'Rewind is not supported by {agent}',
+  'conversation.user.rewindUnsupportedHint': '{agent} does not support native rewind (disabled to preserve prompt cache)',
   'conversation.user.editRewind': 'Edit & Rewind',
   'conversation.user.editRewindHint': 'Edit this message and rewind the conversation to this point',
   'conversation.user.forkHere': 'Fork from here',
   'conversation.user.forkHereHint': 'Fork the conversation up to this message into a new chat',
+  'conversation.user.forkHereLossyHint':
+    'Fork up to this message via a context summary (lossy — {agent} does not support lossless mid-chat fork)',
   'conversation.rewind.warning': 'Rewinds the conversation here and discards later turns.',
+  'conversation.rewind.unsupported':
+    '{agent} does not support native rewind. Lossy rewind is disabled so your session and prompt cache stay intact.',
+  'conversation.rewind.dismiss': 'Dismiss',
   'conversation.rewind.restoreFiles': 'Also restore file changes after this message',
+  'conversation.rewind.confirm': 'Rewind here',
+  'conversation.rewind.edit': 'Edit & Rewind',
+  'conversation.rewind.only': 'Rewind Only',
   'conversation.rewind.submit': 'Rewind & Send',
   'conversation.rewind.cancel': 'Cancel',
+  'conversation.fork.lossyWarning':
+    '{agent} does not support lossless fork from this message. Continuing starts a new session from a Markdown context summary (lossy; will not hit the original prompt cache).',
+  'conversation.fork.lossyConfirm': 'Fork (Lossy)',
   // Background tasks and subagents.
   'conversation.task.background': 'Background',
   'conversation.task.runningTool': 'Running {tool}',
@@ -151,8 +166,16 @@ export const timelineEn = {
   'conversation.notice.untrustFailed': 'The folder could not stop being trusted.',
   'conversation.notice.fullAccessOff': 'Full access is turned off on this machine: the agent started in the default mode.',
   'conversation.notice.forked': 'Forked from an earlier conversation.',
+  'conversation.notice.forkedLossy': 'Forked from an earlier conversation via a context summary (lossy).',
   'conversation.notice.switched': 'Switched from another agent: conversation context was imported.',
   'conversation.notice.switchedFrom': 'Switched from {agent}: conversation context was imported.',
+  'conversation.notice.switchedFull': 'Switched from {agent}: all {kept} turns transferred (~{tokens} tokens).',
+  'conversation.notice.switchedFullNative': 'Switched from {agent}: all {kept} turns injected into native history (~{tokens} tokens).',
+  'conversation.notice.switchedBudgeted':
+    'Switched from {agent}: {kept} of {total} turns transferred ({omitted} omitted, ~{tokens} tokens).',
+  'conversation.notice.switchedBudgetedNative':
+    'Switched from {agent}: {kept} of {total} turns injected into native history ({omitted} omitted, ~{tokens} tokens).',
+  'conversation.notice.openSourceChat': 'Open previous chat',
   'conversation.notice.rewound': 'Conversation rewound to an earlier turn.',
   'conversation.notice.rewoundFiles': 'Conversation rewound and file changes restored.',
   'conversation.notice.stopped.cancelled': 'The turn was interrupted.',

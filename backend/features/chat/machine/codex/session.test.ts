@@ -832,6 +832,11 @@ describe('async questions, models, FIFO queue/steer/interrupt, fork/rewind, and 
       const f = new FakeRun('', HANDSHAKE, sc.file());
       const { s, k } = await start(f);
       k.questAns = [{ answers: { q1: ['Postgres'] } }];
+      const answerQuestion = k.question.bind(k);
+      k.question = async (request, signal) => {
+        await k.wait('first turn completed before answering', turnEnds(1));
+        return answerQuestion(request, signal);
+      };
       await prompt(s, 'm1', 'start');
       await k.wait('second turn from async answer', turnEnds(2));
       expect(k.questions.length).toBe(1);
@@ -880,6 +885,43 @@ describe('async questions, models, FIFO queue/steer/interrupt, fork/rewind, and 
       const starts = f.requests(1, 'turn/start');
       expect(starts[1]!.input).toEqual([{ type: 'text', text: 'manual override', text_elements: [] }]);
     }
+  });
+
+  test('an async question answer steers into the active turn', async () => {
+    const sc = new Script();
+    sc.begin();
+    const turn = sc.request('turn/start');
+    sc.reply(turn, inProgress('t1'));
+    sc.turnStarted('t1');
+    sc.item(false, { type: 'userMessage', id: 'u1', clientId: 'm1', content: text('start') });
+    sc.item(false, {
+      type: 'agentMessage',
+      id: 'am-1',
+      text: 'Which database?',
+      delivery: 'async',
+      questions: [{ title: 'Database' }],
+    });
+    sc.reply(sc.request('turn/steer'), { turnId: 't1' });
+    sc.item(false, { type: 'userMessage', id: 'u2', content: text('Database: Postgres') });
+    sc.turnCompleted('t1', 'completed');
+    const f = new FakeRun('', HANDSHAKE, sc.file());
+    const { s, k } = await start(f);
+    k.questAns = [{ answers: { q1: ['Postgres'] } }];
+    await prompt(s, 'm1', 'start');
+    await k.wait('the turn with the async answer completed', turnEnds(1));
+
+    expect(f.requests(1, 'turn/start')).toHaveLength(1);
+    const steers = f.requests(1, 'turn/steer');
+    expect(steers).toHaveLength(1);
+    expect(steers[0]).toMatchObject({
+      expectedTurnId: 't1',
+      input: [{ type: 'text', text: 'Database: Postgres', text_elements: [] }],
+    });
+    const message = steers[0]!.clientUserMessageId;
+    expect(k.events.filter((ev) => ev.t === chat.EventType.Queued && ev.message === message).map((ev) => ev.state)).toEqual([
+      chat.QueuedState.Waiting,
+      chat.QueuedState.Taken,
+    ]);
   });
 
   test('models() lists models via probe when idle and reuses live app-server while updating live session models', async () => {
@@ -1283,5 +1325,162 @@ describe('async questions, models, FIFO queue/steer/interrupt, fork/rewind, and 
     await k.wait('turn ended and tasks cleared', (sink) => turnEnds(1)(sink) && sink.chat.tasks === undefined);
     expect(await codeOf(s.stopTask('unknown-task', AbortSignal.timeout(5000)))).toBe(chat.Code.NotFound);
     expect(policyProblems(f)).toEqual([]);
+  });
+
+  test('child turns and collaboration results settle tasks without a subAgentActivity end', async () => {
+    const sc = new Script();
+    sc.begin();
+    sc.reply(sc.request('turn/start'), inProgress('t1'));
+    sc.turnStarted('t1');
+    for (const id of ['worker', 'sibling']) {
+      sc.item(true, { type: 'subAgentActivity', id: `call-${id}`, kind: 'started', agentThreadId: id, agentPath: `/root/${id}` });
+      sc.notify('turn/started', { threadId: id, ...inProgress(`turn-${id}`) });
+    }
+    sc.notify('turn/completed', { threadId: 'worker', turn: { id: 'turn-worker', status: 'completed', items: [] } });
+    sc.notify('item/completed', { threadId: 'worker', turnId: 'turn-worker', item: agentMessage('late', 'done') });
+    sc.turnCompleted('t1', 'completed');
+
+    sc.reply(sc.request('turn/start'), inProgress('t2'));
+    sc.turnStarted('t2');
+    sc.notify('turn/started', { threadId: 'worker', ...inProgress('worker-followup') });
+    sc.notify('turn/completed', { threadId: 'worker', turn: { id: 'turn-worker', status: 'completed', items: [] } });
+    sc.item(false, {
+      type: 'collabAgentToolCall',
+      id: 'list',
+      tool: 'listAgents',
+      status: 'completed',
+      receiverThreadIds: [],
+      agentsStates: { worker: { status: 'running' }, sibling: { status: 'shutdown' } },
+    });
+    sc.turnCompleted('t2', 'completed');
+
+    sc.reply(sc.request('turn/start'), inProgress('t3'));
+    sc.turnStarted('t3');
+    sc.item(false, {
+      type: 'collabAgentToolCall',
+      id: 'wait',
+      tool: 'wait',
+      status: 'completed',
+      receiverThreadIds: ['worker'],
+      agentsStates: { worker: { status: 'errored' } },
+    });
+    sc.turnCompleted('t3', 'completed');
+
+    const { s, k } = await start(new FakeRun('', HANDSHAKE, sc.file()));
+    const statuses = (id: string) => k.events.filter((e) => e.item === `call-${id}`).map((e) => (e.update as Msg | undefined)?.status);
+
+    await prompt(s, 'm1', 'start');
+    await k.wait('first turn ended', turnEnds(1));
+    expect(k.chat.tasks?.map((task) => task.id)).toEqual(['sibling']);
+    expect(statuses('worker')).toEqual(['in_progress', 'completed']);
+
+    await prompt(s, 'm2', 'follow up');
+    await k.wait('second turn ended', turnEnds(2));
+    expect(k.chat.tasks?.map((task) => task.id)).toEqual(['worker']);
+    expect(statuses('worker')).toEqual(['in_progress', 'completed', 'in_progress']);
+    expect(statuses('sibling')).toEqual(['in_progress', 'cancelled']);
+
+    await prompt(s, 'm3', 'wait');
+    await k.wait('third turn ended', turnEnds(3));
+    expect(k.chat.tasks).toBeUndefined();
+    expect(statuses('worker')).toEqual(['in_progress', 'completed', 'in_progress', 'failed']);
+  });
+
+  extended('rechecks a background terminal after the turn when no exit notification arrives', async () => {
+    const sc = new Script();
+    sc.begin();
+    const turn = sc.request('turn/start');
+    sc.reply(turn, inProgress('t1'));
+    sc.turnStarted('t1');
+    const terminal = { command: 'make check', cwd: '/work', itemId: 'cmd-1', processId: '99' };
+    sc.item(true, {
+      type: 'commandExecution',
+      id: terminal.itemId,
+      command: terminal.command,
+      cwd: terminal.cwd,
+      processId: terminal.processId,
+      status: 'inProgress',
+      commandActions: [],
+    });
+    const running = { data: [terminal], nextCursor: null };
+    sc.reply(sc.request('thread/backgroundTerminals/list'), running);
+    sc.turnCompleted('t1', 'completed');
+    sc.reply(sc.request('thread/backgroundTerminals/list'), running);
+    sc.reply(sc.request('thread/backgroundTerminals/list'), { data: [], nextCursor: null });
+    const f = new FakeRun('', HANDSHAKE, sc.file());
+    const { s, k } = await start(f);
+    await prompt(s, 'm1', 'check');
+    await k.wait('the terminal is still running after the turn', (sink) => turnEnds(1)(sink) && sink.chat.tasks?.[0]?.id === '99');
+    await k.wait('the stale terminal disappears', (sink) => sink.chat.tasks === undefined);
+    expect(f.requests(1, 'thread/backgroundTerminals/list')).toHaveLength(3);
+  });
+
+  test('injectHistory sends thread/inject_items ResponseItems and maps -32601 to unsupported; handoffContext stays off stored events', async () => {
+    // 1. Native thread/inject_items succeeds and sends ResponseItem user/assistant messages.
+    {
+      const sc = new Script();
+      sc.begin();
+      const inj = sc.request('thread/inject_items');
+      sc.reply(inj, {});
+      const f = new FakeRun('', HANDSHAKE, sc.file());
+      const { s } = await start(f);
+      await s.injectHistory(
+        [
+          { role: 'user', text: 'Original goal: fix auth' },
+          { role: 'assistant', text: '[Previous assistant: Claude Code]\nUpdated login.ts.', agentKind: 'claude' },
+        ],
+        AbortSignal.timeout(PATIENCE),
+      );
+      const reqs = f.requests(1, 'thread/inject_items');
+      expect(reqs).toHaveLength(1);
+      expect(reqs[0]).toEqual({
+        threadId: Script.THREAD,
+        items: [
+          { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Original goal: fix auth' }] },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: '[Previous assistant: Claude Code]\nUpdated login.ts.' }],
+          },
+        ],
+      });
+    }
+    // 2. Older app-server returning -32601 Method not found maps to Code.Unsupported for transparent fallback,
+    //    and prompt({ content, handoffContext }) sends handoffContext on turn/start without polluting User/Queued events.
+    {
+      const sc = new Script();
+      sc.begin();
+      const inj = sc.request('thread/inject_items');
+      sc.line({ dir: 'in', msg: { id: inj, error: { code: -32601, message: 'method not found: thread/inject_items' } } });
+      const turn = sc.request('turn/start');
+      sc.reply(turn, inProgress('t1'));
+      sc.turnStarted('t1');
+      sc.turnCompleted('t1', 'completed');
+      const f = new FakeRun('', HANDSHAKE, sc.file());
+      const { s, k } = await start(f);
+      await expect(s.injectHistory([{ role: 'user', text: 'hello' }], AbortSignal.timeout(PATIENCE))).rejects.toMatchObject({
+        error: { code: chat.Code.Unsupported },
+      });
+      await s.prompt(
+        {
+          content: [{ type: 'text', text: 'new prompt' }],
+          handoffContext: '<handoff_context>\nattributed history\n</handoff_context>',
+          message: 'm1',
+          clientId: 'c1',
+          recorded: false,
+        },
+        AbortSignal.timeout(PATIENCE),
+      );
+      await k.wait('turn ended', turnEnds(1));
+      const starts = f.requests(1, 'turn/start');
+      expect(starts).toHaveLength(1);
+      expect(starts[0]!.input).toEqual([
+        { type: 'text', text: '<handoff_context>\nattributed history\n</handoff_context>', text_elements: [] },
+        { type: 'text', text: 'new prompt', text_elements: [] },
+      ]);
+      // Stored EventType.User emitted by adapter when recorded=false must contain ONLY clean user content!
+      const userEv = k.events.find((e) => e.t === chat.EventType.User);
+      expect(userEv?.content).toEqual([{ type: 'text', text: 'new prompt' }]);
+    }
   });
 });

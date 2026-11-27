@@ -29,15 +29,15 @@ const isActiveStatus = (s: BackgroundTask['status']) => s === 'running' || s ===
 
 /** Collects running/pending background tasks and subagents from `conv.chat.tasks`
  * merged with running background/subagent tool items in `conv.items`. */
-export function activeBackgroundTasks(conv: Conversation): ActiveTaskEntry[] {
+export function activeBackgroundTasks(conv: Conversation, kind?: string): ActiveTaskEntry[] {
   const out: ActiveTaskEntry[] = [];
   const seenIds = new Set<string>();
   const seenTools = new Set<string>();
 
   for (const task of conv.chat?.tasks ?? []) {
-    if (!isActiveStatus(task.status)) continue;
     seenIds.add(task.id);
     if (task.toolCallId) seenTools.add(task.toolCallId);
+    if (!isActiveStatus(task.status)) continue;
     let entry: ActiveTaskEntry = { ...task };
     if (task.toolCallId) {
       const it = itemById(conv, toolItemId(task.toolCallId));
@@ -66,6 +66,8 @@ export function activeBackgroundTasks(conv: Conversation): ActiveTaskEntry[] {
     const rawToolId = it.id.startsWith('tool:') ? it.id.slice(5) : it.id;
     const tm = taskMeta(it);
     const sub = isSubagent(it);
+    // The adapter tracks these tasks even when their tool call stays open in the transcript.
+    if (tm?.processId || kind === 'claude' || ((kind === 'codex' || kind === 'agy') && sub)) continue;
     const bg = tm?.backgrounded === true;
     if (!sub && !bg) continue;
     const id = tm?.taskId ?? rawToolId;
@@ -141,6 +143,7 @@ export function BackgroundTasksBar({ tasks, agent, readOnly, canStop, onStopTask
           {tasks.map((task) => {
             const Icon = KIND_ICON[task.kind] ?? Cpu;
             const title = (task.description || task.command || task.agentType || task.id).split('\n')[0];
+            const agentType = task.agentType === title ? undefined : task.agentType;
             const itemId = task.toolCallId ? toolItemId(task.toolCallId) : undefined;
             const canJump = !!itemId && !!onJumpToItem && (!hasItem || hasItem(itemId));
             const stoppable = !readOnly && canStop && !!onStopTask && task.stoppable !== false;
@@ -154,12 +157,12 @@ export function BackgroundTasksBar({ tasks, agent, readOnly, canStop, onStopTask
                     title={t('conversation.task.jumpHint')}
                     onClick={() => onJumpToItem!(itemId!)}
                   >
-                    {task.agentType && <span className="conv-task-agent">{task.agentType}</span>}
+                    {agentType && <span className="conv-task-agent">{agentType}</span>}
                     <span className={task.kind === 'shell' ? 'conv-task-title mono ellipsis' : 'conv-task-title ellipsis'}>{title}</span>
                   </button>
                 ) : (
                   <span className="conv-task-label" title={task.command || task.description || task.id}>
-                    {task.agentType && <span className="conv-task-agent">{task.agentType}</span>}
+                    {agentType && <span className="conv-task-agent">{agentType}</span>}
                     <span className={task.kind === 'shell' ? 'conv-task-title mono ellipsis' : 'conv-task-title ellipsis'}>{title}</span>
                   </span>
                 )}

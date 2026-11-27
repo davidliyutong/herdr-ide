@@ -2,7 +2,7 @@
 // spec/vectors/chat/acp (testdata/fakeagent.ts), its records compared with
 // the golden files of the same scenarios (testdata/golden).
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { ChatProtoError } from '#shared/proto/chatproto/index.ts';
@@ -721,13 +721,80 @@ describe('the ACP adapter', () => {
     expect(optionOf(h.host.chat.config ?? [], chat.Category.Model)?.currentValue).toBe('claude-opus-5-5');
     expect(optionOf(h.host.chat.config ?? [], chat.Category.ThoughtLevel)?.options?.map((o) => o.value)).toEqual(['low', 'medium', 'high']);
 
-    // Manual /compact with custom instructions emits Notice.Command and runs a turn.
+    // Manual /compact with custom instructions emits Notice.Command, Compacting, Compacted and runs a turn.
     await s.compact(never(), 'keep decisions');
     expect((await h.host.await("compact turn's end", turnOver)).stopReason).toBe('end_turn');
     expect(h.host.events.some((ev) => ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Command))).toBe(true);
+    expect(h.host.events.some((ev) => ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Compacting))).toBe(true);
+    expect(h.host.events.some((ev) => ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Compacted))).toBe(true);
     expect(h.host.chat.usage?.used).toBe(4200);
+    expect(h.host.chat.usage?.stale).toBeUndefined();
 
     // Graceful close calls session/close (checked strictly by fakeagent script).
+    await h.close(s);
+  });
+
+  test('ACP /compact resets usage to 0 (stale) when agent omits post-compact usage or reports a summarization spike, and preserves size', async () => {
+    const h = new Harness();
+    const sid = '00000000-0000-4000-8000-0000000000a1';
+    const steps = h
+      .rec('agy', '01-initialize')
+      .concat(h.rec('agy', '02-session-new'))
+      .concat([
+        // Turn 1: establishes 12400 / 1048576 usage.
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"hello"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"usage_update","used":12400,"size":1048576}}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}`),
+        // Turn 2 (/compact): emits a summarization spike >= 12400 (must be ignored) and no smaller post-compact update.
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"/compact"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"usage_update","used":15000,"size":1048576}}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}`),
+        // Turn 3 (normal turn): reports fresh smaller usage omitting size -> preserves 1048576 and clears stale.
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":5,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"next"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"usage_update","used":3100}}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":6,"method":"session/close","params":{"sessionId":"${sid}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":6,"result":{}}`),
+      ]);
+    const p = h.params(steps);
+    p.kind = 'agy';
+    const s = await h.start(p);
+    for (let i = 0; i < 200 && (!h.host.chat.capabilities.compact || h.host.chat.usage?.size !== 1048576); i++) {
+      await Bun.sleep(5);
+    }
+
+    await h.turn(s, [{ type: 'text', text: 'hello' }]);
+    expect(h.host.chat.usage).toMatchObject({ used: 12400, size: 1048576 });
+
+    await s.compact(never());
+    expect((await h.host.await("compact turn's end", turnOver)).stopReason).toBe('end_turn');
+    expect(h.host.chat.usage).toMatchObject({ used: 0, size: 1048576, stale: true });
+    expect(h.host.events.some((ev) => ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Compacting))).toBe(true);
+    expect(h.host.events.some((ev) => ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Compacted))).toBe(true);
+
+    // Next normal turn clears stale and preserves 1M window even when size is omitted.
+    await h.turn(s, [{ type: 'text', text: 'next' }]);
+    expect(h.host.chat.usage).toMatchObject({ used: 3100, size: 1048576 });
+    expect(h.host.chat.usage?.stale).toBeUndefined();
+
     await h.close(s);
   });
 
@@ -740,6 +807,85 @@ describe('the ACP adapter', () => {
       '00000000-0000-4000-8000-0000000000a1 Work session newer',
       '00000000-0000-4000-8000-0000000000a3 Work session older',
     ]);
+  });
+
+  test('Antigravity (agy) ACP invoke_subagent normalizes call, streams child transcript under parent, and clears tasks', async () => {
+    const h = new Harness();
+    const parentSid = '00000000-0000-4000-8000-0000000000a1';
+    const childSid = '00000000-0000-4000-8000-0000000000b2';
+    const agyDir = join(h.dir, '.gemini', 'antigravity-cli');
+    const parentLog = join(agyDir, 'brain', parentSid, '.system_generated', 'logs', 'transcript.jsonl');
+    const childLog = join(agyDir, 'brain', childSid, '.system_generated', 'logs', 'transcript.jsonl');
+    const steps = h
+      .rec('agy', '01-initialize')
+      .concat(h.rec('agy', '02-session-new'))
+      .concat([
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"${parentSid}","prompt":[{"type":"text","text":"run ls in subagent"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${parentSid}","update":{"sessionUpdate":"tool_call","toolCallId":"call_sub_1","name":"invoke_subagent","kind":"other","title":"Run invoke_subagent","status":"in_progress","rawInput":{"TypeName":"self","Role":"Shell Runner","Prompt":"Run ls"}}}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${parentSid}","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_sub_1","name":"invoke_subagent","kind":"other","title":"Run invoke_subagent","status":"completed","rawInput":{"TypeName":"self","Role":"Shell Runner","Prompt":"Run ls"}}}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":4,"method":"session/close","params":{"sessionId":"${parentSid}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":4,"result":{}}`),
+      ]);
+    const p = h.params(steps);
+    p.kind = 'agy';
+    p.env = { ...p.env, HOME: h.dir };
+    const s = await h.start(p);
+
+    // Pre-create parent and child transcript files after session opens so onTurnEnd drains them cleanly.
+    mkdirSync(join(agyDir, 'brain', parentSid, '.system_generated', 'logs'), { recursive: true });
+    mkdirSync(join(agyDir, 'brain', childSid, '.system_generated', 'logs'), { recursive: true });
+    writeFileSync(
+      parentLog,
+      [
+        JSON.stringify({
+          step_index: 2,
+          type: 'GENERIC',
+          content: `Created the following subagent:\n{"conversationId":"${childSid}","logAbsoluteUri":"file://${childLog}"}`,
+        }),
+        JSON.stringify({
+          step_index: 4,
+          type: 'SYSTEM_MESSAGE',
+          content: `[Message] sender=${childSid} content=README.md`,
+        }),
+      ].join('\n') + '\n',
+    );
+    writeFileSync(
+      childLog,
+      [
+        JSON.stringify({
+          step_index: 1,
+          type: 'PLANNER_RESPONSE',
+          thinking: 'Listing files.',
+          tool_calls: [{ name: 'run_command', args: { CommandLine: '"ls"' } }],
+        }),
+        JSON.stringify({
+          step_index: 2,
+          type: 'GENERIC',
+          content: 'Command exited with code 0.\n\nCommand output:\nREADME.md\n',
+        }),
+      ].join('\n') + '\n',
+    );
+
+    expect((await h.turn(s, [{ type: 'text', text: 'run ls in subagent' }])).stopReason).toBe('end_turn');
+    const nested = h.host.events.filter((ev) => ev.parent === 'call_sub_1');
+    expect(nested.some((ev) => (ev.update as Record<string, unknown>).kind === 'execute')).toBe(true);
+    expect(nested.some((ev) => (ev.update as Record<string, unknown>).sessionUpdate === 'agent_thought_chunk')).toBe(true);
+    const parentDone = h.host.events.filter((ev) => !ev.parent && ev.item === 'call_sub_1').at(-1)!.update as Record<string, unknown>;
+    expect(parentDone.kind).toBe('think');
+    expect(parentDone.title).toBe('Shell Runner');
+    expect(parentDone.status).toBe('completed');
+    expect(h.host.chat.tasks).toBeUndefined();
+    await h.close(s);
   });
 
   test('models() probes ACP models from configOptions and closes cleanly; enriches Grok efforts', async () => {
@@ -886,6 +1032,128 @@ describe('the ACP adapter', () => {
     );
     expect(taken2.message).toBe('q1');
     expect((await h.host.await('queued turn end', turnOver)).stopReason).toBe('end_turn');
+    await h.close(s);
+  });
+
+  test('an ACP agent without native modes (Grok) gets client-enforced permission modes via allow_once', async () => {
+    const h = new Harness();
+    const write = h.rec('grok', '04-permission-write');
+    const exec = h.rec('grok', '05c-execute-permission');
+    const steps = h.rec('grok', '01-initialize').concat(h.rec('grok', '02-session-new-yolo-off'), write, exec);
+    const p = h.params(steps);
+    p.newSessionMeta = { yoloMode: false };
+    p.options = { mode: chat.Mode.AcceptEdits };
+    // Only the execute turn should reach the host; file write is auto-approved.
+    h.host.answers = ['allow-once'];
+    const s = await h.start(p);
+
+    const modeOpt = optionOf(h.host.chat.config ?? [], chat.Category.Mode)!;
+    expect(modeOpt.id).toBe('mode');
+    expect(modeOpt.currentValue).toBe(chat.Mode.AcceptEdits);
+    expect(modeOpt.options).toEqual([
+      { value: chat.Mode.Default, name: 'Default' },
+      { value: chat.Mode.AcceptEdits, name: 'Accept Edits' },
+      { value: chat.Mode.Full, name: 'Full Access', full: true },
+    ]);
+    expect((await rejects(s.setConfig('mode', 'bogus', never()))).code).toBe(chat.Code.BadRequest);
+
+    expect((await h.turn(s, promptOf(write))).stopReason).toBe('end_turn');
+    expect(h.host.perms).toHaveLength(0);
+    expect((await h.turn(s, promptOf(exec))).stopReason).toBe('end_turn');
+    expect(h.host.perms).toHaveLength(1);
+    expect(h.host.perms[0]?.kind).toBe(chat.PermissionKind.Command);
+    await h.close(s);
+
+    // Switching to full access locally auto-approves both writes and commands without any RPC.
+    const h2 = new Harness();
+    const write2 = h2.rec('grok', '04-permission-write');
+    const exec2 = h2.rec('grok', '05c-execute-permission');
+    const steps2 = h2.rec('grok', '01-initialize').concat(h2.rec('grok', '02-session-new-yolo-off'), write2, exec2);
+    const p2 = h2.params(steps2);
+    p2.newSessionMeta = { yoloMode: false };
+    h2.host.answers = [];
+    const s2 = await h2.start(p2);
+    expect(optionOf(h2.host.chat.config ?? [], chat.Category.Mode)?.currentValue).toBe(chat.Mode.Default);
+    await s2.setConfig('mode', chat.Mode.Full, never());
+    expect(optionOf(h2.host.chat.config ?? [], chat.Category.Mode)?.currentValue).toBe(chat.Mode.Full);
+    expect((await h2.turn(s2, promptOf(write2))).stopReason).toBe('end_turn');
+    expect((await h2.turn(s2, promptOf(exec2))).stopReason).toBe('end_turn');
+    expect(h2.host.perms).toHaveLength(0);
+    await h2.close(s2);
+
+    // Starting directly in Mode.Full initializes clientMode before takeConfig (no default flash)
+    // and auto-approves Grok tool permissions whose kind comes from _meta["x.ai/tool"].kind = "write".
+    const h3 = new Harness();
+    const sid = '00000000-0000-4000-8000-000000000001';
+    const steps3 = h3
+      .rec('grok', '01-initialize')
+      .concat(h3.rec('grok', '02-session-new-yolo-off'))
+      .concat([
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"write file"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","id":10,"method":"session/request_permission","params":{"sessionId":"${sid}","toolCall":{"toolCallId":"tc-w","title":"write","_meta":{"x.ai/tool":{"kind":"write"}}},"options":[{"optionId":"allow-once","name":"Yes","kind":"allow_once"},{"optionId":"reject-once","name":"No","kind":"reject_once"}]}}`,
+        ),
+        msgLine('out', '{"jsonrpc":"2.0","id":10,"result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}'),
+        msgLine('in', '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'),
+        msgLine('out', `{"jsonrpc":"2.0","id":4,"method":"session/close","params":{"sessionId":"${sid}"}}`),
+        msgLine('in', '{"jsonrpc":"2.0","id":4,"result":{}}'),
+      ]);
+    const p3 = h3.params(steps3);
+    p3.newSessionMeta = { yoloMode: false };
+    p3.options = { mode: chat.Mode.AcceptEdits };
+    h3.host.answers = [];
+    const seenModes: string[] = [];
+    const origUpdate = h3.host.update.bind(h3.host);
+    h3.host.update = (fn) => {
+      origUpdate(fn);
+      const mv = optionOf(h3.host.chat.config ?? [], chat.Category.Mode)?.currentValue;
+      if (mv) seenModes.push(mv);
+    };
+    const s3 = await h3.start(p3);
+    expect(seenModes).toEqual([chat.Mode.AcceptEdits]);
+    expect((await h3.turn(s3, [{ type: 'text', text: 'write file' }])).stopReason).toBe('end_turn');
+    expect(h3.host.perms).toHaveLength(0);
+    await h3.close(s3);
+  });
+
+  test('Antigravity (agy) maps host Mode.Full to ACP mode "auto" on start when allowFull is enabled', async () => {
+    const h = new Harness();
+    const sid = '00000000-0000-4000-8000-0000000000a1';
+    const autoCfg =
+      '[{"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"auto","options":[{"value":"default","name":"Review"},{"value":"accept-edits","name":"Accept Edits"},{"value":"auto","name":"Auto"},{"value":"plan","name":"Plan"}]}]';
+    const steps = h
+      .rec('agy', '01-initialize')
+      .concat(h.rec('agy', '02-session-new'))
+      .concat([
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/set_config_option","params":{"configId":"mode","sessionId":"${sid}","value":"auto"}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{"configOptions":${autoCfg}}}`),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"current_mode_update","currentModeId":"auto"}}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"config_option_update","configOptions":${autoCfg}}}}`,
+        ),
+        msgLine('out', `{"jsonrpc":"2.0","id":4,"method":"session/close","params":{"sessionId":"${sid}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":4,"result":{}}`),
+      ]);
+    const p = h.params(steps);
+    p.kind = 'agy';
+    p.options = { mode: chat.Mode.Full };
+    p.settings = { ...p.settings, allowFull: true };
+    const s = await h.start(p);
+    const mode = optionOf(h.host.chat.config ?? [], chat.Category.Mode);
+    expect(mode?.currentValue).toBe('auto');
+    expect(mode?.options?.find((v) => v.value === 'auto')?.full).toBe(true);
+    expect(mode?.options?.find((v) => v.value === 'accept-edits')?.full).toBeUndefined();
     await h.close(s);
   });
 });

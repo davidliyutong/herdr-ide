@@ -51,6 +51,36 @@ const urlTransform = (url: string) => url;
  * `user-content-` once instead of double-prefixing GFM footnote IDs. */
 const REMARK_REHYPE_OPTIONS = { clobberPrefix: '' } as const;
 
+type MdastNode = { type: string; value?: string; children?: MdastNode[] };
+
+/** Converts soft line breaks (`\n`) inside mdast text nodes into explicit
+ * `break` (`<br>`) nodes so single newlines render as visible line breaks
+ * instead of collapsing into spaces (enabled by default in compact / chat mode). */
+export function remarkHardBreaks() {
+  const walk = (node: MdastNode): void => {
+    const children = node.children;
+    if (!Array.isArray(children) || children.length === 0) return;
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.type === 'text' && typeof child.value === 'string' && child.value.includes('\n')) {
+        const parts = child.value.split(/\r?\n/);
+        const replacement: MdastNode[] = [];
+        for (let j = 0; j < parts.length; j++) {
+          if (parts[j]) replacement.push({ type: 'text', value: parts[j] });
+          if (j < parts.length - 1) replacement.push({ type: 'break' });
+        }
+        children.splice(i, 1, ...replacement);
+        i += replacement.length - 1;
+      } else {
+        walk(child);
+      }
+    }
+  };
+  return (tree: unknown) => {
+    if (tree && typeof tree === 'object') walk(tree as MdastNode);
+  };
+}
+
 function textOf(node: ReactNode): string {
   if (node == null || typeof node === 'boolean') return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -416,6 +446,7 @@ export interface MarkdownBodyProps {
   frontmatter?: boolean;
   headingAnchors?: boolean;
   mathDelimiters?: boolean;
+  hardBreaks?: boolean;
   codeCopy?: boolean;
 }
 
@@ -436,15 +467,18 @@ export function markdownBody(
     frontmatter,
     headingAnchors = true,
     mathDelimiters,
+    hardBreaks,
     codeCopy = true,
   }: MarkdownBodyProps) {
     const showFrontmatter = frontmatter ?? variant !== 'compact';
     const useMathDelimiters = mathDelimiters ?? variant === 'compact';
+    const useHardBreaks = hardBreaks ?? variant === 'compact';
     const fm = useMemo(() => (showFrontmatter ? parseFrontmatter(text) : undefined), [text, showFrontmatter]);
     const body = useMemo(() => {
       const raw = fm ? fm.body : text;
       return useMathDelimiters ? displayMath(raw) : raw;
     }, [fm, text, useMathDelimiters]);
+    const activeRemarkPlugins = useMemo(() => (useHardBreaks ? [...remarkPlugins, remarkHardBreaks] : remarkPlugins), [useHardBreaks]);
     // Recreate components when body changes so deduplicated heading slugs reset cleanly.
     const comps = useMemo(
       () => components({ base, onOpenPath, resolveImage, resolveLink, headingAnchors, codeCopy }),
@@ -463,7 +497,7 @@ export function markdownBody(
           </dl>
         )}
         <Renderer
-          remarkPlugins={remarkPlugins}
+          remarkPlugins={activeRemarkPlugins}
           rehypePlugins={rehypePlugins}
           remarkRehypeOptions={REMARK_REHYPE_OPTIONS}
           components={comps}

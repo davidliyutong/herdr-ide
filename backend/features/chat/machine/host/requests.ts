@@ -36,6 +36,10 @@ const settings = z.object({
   maxTotalBytes: int,
   maxChatBytes: int,
   defaultMode: str,
+  defaultModes: z
+    .record(z.string(), z.string())
+    .nullish()
+    .transform((v) => v ?? undefined),
   allowFull: bool,
 });
 
@@ -67,6 +71,8 @@ const request = z.object({
   upToSeq: seq,
   title: str,
   targetKind: str,
+  format: str,
+  maxBytes: int,
 });
 
 const command = z.object({

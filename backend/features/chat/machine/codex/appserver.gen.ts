@@ -132,6 +132,7 @@ export interface ClientRequests {
     result: ThreadBackgroundTerminalsTerminateResponse;
   };
   'thread/backgroundTerminals/clean': { params: ThreadBackgroundTerminalsCleanParams; result: ThreadBackgroundTerminalsCleanResponse };
+  'thread/inject_items': { params: ThreadInjectItemsParams; result: ThreadInjectItemsResponse };
   'turn/start': { params: TurnStartParams; result: TurnStartResponse };
   'turn/steer': { params: TurnSteerParams; result: TurnSteerResponse };
   'turn/interrupt': { params: TurnInterruptParams; result: TurnInterruptResponse };
@@ -2299,6 +2300,18 @@ export type ThreadForkResponse = {
 export type ThreadHistoryMode = 'legacy' | 'paginated';
 
 export type ThreadId = string;
+
+export type ThreadInjectItemsParams = {
+  /**
+   * Raw Responses API items to append to the thread's model-visible history.
+   */
+  items: Array<unknown>;
+  threadId: string;
+};
+
+export type ThreadInjectItemsResponse = {
+  [key: string]: unknown;
+};
 
 /**
  * A thread item and its recorded lifecycle times. The payload stays flat on the wire.

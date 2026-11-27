@@ -4,27 +4,63 @@
 // renaming, closing, archiving, restoring and deleting one, and the menus
 // that offer these.
 import { createElement, type ComponentType } from 'react';
-import { ArrowLeftRight, CirclePower, Download, GitFork, Pencil, SquareTerminal, Trash2 } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  Check,
+  CirclePower,
+  Download,
+  FileCode2,
+  FileText,
+  GitFork,
+  Pencil,
+  SlidersHorizontal,
+  SquareTerminal,
+  Trash2,
+} from 'lucide-react';
 import { create } from 'zustand';
 import { actions } from '../../actions';
 import { agentKind, chatAdapter, usageProvider } from '../../conversation/kinds';
 import { confirmDialog } from '../../dialog';
 import { hasMessage, t, type MessageKey } from '../../i18n';
 import type { MenuEntry } from '../../contextMenu';
-import { useSettings } from '../../settings';
+import { setSetting, useSettings } from '../../settings';
 import { useStore } from '../../state/store';
 import { terms } from '../../state/terms';
 import * as L from '../../term/layout';
 import { ProviderLogo } from '../usage/logos';
-import { ChatFailure, chatApi, failureText, permissionMode, type NewChatVault } from './api';
+import {
+  ChatFailure,
+  DEFAULT_HANDOFF_MAX_KB,
+  HANDOFF_BUDGET_PRESETS,
+  chatApi,
+  failureText,
+  handoffMaxKB,
+  permissionMode,
+  type NewChatVault,
+} from './api';
 import { canContinueInTerminal, continueInTerminal } from './handoff';
 import { STATE_DELETED } from './protocol';
 import { applyStates, chatState, liveKey, loadAgents, offeredKinds, upsertState, useChats } from './state';
 import { CHAT_PLUGIN, CHAT_VIEW, chatPane, chatRef } from './view';
 
+/** External request to open inline rewind on a specific user turn in a pane. */
+export interface RewindRequest {
+  pane: string;
+  seq: number;
+  nonce: number;
+}
+
 /** What the chat panes are asked from outside: the pane (machine and view
- * id, `${m}\n${id}`) whose title is to be edited. */
-export const useChatUi = create<{ renaming?: string }>(() => ({}));
+ * id, `${m}\n${id}`) whose title is to be edited, or a turn to rewind to. */
+export const useChatUi = create<{ renaming?: string; rewind?: RewindRequest }>(() => ({}));
+
+let nextRewindNonce = 0;
+
+/** Focuses a chat pane and opens inline rewind confirmation on user turn `seq`. */
+export function requestRewind(m: string, viewId: string, seq: number) {
+  useChatUi.setState({ rewind: { pane: `${m}\n${viewId}`, seq, nonce: ++nextRewindNonce } });
+  actions.focusPane(m, L.viewKey(viewId));
+}
 
 /** An agent's name for people. */
 export const agentName = (kind: string | undefined): string => agentKind(kind)?.title || kind || t('chat.pane');
@@ -138,7 +174,7 @@ export async function newChat(m: string, kind: string, o: { cwd?: string; worksp
   if (useStore.getState().readOnly) return void toast(t('conversation.error.read_only'));
   const cwd = cleanDir(o.cwd) ?? defaultCwd(m);
   if (!cwd) return void toast(t('chat.noDirectory', { agent }));
-  const mode = permissionMode(useSettings.getState().values, m);
+  const mode = permissionMode(useSettings.getState().values, m, kind);
   const workspace = chatWorkspaceFor(m, o.workspace);
   let chat;
   let vault: NewChatVault | undefined;
@@ -171,6 +207,9 @@ export async function closeChat(m: string, chat: string) {
   }
 }
 
+/** How long the archive confirmation toast stays before auto-dismissing. */
+export const ARCHIVE_TOAST_MS = 4000;
+
 /** Archives a chat from the sidebar list: its agent ends and the chat,
  * with its log, is kept apart (the Chats panel's archived chats) until the
  * machine's chat limits remove it. A bottom-left toast says so and can
@@ -191,7 +230,7 @@ export async function archiveChat(m: string, chat: string): Promise<boolean> {
     .getState()
     .toast(
       t('chat.archived', { title }),
-      { label: t('chat.restore'), run: () => void restoreChat(m, chat) },
+      { label: t('chat.restore'), run: () => void restoreChat(m, chat), ttl: ARCHIVE_TOAST_MS },
       undefined,
       'info',
       'bottom-left',
@@ -303,20 +342,29 @@ export function kindsMenu(m: string, o: { cwd?: string } = {}): MenuEntry[] {
   }));
 }
 
+/** Configured handoff / Markdown export byte budget when non-default, else undefined. */
+function customHandoffBytes(explicit?: number): number | undefined {
+  if (explicit !== undefined) return explicit;
+  const kb = handoffMaxKB(useSettings.getState().values);
+  return kb !== DEFAULT_HANDOFF_MAX_KB ? kb * 1024 : undefined;
+}
+
 /** Forks an existing chat (up to upToSeq, or its end) into a new chat tab. */
 export async function forkChat(
   m: string,
   chat: string,
-  o: { upToSeq?: number; title?: string; from?: string } = {},
+  o: { upToSeq?: number; title?: string; from?: string; maxBytes?: number } = {},
 ): Promise<string | undefined> {
   if (useStore.getState().readOnly) return void toast(t('conversation.error.read_only'));
   const st = chatState(m, chat);
+  const maxBytes = customHandoffBytes(o.maxBytes);
   let forked;
   try {
     forked = await chatApi.fork(m, {
       chat,
       ...(o.upToSeq !== undefined ? { upToSeq: o.upToSeq } : {}),
       ...(o.title ? { title: o.title } : {}),
+      ...(maxBytes !== undefined ? { maxBytes } : {}),
     });
   } catch (e) {
     toast(failureText(e, agentName(st?.kind), 'chat.forkFailed'));
@@ -331,11 +379,12 @@ export async function switchChatAgent(
   m: string,
   chat: string,
   targetKind: string,
-  o: { upToSeq?: number; from?: string } = {},
+  o: { upToSeq?: number; from?: string; maxBytes?: number } = {},
 ): Promise<string | undefined> {
   if (useStore.getState().readOnly) return void toast(t('conversation.error.read_only'));
   const targetName = agentName(targetKind);
-  const mode = permissionMode(useSettings.getState().values, m);
+  const mode = permissionMode(useSettings.getState().values, m, targetKind);
+  const maxBytes = customHandoffBytes(o.maxBytes);
   let switched;
   try {
     switched = await chatApi.switchChat(m, {
@@ -343,6 +392,7 @@ export async function switchChatAgent(
       targetKind,
       ...(mode ? { options: { mode } } : {}),
       ...(o.upToSeq !== undefined ? { upToSeq: o.upToSeq } : {}),
+      ...(maxBytes !== undefined ? { maxBytes } : {}),
     });
   } catch (e) {
     toast(failureText(e, targetName, 'chat.switchAgentFailed'));
@@ -352,20 +402,56 @@ export async function switchChatAgent(
   return openChat(m, switched.id, switched.kind, o.from);
 }
 
-/** Menu items for switching a chat to another available agent on machine m. */
-export function switchAgentMenu(m: string, chat: string, currentKind: string | undefined, from?: string): MenuEntry[] {
+/** Submenu entries for configuring the Markdown export & handoff digest budget. */
+export function handoffBudgetMenu(): MenuEntry[] {
+  const current = handoffMaxKB(useSettings.getState().values);
+  const disabled = useStore.getState().readOnly;
+  return HANDOFF_BUDGET_PRESETS.map((kb) => ({
+    label: kb === DEFAULT_HANDOFF_MAX_KB ? t('chat.handoff.budgetDefault', { kb }) : `${kb} KB`,
+    icon: kb === current ? createElement(Check) : undefined,
+    disabled,
+    run: () => void setSetting('chat.handoffMaxKB', kb),
+  }));
+}
+
+/** Menu items for switching a chat to another available agent on machine m,
+ * with handoff options (Continue in Terminal, Handoff Digest Budget). */
+export function switchAgentMenu(m: string, chat: string, currentKind: string | undefined, from?: string, view?: L.PluginView): MenuEntry[] {
   void loadAgents(m);
-  return offeredKinds(m)
+  const targets: MenuEntry[] = offeredKinds(m)
     .filter((k) => k.id !== currentKind)
     .map((k) => ({
       label: agentName(k.id),
       icon: createElement(brandKindIcon(k.id)),
       run: () => void switchChatAgent(m, chat, k.id, { from }),
     }));
+  const extras: MenuEntry[] = [];
+  if (view && canContinueInTerminal(m, view)) {
+    const st = chatState(m, chat);
+    extras.push({
+      label: t('chat.continueInTerminal'),
+      icon: createElement(SquareTerminal),
+      run: () => void continueInTerminal(m, view).catch((e: unknown) => toast(failureText(e, agentName(st?.kind), 'chat.handoffFailed'))),
+    });
+  }
+  if (!targets.length && !extras.length) return [];
+  const currentKb = handoffMaxKB(useSettings.getState().values);
+  return [
+    ...targets,
+    ...(targets.length && extras.length ? (['sep'] as const) : []),
+    ...extras,
+    'sep',
+    {
+      label: t('chat.handoff.budget'),
+      hint: `${currentKb} KB`,
+      icon: createElement(SlidersHorizontal),
+      submenu: handoffBudgetMenu(),
+    },
+  ];
 }
 
-/** Builds a clean .md download filename from a chat's title (or agent) and id. */
-export function chatExportFileName(title: string | undefined, kind: string | undefined, chat: string): string {
+/** Builds a clean download filename from a chat's title (or agent) and id. */
+export function chatExportFileName(title: string | undefined, kind: string | undefined, chat: string, ext: 'md' | 'json' = 'md'): string {
   const raw = (title || agentName(kind) || 'chat')
     .trim()
     .replace(/[\\/:*?"<>|\x00-\x1f]+/g, '-')
@@ -374,11 +460,11 @@ export function chatExportFileName(title: string | undefined, kind: string | und
     .replace(/^-|-$/g, '')
     .slice(0, 64);
   const stem = raw || 'chat';
-  return `${stem}-${chat.slice(0, 8)}.md`;
+  return `${stem}-${chat.slice(0, 8)}.${ext}`;
 }
 
-function saveMarkdown(text: string, name: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+function saveDownload(text: string, name: string, mime: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
@@ -390,19 +476,65 @@ function saveMarkdown(text: string, name: string) {
 }
 
 /** Exports a chat's conversation as a Markdown file download; a failure is said in a toast. */
-export async function exportChatMarkdown(m: string, chat: string, o: { upToSeq?: number; kind?: string } = {}): Promise<boolean> {
+export async function exportChatMarkdown(
+  m: string,
+  chat: string,
+  o: { upToSeq?: number; kind?: string; maxBytes?: number } = {},
+): Promise<boolean> {
   const st = chatState(m, chat);
   const live = useChats.getState().live[liveKey(m, chat)];
   const kind = o.kind ?? st?.kind;
   const title = live?.info?.title || st?.title;
+  const maxBytes = customHandoffBytes(o.maxBytes);
   try {
-    const md = await chatApi.exportMarkdown(m, chat, o.upToSeq);
-    saveMarkdown(md, chatExportFileName(title, kind, chat));
+    const md = await chatApi.exportMarkdown(m, chat, o.upToSeq, maxBytes);
+    saveDownload(md, chatExportFileName(title, kind, chat, 'md'), 'text/markdown;charset=utf-8');
     return true;
   } catch (e) {
     toast(failureText(e, agentName(kind), 'chat.exportFailed'));
     return false;
   }
+}
+
+/** Exports a chat's lossless raw events and metadata as a JSON file download. */
+export async function exportChatJson(m: string, chat: string, o: { upToSeq?: number; kind?: string } = {}): Promise<boolean> {
+  const st = chatState(m, chat);
+  const live = useChats.getState().live[liveKey(m, chat)];
+  const kind = o.kind ?? st?.kind;
+  const title = live?.info?.title || st?.title;
+  try {
+    const data = await chatApi.exportJson(m, chat, o.upToSeq);
+    saveDownload(JSON.stringify(data, null, 2) + '\n', chatExportFileName(title, kind, chat, 'json'), 'application/json;charset=utf-8');
+    return true;
+  } catch (e) {
+    toast(failureText(e, agentName(kind), 'chat.exportFailed'));
+    return false;
+  }
+}
+
+/** Dropdown entries for the Export action (Markdown, Raw JSON, and Digest Budget). */
+export function exportChatMenu(m: string, chat: string, o: { upToSeq?: number; kind?: string } = {}): MenuEntry[] {
+  const currentKb = handoffMaxKB(useSettings.getState().values);
+  return [
+    {
+      label: t('chat.export.markdown'),
+      hint: `${currentKb} KB`,
+      icon: createElement(FileText),
+      run: () => void exportChatMarkdown(m, chat, o),
+    },
+    {
+      label: t('chat.export.json'),
+      icon: createElement(FileCode2),
+      run: () => void exportChatJson(m, chat, o),
+    },
+    'sep',
+    {
+      label: t('chat.handoff.budget'),
+      hint: `${currentKb} KB`,
+      icon: createElement(SlidersHorizontal),
+      submenu: handoffBudgetMenu(),
+    },
+  ];
 }
 
 /** What a chat pane's header and tab menus start with. */
@@ -419,7 +551,7 @@ export function chatMenu(m: string, view: L.PluginView): MenuEntry[] {
   ];
   const others = switchAgentMenu(m, chat, kind, from);
   if (others.length) out.push({ label: t('chat.switchAgent'), icon: createElement(ArrowLeftRight), submenu: others });
-  out.push({ label: t('chat.export'), icon: createElement(Download), run: () => void exportChatMarkdown(m, chat, { kind }) });
+  out.push({ label: t('chat.export'), icon: createElement(Download), submenu: exportChatMenu(m, chat, { kind }) });
   if (canContinueInTerminal(m, view))
     out.push({
       label: t('chat.continueInTerminal'),

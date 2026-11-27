@@ -14,6 +14,7 @@ import type {
   Adapter,
   ForkParams,
   ForkResult,
+  HandoffMessage,
   HistoryParams,
   ModelsParams,
   PermissionAnswer,
@@ -124,7 +125,16 @@ export class FakeSession implements Session {
     this.sink = sink;
     this.id = p.resume || p.sessionId;
     this.done = new Promise((r) => (this.ended = r));
+    if (a.nativeHistory) {
+      this.injectHistory = async (messages: readonly HandoffMessage[]) => {
+        this.calls.push(`inject_history:${messages.length}`);
+        this.a.injectedHistories.push(messages.map((m) => ({ ...m })));
+        if (this.a.injectHistoryErr) throw new chat.ChatProtoError(this.a.injectHistoryErr);
+      };
+    }
   }
+
+  injectHistory?: (messages: readonly HandoffMessage[], signal: AbortSignal) => Promise<void>;
 
   get pid(): number {
     return this.a.pid ? (this.proc?.pid ?? 0) : 0;
@@ -154,8 +164,9 @@ export class FakeSession implements Session {
     const inTurn = this.turn;
     this.turn = true;
     this.prompts.push(p);
-    const text = (p.content.find((b) => (b as { type?: string }).type === 'text') as { text?: string } | undefined)?.text ?? '';
-    this.calls.push(`prompt:${text}`);
+    const userText = (p.content.find((b) => (b as { type?: string }).type === 'text') as { text?: string } | undefined)?.text ?? '';
+    const wireText = p.handoffContext ? `${p.handoffContext}\n\n${userText}` : userText;
+    this.calls.push(`prompt:${wireText}`);
     if (this.a.promptErr) {
       this.turn = inTurn;
       throw new chat.ChatProtoError(this.a.promptErr);
@@ -357,6 +368,9 @@ export class FakeAdapter implements Adapter {
   rewinds: RewindParams[] = [];
   rewindErr: chat.ChatError | null = null;
   rewindSessionId = '';
+  nativeHistory = false;
+  injectedHistories: HandoffMessage[][] = [];
+  injectHistoryErr: chat.ChatError | null = null;
   /** Held, the listings and the compactions wait for it. */
   sessionsGate: Promise<void> | null = null;
   compactGate: Promise<void> | null = null;

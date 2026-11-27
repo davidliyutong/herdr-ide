@@ -17,7 +17,7 @@
 // sources of chats no pane shows are kept KEEP_MS (a tab shown again finds
 // its chat as it was), at most KEEP_IDLE of them.
 import { useEffect, useMemo } from 'react';
-import { readChat, readUsage, type ContentBlock, type SourceEvent, type Usage } from '../../conversation/model';
+import { blocksText, readChat, readUsage, type ContentBlock, type SourceEvent, type Usage } from '../../conversation/model';
 import type { ChatSource, Delivery, FileSuggestion, PermissionReply, QuestionReply, RewindOptions } from '../../conversation/source';
 import { listDir } from '../../lib/files';
 import { RETRY_RESET_MS, retryDelay } from '../../lib/retry';
@@ -79,6 +79,8 @@ export class ChatSourceImpl implements ChatSource {
   /** The hub said there is no such chat. */
   private gone = false;
   private usage?: Usage;
+  /** The chat's last observed host state (working/waiting/starting/idle/…). */
+  private lastState?: string;
   /** Its next subscription attaches again (a reattach first). */
   private again = false;
   /** Number of commands currently awaiting an ack on this subscription. */
@@ -98,6 +100,33 @@ export class ChatSourceImpl implements ChatSource {
   /** The page is read-only: every control is disabled. */
   get readOnly(): boolean {
     return useStore.getState().readOnly;
+  }
+
+  /** Whether this chat's agent is currently active (working, waiting, or starting). */
+  get active(): boolean {
+    return this.lastState === 'working' || this.lastState === 'waiting' || this.lastState === 'starting';
+  }
+
+  /** Stored user turns (User or Queued(taken)) in order, with their sequence
+   * numbers and plain text previews (used by header rewind turn pickers). */
+  userTurns(): Array<{ seq: number; text: string }> {
+    const out: Array<{ seq: number; text: string }> = [];
+    const seenClient = new Set<string>();
+    for (const raw of this.stored) {
+      if (!isObject(raw)) continue;
+      const ev = raw as unknown as Event;
+      const isUser = ev.t === 'user' || (ev.t === 'queued' && ev.state === 'taken');
+      if (!isUser || typeof ev.seq !== 'number') continue;
+      const cid = typeof ev.clientId === 'string' && ev.clientId ? ev.clientId : '';
+      if (cid) {
+        if (seenClient.has(cid)) continue;
+        seenClient.add(cid);
+      }
+      const content = Array.isArray(ev.content) ? (ev.content as ContentBlock[]) : [];
+      const text = blocksText(content).replace(/\s+/g, ' ').trim();
+      out.push({ seq: ev.seq, text });
+    }
+    return out;
   }
 
   subscribe(fn: (ev: SourceEvent) => void): () => void {
@@ -174,50 +203,66 @@ export class ChatSourceImpl implements ChatSource {
     await ask(this.m, cwd);
   }
 
+  private suggestAbort?: AbortController;
+
   /** The files and folders of the chat's directory that match what the
    * user typed after `@`. For non-empty relative queries that do not end in
    * `/`, tries the machine's recursive `/p/files/find` endpoint first and
    * falls back gracefully to `listDir` on the folder before the last `/`. */
-  async suggestFiles(query: string): Promise<FileSuggestion[]> {
+  async suggestFiles(query: string, callerSignal?: AbortSignal): Promise<FileSuggestion[]> {
     const cwd = chatCwd(this.m, this.chat);
     if (!cwd?.startsWith('/') || /\s/.test(query)) return [];
-    if (query !== '' && !query.startsWith('/') && !query.endsWith('/')) {
-      try {
-        const params = new URLSearchParams({ dir: cwd, query, limit: '50' });
-        const r = await fetch(`/api/m/${encodeURIComponent(this.m)}/p/files/find?${params}`, { cache: 'no-store' });
-        if (r.ok) {
-          const j: unknown = await r.json();
-          if (isObject(j) && Array.isArray(j.matches)) {
-            const out: FileSuggestion[] = [];
-            for (const m of j.matches.slice(0, 50)) {
-              if (!isObject(m) || typeof m.path !== 'string' || !m.path || typeof m.rel !== 'string' || !m.rel) continue;
-              const isDir = m.is_dir === true;
-              const label = isDir && !m.rel.endsWith('/') ? `${m.rel}/` : m.rel;
-              out.push(isDir ? { path: m.path, label, isDir: true } : { path: m.path, label });
+    if (callerSignal?.aborted) return [];
+    this.suggestAbort?.abort();
+    const ac = new AbortController();
+    this.suggestAbort = ac;
+    const onCallerAbort = () => ac.abort();
+    callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+    const signal = ac.signal;
+    try {
+      if (query !== '' && !query.startsWith('/') && !query.endsWith('/')) {
+        try {
+          const params = new URLSearchParams({ dir: cwd, query, limit: '50' });
+          const r = await fetch(`/api/m/${encodeURIComponent(this.m)}/p/files/find?${params}`, { cache: 'no-store', signal });
+          if (r.ok) {
+            const j: unknown = await r.json();
+            if (isObject(j) && Array.isArray(j.matches)) {
+              const out: FileSuggestion[] = [];
+              for (const m of j.matches.slice(0, 50)) {
+                if (!isObject(m) || typeof m.path !== 'string' || !m.path || typeof m.rel !== 'string' || !m.rel) continue;
+                const isDir = m.is_dir === true;
+                const label = isDir && !m.rel.endsWith('/') ? `${m.rel}/` : m.rel;
+                out.push(isDir ? { path: m.path, label, isDir: true } : { path: m.path, label });
+              }
+              return out;
             }
-            return out;
           }
+        } catch {
+          if (signal.aborted) return [];
+          // Fall through to directory listing.
         }
-      } catch {
-        // Fall through to directory listing.
       }
+      if (signal.aborted) return [];
+      const cut = query.lastIndexOf('/');
+      const head = cut >= 0 ? query.slice(0, cut + 1) : '';
+      const tail = (cut >= 0 ? query.slice(cut + 1) : query).toLowerCase();
+      const dir = head.startsWith('/') ? head : `${cwd.replace(/\/+$/, '')}/${head}`;
+      const listing = await listDir(this.m, dir.length > 1 ? dir.replace(/\/+$/, '') : dir, signal);
+      const entries = (Array.isArray(listing?.entries) ? listing.entries : []).filter(
+        (e) => e && typeof e.name === 'string' && e.name && !/\s/.test(e.name) && (tail.startsWith('.') || !e.name.startsWith('.')),
+      );
+      const starts = entries.filter((e) => e.name.toLowerCase().startsWith(tail));
+      const within = entries.filter((e) => !e.name.toLowerCase().startsWith(tail) && e.name.toLowerCase().includes(tail));
+      const base = dir.endsWith('/') ? dir : `${dir}/`;
+      return [...starts, ...within].slice(0, 50).map((e) => ({
+        path: base + e.name,
+        label: head + e.name + (e.is_dir ? '/' : ''),
+        ...(e.is_dir ? { isDir: true } : {}),
+      }));
+    } finally {
+      callerSignal?.removeEventListener('abort', onCallerAbort);
+      if (this.suggestAbort === ac) this.suggestAbort = undefined;
     }
-    const cut = query.lastIndexOf('/');
-    const head = cut >= 0 ? query.slice(0, cut + 1) : '';
-    const tail = (cut >= 0 ? query.slice(cut + 1) : query).toLowerCase();
-    const dir = head.startsWith('/') ? head : `${cwd.replace(/\/+$/, '')}/${head}`;
-    const listing = await listDir(this.m, dir.length > 1 ? dir.replace(/\/+$/, '') : dir);
-    const entries = (Array.isArray(listing?.entries) ? listing.entries : []).filter(
-      (e) => e && typeof e.name === 'string' && e.name && !/\s/.test(e.name) && (tail.startsWith('.') || !e.name.startsWith('.')),
-    );
-    const starts = entries.filter((e) => e.name.toLowerCase().startsWith(tail));
-    const within = entries.filter((e) => !e.name.toLowerCase().startsWith(tail) && e.name.toLowerCase().includes(tail));
-    const base = dir.endsWith('/') ? dir : `${dir}/`;
-    return [...starts, ...within].slice(0, 50).map((e) => ({
-      path: base + e.name,
-      label: head + e.name + (e.is_dir ? '/' : ''),
-      ...(e.is_dir ? { isDir: true } : {}),
-    }));
   }
 
   /** Attaches again now if the chat is not attached (a pane shows it
@@ -299,6 +344,7 @@ export class ChatSourceImpl implements ChatSource {
     this.attachedNow = true;
     const info = readChat(chat);
     this.usage = info?.usage ?? this.usage;
+    if (info?.state) this.lastState = info.state;
     this.live({ link: 'attached', linkError: undefined, info, state: info?.state, error: info?.error, usage: this.usage });
     this.keep({ t: 'info', chat });
     for (const w of this.waiters.splice(0)) {
@@ -391,8 +437,10 @@ export class ChatSourceImpl implements ChatSource {
       const info = readChat(ev.chat);
       if (!info) return;
       this.usage = info.usage ?? this.usage;
+      if (info.state) this.lastState = info.state;
       this.live({ info, state: info.state, error: info.error, usage: this.usage });
     } else if (ev.t === 'state' && typeof ev.state === 'string') {
+      this.lastState = ev.state;
       this.live({ state: ev.state, error: ev.state === 'failed' ? readError(ev.error) : undefined });
     } else if (ev.t === 'update' && isObject(ev.update) && ev.update.sessionUpdate === 'usage_update') {
       const usage = usageAfter(this.usage, ev.update);
@@ -506,13 +554,21 @@ function drop(k: string) {
 }
 
 /** Lets go of h: kept KEEP_MS, the sources kept longest going first past
- * KEEP_IDLE. */
+ * KEEP_IDLE. Idle (non-working) unreferenced sources are always evicted before
+ * actively working ones so an active agent's subscription is protected. */
 function idle(k: string, h: Held) {
   h.idleSince = Date.now();
   clearTimeout(h.timer);
   h.timer = setTimeout(() => drop(k), KEEP_MS);
-  const idleOnes = [...held.entries()].filter(([, x]) => x.refs === 0).sort((a, b) => a[1].idleSince - b[1].idleSince);
+  const idleOnes = [...held.entries()]
+    .filter(([, x]) => x.refs === 0)
+    .sort((a, b) => Number(a[1].source.active) - Number(b[1].source.active) || a[1].idleSince - b[1].idleSince);
   for (const [key] of idleOnes.slice(0, Math.max(0, idleOnes.length - KEEP_IDLE))) drop(key);
+}
+
+/** Stored user turns of a currently held chat source (empty when not attached). */
+export function chatUserTurns(m: string, chat: string): Array<{ seq: number; text: string }> {
+  return held.get(keyOf(m, chat))?.source.userTurns() ?? [];
 }
 
 /** The page's source of a chat, made when there is none; it is kept

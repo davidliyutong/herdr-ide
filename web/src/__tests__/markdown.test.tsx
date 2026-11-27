@@ -633,4 +633,23 @@ describe('Markdown', () => {
     expect(host.textContent).toContain('Second');
     expect(host.textContent).not.toContain('hidden');
   });
+
+  it('preserves single newlines as hard breaks in compact mode without changing document mode', async () => {
+    // Document mode keeps CommonMark soft breaks (no <br>).
+    await show({ text: 'line one\nline two' });
+    expect(host.querySelectorAll('p br')).toHaveLength(0);
+
+    // Compact mode (Agent Native View) converts single newlines into <br> while preserving formatting and code blocks.
+    await show({
+      variant: 'compact',
+      text: 'line one\n**line two**\nline three\n\n```ts\nconst a = 1;\nconst b = 2;\n```',
+    });
+    expect(host.querySelectorAll('p br')).toHaveLength(2);
+    expect(q('p strong')?.textContent).toBe('line two');
+    expect(host.querySelectorAll('pre br')).toHaveLength(0);
+
+    // Explicit hardBreaks=false overrides compact default.
+    await show({ variant: 'compact', hardBreaks: false, text: 'line one\nline two' });
+    expect(host.querySelectorAll('p br')).toHaveLength(0);
+  });
 });

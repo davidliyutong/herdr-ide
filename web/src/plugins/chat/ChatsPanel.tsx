@@ -18,7 +18,7 @@ import { CHAT_STATUSES, type ChatState } from './protocol';
 import { PastSessions } from './Sessions';
 import { follow, hostBusy, loadAgents, useChats } from './state';
 import { watchHosts } from './hostReminder';
-import { stateLabel } from './ChatPane';
+import { stateLabel } from './ChatHeader';
 import './chat.css';
 
 /** How many chats the panel lists at first, and how many more each

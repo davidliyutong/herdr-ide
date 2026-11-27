@@ -2,9 +2,11 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Adapter as AdapterKind } from '#shared/agents/kinds.ts';
 import { Notice, noticeMethod, VERSION } from '#shared/proto/agentproto/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { hostFile, open } from '#shared/store/index.ts';
+import { OPTION_ALLOW_ONCE } from '../adapter.ts';
 import { DB_NAME, MIGRATIONS } from './journal.ts';
 import { Client, FAKE_KIND, TestHost, eventually, startHost, text } from './testing.ts';
 import { extended } from '#shared/testdata/extended.ts';
@@ -464,6 +466,38 @@ describe('the chat host', () => {
     a.close();
   });
 
+  test('set_config wakes a sleeping chat (including before the first turn) and respects closed/allowFull', async () => {
+    const h = await host();
+    expect((await h.request({ op: chat.Op.Configure, settings: { maxLive: 1, allowFull: false } })).ok).toBe(true);
+    const { chat: c, s: s1 } = await h.newChat();
+    const a = await h.attach(c.id);
+    await eventually('idle', () => h.chat(c.id).r.chat.state === 'idle');
+    await eventually('configured', () => (h.chat(c.id).r.chat.config ?? []).length === 1);
+    // Starting a second chat evicts the untouched first chat (fresh = true) to sleeping.
+    const { chat: c2 } = await h.newChat();
+    await eventually('second idle', () => h.chat(c2.id).r.chat.state === 'idle');
+    await eventually('sleeping', () => h.chat(c.id).r.chat.state === 'sleeping');
+    expect(h.chat(c.id).r.fresh).toBe(true);
+    await s1.expect('close');
+    // Switching config while sleeping wakes a fresh session instead of failing with sleeping.
+    const set = a.command({ op: 'set_config', config: 'model', value: 'large' });
+    const s2 = await h.fake.session();
+    expect(await set).toBeUndefined();
+    expect(s2).not.toBe(s1);
+    expect(h.fake.starts.at(-1)!.resume).toBe('');
+    await s2.expect('set_config:model=large');
+    expect(h.chat(c.id).r.chat.state).toBe('idle');
+    expect(h.chat(c.id).r.options.model).toBe('large');
+    expect(h.chat(c.id).r.chat.config![0]!.currentValue).toBe('large');
+    // A closed chat is not woken by set_config.
+    const startsBeforeClose = h.fake.starts.length;
+    await h.request({ op: chat.Op.Close, chat: c.id });
+    await s2.expect('close');
+    expect(await a.command({ op: 'set_config', config: 'model', value: 'small' })).toMatchObject({ code: 'sleeping' });
+    expect(h.fake.starts.length).toBe(startsBeforeClose);
+    a.close();
+  });
+
   test('bounds: connections, listings and commands waiting for the agent', async () => {
     const h = await host();
     // 256 connections, none past its hello, are served; the next is refused.
@@ -476,14 +510,20 @@ describe('the chat host', () => {
     for (const c of held) c.close();
     await eventually('the connections to go', async () => (await h.request({ op: chat.Op.Chats })).ok === true);
 
-    // Four listings at a time.
+    // Four listings run concurrently, up to 16 more queue FIFO, and overflow refuses with probe_busy.
     let open!: () => void;
     h.fake.sessionsGate = new Promise((r) => (open = r));
-    const listings = Array.from({ length: 4 }, () => h.request({ op: chat.Op.Sessions, kind: FAKE_KIND, cwd: h.cwd }));
+    const running = Array.from({ length: 4 }, () => h.request({ op: chat.Op.Sessions, kind: FAKE_KIND, cwd: h.cwd }));
     await eventually('four listings to run', () => h.fake.sessionsP.length === 4);
-    expect((await h.request({ op: chat.Op.Sessions, kind: FAKE_KIND, cwd: h.cwd })).error?.code).toBe('busy');
+    const queued = Array.from({ length: 16 }, () => h.request({ op: chat.Op.Sessions, kind: FAKE_KIND, cwd: h.cwd }));
+    // Give the 16 queued requests a moment to enter the host's probeQueue.
+    await eventually('probe queue filled', async () => {
+      const r = await h.request({ op: chat.Op.Sessions, kind: FAKE_KIND, cwd: h.cwd });
+      return r.error?.code === chat.Code.ProbeBusy;
+    });
+    expect(h.fake.sessionsP.length).toBe(4);
     open();
-    for (const l of await Promise.all(listings)) expect(l.nextCursor).toBe('next-page');
+    for (const l of await Promise.all([...running, ...queued])) expect(l.nextCursor).toBe('next-page');
 
     // Eight commands of a connection wait for the agent; the ninth is refused.
     const { chat: c, s } = await h.newChat();
@@ -1153,6 +1193,287 @@ describe('the chat host', () => {
     await s.expect('prompt:queued turn edited');
     s.endTurn('end_turn');
     a.close();
+  });
+
+  test('rejects rewind when agent lacks native caps.rewind (preserving session/cache), supports truncate-only native rewind + usage invalidation, and per-kind defaultModes', async () => {
+    // 1. Agent without native rewind capability (like ACP): refuses rewind with Code.Unsupported
+    //    without stopping the live session or invalidating its context usage.
+    const h = await host((t) => {
+      t.fake.caps.rewind = false;
+      t.fake.caps.rewindFiles = false;
+    });
+    await h.request({
+      op: chat.Op.Configure,
+      settings: { defaultMode: chat.Mode.Default, defaultModes: { [FAKE_KIND]: chat.Mode.Plan } },
+    });
+
+    const created = await h.request({ op: chat.Op.New, kind: FAKE_KIND, cwd: h.cwd });
+    expect(created.ok).toBe(true);
+    const id = created.chat!.id;
+    const s1 = await h.fake.session();
+    expect(h.fake.starts.at(-1)!.options?.mode).toBe(chat.Mode.Plan);
+    const a = await h.attach(id, 0);
+    await a.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    await a.command({ op: chat.CommandOp.Prompt, content: text('turn one') });
+    await s1.expect('prompt:turn one');
+    const u1 = await a.until((e) => e.t === chat.EventType.User);
+    s1.sink.update((c) => {
+      c.usage = { used: 8000, size: 100000, percentage: 8 };
+    });
+    s1.endTurn('end_turn');
+    await a.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    const rwUnsupported = await a.command({ op: chat.CommandOp.Rewind, seq: u1.seq });
+    expect(rwUnsupported?.code).toBe(chat.Code.Unsupported);
+    // Session stays alive and usage stays intact (prompt cache preserved).
+    const checkIntact = await h.attach(id, 0);
+    expect(checkIntact.head.chat!.state).toBe(chat.State.Idle);
+    expect(checkIntact.head.chat!.usage).toMatchObject({ used: 8000, size: 100000, percentage: 8 });
+    checkIntact.close();
+    a.close();
+
+    // 2. Agent with native rewind: truncate-only rewind (no content) truncates log and invalidates usage.
+    const h2 = await host((t) => {
+      t.fake.caps.rewind = true;
+      t.fake.caps.rewindFiles = false;
+    });
+    const created2 = await h2.request({ op: chat.Op.New, kind: FAKE_KIND, cwd: h2.cwd });
+    const id2 = created2.chat!.id;
+    const sn = await h2.fake.session();
+    const an = await h2.attach(id2, 0);
+    await an.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    await an.command({ op: chat.CommandOp.Prompt, content: text('native one') });
+    await sn.expect('prompt:native one');
+    sn.endTurn('end_turn');
+    await an.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    await an.command({ op: chat.CommandOp.Prompt, content: text('native two') });
+    await sn.expect('prompt:native two');
+    const u2 = await an.until((e) => e.t === chat.EventType.User && JSON.stringify(e.content).includes('native two'));
+    sn.sink.update((c) => {
+      c.usage = { used: 24000, size: 100000, percentage: 24 };
+    });
+    sn.endTurn('end_turn');
+    await an.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    expect(await an.command({ op: chat.CommandOp.Rewind, seq: u2.seq })).toBeUndefined();
+    await an.until((e) => e.t === chat.EventType.Reset);
+    expect(h2.fake.rewinds).toHaveLength(1);
+    an.close();
+
+    const an2 = await h2.attach(id2, 0);
+    expect(an2.head.chat!.usage).toMatchObject({ used: 0, size: 100000, percentage: 0, stale: true });
+    an2.close();
+
+    // 3. Global defaultMode=full with allowFull passes Mode.Full when no per-kind override is set.
+    await h2.request({ op: chat.Op.Configure, settings: { defaultMode: chat.Mode.Full, allowFull: true } });
+    const created3 = await h2.request({ op: chat.Op.New, kind: FAKE_KIND, cwd: h2.cwd });
+    expect(created3.ok).toBe(true);
+    await h2.fake.session();
+    expect(h2.fake.starts.at(-1)!.options?.mode).toBe(chat.Mode.Full);
+  });
+
+  test('backfills client mode config for Grok chats on new/reload and resolves matching pending permissions on mode switch', async () => {
+    const h = await host((t) => {
+      const origSpec = t.o.spec;
+      t.o.spec = (kind) =>
+        kind === 'grok' ? { adapter: AdapterKind.ACP, argv: ['/bin/sh', '--grok'], newSessionMeta: { yoloMode: false } } : origSpec(kind);
+      t.o.adapters = { ...t.o.adapters, [AdapterKind.ACP]: t.fake };
+      t.fake.config = [
+        {
+          id: 'model',
+          name: 'Model',
+          category: chat.Category.Model,
+          type: chat.CONFIG_SELECT,
+          currentValue: 'grok-4.7',
+          options: [{ value: 'grok-4.7', name: 'Grok 4.7' }],
+        },
+        {
+          id: 'mode',
+          name: 'Mode',
+          category: chat.Category.Mode,
+          type: chat.CONFIG_SELECT,
+          currentValue: chat.Mode.Default,
+          options: [
+            { value: chat.Mode.Default, name: 'Default' },
+            { value: chat.Mode.AcceptEdits, name: 'Accept Edits' },
+            { value: chat.Mode.Full, name: 'Full Access', full: true },
+          ],
+        },
+      ];
+    });
+    await h.request({ op: chat.Op.Configure, settings: { allowFull: true } });
+
+    // 1. A brand-new Grok chat immediately exposes the client mode selector before the agent starts.
+    const created = await h.request({ op: chat.Op.New, kind: 'grok', cwd: h.cwd });
+    expect(created.ok).toBe(true);
+    const id = created.chat!.id;
+    const initMode = created.chat!.config?.find((c) => c.category === chat.Category.Mode);
+    expect(initMode?.currentValue).toBe(chat.Mode.Default);
+    expect(initMode?.options?.map((o) => o.value)).toEqual([chat.Mode.Default, chat.Mode.AcceptEdits, chat.Mode.Full]);
+
+    const s = await h.fake.session();
+    const a = await h.attach(id, 0);
+    await a.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    // 2. While waiting on a command permission, switching mode to Full Access auto-approves via allow_once.
+    await a.command({ op: chat.CommandOp.Prompt, content: text('run command') });
+    await s.expect('prompt:run command');
+    const permP = s.permission(chat.PermissionKind.Command);
+    await a.until((e) => e.t === chat.EventType.Permission);
+    await a.until((e) => e.t === chat.EventType.State && e.state === chat.State.Waiting);
+
+    expect(await a.command({ op: chat.CommandOp.SetConfig, config: 'mode', value: chat.Mode.Full })).toBeUndefined();
+    expect(await permP).toEqual({ option: OPTION_ALLOW_ONCE });
+    const doneEv = await a.until((e) => e.t === chat.EventType.PermissionDone);
+    expect(doneEv.outcome).toEqual({ outcome: chat.OutcomeKind.Selected, optionId: OPTION_ALLOW_ONCE });
+    s.endTurn('end_turn');
+    await a.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+    a.close();
+
+    // 3. A pre-upgrade sleeping Grok chat persisted in SQLite with only [model] (no mode option)
+    //    gets its client mode option backfilled on host restart.
+    await h.stop();
+    const db = open(hostFile(h.base, DB_NAME), { migrations: MIGRATIONS });
+    const modelOnly = JSON.stringify([
+      {
+        id: 'model',
+        name: 'Model',
+        category: chat.Category.Model,
+        type: chat.CONFIG_SELECT,
+        currentValue: 'grok-4.7',
+        options: [{ value: 'grok-4.7', name: 'Grok 4.7' }],
+      },
+    ]);
+    db.prepare('UPDATE chats SET config = ? WHERE id = ?').run(modelOnly, id);
+    db.close();
+
+    await h.serve();
+    const listed = await h.request({ op: chat.Op.Chats });
+    const reloaded = listed.chats!.find((c) => c.id === id)!;
+    const reloadedMode = reloaded.config?.find((c) => c.category === chat.Category.Mode);
+    expect(reloadedMode?.id).toBe('mode');
+    expect(reloadedMode?.currentValue).toBe(chat.Mode.Full);
+    expect(reloadedMode?.options?.map((o) => o.value)).toEqual([chat.Mode.Default, chat.Mode.AcceptEdits, chat.Mode.Full]);
+  });
+
+  test('cross-agent handoff: native history injection + persistence, unsupported fallback, clean queued events, busy refusal, bare /compact, and multi-hop lineage', async () => {
+    const h = await host((t) => {
+      t.fake.nativeHistory = true;
+    });
+    const { chat: chatA, s: sessA } = await h.newChat();
+    const aAtt = await h.attach(chatA.id, 0);
+    await aAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    // Turn 1 in Chat A: run a prompt while refusing Op.Switch while busy!
+    await aAtt.command({ op: chat.CommandOp.Prompt, content: text('Initial goal from chat A') });
+    await sessA.expect('prompt:Initial goal from chat A');
+    const busySwitch = await h.request({ op: chat.Op.Switch, chat: chatA.id, targetKind: FAKE_KIND });
+    expect(busySwitch.error?.code).toBe(chat.Code.Busy);
+    sessA.say('a1', 'Completed step 1 in chat A.');
+    sessA.endTurn('end_turn');
+    await aAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    // 1. Switch A -> B with native history injection enabled: injects on launch(),
+    //    marks chat B non-fresh (so sleep/resume preserves the thread), and keeps B's first prompt clean!
+    const swB = await h.request({ op: chat.Op.Switch, chat: chatA.id, targetKind: FAKE_KIND });
+    expect(swB.ok).toBe(true);
+    const idB = swB.chat!.id;
+    const sessB = await h.fake.session();
+    const bAtt = await h.attach(idB, 0);
+    const bNotice = await bAtt.until((e) => e.t === chat.EventType.Notice && e.method === noticeMethod(Notice.Switched));
+    expect(bNotice.params).toMatchObject({
+      fromChat: chatA.id,
+      fromKind: FAKE_KIND,
+      totalTurns: 1,
+      keptTurns: 1,
+      omittedTurns: 0,
+    });
+    await bAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+    await sessB.expect('inject_history:2');
+    expect(h.fake.injectedHistories).toHaveLength(1);
+    expect(h.fake.injectedHistories[0]!.map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(h.fake.injectedHistories[0]![0]!.text).toContain('Initial goal from chat A');
+    expect(h.fake.injectedHistories[0]![1]!.text).toContain('Completed step 1 in chat A.');
+    // Chat B must be marked non-fresh after native injection so sleep/resume loads this session!
+    expect(h.chat(idB).r.fresh).toBe(false);
+
+    // First user prompt on B goes completely clean (no <handoff_context> wrapper).
+    await bAtt.command({ op: chat.CommandOp.Prompt, content: text('Step 2 in chat B') });
+    await sessB.expect('prompt:Step 2 in chat B');
+    sessB.say('b1', 'Completed step 2 in chat B.');
+    sessB.endTurn('end_turn');
+    await bAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    // Diverge Chat A AFTER A -> B switch: later turns in A must NOT leak into B -> C!
+    await aAtt.command({ op: chat.CommandOp.Prompt, content: text('DIVERGENT_LATER_TURN_IN_A') });
+    await sessA.expect('prompt:DIVERGENT_LATER_TURN_IN_A');
+    sessA.say('a2', 'Divergent reply in A.');
+    sessA.endTurn('end_turn');
+    await aAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    // 2. Chained switch B -> C when native injection rejects with Code.Unsupported:
+    //    falls back transparently to attributed prompt context, carries BOTH A (up to fromSeq) and B,
+    //    excludes A's divergent turn, does NOT burn seed on bare `/compact`, and NEVER leaks
+    //    <handoff_context> into stored User events!
+    h.fake.injectHistoryErr = { code: chat.Code.Unsupported, message: 'older codex' };
+    const swC = await h.request({ op: chat.Op.Switch, chat: idB, targetKind: FAKE_KIND });
+    expect(swC.ok).toBe(true);
+    const idC = swC.chat!.id;
+    const sessC = await h.fake.session();
+    const cAtt = await h.attach(idC, 0);
+    await cAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+    await sessC.expect('inject_history:4');
+    // Failed native inject leaves chat C fresh and seed preserved.
+    expect(h.chat(idC).r.fresh).toBe(true);
+
+    // Bare /compact must NOT consume the pending handoff seed.
+    await cAtt.command({ op: chat.CommandOp.Prompt, content: text('/compact') });
+    await sessC.expect('prompt:/compact');
+    sessC.endTurn('end_turn');
+    await cAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    // First real prompt receives attributed handoff containing BOTH chat A & chat B, without A's divergent turn!
+    await cAtt.command({ op: chat.CommandOp.Prompt, content: text('Continue in chat C') });
+    const cWire = await sessC.calls.next('C wire prompt');
+    expect(cWire).toContain('<handoff_context>');
+    expect(cWire).toContain('Initial goal from chat A');
+    expect(cWire).toContain('Completed step 2 in chat B.');
+    expect(cWire).not.toContain('DIVERGENT_LATER_TURN_IN_A');
+    expect(cWire).toContain('Continue in chat C');
+    // Stored User event on C must contain ONLY clean user content!
+    const cUser = await cAtt.until((e) => e.t === chat.EventType.User && JSON.stringify(e.content).includes('Continue in chat C'));
+    expect(cUser.content).toEqual(text('Continue in chat C'));
+    sessC.endTurn('end_turn');
+    await cAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    // 3. Re-switching immediately before sending any prompt (B -> D -> E) preserves full lineage even with 0 turns in D!
+    h.fake.nativeHistory = false;
+    h.fake.injectHistoryErr = null;
+    const swD = await h.request({ op: chat.Op.Switch, chat: idB, targetKind: FAKE_KIND });
+    expect(swD.ok).toBe(true);
+    const sessD = await h.fake.session();
+    const dAtt = await h.attach(swD.chat!.id, 0);
+    await dAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+    // Delete chat B? Keep B so D->E walks D -> B -> A even with zero turns in D!
+    const swE = await h.request({ op: chat.Op.Switch, chat: swD.chat!.id, targetKind: FAKE_KIND });
+    expect(swE.ok).toBe(true);
+    const sessE = await h.fake.session();
+    const eAtt = await h.attach(swE.chat!.id, 0);
+    await eAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+    await eAtt.command({ op: chat.CommandOp.Prompt, content: text('First prompt on E') });
+    const eWire = await sessE.calls.next('E wire prompt');
+    expect(eWire).toContain('Initial goal from chat A');
+    expect(eWire).toContain('Completed step 2 in chat B.');
+    sessE.endTurn('end_turn');
+    void sessD;
+    aAtt.close();
+    bAtt.close();
+    cAtt.close();
+    dAtt.close();
+    eAtt.close();
   });
 });
 

@@ -133,6 +133,12 @@ describe("Codex's app-server schema", () => {
     expect(request('thread/backgroundTerminals/list', { threadId: 't', limit: 50 })).toBe('');
     expect(request('thread/backgroundTerminals/terminate', { threadId: 't', processId: 'p1' })).toBe('');
     expect(request('thread/backgroundTerminals/clean', { threadId: 't' })).toBe('');
+    const injectedItems = [
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Original goal' }] },
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '[Previous assistant: Claude Code]\nDone.' }] },
+    ];
+    for (const it of injectedItems) expect(invalid('ResponseItem', it)).toBe('');
+    expect(request('thread/inject_items', { threadId: 't', items: injectedItems })).toBe('');
     expect(request('turn/steer', { threadId: 't', expectedTurnId: 'u', clientUserMessageId: 'm', input })).toBe('');
     expect(request('turn/interrupt', { threadId: 't', turnId: 'u' })).toBe('');
     expect(request('thread/compact/start', { threadId: 't' })).toBe('');

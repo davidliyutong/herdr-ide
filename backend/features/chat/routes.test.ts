@@ -62,6 +62,18 @@ describe('routes', () => {
 
   // Each route is one request of the machine's chat host, which a change
   // starts when none serves; what it takes is checked on the hub first.
+  // A POST while a GET is under way starts the host: it does not share the
+  // GET's listing, which finds none running.
+  test('a POST of agents does not join a GET under way', async () => {
+    const r = await start();
+    r.host.running = false;
+    r.host.agents.set('claude', true);
+    const [peek, started] = await Promise.all([r.call('GET', m('agents')), r.call('POST', m('agents'))]);
+    expect(peek).toMatchObject([409, { error: 'not_running' }]);
+    expect(started[0]).toBe(200);
+    expect(r.host.running).toBe(true);
+  });
+
   test('requests', async () => {
     const r = await start();
     const f = r.host;
@@ -294,6 +306,7 @@ describe('routes', () => {
     for (const [code, status] of [
       [chat.Code.UnknownChat, 404],
       [chat.Code.Busy, 409],
+      [chat.Code.ProbeBusy, 429],
       [chat.Code.TooMany, 409],
       [chat.Code.BadRequest, 400],
       [chat.Code.StartFailed, 502],
@@ -394,7 +407,7 @@ describe('routes', () => {
         },
       ],
     };
-    [code, out] = await r.call('GET', '/api/p/chat/hosts');
+    [code, out] = await r.call('GET', '/api/p/chat/hosts?refresh=1');
     const [gpu, box] = out.hosts as Array<Record<string, unknown>>;
     expect(gpu).toEqual({
       machine: 'gpu',
@@ -418,7 +431,7 @@ describe('routes', () => {
     const id = chat.newChatID();
     f.chats.set(id, testChat({ id, state: chat.State.Working, status: chat.Status.Working, agentVersion: '1.0' }));
     f.chats.set(chat.newChatID(), testChat({ id: chat.newChatID(), state: chat.State.Closed }));
-    [code, out] = await r.call('GET', '/api/p/chat/hosts');
+    [code, out] = await r.call('GET', '/api/p/chat/hosts?refresh=1');
     expect((out.hosts as unknown[])[0]).toEqual({
       machine: 'gpu',
       label: 'gpu',
@@ -558,5 +571,43 @@ describe('routes', () => {
     [code, out] = await r.call('GET', m(`export?chat=${srcId}&upToSeq=2`));
     expect([code, out]).toEqual([200, { markdown: '# Conversation Handoff\n\n### User\n\nhi' }]);
     expect(f.requests.at(-1)).toEqual({ op: chat.Op.Export, chat: srcId, upToSeq: 2 });
+
+    // Custom maxBytes and lossless raw JSON export.
+    [code, out] = await r.call('GET', m(`export?chat=${srcId}&maxBytes=65536`));
+    expect(code).toBe(200);
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Export, chat: srcId, maxBytes: 65536 });
+    expect((await r.call('GET', m(`export?chat=${srcId}&maxBytes=100`)))[0]).toBe(400);
+    expect((await r.call('GET', m(`export?chat=${srcId}&format=xml`)))[0]).toBe(400);
+
+    f.exportedData = {
+      version: 1,
+      exportedAt: '2026-01-01T00:00:00Z',
+      chat: {
+        id: srcId,
+        kind: 'claude',
+        title: 'Test',
+        cwd: '/w',
+        sessionId: '',
+        state: chat.State.Idle,
+        created: '2026-01-01T00:00:00Z',
+        updated: '2026-01-01T00:00:00Z',
+        seq: 1,
+      },
+      events: [{ seq: 1, t: chat.EventType.Turn, state: chat.TurnState.Error, error: { code: 'failed', message: 'm', stderr: 'SECRET' } }],
+    };
+    [code, out] = await r.call('GET', m(`export?chat=${srcId}&format=json`));
+    expect(code).toBe(200);
+    expect(out.format).toBe('json');
+    expect((out.data as chat.ChatExport).events[0]?.error?.stderr).toBe('SECRET');
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Export, chat: srcId, format: 'json' });
+
+    // Sessions cache hit vs ?refresh=1 bypass.
+    f.sessions = [{ sessionId: 's-cache', cwd: '/w', title: 'cached' }];
+    const beforeSess = f.count(chat.Op.Sessions);
+    expect((await r.call('POST', m('sessions?kind=claude&cwd=/w')))[0]).toBe(200);
+    expect((await r.call('POST', m('sessions?kind=claude&cwd=/w')))[0]).toBe(200);
+    expect(f.count(chat.Op.Sessions)).toBe(beforeSess + 1);
+    expect((await r.call('POST', m('sessions?kind=claude&cwd=/w&refresh=1')))[0]).toBe(200);
+    expect(f.count(chat.Op.Sessions)).toBe(beforeSess + 2);
   });
 });

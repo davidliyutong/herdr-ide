@@ -13,10 +13,10 @@ import { ArrowDown, MessagesSquare } from 'lucide-react';
 import { t } from '../i18n';
 import type { MarkdownBase } from '../markdown/links';
 import { activeBackgroundTasks, BackgroundTasksBar } from './BackgroundTasksBar';
-import { Composer } from './Composer';
+import { Composer, type ComposerHandle } from './Composer';
 import { spokenText } from './format';
 import { ItemView } from './items';
-import { agentKind } from './kinds';
+import { agentKind, chatAdapter } from './kinds';
 import {
   blockingWaitingItems,
   blocksText,
@@ -43,6 +43,10 @@ export interface ConversationProps extends ConversationExtras {
   source: ChatSource;
   /** The agent's kind (kinds.ts), whose title the view names it by. */
   kind: string;
+  /** Whether the pane is currently visible (false while kept mounted offscreen). */
+  shown?: boolean;
+  /** External request to jump to and open inline rewind on a specific user turn. */
+  rewindRequest?: { seq: number; nonce: number };
   /** Machine and directory relative Markdown links and images resolve against. */
   base?: MarkdownBase;
   /** Read-only (also when the source says so): every control disabled. */
@@ -54,6 +58,111 @@ export interface ConversationProps extends ConversationExtras {
   /** A path the agent named was activated. */
   onOpenFile?(path: string, line?: number): void;
   ref?: Ref<ConversationHandle>;
+}
+
+/** Saved reading state of a chat across pane hiding or unmount/remount. */
+export interface SavedScrollState {
+  atEnd: boolean;
+  scrollTop: number;
+  /** First visible `[data-item]` id near the viewport top (resilient to layout shifts). */
+  anchorItemId?: string;
+  /** Offset of that item's top relative to the scroll container's top. */
+  anchorOffset?: number;
+  /** Expanded visible item limit (if user clicked "Show Earlier Messages"). */
+  limit: number;
+}
+
+/** The most chats whose scroll/browsing state is kept by id. */
+const MAX_SAVED_SCROLLS = 200;
+const savedScrolls = new Map<string, SavedScrollState>();
+
+function getSavedScroll(id: string | undefined): SavedScrollState | undefined {
+  if (!id) return undefined;
+  const s = savedScrolls.get(id);
+  if (!s) return undefined;
+  savedScrolls.delete(id);
+  savedScrolls.set(id, s);
+  return s;
+}
+
+function setSavedScroll(id: string | undefined, state: SavedScrollState) {
+  if (!id) return;
+  savedScrolls.delete(id);
+  savedScrolls.set(id, state);
+  if (savedScrolls.size > MAX_SAVED_SCROLLS) savedScrolls.delete(savedScrolls.keys().next().value!);
+}
+
+function deleteSavedScroll(id: string | undefined) {
+  if (id) savedScrolls.delete(id);
+}
+
+/** Clears all saved browsing states (tests). */
+export function clearSavedScrolls() {
+  savedScrolls.clear();
+}
+
+/** How long a restored scroll position stays anchored against async lazy-render
+ * height shifts (Markdown, KaTeX, Shiki) after the last resize. */
+const RESTORE_SETTLE_MS = 600;
+
+function findItemEl(list: HTMLElement, id: string): HTMLElement | undefined {
+  const nodes = list.querySelectorAll<HTMLElement>('[data-item]');
+  for (let i = 0; i < nodes.length; i++) {
+    if (nodes[i].getAttribute('data-item') === id) return nodes[i];
+  }
+  return undefined;
+}
+
+/** Finds the first visible `[data-item]` element in the scroll container via
+ * binary search on `list.children` (O(log N) layout queries). Returns empty
+ * object when layout geometry is unavailable (e.g. jsdom). */
+function findAnchorItem(el: HTMLElement, list: HTMLElement | null): { anchorItemId?: string; anchorOffset?: number } {
+  if (!list || !list.children.length) return {};
+  const viewRect = el.getBoundingClientRect();
+  const kids = list.children;
+  let lo = 0;
+  let hi = kids.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const rect = (kids[mid] as HTMLElement).getBoundingClientRect();
+    if (rect.height === 0 && rect.bottom === 0 && viewRect.top === 0) return {};
+    if (rect.bottom > viewRect.top + 1) {
+      found = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  if (found < 0) return {};
+  for (let i = found; i < Math.min(kids.length, found + 4); i++) {
+    const node = kids[i] as HTMLElement;
+    const id = node.getAttribute('data-item');
+    if (!id) continue;
+    const rect = node.getBoundingClientRect();
+    if (rect.height > 0) return { anchorItemId: id, anchorOffset: rect.top - viewRect.top };
+  }
+  return {};
+}
+
+/** Applies a saved non-atEnd scroll position to `el`, preferring the anchored
+ * item when rendered with non-zero layout geometry and falling back to
+ * `saved.scrollTop`. Returns the resulting scrollTop applied. */
+function applySavedScroll(el: HTMLElement, list: HTMLElement | null, saved: SavedScrollState): number {
+  if (saved.anchorItemId && list) {
+    const target = findItemEl(list, saved.anchorItemId);
+    if (target) {
+      const itemRect = target.getBoundingClientRect();
+      if (itemRect.height > 0) {
+        const viewTop = el.getBoundingClientRect().top;
+        const delta = itemRect.top - viewTop - (saved.anchorOffset ?? 0);
+        if (Math.abs(delta) > 0.5) el.scrollTop += delta;
+        return el.scrollTop;
+      }
+    }
+  }
+  el.scrollTop = saved.scrollTop;
+  return el.scrollTop;
 }
 
 /** The most items the list draws at first, and how many more each "Show
@@ -107,11 +216,11 @@ function useConversation(source: ChatSource, onTaken: (what: Taken) => void) {
   useEffect(() => {
     let queue: SourceEvent[] = [];
     let live = true;
+    let initializing = true;
     let micro = false;
     let frame: number | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     state.current = EMPTY;
-    setShown({ source, conv: EMPTY });
     // The events a source gives at once (a page, a frame's increments) are
     // reduced together: the list is copied once for them and drawn once.
     const flush = () => {
@@ -139,6 +248,7 @@ function useConversation(source: ChatSource, onTaken: (what: Taken) => void) {
       // An event is an object: what else a machine sent is passed over.
       if (typeof ev !== 'object' || ev === null) return;
       queue.push(ev);
+      if (initializing) return;
       if (!isLive(ev)) {
         if (!micro) {
           micro = true;
@@ -151,6 +261,11 @@ function useConversation(source: ChatSource, onTaken: (what: Taken) => void) {
         timer = setTimeout(flush, FRAME_WAIT_MS);
       }
     });
+    initializing = false;
+    // Synchronously flush initial replay so the list renders populated on its
+    // first paint instead of flashing EMPTY and chasing the bottom across frames.
+    if (queue.length) flush();
+    else setShown({ source, conv: EMPTY });
     return () => {
       live = false;
       if (frame !== undefined) cancelAnimationFrame(frame);
@@ -166,10 +281,14 @@ function useConversation(source: ChatSource, onTaken: (what: Taken) => void) {
 export function Conversation({
   source,
   kind,
+  shown: isShown = true,
+  rewindRequest,
   base,
+  branch,
   readOnly: readOnlyProp,
   allowFull = true,
   onOpenFile,
+  onOpenChat,
   agentIcon,
   modelPicker,
   onFork,
@@ -180,15 +299,75 @@ export function Conversation({
   const scrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const atEnd = useRef(true);
+  const composerRef = useRef<ComposerHandle>(null);
+
+  const initialSaved = getSavedScroll(source.id);
+  const atEnd = useRef(initialSaved ? initialSaved.atEnd : true);
+  /** Saved scroll position being actively re-applied during mount / unhide layout shifts. */
+  const restoreRef = useRef<SavedScrollState | undefined>(initialSaved && !initialSaved.atEnd ? initialSaved : undefined);
+  /** Last scrollTop written programmatically by restore, so its async scroll event does not cancel anchoring. */
+  const lastRestoredTop = useRef<number | undefined>(undefined);
+  /** Most recently captured browsing state (survives hiding via `display: none`). */
+  const lastKnownScroll = useRef<SavedScrollState | undefined>(initialSaved);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** The list's distance from its end to keep when items come before those
    * shown. */
   const anchor = useRef<number | undefined>(undefined);
   /** An item to show and focus once it is drawn. */
   const reveal = useRef<string | undefined>(undefined);
-  const [away, setAway] = useState(false);
-  const [limit, setLimit] = useState(SHOWN_ITEMS);
+  const [away, setAway] = useState(() => (initialSaved ? !initialSaved.atEnd : false));
+  const [limit, setLimit] = useState(() => Math.max(SHOWN_ITEMS, initialSaved?.limit ?? SHOWN_ITEMS));
   const [earlier, setEarlier] = useState<'idle' | 'loading' | 'none'>('idle');
+  const [rewindTarget, setRewindTarget] = useState<{ seq: number; nonce: number } | undefined>(undefined);
+  const handledRewindNonce = useRef(0);
+
+  const shownRef = useRef(isShown);
+  shownRef.current = isShown;
+  const prevShown = useRef(isShown);
+  const limitRef = useRef(limit);
+  limitRef.current = limit;
+  const sourceIdRef = useRef(source.id);
+  sourceIdRef.current = source.id;
+
+  const clearRestore = useCallback(() => {
+    restoreRef.current = undefined;
+    lastRestoredTop.current = undefined;
+    if (settleTimer.current !== undefined) {
+      clearTimeout(settleTimer.current);
+      settleTimer.current = undefined;
+    }
+  }, []);
+
+  const armSettle = useCallback(() => {
+    if (!restoreRef.current) return;
+    if (settleTimer.current !== undefined) clearTimeout(settleTimer.current);
+    settleTimer.current = setTimeout(() => {
+      restoreRef.current = undefined;
+      lastRestoredTop.current = undefined;
+      settleTimer.current = undefined;
+    }, RESTORE_SETTLE_MS);
+  }, []);
+
+  const applyRestore = useCallback(() => {
+    const el = scrollRef.current;
+    const saved = restoreRef.current;
+    if (!el || !saved) return;
+    lastRestoredTop.current = applySavedScroll(el, listRef.current, saved);
+  }, []);
+
+  const recordScroll = useCallback((el: HTMLElement, endOverride?: boolean) => {
+    if (el.clientHeight === 0 || el.scrollHeight === 0) return;
+    const end = endOverride ?? stickToEnd(el.scrollTop, el.scrollHeight, el.clientHeight);
+    const anchorInfo = end ? undefined : findAnchorItem(el, listRef.current);
+    const next: SavedScrollState = {
+      atEnd: end,
+      scrollTop: el.scrollTop,
+      limit: limitRef.current,
+      ...anchorInfo,
+    };
+    lastKnownScroll.current = next;
+    setSavedScroll(sourceIdRef.current, next);
+  }, []);
 
   /** Keeps the user's place while items come before those shown. */
   const keep = () => {
@@ -198,37 +377,64 @@ export function Conversation({
   // An earlier page is drawn whole: the user asked for it.
   const conv = useConversation(source, (what) => {
     if ('reset' in what) {
+      deleteSavedScroll(sourceIdRef.current);
+      lastKnownScroll.current = undefined;
+      clearRestore();
       setLimit(SHOWN_ITEMS);
       setEarlier('idle');
       atEnd.current = true;
       setAway(false);
+      setRewindTarget(undefined);
       return;
     }
     keep();
     if (what.grown > 0) setLimit((l) => l + what.grown);
   });
 
-  // The view starts over with another source.
+  // The view starts over with another source (loading any saved browsing state).
   const [shownSource, setShownSource] = useState(source);
   if (shownSource !== source) {
+    const nextSaved = getSavedScroll(source.id);
     setShownSource(source);
-    setLimit(SHOWN_ITEMS);
+    setLimit(Math.max(SHOWN_ITEMS, nextSaved?.limit ?? SHOWN_ITEMS));
     setEarlier('idle');
-    setAway(false);
+    setAway(nextSaved ? !nextSaved.atEnd : false);
+    setRewindTarget(undefined);
   }
   const latestSource = useRef(source);
   useLayoutEffect(() => {
-    if (latestSource.current !== source) atEnd.current = true;
+    const prev = latestSource.current;
+    if (prev !== source) {
+      const nextSaved = getSavedScroll(source.id);
+      atEnd.current = nextSaved ? nextSaved.atEnd : true;
+      restoreRef.current = nextSaved && !nextSaved.atEnd ? nextSaved : undefined;
+      lastKnownScroll.current = nextSaved;
+      lastRestoredTop.current = undefined;
+    }
     latestSource.current = source;
-  }, [source]);
+    return () => {
+      clearRestore();
+      const el = scrollRef.current;
+      if (el && shownRef.current && el.clientHeight > 0 && el.scrollHeight > 0) {
+        const end = stickToEnd(el.scrollTop, el.scrollHeight, el.clientHeight);
+        const anchorInfo = end ? undefined : findAnchorItem(el, listRef.current);
+        const next: SavedScrollState = { atEnd: end, scrollTop: el.scrollTop, limit: limitRef.current, ...anchorInfo };
+        lastKnownScroll.current = next;
+        setSavedScroll(source.id, next);
+      } else if (lastKnownScroll.current) {
+        setSavedScroll(source.id, lastKnownScroll.current);
+      }
+    };
+  }, [source, clearRestore]);
 
   // What the items call: the same functions for the view's life, calling
   // the parent's latest ones.
-  const latest = useRef({ onOpenFile, onFork, source });
+  const latest = useRef({ onOpenFile, onOpenChat, onFork, source });
   useLayoutEffect(() => {
-    latest.current = { onOpenFile, onFork, source };
+    latest.current = { onOpenFile, onOpenChat, onFork, source };
   });
   const canOpen = !!onOpenFile;
+  const canOpenChat = !!onOpenChat;
   const canTrust = !readOnly && !!source.trust;
   const canUntrust = !readOnly && !!source.untrust;
   const baseM = base?.m;
@@ -239,10 +445,11 @@ export function Conversation({
       agent,
       base: stableBase,
       openFile: canOpen ? (path, line) => latest.current.onOpenFile?.(path, line) : undefined,
+      openChat: canOpenChat ? (chatId, chatKind) => latest.current.onOpenChat?.(chatId, chatKind) : undefined,
       trust: canTrust ? () => latest.current.source.trust?.() ?? Promise.resolve() : undefined,
       untrust: canUntrust ? () => latest.current.source.untrust?.() ?? Promise.resolve() : undefined,
     }),
-    [agent, stableBase, canOpen, canTrust, canUntrust],
+    [agent, stableBase, canOpen, canOpenChat, canTrust, canUntrust],
   );
 
   const state = conv.state;
@@ -272,10 +479,26 @@ export function Conversation({
   // Only blocking permissions/questions trigger the composer waiting banner.
   const waiting = open && blockingSet.size > 0;
 
-  const canRewind = !readOnly && !working && !!caps.rewind && !!source.rewind;
+  // Rewind is only enabled when the agent supports native rollback (preserving
+  // prompt cache); agents without native rewind surface an explicit unsupported notice.
+  const rewindReady = !readOnly && !working && !conv.chat?.handedOff && !!source.rewind;
+  const canRewind = rewindReady && !!caps.rewind;
+  const rewindUnsupported = rewindReady && !caps.rewind && !!conv.chat;
   const rewindFiles = !!caps.rewindFiles;
   const canFork = !readOnly && !working && !!onFork;
+  const nativeFork = !!caps.fork;
+  // ACP session/fork clones the full session only; mid-history partial forks
+  // fall back to a lossy Markdown summary on ACP agents.
+  const nativePartialFork = !!caps.fork && chatAdapter(kind) !== 'acp';
   const canStopTask = !readOnly && !!caps.stopTask && !!source.stopTask;
+
+  const lastUserSeq = useMemo(() => {
+    for (let i = conv.items.length - 1; i >= 0; i--) {
+      const it = conv.items[i];
+      if (it.kind === 'message' && it.role === 'user' && it.seq !== undefined) return it.seq;
+    }
+    return undefined;
+  }, [conv.items]);
 
   const tasksByToolCall = useMemo<ReadonlyMap<string, BackgroundTask>>(() => {
     const map = new Map<string, BackgroundTask>();
@@ -297,19 +520,45 @@ export function Conversation({
     [questionSourceKey],
   );
 
+  const prefillComposer = useCallback((value: string) => {
+    composerRef.current?.setDraft(value);
+  }, []);
+  const clearRewindTarget = useCallback(() => setRewindTarget(undefined), []);
+
   const timelineActions = useMemo<TimelineActions>(
     () => ({
       rewind: canRewind ? (seq, opts) => latest.current.source.rewind!(seq, opts) : undefined,
+      rewindUnsupported,
       rewindFiles,
+      prefillComposer: canRewind ? prefillComposer : undefined,
+      rewindTarget: canRewind ? rewindTarget : undefined,
+      clearRewindTarget,
       fork: canFork ? (upToSeq) => latest.current.onFork?.(upToSeq) : undefined,
+      nativeFork,
+      nativePartialFork,
+      lastUserSeq,
       stopTask: canStopTask ? (taskId) => latest.current.source.stopTask!(taskId) : undefined,
       tasksByToolCall,
       questionSourceItems,
     }),
-    [canRewind, rewindFiles, canFork, canStopTask, tasksByToolCall, questionSourceItems],
+    [
+      canRewind,
+      rewindUnsupported,
+      rewindFiles,
+      prefillComposer,
+      rewindTarget,
+      clearRewindTarget,
+      canFork,
+      nativeFork,
+      nativePartialFork,
+      lastUserSeq,
+      canStopTask,
+      tasksByToolCall,
+      questionSourceItems,
+    ],
   );
 
-  const activeTasks = useMemo(() => activeBackgroundTasks(conv), [conv]);
+  const activeTasks = useMemo(() => activeBackgroundTasks(conv, kind), [conv, kind]);
   const delivered = useCallback((clientId: string) => hasClientMessage(conv, clientId), [conv]);
 
   useImperativeHandle(
@@ -319,40 +568,69 @@ export function Conversation({
   );
 
   const toEnd = useCallback(() => {
+    clearRestore();
+    atEnd.current = true;
+    setAway(false);
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, []);
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+      recordScroll(el, true);
+    }
+  }, [clearRestore, recordScroll]);
 
   const onScroll = () => {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || !shownRef.current || el.clientHeight === 0 || el.scrollHeight === 0) return;
+    if (restoreRef.current) {
+      // Ignore the browser's async scroll notification from our own restore assignment;
+      // any other scrollTop change means the user scrolled manually.
+      if (lastRestoredTop.current !== undefined && Math.abs(el.scrollTop - lastRestoredTop.current) <= 2) return;
+      clearRestore();
+    }
     const end = stickToEnd(el.scrollTop, el.scrollHeight, el.clientHeight);
     atEnd.current = end;
     setAway(!end);
+    recordScroll(el, end);
   };
 
   const hidden = Math.max(0, conv.items.length - limit);
-  const shown = hidden ? conv.items.slice(hidden) : conv.items;
+  const visibleItems = hidden ? conv.items.slice(hidden) : conv.items;
 
-  const focusReveal = () => {
+  const focusReveal = useCallback(() => {
+    if (!shownRef.current) return;
     const id = reveal.current;
     const list = listRef.current;
     if (!id || !list) return;
-    const targetItem = Array.from(list.querySelectorAll<HTMLElement>('[data-item]')).find((el) => el.getAttribute('data-item') === id);
+    const targetItem = findItemEl(list, id);
     if (!targetItem) return;
     reveal.current = undefined;
     targetItem.scrollIntoView?.({ block: 'center' });
     const target = targetItem.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled)') ?? targetItem;
     target.focus();
-  };
+  }, []);
 
   /** Shows and focuses an item in the timeline, expanding hidden items if needed. */
-  const jumpToItem = (id: string) => {
-    const at = conv.items.findIndex((it) => it.id === id);
-    if (at >= 0 && at < hidden) setLimit(conv.items.length - at);
-    reveal.current = id;
-    focusReveal();
-  };
+  const jumpToItem = useCallback(
+    (id: string) => {
+      const at = conv.items.findIndex((it) => it.id === id);
+      if (at >= 0 && at < hidden) setLimit(conv.items.length - at);
+      reveal.current = id;
+      focusReveal();
+    },
+    [conv.items, hidden, focusReveal],
+  );
+
+  // External rewind request from the pane header turn picker: reveal the turn
+  // and open its inline rewind confirmation panel.
+  useEffect(() => {
+    if (!rewindRequest || !canRewind || rewindRequest.nonce === handledRewindNonce.current) return;
+    const target = conv.items.find((it) => it.kind === 'message' && it.role === 'user' && it.seq === rewindRequest.seq);
+    if (!target) return;
+    handledRewindNonce.current = rewindRequest.nonce;
+    clearRestore();
+    jumpToItem(target.id);
+    setRewindTarget(rewindRequest);
+  }, [rewindRequest, canRewind, conv.items, clearRestore, jumpToItem]);
 
   /** Shows the card that waits for the user, and gives it the keyboard. */
   const showWaiting = () => {
@@ -361,35 +639,64 @@ export function Conversation({
     jumpToItem(id);
   };
 
+  // When a kept pane becomes visible again, synchronously restore its scroll
+  // position before paint so returning to an active or paused chat never animates
+  // from top to bottom.
+  useLayoutEffect(() => {
+    const wasShown = prevShown.current;
+    prevShown.current = isShown;
+    if (!isShown || wasShown) return;
+    const el = scrollRef.current;
+    if (el) {
+      if (atEnd.current) {
+        el.scrollTop = el.scrollHeight;
+      } else if (lastKnownScroll.current) {
+        restoreRef.current = lastKnownScroll.current;
+        applyRestore();
+        armSettle();
+      }
+    }
+    focusReveal();
+  }, [isShown, applyRestore, armSettle, focusReveal]);
+
   // After each change: back to where the user was when items came before
-  // those shown (the distance from the end kept), else to the end while the
-  // user is there; then a card asked for is shown.
+  // those shown (the distance from the end kept), else restore saved scroll on
+  // mount, else snap to the end while the user is there; then focus any reveal.
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || !shownRef.current) return;
     if (anchor.current !== undefined) {
       el.scrollTop = el.scrollHeight - anchor.current;
       anchor.current = undefined;
-    } else if (atEnd.current) el.scrollTop = el.scrollHeight;
+    } else if (restoreRef.current && conv.items.length > 0) {
+      applyRestore();
+      armSettle();
+    } else if (atEnd.current) {
+      el.scrollTop = el.scrollHeight;
+    }
     focusReveal();
-    // focusReveal reads refs only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conv, limit]);
+  }, [conv, limit, applyRestore, armSettle, focusReveal]);
 
   // What grows after it is drawn (Markdown, formulas and code as their
   // renderers load, a tool call opened, the pane resized) keeps the list at
-  // its end while the user is there.
+  // its end while the user is there, or keeps a restored reading anchor steady.
   useEffect(() => {
     const el = scrollRef.current;
     const list = listRef.current;
     if (!el || !list || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => {
-      if (atEnd.current) el.scrollTop = el.scrollHeight;
+      if (!shownRef.current || el.clientHeight === 0 || el.scrollHeight === 0) return;
+      if (restoreRef.current) {
+        applyRestore();
+        armSettle();
+      } else if (atEnd.current) {
+        el.scrollTop = el.scrollHeight;
+      }
     });
     ro.observe(list);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [applyRestore, armSettle]);
 
   const loadEarlier = () => {
     if (!source.loadEarlier || earlier === 'loading') return;
@@ -431,6 +738,10 @@ export function Conversation({
           aria-label={t('conversation.list', { agent })}
           tabIndex={0}
           onScroll={onScroll}
+          onWheel={clearRestore}
+          onPointerDown={clearRestore}
+          onTouchStart={clearRestore}
+          onKeyDown={clearRestore}
         >
           <div ref={listRef} className="conv-list">
             {conv.items.length > 0 && (hidden > 0 || (source.loadEarlier && earlier !== 'none')) && (
@@ -458,7 +769,7 @@ export function Conversation({
             )}
             <AnsweringContext.Provider value={answering}>
               <TimelineActionsContext.Provider value={timelineActions}>
-                {shown.map((it) => (
+                {visibleItems.map((it) => (
                   <ItemView key={it.id} item={it} ctx={ctx} />
                 ))}
               </TimelineActionsContext.Provider>
@@ -505,6 +816,7 @@ export function Conversation({
         agent={agent}
         agentIcon={agentIcon}
         base={stableBase}
+        branch={branch}
         activity={conv.activity}
         modelPicker={modelPicker}
         chat={conv.chat}
@@ -519,6 +831,7 @@ export function Conversation({
         onShowWaiting={showWaiting}
         delivered={delivered}
         inputRef={inputRef}
+        composerRef={composerRef}
       />
     </div>
   );

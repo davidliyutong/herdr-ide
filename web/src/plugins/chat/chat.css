@@ -11,62 +11,6 @@
   min-width: 0;
   background: var(--bg);
 }
-.chat-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  min-width: 0;
-  height: var(--h-toolbar);
-  padding: 0 10px;
-  border-bottom: 1px solid var(--line);
-  font-size: var(--fs-sm);
-  color: var(--fg-dim);
-}
-.chat-head-icon,
-.chat-head .ai-logo {
-  flex: none;
-  width: var(--ic-sm);
-  height: var(--ic-sm);
-}
-.chat-agent {
-  flex: none;
-  font-weight: 600;
-  color: var(--fg);
-}
-.chat-title {
-  flex: 0 1 auto;
-  min-width: 0;
-  color: var(--fg);
-  cursor: default;
-}
-.chat-title-edit {
-  flex: 1;
-  min-width: 80px;
-}
-.chat-cwd {
-  flex: 1 1 0;
-  min-width: 0;
-  font-family: var(--mono);
-  color: var(--fg-mute);
-}
-.chat-head-actions {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
-}
-.chat-state {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 5px;
-  margin-left: auto;
-}
-.chat-head-actions + .chat-state {
-  margin-left: 4px;
-}
 .chat-banner {
   display: flex;
   align-items: center;
@@ -110,6 +54,12 @@
   flex: 1;
   min-height: 0;
   outline: none;
+}
+.chat-action-rewind.is-unsupported {
+  opacity: 0.45;
+}
+.chat-action-rewind.is-unsupported:hover {
+  opacity: 0.8;
 }
 
 /* ---- the panel ---- */
@@ -436,6 +386,27 @@
   text-align: left;
   border: none;
   background: transparent;
+  cursor: pointer;
+}
+.chat-settings-row:hover {
+  background: var(--bg-2);
+}
+.chat-settings-open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-settings-open:hover {
+  background: transparent;
 }
 .chat-settings-row.modified::before {
   top: 8px;
@@ -445,13 +416,27 @@
   flex: 1;
   min-width: 0;
 }
-.chat-settings-row > .ai-logo {
+.chat-settings-open > .ai-logo {
   flex: none;
   width: var(--ic-md, 16px);
   height: var(--ic-md, 16px);
 }
+.chat-settings-row.off .ai-logo,
+.chat-settings-row.off .setting-title {
+  opacity: 0.6;
+}
 .chat-settings-row > .lucide {
+  flex: none;
   color: var(--fg-mute);
+}
+.chat-provider-switch-row .setting-head {
+  justify-content: space-between;
+}
+.chat-models-bulk {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
 }
 .chat-settings-back {
   display: inline-flex;

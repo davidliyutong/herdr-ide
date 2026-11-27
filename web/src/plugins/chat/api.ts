@@ -42,6 +42,7 @@ async function send<T>(url: string, init?: RequestInit): Promise<T> {
   try {
     r = await fetch(url, init);
   } catch (e) {
+    if (init?.signal?.aborted || (e instanceof DOMException && e.name === 'AbortError')) throw e;
     throw new ChatFailure('network', e instanceof Error ? e.message : String(e));
   }
   return answer<T>(r, failure);
@@ -279,12 +280,30 @@ export const chatApi = {
   },
   /** Which chat kinds the machine can start, from a chat host that serves
    * (not_running otherwise; read_only on a read-only page). */
-  agents: async (m: string): Promise<AgentStatus[]> =>
-    list((await send<{ agents?: unknown }>(`${base(m)}/agents`, { cache: 'no-store' })).agents, MAX_AGENTS, readAgent),
+  agents: async (m: string, o?: { refresh?: boolean; signal?: AbortSignal }): Promise<AgentStatus[]> =>
+    list(
+      (
+        await send<{ agents?: unknown }>(`${base(m)}/agents${o?.refresh ? '?refresh=1' : ''}`, {
+          cache: 'no-store',
+          ...(o?.signal ? { signal: o.signal } : {}),
+        })
+      ).agents,
+      MAX_AGENTS,
+      readAgent,
+    ),
   /** The same, starting the machine's chat host when none serves (a
    * change: not on a read-only page). */
-  startAgents: async (m: string): Promise<AgentStatus[]> =>
-    list((await send<{ agents?: unknown }>(`${base(m)}/agents`, { method: 'POST' })).agents, MAX_AGENTS, readAgent),
+  startAgents: async (m: string, o?: { refresh?: boolean; signal?: AbortSignal }): Promise<AgentStatus[]> =>
+    list(
+      (
+        await send<{ agents?: unknown }>(`${base(m)}/agents${o?.refresh ? '?refresh=1' : ''}`, {
+          method: 'POST',
+          ...(o?.signal ? { signal: o.signal } : {}),
+        })
+      ).agents,
+      MAX_AGENTS,
+      readAgent,
+    ),
   /** The machine's chats, closed ones included, the latest first, from a
    * chat host that serves (not_running otherwise). */
   chats: async (m: string): Promise<ChatState[]> =>
@@ -292,11 +311,22 @@ export const chatApi = {
   /** A page of the sessions an agent kept for a directory, each once;
    * nextCursor asks for the next ('' after the last). A change, as listing
    * them may run the agent: it starts the machine's chat host when none
-   * serves, and a read-only page has none. */
-  async sessions(m: string, kind: string, cwd: string, cursor = ''): Promise<{ sessions: Session[]; nextCursor: string }> {
+   * serves, and a read-only page has none. Served from the hub's TTL cache
+   * unless o.refresh is true. */
+  async sessions(
+    m: string,
+    kind: string,
+    cwd: string,
+    cursor = '',
+    o?: { refresh?: boolean; signal?: AbortSignal },
+  ): Promise<{ sessions: Session[]; nextCursor: string }> {
     const q: Record<string, string> = { kind, cwd };
     if (cursor) q.cursor = cursor;
-    const r = await send<{ sessions?: unknown; nextCursor?: unknown }>(`${base(m)}/sessions?${query(q)}`, { method: 'POST' });
+    if (o?.refresh) q.refresh = '1';
+    const r = await send<{ sessions?: unknown; nextCursor?: unknown }>(`${base(m)}/sessions?${query(q)}`, {
+      method: 'POST',
+      ...(o?.signal ? { signal: o.signal } : {}),
+    });
     const seen = new Set<string>();
     const sessions = list(r.sessions, MAX_SESSION_PAGE, readSession).filter((s) => {
       if (seen.has(s.sessionId)) return false;
@@ -367,27 +397,52 @@ export const chatApi = {
     return fetchedAt ? { models, fetchedAt } : { models };
   },
   /** Forks an existing chat (up to upToSeq, or its end) into a new chat. */
-  async fork(m: string, body: { chat: string; upToSeq?: number; title?: string }): Promise<ChatState> {
+  async fork(m: string, body: { chat: string; upToSeq?: number; title?: string; maxBytes?: number }): Promise<ChatState> {
     const r = await send<{ chat?: unknown }>(`${base(m)}/fork`, jsonInit('POST', body));
     const chat = readState(r.chat);
     if (!chat) throw new ChatFailure('protocol', 'no chat in the answer');
     return chat;
   },
   /** Exports context from a chat and starts a new chat with targetKind in the same directory. */
-  async switchChat(m: string, body: { chat: string; targetKind: string; options?: Options; upToSeq?: number }): Promise<ChatState> {
+  async switchChat(
+    m: string,
+    body: { chat: string; targetKind: string; options?: Options; upToSeq?: number; maxBytes?: number },
+  ): Promise<ChatState> {
     const r = await send<{ chat?: unknown }>(`${base(m)}/switch`, jsonInit('POST', body));
     const chat = readState(r.chat);
     if (!chat) throw new ChatFailure('protocol', 'no chat in the answer');
     return chat;
   },
   /** Exports a chat's conversation as a bounded Markdown digest. */
-  async exportMarkdown(m: string, chat: string, upToSeq?: number): Promise<string> {
+  async exportMarkdown(m: string, chat: string, upToSeq?: number, maxBytes?: number): Promise<string> {
     const q: Record<string, string> = { chat };
     if (upToSeq !== undefined) q.upToSeq = String(upToSeq);
+    if (maxBytes !== undefined) q.maxBytes = String(maxBytes);
     const r = await send<{ markdown?: unknown }>(`${base(m)}/export?${query(q)}`, { cache: 'no-store' });
     return typeof r.markdown === 'string' ? r.markdown : '';
   },
+  /** Exports a chat's raw metadata and stored events as lossless JSON. */
+  async exportJson(m: string, chat: string, upToSeq?: number): Promise<Record<string, unknown>> {
+    const q: Record<string, string> = { chat, format: 'json' };
+    if (upToSeq !== undefined) q.upToSeq = String(upToSeq);
+    const r = await send<{ data?: unknown }>(`${base(m)}/export?${query(q)}`, { cache: 'no-store' });
+    if (!isObject(r.data)) throw new ChatFailure('protocol', 'no export data in the answer');
+    return r.data;
+  },
 };
+
+/** Default and selectable Markdown export / handoff digest budget presets (in KiB). */
+export const DEFAULT_HANDOFF_MAX_KB = 96;
+export const HANDOFF_BUDGET_PRESETS = [32, 64, 96, 192, 384, 512] as const;
+
+/** Configured Markdown export / handoff digest budget in KiB (16..512, default 96). */
+export function handoffMaxKB(values: Values): number {
+  const raw = values['chat.handoffMaxKB']?.value ?? builtinDefaults['chat.handoffMaxKB'];
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return Math.max(16, Math.min(512, Math.trunc(raw)));
+  }
+  return DEFAULT_HANDOFF_MAX_KB;
+}
 
 type Values = Record<string, { value?: unknown; machines?: Record<string, unknown> } | undefined>;
 
@@ -395,6 +450,13 @@ type Values = Record<string, { value?: unknown; machines?: Record<string, unknow
  * built-in default. */
 const valueFor = (values: Values, key: string, m: string): unknown =>
   values[key]?.machines?.[m] ?? values[key]?.value ?? builtinDefaults[key];
+
+/** Whether a chat provider kind is enabled in settings (default on). */
+export function isChatProviderEnabled(values: Values, kind: string | undefined): boolean {
+  if (!kind) return true;
+  const key = `chat.providers.${kind}`;
+  return (values[key]?.value ?? builtinDefaults[key]) !== false;
+}
 
 /** Visible model ID allowlist for an agent kind (empty = show all models). */
 export function visibleModelsFor(values: Values, kind: string | undefined): string[] {
@@ -408,13 +470,21 @@ export function visibleModelsFor(values: Values, kind: string | undefined): stri
  * chat.allowFullAccess (off by default). */
 export const fullAccessAllowed = (values: Values, m: string): boolean => valueFor(values, 'chat.allowFullAccess', m) === true;
 
-/** The permission mode a new chat on machine m asks for: the setting
- * chat.permissionMode (one of MODES); none for full access while the
- * machine's chat.allowFullAccess is not on, which leaves the mode to the
- * chat host (it starts no agent with full access then). */
-export function permissionMode(values: Values, m: string): string | undefined {
-  const v = valueFor(values, 'chat.permissionMode', m);
-  const mode = typeof v === 'string' && (MODES as readonly string[]).includes(v) ? v : 'default';
+/** The permission mode a new chat of agent `kind` on machine m asks for:
+ * checks the per-agent override `chat.permissionMode.<kind>` first (when set
+ * to a concrete mode rather than `inherit`), else falls back to the global
+ * `chat.permissionMode`; returns undefined for `full` while the machine's
+ * `chat.allowFullAccess` is not on, leaving the mode to the chat host. */
+export function permissionMode(values: Values, m: string, kind?: string): string | undefined {
+  let raw: unknown;
+  if (kind) {
+    const specific = valueFor(values, `chat.permissionMode.${kind}`, m);
+    if (typeof specific === 'string' && specific !== 'inherit' && (MODES as readonly string[]).includes(specific)) {
+      raw = specific;
+    }
+  }
+  if (raw === undefined) raw = valueFor(values, 'chat.permissionMode', m);
+  const mode = typeof raw === 'string' && (MODES as readonly string[]).includes(raw) ? raw : 'default';
   return mode === 'full' && !fullAccessAllowed(values, m) ? undefined : mode;
 }
 
