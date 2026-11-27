@@ -54,10 +54,10 @@ export function MonitorStatusItem() {
   // Poll the active machine while the status bar item or its popup is visible.
   useEffect(() => {
     if (!machineId || machine?.status !== 'ready' || (!shown && !open)) return;
-    let alive = true;
+    const ac = new AbortController();
     const poll = () => {
-      if (!alive || document.hidden) return;
-      void fetchMetrics(machineId);
+      if (ac.signal.aborted || document.hidden) return;
+      void fetchMetrics(machineId, ac.signal);
     };
     poll();
     const timer = setInterval(poll, intervalMs);
@@ -66,7 +66,7 @@ export function MonitorStatusItem() {
     };
     document.addEventListener('visibilitychange', onVis);
     return () => {
-      alive = false;
+      ac.abort();
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVis);
     };
@@ -375,15 +375,15 @@ export function MachineHoverMonitor() {
   const shownStatus = useStore((s) => (shownId ? s.machines[shownId]?.status : undefined));
   useEffect(() => {
     if (!shownId || shownStatus !== 'ready') return;
-    let alive = true;
+    const ac = new AbortController();
     const poll = () => {
-      if (!alive || document.hidden) return;
-      void fetchMetrics(shownId);
+      if (ac.signal.aborted || document.hidden) return;
+      void fetchMetrics(shownId, ac.signal);
     };
     poll();
     const timer = setInterval(poll, intervalMs);
     return () => {
-      alive = false;
+      ac.abort();
       clearInterval(timer);
     };
   }, [shownId, shownStatus, intervalMs]);

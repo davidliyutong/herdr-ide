@@ -29,6 +29,7 @@ import {
   INTERVAL,
   LIST_GAP_MS,
   LIST_SETTLE_MS,
+  MAX_CONCURRENT_READS,
   RETRY_MAX_MS,
   RETRY_MIN_MS,
   awaitsCapture,
@@ -752,5 +753,48 @@ describe('the history plugin in the page', () => {
     expect(changed).not.toHaveBeenCalled();
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('pre-boot same pid');
     off();
+  });
+
+  it('bounds concurrent snapshot reads during restart recovery to MAX_CONCURRENT_READS', async () => {
+    capture(true);
+    const total = 10;
+    const leaves = Array.from({ length: total }, (_, i) => ({ terminal: `t${i}` }));
+    const recs = Array.from({ length: total }, (_, i) => rec(`t${i}`, 200 + i));
+    hub.list = {
+      restoreScreen: false,
+      terminals: Array.from({ length: total }, (_, i) => entry(`t${i}`, 100 + i, 3000 + i)),
+    };
+    for (let i = 0; i < total; i++) hub.data.set(`t${i} current`, { bytes: enc(`snap-${i}`), pid: 100 + i, at: 3000 + i });
+
+    let inFlight = 0;
+    let peak = 0;
+    const releases: Array<() => void> = [];
+    const origFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/p/history/read')) {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise<void>((r) => releases.push(r));
+        inFlight--;
+      }
+      return origFetch(url, init);
+    });
+
+    machine(recs, {
+      version: 2,
+      selected: 0,
+      workspaces: [{ id: 'w', name: '', cwd: '', selected: 0, tabs: leaves.map((root) => ({ root, focused: root.terminal })) }],
+    });
+    stop = startHistory();
+    await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS + 10);
+    expect(peak).toBe(MAX_CONCURRENT_READS);
+    expect(inFlight).toBe(MAX_CONCURRENT_READS);
+    while (releases.length > 0) {
+      releases.shift()!();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(peak).toBe(MAX_CONCURRENT_READS);
+    for (let i = 0; i < total; i++) expect(text(preludeOf('a', `t${i}`)?.bytes)).toBe(`snap-${i}`);
   });
 });

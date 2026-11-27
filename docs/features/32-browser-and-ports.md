@@ -34,7 +34,7 @@ Non-goals: forwards for clients not on the hub's host (behind a reverse proxy th
 A forwarded service is another site than the UI and must stay one.
 
 - Its own port gives it its own origin. The hub's guard accepts a loopback `Origin` only when it is the request's own ([08](08-web-access-and-security.md)), so a forwarded page cannot open the UI's WebSockets or call its API.
-- Cookies ignore ports, so a forward is never framed under the UI's host name: a UI on `127.0.0.1` (the desktop app) loads `http://localhost:<port>`, a UI on `localhost` loads `http://127.0.0.1:<port>` (`otherHost` in `web/src/plugins/browser/api.ts`); the same for the local machine's services.
+- Cookies ignore ports, so in a browser a forward is never framed under the UI's host name: a UI on `127.0.0.1` loads `http://localhost:<port>`, a UI on `localhost` loads `http://127.0.0.1:<port>` (`otherHost` in `web/src/plugins/browser/api.ts`); the same for the local machine's services. The desktop app serves its UI from `https://<slug>.localhost` and renders browser panes in `<webview>` guests inside the isolated `persist:browser` partition, so it loads forwards and local loopback pages on `localhost`.
 - The page's CSP is built per request (`appCSP`): besides the UI it allows frames of the *other* loopback name only, so a framed page cannot navigate itself to the UI's host name on another port and share its cookies. A UI on any other host gets no foreign frames.
 - The hub's own address is never a page for a pane: it is refused when typed (`parseAddress`), as a link target (`web/src/lib/webUrl.ts`) and for desktop guests (`desktop/src/policy.ts`). In a remote machine's pane a port with the hub's number is the machine's port, shown through a forward.
 

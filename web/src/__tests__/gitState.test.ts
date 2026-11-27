@@ -20,6 +20,7 @@ import { useSettings } from '../settings';
 import { definePlugins } from '../plugins/registry';
 import { useShownDirs } from '../plugins/files/decorations';
 import { gitPlugin } from '../plugins/git';
+import { limitGitRead, MAX_CONCURRENT_GIT_READS } from '../plugins/git/api';
 import { leaseCount, repoOf } from '../plugins/git/follow';
 import {
   ACTIVE_MS,
@@ -418,5 +419,38 @@ describe('following a repository', () => {
     expect(discarded.files.find((f) => f.path === 'mod.ts')).toBeUndefined();
     expect(discarded.files.find((f) => f.path === 'new.ts')).toBeUndefined();
     expect(discarded.files.find((f) => f.path === 'both.ts')).toEqual({ path: 'both.ts', x: 'M', y: '.', kind: 'changed' });
+  });
+
+  it('caps concurrent background git reads per machine and cancels queued waits on abort', async () => {
+    let active = 0;
+    let peak = 0;
+    const releases: Array<() => void> = [];
+    const run = (signal?: AbortSignal) =>
+      limitGitRead(
+        'm-cap',
+        async () => {
+          active++;
+          peak = Math.max(peak, active);
+          await new Promise<void>((r) => releases.push(r));
+          active--;
+        },
+        signal,
+      );
+    const queuedAc = new AbortController();
+    const tasks = Array.from({ length: 10 }, (_, i) => run(i === 8 ? queuedAc.signal : undefined));
+    expect(peak).toBe(MAX_CONCURRENT_GIT_READS);
+    expect(releases).toHaveLength(MAX_CONCURRENT_GIT_READS);
+    // Aborting a queued task removes it before it ever starts.
+    const abortedWait = expect(tasks[8]).rejects.toThrow();
+    queuedAc.abort();
+    await abortedWait;
+    while (releases.length > 0) {
+      releases.shift()!();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    await Promise.all(tasks.filter((_, i) => i !== 8));
+    expect(peak).toBe(MAX_CONCURRENT_GIT_READS);
+    expect(active).toBe(0);
   });
 });

@@ -50,8 +50,38 @@ export const useMonitor = create<MonitorStore>((set) => ({
   setTargetMachine: (targetMachine) => set({ targetMachine }),
 }));
 
-const inflightMetrics = new Map<string, Promise<void>>();
-const inflightProcesses = new Map<string, Promise<void>>();
+interface InFlight {
+  promise: Promise<void>;
+  ac: AbortController;
+  waiters: number;
+}
+
+const inflightMetrics = new Map<string, InFlight>();
+const inflightProcesses = new Map<string, InFlight>();
+
+function attachSignal(map: Map<string, InFlight>, key: string, flight: InFlight, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    flight.waiters++;
+    return flight.promise;
+  }
+  if (signal.aborted) return Promise.resolve();
+  flight.waiters++;
+  return new Promise<void>((resolve) => {
+    const onAbort = () => {
+      flight.waiters--;
+      if (flight.waiters <= 0) {
+        if (map.get(key) === flight) map.delete(key);
+        flight.ac.abort();
+      }
+      resolve();
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    void flight.promise.finally(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    });
+  });
+}
 
 function patchMachine(m: string, fn: (cur: MachineMonitorState) => MachineMonitorState) {
   useMonitor.setState((s) => ({
@@ -59,14 +89,19 @@ function patchMachine(m: string, fn: (cur: MachineMonitorState) => MachineMonito
   }));
 }
 
-/** Fetches one fresh metrics snapshot for machine m (deduplicated in flight). */
-export function fetchMetrics(m: string): Promise<void> {
+/** Fetches one fresh metrics snapshot for machine m (deduplicated in flight;
+ * aborts the underlying request if every caller's signal aborts). */
+export function fetchMetrics(m: string, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
   const existing = inflightMetrics.get(m);
-  if (existing) return existing;
+  if (existing) return attachSignal(inflightMetrics, m, existing, signal);
+  const ac = new AbortController();
   patchMachine(m, (cur) => ({ ...cur, metricsLoading: true }));
-  const p = monitorApi
-    .metrics(m)
+  const flight: InFlight = { promise: undefined as unknown as Promise<void>, ac, waiters: 0 };
+  flight.promise = monitorApi
+    .metrics(m, ac.signal)
     .then((metrics) => {
+      if (ac.signal.aborted) return;
       patchMachine(m, (cur) => {
         const pt: HistoryPoint = {
           ts: metrics.timestampMs,
@@ -81,33 +116,46 @@ export function fetchMetrics(m: string): Promise<void> {
       });
     })
     .catch((err) => {
+      if (ac.signal.aborted) {
+        patchMachine(m, (cur) => ({ ...cur, metricsLoading: false }));
+        return;
+      }
       patchMachine(m, (cur) => ({ ...cur, metricsLoading: false, metricsError: errorText(err) }));
     })
     .finally(() => {
-      inflightMetrics.delete(m);
+      if (inflightMetrics.get(m) === flight) inflightMetrics.delete(m);
     });
-  inflightMetrics.set(m, p);
-  return p;
+  inflightMetrics.set(m, flight);
+  return attachSignal(inflightMetrics, m, flight, signal);
 }
 
-/** Fetches one fresh process list for machine m (deduplicated in flight). */
-export function fetchProcesses(m: string): Promise<void> {
+/** Fetches one fresh process list for machine m (deduplicated in flight;
+ * aborts the underlying request if every caller's signal aborts). */
+export function fetchProcesses(m: string, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
   const existing = inflightProcesses.get(m);
-  if (existing) return existing;
+  if (existing) return attachSignal(inflightProcesses, m, existing, signal);
+  const ac = new AbortController();
   patchMachine(m, (cur) => ({ ...cur, processesLoading: true }));
-  const p = monitorApi
-    .processes(m)
+  const flight: InFlight = { promise: undefined as unknown as Promise<void>, ac, waiters: 0 };
+  flight.promise = monitorApi
+    .processes(m, ac.signal)
     .then((processes) => {
+      if (ac.signal.aborted) return;
       patchMachine(m, (cur) => ({ ...cur, processes, processesLoading: false, processesError: undefined }));
     })
     .catch((err) => {
+      if (ac.signal.aborted) {
+        patchMachine(m, (cur) => ({ ...cur, processesLoading: false }));
+        return;
+      }
       patchMachine(m, (cur) => ({ ...cur, processesLoading: false, processesError: errorText(err) }));
     })
     .finally(() => {
-      inflightProcesses.delete(m);
+      if (inflightProcesses.get(m) === flight) inflightProcesses.delete(m);
     });
-  inflightProcesses.set(m, p);
-  return p;
+  inflightProcesses.set(m, flight);
+  return attachSignal(inflightProcesses, m, flight, signal);
 }
 
 /** Sends an allowlisted signal to a process and refreshes the process list. */

@@ -34,15 +34,15 @@ export function Detail({
   useEffect(() => setParent(1), [rev]);
   useEffect(() => {
     if (row.kind === 'uncommitted') return;
-    let gone = false;
+    const ac = new AbortController();
     setShown(undefined);
     setError(undefined);
     gitApi
-      .show(m, repo, compare ? compare : rev, compare ? { rev2: rev } : { parent })
-      .then((s) => !gone && setShown(s))
-      .catch((e) => !gone && setError(errorText(e)));
+      .show(m, repo, compare ? compare : rev, compare ? { rev2: rev, signal: ac.signal } : { parent, signal: ac.signal })
+      .then((s) => !ac.signal.aborted && setShown(s))
+      .catch((e) => !ac.signal.aborted && setError(errorText(e)));
     return () => {
-      gone = true;
+      ac.abort();
     };
   }, [m, repo, rev, compare, parent, row.kind]);
 

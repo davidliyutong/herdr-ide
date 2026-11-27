@@ -69,6 +69,7 @@ interface Slot {
   busy: boolean;
   again: boolean;
   owed: boolean;
+  abort?: AbortController;
   timer?: ReturnType<typeof setTimeout>;
   retry?: ReturnType<typeof setTimeout>;
 }
@@ -108,33 +109,40 @@ function put(key: string, e: SessionEntry) {
   });
 }
 
-/** Reads a session's numbers into useUsage.sessions: whether the machine
- * answered. A failure without a code of its own (the machine offline, the
- * network, no answer within SESSION_TIMEOUT_MS) keeps what was known. */
-async function load(t: SessionTarget, key: string): Promise<boolean> {
+/** Reads a session's numbers into useUsage.sessions: 'ok' when the machine
+ * answered, 'aborted' when cancelled before completion (e.g. pane switch),
+ * 'failed' otherwise (offline, network, timeout). A failure keeps what was
+ * known. */
+async function load(t: SessionTarget, key: string, slot: Slot): Promise<'ok' | 'aborted' | 'failed'> {
   const q = new URLSearchParams({ kind: t.kind });
   if (t.session) q.set('session', t.session);
   if (t.cwd) q.set('cwd', t.cwd);
   if (t.pid) q.set('pid', String(t.pid));
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), SESSION_TIMEOUT_MS);
+  slot.abort = abort;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    abort.abort();
+  }, SESSION_TIMEOUT_MS);
   try {
     const r = await fetch(`/api/m/${encodeURIComponent(t.m)}/p/usage/session?${q}`, { signal: abort.signal });
     const j = await jsonBody(r);
     if (r.ok) {
       const usage = sessionUsageOf(j);
       if (usage) put(key, { usage, at: Date.now() });
-      return !!usage;
+      return usage ? 'ok' : 'failed';
     }
     if (typeof j.error === 'string' && CODES.has(j.error)) {
       put(key, { code: j.error as SessionCode, status: t.status, at: Date.now() });
-      return true;
+      return 'ok';
     }
-    return false;
+    return 'failed';
   } catch {
-    return false;
+    return abort.signal.aborted && !timedOut ? 'aborted' : 'failed';
   } finally {
     clearTimeout(timer);
+    if (slot.abort === abort) slot.abort = undefined;
   }
 }
 
@@ -168,14 +176,20 @@ export function requestSession(t: SessionTarget, final = false, retry = false) {
   s.owed = false;
   s.at = Date.now();
   s.busy = true;
-  void load(t, key).then((ok) => {
+  void load(t, key, s).then((res) => {
     s.busy = false;
+    if (res === 'aborted') {
+      // Cancelled on pane switch / unmount: allow an immediate read if focused again.
+      s.at = 0;
+      s.again = false;
+      return;
+    }
     if (s.again) {
       s.again = false;
       requestSession(t, true);
       return;
     }
-    if (ok || !final || retry || s.retry) return;
+    if (res === 'ok' || !final || retry || s.retry) return;
     s.retry = setTimeout(() => {
       s.retry = undefined;
       requestSession(t, true, true);
@@ -183,10 +197,29 @@ export function requestSession(t: SessionTarget, final = false, retry = false) {
   });
 }
 
-/** Cancels the reads that wait for their gap or their one more try (the
+/** Aborts an in-flight read for a single session key (e.g. when switching
+ * away from its terminal pane so it does not hold a machine read slot). */
+export function abortSessionRead(key: string) {
+  const s = slots.get(key);
+  if (!s) return;
+  if (s.abort) {
+    s.abort.abort();
+    s.abort = undefined;
+  }
+  clearTimeout(s.timer);
+  s.timer = undefined;
+  clearTimeout(s.retry);
+  s.retry = undefined;
+}
+
+/** Cancels in-flight reads and reads waiting for their gap or retry (the
  * status bar's item is gone). */
 export function cancelSessionReads() {
   for (const s of slots.values()) {
+    if (s.abort) {
+      s.abort.abort();
+      s.abort = undefined;
+    }
     clearTimeout(s.timer);
     s.timer = undefined;
     clearTimeout(s.retry);
@@ -212,6 +245,12 @@ export function useSessionReads(t: SessionTarget | undefined) {
   const latest = useRef(t);
   latest.current = t;
   const seen = useRef<{ key?: string; status?: AgentStatus }>({});
+  // Abort any in-flight read when switching away from a pane/session so rapid
+  // terminal switches do not pile up against MAX_SESSION_READS on the hub.
+  useEffect(() => {
+    if (!key) return;
+    return () => abortSessionRead(key);
+  }, [key]);
   // The focused session, and its agent's status.
   useEffect(() => {
     const before = seen.current;

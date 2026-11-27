@@ -57,27 +57,36 @@ export function diffTitle(d: DiffView): string {
 const EMPTY: Blob = { exists: false, text: '', size: 0 };
 
 /** Both sides of a diff. */
-export async function loadSides(m: string, d: DiffView): Promise<{ left: Blob; right: Blob }> {
+export async function loadSides(m: string, d: DiffView, signal?: AbortSignal): Promise<{ left: Blob; right: Blob }> {
   const left = d.orig ?? d.path;
   switch (d.mode) {
     case 'worktree': {
       const [l, r] = await Promise.all([
-        d.untracked ? EMPTY : gitApi.blob(m, d.repo, d.path, 'index'),
-        gitApi.blob(m, d.repo, d.path, 'worktree'),
+        d.untracked ? EMPTY : gitApi.blob(m, d.repo, d.path, 'index', undefined, signal),
+        gitApi.blob(m, d.repo, d.path, 'worktree', undefined, signal),
       ]);
       // A conflicted file has no entry of its own in the index: HEAD's.
-      return { left: l.exists || d.untracked ? l : await gitApi.blob(m, d.repo, d.path, 'head'), right: r };
+      return { left: l.exists || d.untracked ? l : await gitApi.blob(m, d.repo, d.path, 'head', undefined, signal), right: r };
     }
     case 'staged': {
-      const [l, r] = await Promise.all([gitApi.blob(m, d.repo, left, 'head'), gitApi.blob(m, d.repo, d.path, 'index')]);
+      const [l, r] = await Promise.all([
+        gitApi.blob(m, d.repo, left, 'head', undefined, signal),
+        gitApi.blob(m, d.repo, d.path, 'index', undefined, signal),
+      ]);
       return { left: l, right: r };
     }
     case 'commit': {
-      const [l, r] = await Promise.all([gitApi.blob(m, d.repo, left, d.rev!, d.parent ?? 1), gitApi.blob(m, d.repo, d.path, d.rev!)]);
+      const [l, r] = await Promise.all([
+        gitApi.blob(m, d.repo, left, d.rev!, d.parent ?? 1, signal),
+        gitApi.blob(m, d.repo, d.path, d.rev!, undefined, signal),
+      ]);
       return { left: l, right: r };
     }
     default: {
-      const [l, r] = await Promise.all([gitApi.blob(m, d.repo, left, d.rev!), gitApi.blob(m, d.repo, d.path, d.rev2!)]);
+      const [l, r] = await Promise.all([
+        gitApi.blob(m, d.repo, left, d.rev!, undefined, signal),
+        gitApi.blob(m, d.repo, d.path, d.rev2!, undefined, signal),
+      ]);
       return { left: l, right: r };
     }
   }
@@ -165,18 +174,24 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   const editable = d.mode === 'worktree' && !readOnly && rules.editable;
   const key = `${d.repo}\u0000${d.path}\u0000${d.mode}\u0000${d.rev ?? ''}\u0000${d.rev2 ?? ''}\u0000${d.parent ?? ''}\u0000${d.orig ?? ''}`;
   // The latest call of show and the file shown: an earlier call's answer
-  // (another file's after a switch, an older version's) is dropped.
+  // (another file's after a switch, an older version's) is dropped, and its
+  // in-flight fetch is aborted so old git processes free machine slots.
   const shows = useRef(0);
+  const showAbort = useRef<AbortController | undefined>(undefined);
   const keyNow = useRef(key);
   keyNow.current = key;
+  useEffect(() => () => showAbort.current?.abort(), []);
 
   const show = useCallback(
     async (keepDirty = false) => {
+      showAbort.current?.abort();
+      const ac = new AbortController();
+      showAbort.current = ac;
       const call = ++shows.current;
-      const stale = () => call !== shows.current || keyNow.current !== key;
+      const stale = () => call !== shows.current || keyNow.current !== key || ac.signal.aborted;
       let s: { left: Blob; right: Blob };
       try {
-        s = await loadSides(m, d);
+        s = await loadSides(m, d, ac.signal);
       } catch (e) {
         if (!stale()) setStatus({ kind: 'error', message: errorText(e) });
         return;

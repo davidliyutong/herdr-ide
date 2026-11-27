@@ -21,18 +21,18 @@ export function Stashes({ m, root, version }: { m: string; root: string; version
   const rowH = useSize('row');
   const [stashes, setStashes] = useState<Stash[]>(() => panelMemory(m, root).stashes ?? []);
   useEffect(() => {
-    let gone = false;
+    const ac = new AbortController();
     const set = (s: Stash[]) => {
-      if (gone) return;
+      if (ac.signal.aborted) return;
       panelMemory(m, root).stashes = s;
       setStashes(s);
     };
     gitApi
-      .stashes(m, root)
+      .stashes(m, root, ac.signal)
       .then(set)
       .catch(() => set([]));
     return () => {
-      gone = true;
+      ac.abort();
     };
   }, [m, root, version]);
   if (!stashes.length) return null;

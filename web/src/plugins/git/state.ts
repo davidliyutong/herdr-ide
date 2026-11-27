@@ -17,7 +17,18 @@ import { useTerms } from '../../state/terms';
 import { directoryOf, type TerminalRecord } from '../../term/protocol';
 import { t } from '../../i18n';
 import { refreshDecorations } from '../files/decorations';
-import { errorText, gitApi, GitError, noRepo, type RepoInfo, type Status, type StatusFile, type Watch } from './api';
+import {
+  errorText,
+  gitApi,
+  GitError,
+  isAbortError,
+  limitGitRead,
+  noRepo,
+  type RepoInfo,
+  type Status,
+  type StatusFile,
+  type Watch,
+} from './api';
 
 /** How often a shown repository's watch token is read; ACTIVE_POLL_MS
  * while the repository is active. */
@@ -77,6 +88,12 @@ function patch(m: string, root: string, f: (s: RepoState) => Partial<RepoState>)
     const cur = st.repos[k] ?? { version: 0, refs: 0, readAt: 0 };
     return { repos: { ...st.repos, [k]: { ...cur, ...f(cur) } } };
   });
+}
+
+/** Seeds a repository's already-fetched info so an immediate watchRepo/refresh
+ * does not issue a redundant gitApi.repo call for the same root. */
+export function seedRepoInfo(m: string, info: RepoInfo) {
+  patch(m, info.root, (s) => (s.info ? {} : { info }));
 }
 
 /** What the polls keep per repository: a read due (the token moved, a
@@ -290,12 +307,14 @@ async function read(m: string, root: string, withInfo: boolean) {
   const t0 = Date.now();
   const needInfo = withInfo || !useGit.getState().repos[k]?.info;
   try {
-    const [info, status] = await Promise.all([
-      // The branch, upstream and ahead/behind come with the status; the
-      // info (remotes, git directories) only when it may have changed.
-      needInfo ? gitApi.repo(m, root).catch(() => undefined) : undefined,
-      gitApi.status(m, root),
-    ]);
+    const [info, status] = await limitGitRead(m, async () => {
+      // Run info (when needed) and status sequentially within one per-machine
+      // read slot so expanding many submodules or focusing the window never
+      // exceeds the machine's MAX_RUNS semaphore.
+      const i = needInfo ? await gitApi.repo(m, root).catch(() => undefined) : undefined;
+      const s = await gitApi.status(m, root);
+      return [i, s] as const;
+    });
     paced(k, Date.now() - t0);
     // A status read that raced with a newer UI mutation must not overwrite
     // the optimistic state with pre-mutation data.
@@ -631,22 +650,23 @@ export function useReposOf(m: string | undefined, dir: string | undefined): { ro
   useEffect(() => {
     if (!m || !dir || (found && 'roots' in found)) return;
     let gone = false;
+    const ac = new AbortController();
     const ask = () =>
-      gitApi
-        .repo(m, dir)
+      limitGitRead(m, () => gitApi.repo(m, dir, ac.signal), ac.signal)
         .then((info) => {
           if (gone) return;
           repoOfDir.setState((s) => ({ dirs: { ...s.dirs, [k]: { roots: rootsOf(info) } } }));
           patch(m, info.root, () => ({ info }));
         })
         .catch((e) => {
-          if (gone) return;
+          if (gone || isAbortError(e)) return;
           repoOfDir.setState((s) => ({ dirs: { ...s.dirs, [k]: noRepo(e) ? { roots: [] } : { error: errorText(e) } } }));
         });
     const timer = found ? setTimeout(() => void ask(), RETRY_MS) : undefined;
     if (!found) void ask();
     return () => {
       gone = true;
+      ac.abort();
       clearTimeout(timer);
     };
   }, [m, dir, k, found]);

@@ -448,16 +448,16 @@ function ListeningPorts({ m, onOpen }: { m: string; onOpen(port: number): void }
   const label = useStore((s) => s.machines[m]?.label ?? m);
   const [ports, setPorts] = useState<ListeningPort[] | 'loading' | 'failed'>('loading');
   useEffect(() => {
-    let dead = false;
+    const ac = new AbortController();
     setPorts('loading');
     // On this computer the hub's own port is no page for a pane.
     const mine = (p: ListeningPort) => !isRemote(m) && parseAddress(String(p.port)).kind !== 'page';
-    browserApi.listening(m).then(
-      (p) => !dead && setPorts(p.filter((x) => !mine(x))),
-      () => !dead && setPorts('failed'),
+    browserApi.listening(m, ac.signal).then(
+      (p) => !ac.signal.aborted && setPorts(p.filter((x) => !mine(x))),
+      () => !ac.signal.aborted && setPorts('failed'),
     );
     return () => {
-      dead = true;
+      ac.abort();
     };
   }, [m]);
   return (

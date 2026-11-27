@@ -679,6 +679,25 @@ describe('usage session reads', () => {
     expect(reads).toHaveLength(13);
   });
 
+  it('aborts an in-flight session fetch when switching away to another pane', async () => {
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      if (init?.signal) signals.push(init.signal);
+      return await new Promise((_, reject) =>
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true }),
+      );
+    });
+    const both = (focused: string) => show([rec('t1'), rec('t2', { agent_session: S2 })], focused);
+    both('t1');
+    await render();
+    expect(signals).toHaveLength(1);
+    expect(signals[0].aborted).toBe(false);
+    await set(() => both('t2'));
+    expect(signals[0].aborted).toBe(true);
+    expect(signals).toHaveLength(2);
+    expect(signals[1].aborted).toBe(false);
+  });
+
   it('keeps the numbers of at most SESSION_KEEP sessions, the oldest leaving first', async () => {
     const id = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
     await render();
@@ -717,7 +736,11 @@ describe('usage session in the status bar', () => {
     show([rec('t1')], 't1');
     await set(() => root.render(createElement(StatusBar, { connected: true, chord: false })));
     expect(host.querySelector('[data-status-widget="usage.session"] .usage-session-item')).not.toBeNull();
-    await set(() => host.querySelector<HTMLButtonElement>('.status-widgets-btn')!.click());
+    await set(() =>
+      host
+        .querySelector<HTMLElement>('footer.statusbar')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 600 })),
+    );
     const entry = useMenu.getState().menu!.entries.find((e) => isItem(e) && e.label === t('usage.session.title'));
     expect(entry).toBeDefined();
     await set(() => {

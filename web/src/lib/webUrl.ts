@@ -1,6 +1,8 @@
 // Which addresses a text of another origin (a document, a program's output)
 // may make the page open. Both Markdown links and terminal links pass here.
 
+import { desktopShell } from '../shell';
+
 // Browsers drop tabs, newlines and other controls from a URL before reading
 // it (`java\nscript:` is `javascript:`), so the text is read cleaned the
 // same way.
@@ -28,15 +30,21 @@ const portOf = (u: { port: string; protocol: string }): string => u.port || (u.p
 export type PageAddress = Pick<Location, 'origin' | 'hostname' | 'port' | 'protocol'>;
 
 /** Whether u leads to the server of the page itself: the page's origin,
- * or, with the page on a loopback host, any loopback host with the page's
- * port under either scheme. The hub answers under every name of its
- * computer's loopback (`127.0.0.1` for a page on `localhost`, and the
- * reverse), so the other name is the UI's own routes again, only as
- * another origin. A page on any other host knows nothing of the kind: its
- * `localhost` is the viewer's computer. */
-export function isOwnAddress(u: URL, page: PageAddress | undefined = globalThis.location): boolean {
+ * or, in the desktop app (which intercepts https://<slug>.localhost and
+ * listens on no TCP port), that exact host under any scheme and port
+ * (matching desktop/src/policy.ts leadsToHub); or, with a browser page on
+ * a loopback host, any loopback host with the page's port under either
+ * scheme. The CLI hub answers under every name of its computer's loopback
+ * (`127.0.0.1` for a page on `localhost`, and the reverse), so the other
+ * name is the UI's own routes again, only as another origin. A page on any
+ * other host knows nothing of the kind: its `localhost` is the viewer's
+ * computer. */
+export function isOwnAddress(u: URL, page: PageAddress | undefined = globalThis.location, desktop: boolean = !!desktopShell): boolean {
   if (!page) return false;
   if (u.origin === page.origin) return true;
+  if (desktop && page.hostname.toLowerCase().endsWith('.localhost')) {
+    return u.hostname.toLowerCase() === page.hostname.toLowerCase();
+  }
   return isLoopbackName(page.hostname) && isLoopbackName(u.hostname) && portOf(u) === portOf(page);
 }
 

@@ -61,6 +61,10 @@ export const CAPTURE_WAITS = 3;
  * first failure, twice as long after each next one, at most RETRY_MAX_MS. */
 export const RETRY_MIN_MS = 2000;
 export const RETRY_MAX_MS = 60_000;
+/** Maximum concurrent snapshot reads / adoptions per machine so a restart
+ * with many terminals does not burst-fetch every snapshot simultaneously. */
+export const MAX_CONCURRENT_READS = 4;
+export const MAX_CONCURRENT_ADOPTIONS = 4;
 
 /** How long the nth failure in a row waits before the next try. */
 export const retryAfter = (failures: number): number => Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** Math.max(0, failures - 1));
@@ -401,12 +405,16 @@ function adopt(m: string, w: Watched, leaf: L.TerminalLeaf, record: TerminalReco
       a.busy = false;
       a.done = true;
       if (moved) a.moved = { pid: newest.pid, at: newest.at };
-      if (watched.get(m) === w) askList(m, w);
+      if (watched.get(m) === w) {
+        askList(m, w);
+        apply(m, w);
+      }
     },
     (err) => {
       a.busy = false;
       if (!transient(err)) {
         a.done = true;
+        if (watched.get(m) === w) apply(m, w);
         return;
       }
       a.failures++;
@@ -414,6 +422,7 @@ function adopt(m: string, w: Watched, leaf: L.TerminalLeaf, record: TerminalReco
         a.timer = undefined;
         if (watched.get(m) === w) apply(m, w);
       }, retryAfter(a.failures));
+      if (watched.get(m) === w) apply(m, w);
     },
   );
 }
@@ -448,14 +457,21 @@ function apply(m: string, w: Watched) {
     if (w.shown.get(address) === key) continue;
     if (w.bytes.has(key)) show(m, w, address, key, c);
     else if (w.failed.has(key)) hide(m, w, address);
-    else read(m, w, c, key);
+    else if (w.reading.size < MAX_CONCURRENT_READS) read(m, w, c, key);
   }
   // A snapshot is moved once what the leaf shows was read (or failed):
   // the machine removes the files of the one it moves from.
+  let adopting = 0;
+  for (const a of w.adoptions.values()) if (a.busy) adopting++;
   for (const [leaf, record] of leaves) {
+    if (adopting >= MAX_CONCURRENT_ADOPTIONS) break;
     const c = want.get(leaf.terminal);
     const key = c && snapshotKey(w, c);
-    if (key === undefined || w.shown.get(leaf.terminal) === key || w.failed.has(key)) adopt(m, w, leaf, record, entries);
+    if (key === undefined || w.shown.get(leaf.terminal) === key || w.failed.has(key)) {
+      const wasBusy = w.adoptions.get(leaf.terminal)?.busy === true;
+      adopt(m, w, leaf, record, entries);
+      if (!wasBusy && w.adoptions.get(leaf.terminal)?.busy) adopting++;
+    }
   }
   // Bytes no leaf wants go, with the tries of their reads.
   const keys = new Set([...want.values()].map((c) => snapshotKey(w, c)));

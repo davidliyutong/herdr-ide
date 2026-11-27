@@ -11,7 +11,7 @@
 // any page.
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChevronRight } from 'lucide-react';
-import { useSettings, type SettingDef } from '../../settings';
+import { setSetting, useSettings, type SettingDef } from '../../settings';
 import { useStore } from '../../state/store';
 import { t } from '../../i18n';
 import type { PluginSettingsLayoutProps } from '../api';
@@ -28,7 +28,7 @@ export function providerPages(defs: SettingDef[]): { id: string; switch: Setting
     .map((d) => ({ id: d.key.slice(SWITCH.length), switch: d, defs: defs.filter((x) => x.group === d.group) }));
 }
 
-export function UsageSettings({ defs, rows, lead, visit }: PluginSettingsLayoutProps) {
+export function UsageSettings({ defs, rows, lead, readOnly, visit }: PluginSettingsLayoutProps) {
   const values = useSettings((s) => s.values);
   const asked = useStore((s) => s.settings?.row);
   const providers = providerPages(defs);
@@ -70,19 +70,42 @@ export function UsageSettings({ defs, rows, lead, visit }: PluginSettingsLayoutP
       <div className="usage-settings-providers">
         {providers.map((p) => {
           const on = (values[p.switch.key]?.value ?? p.switch.default) !== false;
+          const locked = !!values[p.switch.key]?.locked;
           const modified = p.defs.some((d) => values[d.key]?.source === 'global');
+          const name = providerName(p.id);
           return (
-            <button
+            <div
               key={p.id}
               className={['setting usage-settings-row', !on && 'off', modified && 'modified'].filter(Boolean).join(' ')}
               data-provider={p.id}
               onClick={() => setOpen(p.id)}
             >
-              <ProviderLogo provider={p.id} />
-              <span className="setting-title ellipsis">{providerName(p.id)}</span>
-              <span className="muted">{t(on ? 'settings.on' : 'settings.off')}</span>
-              <ChevronRight aria-hidden />
-            </button>
+              <button
+                type="button"
+                className="usage-settings-open"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpen(p.id);
+                }}
+              >
+                <ProviderLogo provider={p.id} />
+                <span className="setting-title ellipsis">{name}</span>
+                <span className="muted">{t(on ? 'settings.on' : 'settings.off')}</span>
+              </button>
+              <button
+                type="button"
+                role="switch"
+                className="switch"
+                aria-checked={on}
+                aria-label={name}
+                disabled={readOnly || locked}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void setSetting(p.switch.key, !on);
+                }}
+              />
+              <ChevronRight className="usage-settings-chevron" aria-hidden />
+            </div>
           );
         })}
       </div>

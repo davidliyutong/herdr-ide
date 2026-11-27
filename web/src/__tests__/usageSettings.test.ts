@@ -273,9 +273,20 @@ describe('the AI usage settings page', () => {
     expect(serializePrices(Array.from({ length: 51 }, (_, i) => row(`m${i}`, '1', '2')))).toBeUndefined();
   });
 
+  it('toggles a provider directly from the first-level list without opening its sub-page', async () => {
+    await open({ page: 'usage' });
+    const sw = () => providerRow('codex').querySelector<HTMLButtonElement>('[role="switch"]')!;
+    expect(sw().getAttribute('aria-checked')).toBe('true');
+    await act(async () => sw().click());
+    await vi.waitFor(() => expect(useSettings.getState().values['usage.providers.codex']?.value).toBe(false));
+    expect(q('.usage-settings-provider')).toBeNull();
+    expect(sw().getAttribute('aria-checked')).toBe('false');
+    expect(providerRow('codex').classList.contains('off')).toBe(true);
+  });
+
   it('shows a read-only hub’s settings without letting them change', async () => {
     await open({ page: 'usage' }, state(), true);
-    expect(providerRow('opencode').disabled).toBe(false);
+    expect(providerRow('opencode').querySelector<HTMLButtonElement>('[role="switch"]')!.disabled).toBe(true);
     await act(async () => providerRow('opencode').click());
     expect(q<HTMLInputElement>('[data-key="usage.providers.opencode"] input')!.disabled).toBe(true);
   });
