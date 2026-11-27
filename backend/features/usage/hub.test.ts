@@ -268,9 +268,10 @@ test('a session’s failures', async () => {
   expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([409, 'offline']);
 });
 
-// At most MAX_SESSION_READS session requests are under way per machine
-// (more: 429 busy, the machine not asked); another machine is not held up,
-// and a request ended gives its place back.
+// At most MAX_SESSION_READS distinct session requests are under way per machine
+// (more: 429 busy, the machine not asked); duplicate requests for the same
+// session coalesce onto one read and reuse the hub cache; another machine is
+// not held up, and a request ended gives its place back.
 test('a machine busy reading sessions', async () => {
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
@@ -279,15 +280,23 @@ test('a machine busy reading sessions', async () => {
     if (of('session').length <= MAX_SESSION_READS) await gate;
     return usageOf();
   });
-  const held = Array.from({ length: MAX_SESSION_READS }, () => session(request, 'claude', SESSION));
+  const sid = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+  // Concurrent reads of the same session coalesce into a single machine call.
+  const coalesced = [session(request, 'claude', sid(0)), session(request, 'claude', sid(0))];
+  const rest = Array.from({ length: MAX_SESSION_READS - 1 }, (_, i) => session(request, 'claude', sid(i + 1)));
+  const held = [...coalesced, ...rest];
   await waitFor('the reads under way', () => of('session').length === MAX_SESSION_READS);
-  let res = await session(request, 'claude', SESSION);
+  let res = await session(request, 'claude', sid(MAX_SESSION_READS));
   expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([429, 'busy']);
   expect(of('session')).toHaveLength(MAX_SESSION_READS);
   // Another machine is not held up.
-  res = await session(request, 'claude', SESSION, 'gpu');
+  res = await session(request, 'claude', sid(0), 'gpu');
   expect(res.status).toBe(200);
   release();
-  expect((await Promise.all(held)).map((r) => r.status)).toEqual(Array(MAX_SESSION_READS).fill(200));
-  expect((await session(request, 'claude', SESSION)).status).toBe(200);
+  expect((await Promise.all(held)).map((r) => r.status)).toEqual(Array(held.length).fill(200));
+  // Cached hit does not call the machine again.
+  expect((await session(request, 'claude', sid(0))).status).toBe(200);
+  expect(of('session')).toHaveLength(MAX_SESSION_READS + 1);
+  // A fresh distinct session succeeds once slots free up.
+  expect((await session(request, 'claude', sid(MAX_SESSION_READS + 1))).status).toBe(200);
 });

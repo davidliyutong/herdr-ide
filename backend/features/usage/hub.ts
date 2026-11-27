@@ -21,6 +21,7 @@
 // as usage.refresh and usage.deepseek_key.
 import { z } from 'zod';
 import { byId, validSessionId } from '#shared/agents/kinds.ts';
+import { CoalesceCache } from '#shared/lib/cache.ts';
 import { defineFeature } from '#kernel/feature.ts';
 import { Fail, offline } from '#kernel/fail.ts';
 import { readBody } from '#kernel/http/app.ts';
@@ -34,6 +35,12 @@ import { Usage, type UsageDeps } from './usage.ts';
 /** The session reads a machine serves at once: each holds a stream of its
  * agent and may search its session directories. */
 export const MAX_SESSION_READS = 8;
+
+/** How long a session usage read is cached on the hub, in ms. Shorter than
+ * the client's SESSION_MIN_GAP (10 s) so normal polling stays fresh while
+ * multi-tab reads and rapid terminal switches coalesce and hit cache. */
+export const SESSION_CACHE_FRESH = 5_000;
+const SESSION_CACHE_MAX = 256;
 
 /** The providers whose sessions can be priced on the machines. */
 export const SESSION_PROVIDERS: ReadonlySet<string> = new Set(['claude', 'codex', 'grok', 'kimi', 'antigravity', 'opencode']);
@@ -109,7 +116,15 @@ export const usageFeature = (o: UsageOptions = {}) =>
           await store.close();
         }
       });
-      ctx.onForget((m) => usage.forget(m));
+      const sessionCache = new CoalesceCache<unknown>({
+        ttlMs: SESSION_CACHE_FRESH,
+        maxEntries: SESSION_CACHE_MAX,
+        now: o.now,
+      });
+      ctx.onForget((m) => {
+        usage.forget(m);
+        sessionCache.invalidatePrefix(`${m}\0`, { abort: true });
+      });
 
       const query = (c: Ctx) => new URL(c.req.url).searchParams;
       /** The answer, or 304 when If-None-Match is its ETag. */
@@ -169,31 +184,36 @@ export const usageFeature = (o: UsageOptions = {}) =>
         const opts = usage.options();
         if (!opts.providers.includes(provider)) throw new Fail('provider_off', 404);
         const m = c.var.machine;
-        const n = reads.get(m.id) ?? 0;
-        if (n >= MAX_SESSION_READS) throw new Fail('busy', 429, "too many reads of the machine's sessions at once");
-        reads.set(m.id, n + 1);
-        try {
-          // Decoded by the protocol's schema: nothing else an agent
-          // answered reaches the page.
-          const own = usage.prices().own;
-          const params: {
-            kind: string;
-            session: string;
-            cwd?: string;
-            pid?: number;
-            codexHomes?: string[];
-            prices?: typeof own;
-          } = { kind, session };
-          if (hasCwd) params.cwd = cwd;
-          if (pid !== undefined) params.pid = pid;
-          if (provider === 'codex' && opts.codexHomes.length) params.codexHomes = opts.codexHomes;
-          if (own) params.prices = own;
-          return c.json(await ctx.call(m, usageProtocol, 'session', params, { signal: c.req.raw.signal }));
-        } finally {
-          const left = (reads.get(m.id) ?? 1) - 1;
-          if (left > 0) reads.set(m.id, left);
-          else reads.delete(m.id);
-        }
+        const prices = usage.prices();
+        const codexHomes = provider === 'codex' && opts.codexHomes.length ? opts.codexHomes : undefined;
+        const cacheKey = [m.id, kind, session, cwd, pid ?? '', codexHomes?.join('\0') ?? '', prices.key].join('\0');
+        const res = await sessionCache.get(cacheKey, { signal: c.req.raw.signal }, async (signal) => {
+          const n = reads.get(m.id) ?? 0;
+          if (n >= MAX_SESSION_READS) throw new Fail('busy', 429, "too many reads of the machine's sessions at once");
+          reads.set(m.id, n + 1);
+          try {
+            // Decoded by the protocol's schema: nothing else an agent
+            // answered reaches the page.
+            const params: {
+              kind: string;
+              session: string;
+              cwd?: string;
+              pid?: number;
+              codexHomes?: string[];
+              prices?: typeof prices.own;
+            } = { kind, session };
+            if (hasCwd) params.cwd = cwd;
+            if (pid !== undefined) params.pid = pid;
+            if (codexHomes) params.codexHomes = codexHomes;
+            if (prices.own) params.prices = prices.own;
+            return await ctx.call(m, usageProtocol, 'session', params, { signal });
+          } finally {
+            const left = (reads.get(m.id) ?? 1) - 1;
+            if (left > 0) reads.set(m.id, left);
+            else reads.delete(m.id);
+          }
+        });
+        return c.json(res as object);
       });
     },
   });

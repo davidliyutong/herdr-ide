@@ -4,18 +4,23 @@
 // Nothing listens on the machine for it: the hub opens a stream per
 // connection.
 import { connect, type Socket } from 'node:net';
+import { CoalesceCache } from '#shared/lib/cache.ts';
 import { Fail } from '#shared/lib/fail.ts';
 import { closeStream } from '#shared/proto/yamux.ts';
 import { defineMachine } from '#machine/feature.ts';
 import { pipe } from '#machine/hcop.ts';
 import { browserProtocol } from './protocol.ts';
-import { listening, tidy } from './machine/listening.ts';
+import { listening, tidy, type Port } from './machine/listening.ts';
 
 export interface BrowserMachineOptions {
   /** Bounds connecting to a service of the machine itself (5 s). */
   dialMs?: number;
   /** Bounds looking for the listening ports (10 s). */
   listeningMs?: number;
+  /** How long a listening-ports scan is reused on the machine (2 s). */
+  listeningCacheMs?: number;
+  /** Clock function for the machine-side listening cache (tests). */
+  now?: () => number;
 }
 
 /** Connects to port of host within timeoutMs. */
@@ -43,6 +48,11 @@ function dialTCP(host: string, port: number, timeoutMs: number, signal: AbortSig
 }
 
 export function browserMachine(o: BrowserMachineOptions = {}) {
+  const listeningCache = new CoalesceCache<Port[]>({
+    ttlMs: o.listeningCacheMs ?? 2_000,
+    maxEntries: 1,
+    now: o.now,
+  });
   return defineMachine(browserProtocol, () => ({
     actions: {
       // Connects the stream to the port of this machine's loopback, answers,
@@ -86,8 +96,10 @@ export function browserMachine(o: BrowserMachineOptions = {}) {
         }
       },
       listening: async (_, ctx) => {
-        const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(o.listeningMs ?? 10_000)]);
-        return { ports: tidy(await listening(signal)) };
+        const ports = await listeningCache.get('listening', { signal: ctx.signal, timeoutMs: o.listeningMs ?? 10_000 }, async (signal) =>
+          tidy(await listening(signal)),
+        );
+        return { ports };
       },
     },
   }));

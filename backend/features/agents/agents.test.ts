@@ -166,25 +166,33 @@ test('a resolve ends with its request', async () => {
   expect((await resolve(tc, 'box', resolveQuery)).status).toBe(200);
 });
 
-// At most MAX_RESOLVING resolves run at once per machine (more: 429
-// busy); another machine is not held up.
+// At most MAX_RESOLVING distinct resolves run at once per machine (more: 429
+// busy); duplicate concurrent resolves coalesce onto one call and hit the hub
+// cache; another machine is not held up.
 test('busy', async () => {
   let release!: () => void;
   const a: Agents = { calls: [], block: new Promise<void>((r) => (release = r)) };
   const tc = await setup(a);
-  const flying = Array.from({ length: MAX_RESOLVING }, () => resolve(tc, 'box', resolveQuery));
+  const q = (i: number) => `kind=claude&session=00000000-0000-4000-8000-${String(i).padStart(12, '0')}&cwd=/x`;
+  // Duplicate concurrent requests share one slot and one upstream call.
+  const dup = [resolve(tc, 'box', q(0)), resolve(tc, 'box', q(0))];
+  const rest = Array.from({ length: MAX_RESOLVING - 1 }, (_, i) => resolve(tc, 'box', q(i + 1)));
+  const flying = [...dup, ...rest];
   await waitFor('all asked', () => a.calls.length === MAX_RESOLVING);
-  const over = await resolve(tc, 'box', resolveQuery);
+  const over = await resolve(tc, 'box', q(MAX_RESOLVING));
   expect([over.status, code(over.body)]).toEqual([429, 'busy']);
   expect(a.calls.length).toBe(MAX_RESOLVING);
   // Another machine.
-  const other = resolve(tc, 'gpu', resolveQuery);
+  const other = resolve(tc, 'gpu', q(0));
   await waitFor('gpu asked', () => a.calls.length === MAX_RESOLVING + 1);
   release();
   expect((await other).status).toBe(200);
   for (const r of await Promise.all(flying)) expect(r.status).toBe(200);
+  // Cached hit avoids asking the machine again.
+  expect((await resolve(tc, 'box', q(0))).status).toBe(200);
+  expect(a.calls.length).toBe(MAX_RESOLVING + 1);
   a.block = undefined;
-  expect((await resolve(tc, 'box', resolveQuery)).status).toBe(200);
+  expect((await resolve(tc, 'box', q(MAX_RESOLVING + 1))).status).toBe(200);
 });
 
 test('goQuery', () => {

@@ -15,7 +15,7 @@ import { createHub } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, localSpec, memoryAudit, running, sshSpec, testHub, testMachines, waitFor } from '#kernel/testing.ts';
-import { browserFeature, type BrowserOptions } from './hub.ts';
+import { browserFeature, LISTENING_CACHE_TTL_MS, type BrowserOptions } from './hub.ts';
 import { Forwards, listenLoopback, MAX_FORWARDS, temporary, type Listening } from './forwards.ts';
 import { DEFAULT_IDLE, settings } from './settings.ts';
 
@@ -498,8 +498,11 @@ test('listenLoopback', async () => {
   closeAll(l.servers);
 });
 
-// The machine's listening ports, with only their port and process.
+// The machine's listening ports, with only their port and process; cached
+// briefly on the hub and refreshed after TTL.
 test('listening', async () => {
+  const c = clock();
+  let calls = 0;
   let reply: Reply = {
     ok: true,
     plugin: {
@@ -509,12 +512,23 @@ test('listening', async () => {
       ],
     },
   };
-  const t = await setup({ listening: () => reply });
+  const t = await setup({
+    now: c.now,
+    listening: () => {
+      calls++;
+      return reply;
+    },
+  });
   let r = await t.request('GET', '/api/m/x/p/browser/listening');
   expect([r.status, r.body]).toEqual([200, { ports: [{ port: 3000, process: 'node' }, { port: 5432 }] }]);
+  // Within TTL: served from hub cache without calling the machine again.
   reply = { ok: true, plugin: { ports: null } };
   r = await t.request('GET', '/api/m/x/p/browser/listening');
-  expect(r.body).toEqual({ ports: [] });
+  expect([calls, r.body]).toEqual([1, { ports: [{ port: 3000, process: 'node' }, { port: 5432 }] }]);
+  // Past TTL: refreshes from the machine.
+  c.t += LISTENING_CACHE_TTL_MS;
+  r = await t.request('GET', '/api/m/x/p/browser/listening');
+  expect([calls, r.body]).toEqual([2, { ports: [] }]);
   r = await t.request('GET', '/api/m/local/p/browser/listening');
   expect([r.status, r.body.error]).toEqual([409, 'offline']);
 });

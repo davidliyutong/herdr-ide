@@ -5,6 +5,7 @@
 // read-only mode and audited as monitor.signal with the pid and the
 // signal.
 import { z } from 'zod';
+import { CoalesceCache } from '#shared/lib/cache.ts';
 import { defineFeature } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
 import { readBody } from '#kernel/http/app.ts';
@@ -14,6 +15,17 @@ import { settings } from './settings.ts';
 
 /** Bounds a signal's JSON. */
 const MAX_SIGNAL_BODY = 4 << 10;
+
+/** Short hub-side TTL for metrics/processes snapshots (shorter than the 1 s
+ * minimum poll interval so single-tab polling always gets fresh samples while
+ * multi-tab polling coalesces onto one machine call). */
+export const MONITOR_CACHE_TTL_MS = 800;
+const MONITOR_CACHE_MAX = 256;
+
+export interface MonitorOptions {
+  /** Clock function for the hub-side snapshot cache (tests). */
+  now?: () => number;
+}
 
 /** A signal's body as the Go hub decoded it into its struct: members it
  * does not know are ignored, null is none. */
@@ -49,23 +61,41 @@ const answer = (c: Ctx, result: unknown) => {
   return c.json(result as object);
 };
 
-export const monitorFeature = () =>
+export const monitorFeature = (o: MonitorOptions = {}) =>
   defineFeature({
     id: 'monitor',
     settings,
     setup(ctx) {
       const api = ctx.machineApi;
-      api.get('/metrics', async (c) =>
-        answer(c, await ctx.call(c.var.machine, monitorProtocol, 'metrics', {}, { signal: c.req.raw.signal })),
-      );
-      api.get('/processes', async (c) =>
-        answer(c, await ctx.call(c.var.machine, monitorProtocol, 'processes', {}, { signal: c.req.raw.signal })),
-      );
+      const cache = new CoalesceCache<unknown>({ ttlMs: MONITOR_CACHE_TTL_MS, maxEntries: MONITOR_CACHE_MAX, now: o.now });
+      ctx.onForget((m) => cache.invalidatePrefix(`${m}\0`, { abort: true }));
+
+      api.get('/metrics', async (c) => {
+        const m = c.var.machine;
+        return answer(
+          c,
+          await cache.get(`${m.id}\0metrics`, { signal: c.req.raw.signal }, (signal) =>
+            ctx.call(m, monitorProtocol, 'metrics', {}, { signal }),
+          ),
+        );
+      });
+      api.get('/processes', async (c) => {
+        const m = c.var.machine;
+        return answer(
+          c,
+          await cache.get(`${m.id}\0processes`, { signal: c.req.raw.signal }, (signal) =>
+            ctx.call(m, monitorProtocol, 'processes', {}, { signal }),
+          ),
+        );
+      });
       api.post('/signal', ctx.mutating('signal'), async (c) => {
         const p = await readJSON(c, MAX_SIGNAL_BODY, signalBody);
         Object.assign(c.var.audit, { pid: p.pid, signal: p.signal });
         if (p.pid <= 1 || p.pid > MAX_PID) throw new Fail('invalid_pid', 400, 'invalid pid');
-        return answer(c, await ctx.call(c.var.machine, monitorProtocol, 'signal', p, { signal: c.req.raw.signal }));
+        const m = c.var.machine;
+        const r = await ctx.call(m, monitorProtocol, 'signal', p, { signal: c.req.raw.signal });
+        cache.invalidate(`${m.id}\0processes`);
+        return answer(c, r);
       });
     },
   });
