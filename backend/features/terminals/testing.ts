@@ -259,6 +259,8 @@ export class AgentSim {
   readonly actions: string[] = [];
   readonly stagedEnvs: Array<{ token: string; env: Record<string, string>; argv?: string[]; line?: string; dropped?: boolean }> = [];
   private envSeq = 0;
+  /** Answers Op.TermEnv as a node of an earlier release does: unknown op. */
+  termEnvUnknown = false;
 
   status(): HCStatus {
     return {
@@ -335,6 +337,7 @@ export class AgentSim {
       case Op.Privacy:
         return once({ ok: true, privacy: this.privacy });
       case Op.TermEnv: {
+        if (this.termEnvUnknown) return once({ ok: false, error: `unknown op ${JSON.stringify(h.op)}` });
         const raw = h.params_length && h.params_length > 0 ? await readBody(conn.reader, h.params_length) : h.params;
         if (h.action === 'stage') {
           const p = raw as TermEnvStageParams;

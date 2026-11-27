@@ -492,6 +492,12 @@ function LinkWorkspacesDialog({ preset, onDone }: { preset: VaultPreset; onDone(
       return next;
     });
 
+  const allKeys = useMemo(() => rows.map((r) => workspaceKey(r.machine, r.workspace)), [rows]);
+  const allSelected = allKeys.length > 0 && allKeys.every((k) => selected.has(k));
+  const someSelected = allKeys.some((k) => selected.has(k));
+  const selectAll = () => setSelected(new Set(allKeys));
+  const clearAll = () => setSelected(new Set());
+
   const changed = rows.filter((r) => {
     const key = workspaceKey(r.machine, r.workspace);
     return selected.has(key) !== initialSelected.has(key);
@@ -554,25 +560,46 @@ function LinkWorkspacesDialog({ preset, onDone }: { preset: VaultPreset; onDone(
           {rows.length === 0 ? (
             <div className="empty-note">{t('vault.preset.linkEmpty')}</div>
           ) : (
-            <ul className="vault-link-list">
-              {rows.map((r) => {
-                const key = workspaceKey(r.machine, r.workspace);
-                const checked = selected.has(key);
-                return (
-                  <li key={key}>
-                    <label className="vault-link-option">
-                      <input type="checkbox" checked={checked} onChange={() => toggle(key)} />
-                      <span className="vault-link-text">
-                        <b>
-                          {r.machineLabel} · {r.workspaceLabel}
-                        </b>
-                        {r.cwd && <small className="muted ellipsis">{r.cwd}</small>}
-                      </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
+            <>
+              <div className="vault-select-bar" data-selected={selected.size}>
+                <label className="vault-link-select-all">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someSelected && !allSelected;
+                    }}
+                    onChange={(e) => (e.target.checked ? selectAll() : clearAll())}
+                  />
+                  <span>{t('vault.preset.linkSelectAll')}</span>
+                </label>
+                <span className="spacer" />
+                {selected.size > 0 && (
+                  <button type="button" className="ghost sm" data-action="clear-links" onClick={clearAll}>
+                    {t('vault.preset.linkDeselectAll')}
+                  </button>
+                )}
+              </div>
+              <ul className="vault-link-list">
+                {rows.map((r) => {
+                  const key = workspaceKey(r.machine, r.workspace);
+                  const checked = selected.has(key);
+                  return (
+                    <li key={key}>
+                      <label className="vault-link-option">
+                        <input type="checkbox" checked={checked} onChange={() => toggle(key)} />
+                        <span className="vault-link-text">
+                          <b>
+                            {r.machineLabel} · {r.workspaceLabel}
+                          </b>
+                          {r.cwd && <small className="muted ellipsis">{r.cwd}</small>}
+                        </span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
           {asking && (
             <div className="vault-field" data-fresh="link">

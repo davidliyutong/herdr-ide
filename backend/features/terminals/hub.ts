@@ -10,6 +10,7 @@ import { defineFeature, type FeatureDef } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
 import { SSH_ENV } from '#kernel/config/ui/index.ts';
+import type { Client } from '#kernel/http/env.ts';
 import { Backend } from './backend.ts';
 import { Switchboard } from './switchboard.ts';
 import { hcStatus, online, type HCSource } from './lifecycle.ts';
@@ -35,6 +36,7 @@ export interface TerminalsOptions {
   workspaceEnv?: (
     m: Machine,
     workspace: string,
+    client: Client,
   ) => Promise<{ env: Record<string, string>; names: string[]; presets: string[] } | undefined>;
   /** Told whether a machine's terminal core is ready, at each change of
    * the backend's state (program windows follow it). */
@@ -104,7 +106,8 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
       ctx.route('/api/v1').get('/term', (c) => {
         if (!c.env.upgrade) throw new Fail('upgrade_required', 426);
         const who = c.var.who;
-        return c.env.upgrade((ch) => h.connect(ch, who));
+        const client = c.var.client;
+        return c.env.upgrade((ch) => h.connect(ch, who, client));
       });
 
       const api = ctx.route('/api');

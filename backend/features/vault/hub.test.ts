@@ -1092,7 +1092,7 @@ describe('groups, presets and workspace env injection routes', () => {
     await call('DELETE', '/vars/GONE_VAR', undefined, tok);
 
     // Unlocked: resolves values and durably records Result.Injected in access log.
-    const ok = await feat.workspaceEnv('m1', 'ws-1', 'terminal');
+    const ok = await feat.workspaceEnv('m1', 'ws-1', 'terminal', 'desktop');
     expect(ok).toEqual({
       env: { API_KEY: 'val-1' },
       names: ['API_KEY'],
@@ -1105,13 +1105,13 @@ describe('groups, presets and workspace env injection routes', () => {
 
     // Locked: returns locked=true and empty env, records vault_locked.
     await call('POST', '/lock', undefined, tok);
-    const locked = await feat.workspaceEnv('m1', 'ws-1', 'chat');
+    const locked = await feat.workspaceEnv('m1', 'ws-1', 'chat', 'desktop');
     expect(locked).toEqual({ env: {}, names: [], presets: [pid], missing: [], locked: true });
 
     // Unlock again, then disable the vault plugin: refuses injection.
     const tok2 = (await call('POST', '/session', { passphrase: PASS })).json.session as string;
     t.settings['plugins.vault.enabled'] = false;
-    expect(await feat.workspaceEnv('m1', 'ws-1', 'terminal')).toEqual({
+    expect(await feat.workspaceEnv('m1', 'ws-1', 'terminal', 'desktop')).toEqual({
       env: {},
       names: [],
       presets: [],
@@ -1126,7 +1126,7 @@ describe('groups, presets and workspace env injection routes', () => {
     const db = openShared(hubDBBeside(join(dir, 'vault.json')));
     db.run(`CREATE TRIGGER ws_disk_fails AFTER INSERT ON vault_access BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`);
     db.close();
-    const failed = await feat.workspaceEnv('m1', 'ws-1', 'terminal');
+    const failed = await feat.workspaceEnv('m1', 'ws-1', 'terminal', 'desktop');
     expect(failed).toEqual({
       env: {},
       names: [],

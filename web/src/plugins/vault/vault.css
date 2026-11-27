@@ -866,6 +866,12 @@
 .vault-missing-banner > span {
   flex: 1;
 }
+.vault-link-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
 .vault-link-list {
   list-style: none;
   margin: 0;

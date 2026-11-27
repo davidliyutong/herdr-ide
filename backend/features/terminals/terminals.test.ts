@@ -720,3 +720,37 @@ test('terminal.run stages vault env ephemerally out of terminal.run.env, strips 
   expect(failed.error).toBeTruthy();
   await waitFor('staged token dropped on failure', () => r.sim.stagedEnvs[2]?.dropped === true);
 });
+
+test('a node of an earlier release, which cannot stage vault env, starts the terminal without it', async () => {
+  const r = await start({
+    ssh: '10.0.0.1 1234 10.0.0.2 22',
+    options: {
+      paneEnv: () => ({ DISPLAY: ':99' }),
+      workspaceEnv: async () => ({
+        env: { VAULT_SECRET: 's3cr3t-value' },
+        names: ['VAULT_SECRET'],
+        presets: ['p1'],
+        missing: [],
+        locked: false,
+      }),
+    },
+  });
+  r.sim.termEnvUnknown = true;
+  const c = await r.client();
+  await c.ready();
+  const res = await c.call(1, 'terminal.run', { workspace: 'ws-42', argv: ['/bin/sh'], env: { CLIENT_X: '1' } });
+  expect(res.error).toBeUndefined();
+  const params = r.sim.core!.calls.find((x) => x.method === 'terminal.run')!.params as Record<string, unknown>;
+  expect(params.argv).toEqual(['/bin/sh']);
+  expect(params.env).toEqual({
+    CLIENT_X: '1',
+    DISPLAY: ':99',
+    SSH_CLIENT: '10.0.0.1 1234 22',
+    SSH_CONNECTION: '10.0.0.1 1234 10.0.0.2 22',
+  });
+  expect(JSON.stringify(params)).not.toContain('s3cr3t-value');
+  expect(r.sim.stagedEnvs).toEqual([]);
+  const auditRec = r.tc.audit.records().find((a) => a.event === 'terminal.run');
+  expect(auditRec).toMatchObject({ vault_unsupported: ['VAULT_SECRET'], env: ['DISPLAY', 'SSH_CLIENT', 'SSH_CONNECTION'] });
+  expect(auditRec?.vault_env).toBeUndefined();
+});

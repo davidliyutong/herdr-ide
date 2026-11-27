@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { defineFeature, type FeatureContext, type FeatureDef } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
 import { readBody } from '#kernel/http/app.ts';
-import type { Ctx, Env } from '#kernel/http/env.ts';
+import type { Client, Ctx, Env } from '#kernel/http/env.ts';
 import { SLUG } from '#shared/lib/brand.ts';
 import { formatRFC3339 } from '#shared/lib/gotime.ts';
 import { Op } from '#shared/proto/agentproto/index.ts';
@@ -88,7 +88,7 @@ export interface VaultFeature extends FeatureDef {
   /** Resolves environment variables of presets linked to (machine, workspace)
    * for injection into a new terminal or chat panel. Never exposes values
    * while disabled, locked, tampered, or when the access log fails. */
-  workspaceEnv(machine: string, workspace: string, source: 'terminal' | 'chat'): Promise<WorkspaceEnvResult>;
+  workspaceEnv(machine: string, workspace: string, source: 'terminal' | 'chat', client: Client): Promise<WorkspaceEnvResult>;
 }
 
 export function vaultFeature(opts: VaultOptions = {}): VaultFeature {
@@ -806,9 +806,9 @@ export function vaultFeature(opts: VaultOptions = {}): VaultFeature {
     },
   });
   return Object.assign(def, {
-    workspaceEnv: (machine: string, workspace: string, source: 'terminal' | 'chat') =>
+    workspaceEnv: (machine: string, workspace: string, source: 'terminal' | 'chat', client: Client) =>
       instance
-        ? instance.workspaceEnv(machine, workspace, source)
+        ? instance.workspaceEnv(machine, workspace, source, client)
         : Promise.resolve({ env: {}, names: [], presets: [], missing: [], locked: false }),
   });
 }

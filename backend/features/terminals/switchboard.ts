@@ -6,6 +6,7 @@ import type { Audit, Who } from '#kernel/audit.ts';
 import { CloseCode, type Channel, type ChannelHandlers } from '#kernel/channel.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
+import type { Client } from '#kernel/http/env.ts';
 import { Backend } from './backend.ts';
 import { TermClient } from './client.ts';
 import type { HCSource } from './lifecycle.ts';
@@ -23,6 +24,7 @@ export interface SwitchboardDeps {
   workspaceEnv?: (
     m: Machine,
     workspace: string,
+    client: Client,
   ) => Promise<{ env: Record<string, string>; names: string[]; presets: string[] } | undefined>;
   sessions: () => boolean;
   onSessionsChange: (changed: () => void) => () => void;
@@ -78,8 +80,8 @@ export class Switchboard {
   }
 
   /** Adopts a channel of /api/v1/term. */
-  connect(ch: Channel, who: Who): ChannelHandlers {
-    const c = new TermClient(ch, who, { ...this.d, backend: (id) => this.backend(id) });
+  connect(ch: Channel, who: Who, client: Client): ChannelHandlers {
+    const c = new TermClient(ch, who, client, { ...this.d, backend: (id) => this.backend(id) });
     const h = c.handlers();
     if (this.life.signal.aborted) {
       queueMicrotask(() => c.close());

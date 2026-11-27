@@ -19,6 +19,8 @@ import type { Audit, AuditFields, Who } from '#kernel/audit.ts';
 import { CloseCode, type Channel, type ChannelHandlers, type Message } from '#kernel/channel.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
+import { AgentError } from '#kernel/machines/transport/session.ts';
+import type { Client } from '#kernel/http/env.ts';
 import {
   addEnv,
   AUDITED_METHODS,
@@ -51,7 +53,11 @@ export interface ClientDeps {
   sshEnv(m: Machine): Record<string, string> | null;
   /** Optional vault preset environment variables for a workspace's new
    * terminals; names only are audited, never values. */
-  workspaceEnv?(m: Machine, workspace: string): Promise<{ env: Record<string, string>; names: string[]; presets: string[] } | undefined>;
+  workspaceEnv?(
+    m: Machine,
+    workspace: string,
+    client: Client,
+  ): Promise<{ env: Record<string, string>; names: string[]; presets: string[] } | undefined>;
   timing: Timing;
   /** A client whose channel holds more unsent bytes than this stopped
    * reading: it is disconnected. Output is credited (a stream has at most
@@ -92,6 +98,9 @@ interface Subscription {
 export class TermClient implements Subscriber {
   private readonly ch: Channel;
   private readonly who: Who;
+  /** Which kind of client this is: vault presets reach its terminals only
+   * where the vault is enabled for it. */
+  private readonly client: Client;
   private readonly d: ClientDeps;
   private readonly life = new AbortController();
   private readonly attached = new Map<number, TermStream>();
@@ -102,9 +111,10 @@ export class TermClient implements Subscriber {
   private closed = false;
   private overflowed = false;
 
-  constructor(ch: Channel, who: Who, d: ClientDeps) {
+  constructor(ch: Channel, who: Who, client: Client, d: ClientDeps) {
     this.ch = ch;
     this.who = who;
+    this.client = client;
     this.d = d;
     d.audit.log(who, 'term.connect');
   }
@@ -411,7 +421,7 @@ export class TermClient implements Subscriber {
         const vaultEnv: Record<string, string> = {};
         let vaultPresets: string[] = [];
         if (workspace && this.d.workspaceEnv) {
-          const resolved = await this.d.workspaceEnv(mc, workspace);
+          const resolved = await this.d.workspaceEnv(mc, workspace, this.client);
           if (resolved && Object.keys(resolved.env).length) {
             for (const [k, val] of Object.entries(resolved.env)) {
               if ((given && k in given) || (display && k in display)) continue;
@@ -421,6 +431,29 @@ export class TermClient implements Subscriber {
           }
         }
         const vaultNames = Object.keys(vaultEnv).sort();
+        const clientEnv = p.env;
+        // New programs get the machine's virtual display (feature 14): its
+        // variables replace any the client gave, so a client cannot point
+        // them elsewhere. Programs on an ssh machine learn that their
+        // terminal is shown elsewhere; what the client gave stays.
+        const plain = (): boolean => {
+          if (display && Object.keys(display).length) {
+            const names = addEnv(p, display, true);
+            if (!names) return false;
+            added.push(...names);
+          }
+          if (ssh && Object.keys(ssh).length) {
+            const names = addEnv(p, ssh, false);
+            if (!names) return false;
+            added.push(...names);
+          }
+          if (added.length) {
+            ev.env = [...new Set(added)].sort();
+            params = p;
+          }
+          return true;
+        };
+        let staged = false;
         if (vaultNames.length > 0) {
           let runArgv: string[] | undefined;
           if (p.argv !== undefined && p.argv !== null) {
@@ -496,30 +529,22 @@ export class TermClient implements Subscriber {
             p.argv = rep.termenv.launch;
             delete p.line;
             params = p;
-          } catch {
-            return this.fail(m.rid, 'unavailable');
-          }
-        } else {
-          // New programs get the machine's virtual display (feature 14): its
-          // variables replace any the client gave, so a client cannot point
-          // them elsewhere.
-          if (display && Object.keys(display).length) {
-            const names = addEnv(p, display, true);
-            if (!names) return this.fail(m.rid, 'usage');
-            added.push(...names);
-          }
-          // Programs on an ssh machine learn that their terminal is shown
-          // elsewhere; what the client gave stays.
-          if (ssh && Object.keys(ssh).length) {
-            const names = addEnv(p, ssh, false);
-            if (!names) return this.fail(m.rid, 'usage');
-            added.push(...names);
-          }
-          if (added.length) {
-            ev.env = [...new Set(added)].sort();
-            params = p;
+            staged = true;
+          } catch (e) {
+            if (!unknownOp(e)) return this.fail(m.rid, 'unavailable');
+            // A node of an earlier release (AGENTS.md rule 7) cannot stage
+            // values: the terminal starts without them, and the audit entry
+            // says which it did not get.
+            if (clientEnv === undefined) delete p.env;
+            else p.env = clientEnv;
+            added.length = 0;
+            delete ev.vault_env;
+            delete ev.vault_presets;
+            delete ev.env;
+            ev.vault_unsupported = vaultNames;
           }
         }
+        if (!staged && !plain()) return this.fail(m.rid, 'usage');
       }
     }
     if (AUDITED_METHODS.has(m.method)) this.audit(m.method, ev);
@@ -660,4 +685,10 @@ export class TermClient implements Subscriber {
       } else this.send(resizeFrame(id, out.cols, out.rows));
     }
   }
+}
+
+/** Whether e is a node's refusal of an op it does not know (a node of an
+ * earlier release). */
+function unknownOp(e: unknown): boolean {
+  return e instanceof AgentError && typeof e.reply?.error === 'string' && e.reply.error.startsWith('unknown op');
 }

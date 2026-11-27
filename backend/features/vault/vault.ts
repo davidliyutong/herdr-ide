@@ -15,7 +15,7 @@ import { performance } from 'node:perf_hooks';
 import { dirname, basename, join } from 'node:path';
 import { Fail } from '#kernel/fail.ts';
 import type { FeatureContext } from '#kernel/feature.ts';
-import type { Ctx } from '#kernel/http/env.ts';
+import type { Client, Ctx } from '#kernel/http/env.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { formatRFC3339 } from '#shared/lib/gotime.ts';
 import {
@@ -1200,13 +1200,14 @@ export class Vault {
   }
 
   /** Resolves workspace-linked vault presets for injection into a new
-   * terminal or chat panel on machine. Never releases values while the
-   * vault plugin is disabled, the vault is locked, the sealed policy is
+   * terminal or chat panel on machine, opened by a client of that kind.
+   * Never releases values while the vault plugin is disabled for that
+   * client, the vault is locked, the sealed policy is
    * tampered, or the durable access log write fails. */
-  async workspaceEnv(machine: string, workspace: string, source: 'terminal' | 'chat'): Promise<WorkspaceEnvResult> {
+  async workspaceEnv(machine: string, workspace: string, source: 'terminal' | 'chat', client: Client): Promise<WorkspaceEnvResult> {
     const empty: WorkspaceEnvResult = { presets: [], env: {}, names: [], missing: [], locked: false };
     if (!machine || !workspace) return empty;
-    if (!this.ctx.enabledFor('desktop') && !this.ctx.enabledFor('browser')) return empty;
+    if (!this.ctx.enabledFor(client)) return empty;
     let s: Store;
     try {
       s = this.open();

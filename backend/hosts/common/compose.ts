@@ -74,7 +74,7 @@ export function hubFeatures(o: FeatureInputs): FeatureDef[] {
   const terminals = terminalsFeature({
     embeddedHC: (os, arch) => payloads.embeddedHC(os, arch),
     paneEnv: gui.paneEnv,
-    workspaceEnv: (m, ws) => vault.workspaceEnv(m.id, ws, 'terminal'),
+    workspaceEnv: (m, ws, client) => vault.workspaceEnv(m.id, ws, 'terminal', client),
     onReady: gui.terminalReady,
   });
   return [
@@ -91,7 +91,7 @@ export function hubFeatures(o: FeatureInputs): FeatureDef[] {
     usageFeature(),
     vault,
     agentsFeature(),
-    chatFeature({ sdk: o.chatSdk, workspaceEnv: (m, ws) => vault.workspaceEnv(m, ws, 'chat') }),
+    chatFeature({ sdk: o.chatSdk, workspaceEnv: (m, ws, client) => vault.workspaceEnv(m, ws, 'chat', client) }),
     historyFeature(),
   ];
 }

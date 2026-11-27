@@ -116,8 +116,40 @@ export class VaultError extends PluginError {
   }
 }
 
-/** A failure's message in the UI's language: never the failure's own. */
-export const errorText = makeErrorText(VaultError, 'vault.error', { fallback: () => t('vault.error.failed') });
+/** A failure's message in the UI's language: distinguishes overloaded hub
+ * error codes (busy, full, not_found, exists) by the server's structured
+ * detail so groups, presets, workspace links and file transfers get accurate
+ * localized copy instead of variable/passphrase messages. */
+export const errorText = makeErrorText(VaultError, 'vault.error', {
+  special: (e) => {
+    const msg = e.message.toLowerCase();
+    if (e.code === 'busy') {
+      if (msg.includes('file')) return t('vault.error.file_busy');
+      return undefined;
+    }
+    if (e.code === 'full') {
+      if (msg.includes('group')) return t('vault.error.full_groups');
+      if (msg.includes('preset')) return t('vault.error.full_presets');
+      if (msg.includes('workspace link')) return t('vault.error.full_links');
+      return undefined;
+    }
+    if (e.code === 'not_found') {
+      if (msg.includes('group')) return t('vault.error.group_not_found');
+      if (msg.includes('preset')) return t('vault.error.preset_not_found');
+      if (msg.includes('authenticator')) return t('vault.error.authenticator_not_found');
+      if (msg.includes('exemption')) return t('vault.error.exemption_not_found');
+      if (msg.includes('request')) return t('vault.error.request_not_found');
+      return undefined;
+    }
+    if (e.code === 'exists') {
+      if (msg.includes('group')) return t('vault.error.group_exists');
+      if (msg.includes('preset')) return t('vault.error.preset_exists');
+      return undefined;
+    }
+    return undefined;
+  },
+  fallback: () => t('vault.error.failed'),
+});
 
 /** Why the vault did not load, in the UI's language: its file of another
  * version or unreadable, the hub keeps no file, or a failure. */
@@ -131,8 +163,9 @@ const base = '/api/p/vault';
 /** The page's vault session (memory only). */
 let token = '';
 
-async function request(method: string, path: string, body?: unknown): Promise<Response> {
-  const res = await fetch(base + path, jsonInit(method, body, token ? { 'X-Vault-Session': token } : {}));
+async function request(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
+  const init = jsonInit(method, body, token ? { 'X-Vault-Session': token } : {});
+  const res = await fetch(base + path, signal ? { ...init, signal } : init);
   if (!res.ok) {
     const data = await jsonBody(res);
     const code = String(data.error ?? res.status);
@@ -145,12 +178,13 @@ async function request(method: string, path: string, body?: unknown): Promise<Re
   return res;
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await request(method, path, body);
+async function call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await request(method, path, body, signal);
   return (await jsonBody(res)) as T;
 }
 
 function endLocalSession() {
+  loadSeq++;
   token = '';
   // The log is a session's: it goes with it.
   useVault.setState({ session: false, sessionProof: false, log: [] });
@@ -165,6 +199,7 @@ interface Opened {
 }
 
 function opened(o: Opened) {
+  loadSeq++;
   token = o.session;
   useVault.setState({ session: true, sessionProof: !!o.proof, status: o.status });
   useWorkspacePresets.setState({ session: true, locked: !!o.status.locked });
@@ -173,7 +208,7 @@ function opened(o: Opened) {
 const enc = encodeURIComponent;
 
 export const vaultApi = {
-  list: () =>
+  list: (signal?: AbortSignal) =>
     call<{
       status: VaultStatus;
       variables: VaultVariable[];
@@ -186,7 +221,7 @@ export const vaultApi = {
       autoLock?: AutoLock;
       guard?: VaultGuard | null;
       unlock?: VaultUnlock;
-    }>('GET', ''),
+    }>('GET', '', undefined, signal),
   /** Creates or changes a variable; `to` renames it in the same write. */
   set: (
     name: string,
@@ -232,7 +267,7 @@ export const vaultApi = {
   requests: () => call<{ requests: VaultRequest[] }>('GET', '/requests'),
   answer: (id: string, answer: Answer, verify?: { proof?: Proof; passphrase?: string }) =>
     call('POST', `/requests/${enc(id)}`, { answer, ...verify }),
-  log: () => call<{ log: VaultAccess[] }>('GET', '/log'),
+  log: (signal?: AbortSignal) => call<{ log: VaultAccess[] }>('GET', '/log', undefined, signal),
   /** An export file of the variables named (or all), as its text: the hub
    * seals it, so values never reach the page. */
   exportFile: async (body: { passphrase: string; filePassphrase: string; names?: string[]; all?: boolean }) =>
@@ -549,15 +584,28 @@ export function appOf(ps?: VaultProcess[]): string {
   return ps?.[1]?.name ?? '';
 }
 
+let loadAbort: AbortController | undefined;
+let loadSeq = 0;
+
 /** Loads the variables and, with a session, the log again: the hub shows
  * the log to a session only (it tells what was read, by whom and which
- * apps are exempt). */
-export async function loadVault() {
+ * apps are exempt). Each call supersedes any earlier in-flight load (aborting
+ * its fetch and guarding commits by monotonic sequence) so bulk operations
+ * and WS changed bursts can never overwrite newer state out of order. */
+export async function loadVault(): Promise<void> {
+  loadAbort?.abort();
+  const ac = new AbortController();
+  loadAbort = ac;
+  const seq = ++loadSeq;
   try {
     // What the hub says of the session counts only for the token sent: a
     // load that crossed a session's start or end says nothing of it.
     const sent = token;
-    const [list, log] = await Promise.all([vaultApi.list(), sent ? vaultApi.log().catch(() => ({ log: [] })) : { log: [] }]);
+    const [list, log] = await Promise.all([
+      vaultApi.list(ac.signal),
+      sent ? vaultApi.log(ac.signal).catch(() => ({ log: [] })) : { log: [] },
+    ]);
+    if (seq !== loadSeq || ac.signal.aborted) return;
     if (token === sent && !list.session) token = '';
     const variables = list.variables ?? [];
     const groups = list.groups ?? [];
@@ -588,7 +636,10 @@ export async function loadVault() {
       verifyEachAllow: !!(guard && 'verifyEachAllow' in guard && guard.verifyEachAllow),
     });
   } catch (e) {
+    if (seq !== loadSeq || ac.signal.aborted) return;
     useVault.setState({ error: e instanceof VaultError ? e.code : 'failed' });
+  } finally {
+    if (loadAbort === ac) loadAbort = undefined;
   }
 }
 
