@@ -4,7 +4,7 @@
 // renaming, closing, archiving, restoring and deleting one, and the menus
 // that offer these.
 import { createElement, type ComponentType } from 'react';
-import { ArrowLeftRight, CirclePower, GitFork, Pencil, SquareTerminal, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, CirclePower, Download, GitFork, Pencil, SquareTerminal, Trash2 } from 'lucide-react';
 import { create } from 'zustand';
 import { actions } from '../../actions';
 import { agentKind, chatAdapter, usageProvider } from '../../conversation/kinds';
@@ -19,7 +19,7 @@ import { ProviderLogo } from '../usage/logos';
 import { ChatFailure, chatApi, failureText, permissionMode, type NewChatVault } from './api';
 import { canContinueInTerminal, continueInTerminal } from './handoff';
 import { STATE_DELETED } from './protocol';
-import { applyStates, chatState, loadAgents, offeredKinds, upsertState, useChats } from './state';
+import { applyStates, chatState, liveKey, loadAgents, offeredKinds, upsertState, useChats } from './state';
 import { CHAT_PLUGIN, CHAT_VIEW, chatPane, chatRef } from './view';
 
 /** What the chat panes are asked from outside: the pane (machine and view
@@ -364,6 +364,47 @@ export function switchAgentMenu(m: string, chat: string, currentKind: string | u
     }));
 }
 
+/** Builds a clean .md download filename from a chat's title (or agent) and id. */
+export function chatExportFileName(title: string | undefined, kind: string | undefined, chat: string): string {
+  const raw = (title || agentName(kind) || 'chat')
+    .trim()
+    .replace(/[\\/:*?"<>|\x00-\x1f]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 64);
+  const stem = raw || 'chat';
+  return `${stem}-${chat.slice(0, 8)}.md`;
+}
+
+function saveMarkdown(text: string, name: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** Exports a chat's conversation as a Markdown file download; a failure is said in a toast. */
+export async function exportChatMarkdown(m: string, chat: string, o: { upToSeq?: number; kind?: string } = {}): Promise<boolean> {
+  const st = chatState(m, chat);
+  const live = useChats.getState().live[liveKey(m, chat)];
+  const kind = o.kind ?? st?.kind;
+  const title = live?.info?.title || st?.title;
+  try {
+    const md = await chatApi.exportMarkdown(m, chat, o.upToSeq);
+    saveMarkdown(md, chatExportFileName(title, kind, chat));
+    return true;
+  } catch (e) {
+    toast(failureText(e, agentName(kind), 'chat.exportFailed'));
+    return false;
+  }
+}
+
 /** What a chat pane's header and tab menus start with. */
 export function chatMenu(m: string, view: L.PluginView): MenuEntry[] {
   const ref = chatRef(view);
@@ -378,6 +419,7 @@ export function chatMenu(m: string, view: L.PluginView): MenuEntry[] {
   ];
   const others = switchAgentMenu(m, chat, kind, from);
   if (others.length) out.push({ label: t('chat.switchAgent'), icon: createElement(ArrowLeftRight), submenu: others });
+  out.push({ label: t('chat.export'), icon: createElement(Download), run: () => void exportChatMarkdown(m, chat, { kind }) });
   if (canContinueInTerminal(m, view))
     out.push({
       label: t('chat.continueInTerminal'),

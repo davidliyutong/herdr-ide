@@ -270,53 +270,86 @@ describe('the chat pane', () => {
     expect(q('.chat-title-edit')).toBeNull();
     expect(q('.chat-action-fork')).toBeNull();
     expect(q('.chat-action-switch')).toBeNull();
+    expect(q('.chat-action-export')).toBeNull();
     await vi.waitFor(() => expect(q<HTMLTextAreaElement>('textarea')?.disabled).toBe(true));
   });
 
-  it('forks the chat and switches agent from the header actions', async () => {
+  it('forks, switches agent, and exports Markdown from the header actions', async () => {
     const E = 'c00000000000000e5';
     const F = 'c00000000000000f6';
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string, init?: RequestInit) => {
-        const method = init?.method ?? 'GET';
-        calls.push({ url: String(url), method });
-        if (String(url) === '/api/m/m/p/chat/agents') {
-          return new Response(
-            JSON.stringify({
-              agents: [
-                { kind: 'claude', available: true },
-                { kind: 'codex', available: true },
-              ],
-            }),
-            { status: 200 },
-          );
-        }
-        if (String(url) === '/api/m/m/p/chat/fork' && method === 'POST') {
-          return new Response(JSON.stringify({ chat: st(E, { kind: 'claude', title: 'Forked' }) }), { status: 200 });
-        }
-        if (String(url) === '/api/m/m/p/chat/switch' && method === 'POST') {
-          return new Response(JSON.stringify({ chat: st(F, { kind: 'codex', title: 'Switched' }) }), { status: 200 });
-        }
-        return new Response('{}', { status: 200 });
-      }),
-    );
-    chats.chat(A, { kind: 'claude', title: 'Orig', cwd: '/home/u/proj', state: 'idle' });
-    await pane(view(A));
-    await act(async () => q<HTMLButtonElement>('.chat-action-fork')!.click());
-    await tick();
-    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/fork')).toBe(true);
-    expect(useChats.getState().states.m?.[E]?.title).toBe('Forked');
-
-    await act(async () => q<HTMLButtonElement>('.chat-action-switch')!.click());
-    const codexItem = (useMenu.getState().menu?.entries ?? []).find((e) => isItem(e) && e.label === 'Codex');
-    expect(codexItem && isItem(codexItem)).toBe(true);
-    await act(async () => {
-      if (codexItem && isItem(codexItem)) codexItem.run?.();
+    const downloads: Array<{ name: string; text: string }> = [];
+    const origCreateObjectURL = URL.createObjectURL;
+    const origRevokeObjectURL = URL.revokeObjectURL;
+    const blobs = new Map<string, Blob>();
+    URL.createObjectURL = vi.fn((obj: Blob | MediaSource) => {
+      const u = `blob:test/${blobs.size}`;
+      if (obj instanceof Blob) blobs.set(u, obj);
+      return u;
     });
-    await tick();
-    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/switch')).toBe(true);
-    expect(useChats.getState().states.m?.[F]?.kind).toBe('codex');
+    URL.revokeObjectURL = vi.fn();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      const b = blobs.get(this.href);
+      void b?.text().then((text) => downloads.push({ name: this.download, text }));
+    });
+    try {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const method = init?.method ?? 'GET';
+          calls.push({ url: String(url), method });
+          if (String(url) === '/api/m/m/p/chat/agents') {
+            return new Response(
+              JSON.stringify({
+                agents: [
+                  { kind: 'claude', available: true },
+                  { kind: 'codex', available: true },
+                ],
+              }),
+              { status: 200 },
+            );
+          }
+          if (String(url) === '/api/m/m/p/chat/fork' && method === 'POST') {
+            return new Response(JSON.stringify({ chat: st(E, { kind: 'claude', title: 'Forked' }) }), { status: 200 });
+          }
+          if (String(url) === '/api/m/m/p/chat/switch' && method === 'POST') {
+            return new Response(JSON.stringify({ chat: st(F, { kind: 'codex', title: 'Switched' }) }), { status: 200 });
+          }
+          if (String(url) === `/api/m/m/p/chat/export?chat=${A}` && method === 'GET') {
+            return new Response(JSON.stringify({ markdown: '# Conversation Handoff\n\n### User\n\nHello' }), { status: 200 });
+          }
+          return new Response('{}', { status: 200 });
+        }),
+      );
+      chats.chat(A, { kind: 'claude', title: 'Orig / Spec', cwd: '/home/u/proj', state: 'idle' });
+      await pane(view(A));
+      await act(async () => q<HTMLButtonElement>('.chat-action-fork')!.click());
+      await tick();
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/fork')).toBe(true);
+      expect(useChats.getState().states.m?.[E]?.title).toBe('Forked');
+
+      await act(async () => q<HTMLButtonElement>('.chat-action-switch')!.click());
+      const codexItem = (useMenu.getState().menu?.entries ?? []).find((e) => isItem(e) && e.label === 'Codex');
+      expect(codexItem && isItem(codexItem)).toBe(true);
+      await act(async () => {
+        if (codexItem && isItem(codexItem)) codexItem.run?.();
+      });
+      await tick();
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/switch')).toBe(true);
+      expect(useChats.getState().states.m?.[F]?.kind).toBe('codex');
+
+      await act(async () => q<HTMLButtonElement>('.chat-action-export')!.click());
+      await tick();
+      expect(calls.some((c) => c.method === 'GET' && c.url === `/api/m/m/p/chat/export?chat=${A}`)).toBe(true);
+      await vi.waitFor(() => expect(downloads).toHaveLength(1));
+      expect(downloads[0]).toEqual({
+        name: `Orig-Spec-${A.slice(0, 8)}.md`,
+        text: '# Conversation Handoff\n\n### User\n\nHello',
+      });
+    } finally {
+      clickSpy.mockRestore();
+      URL.createObjectURL = origCreateObjectURL;
+      URL.revokeObjectURL = origRevokeObjectURL;
+    }
   });
 
   it('renders each agent kind’s brand icon in LeafIcon and on custom-named chat tabs', async () => {

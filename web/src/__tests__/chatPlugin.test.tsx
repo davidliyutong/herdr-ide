@@ -489,11 +489,18 @@ describe('a chat pane’s menu', () => {
   const labels = (list: ReturnType<typeof chatMenu>) => list.map((e) => (isItem(e) ? e.label : '-'));
   const entry = (list: ReturnType<typeof chatMenu>, label: string) => list.find((e) => isItem(e) && e.label === label) as MenuItem;
 
-  it('renames, forks, switches agent, closes and deletes the chat', async () => {
+  it('renames, forks, switches agent, exports, closes and deletes the chat', async () => {
     applyMessage('m', msg([st(B, { title: 'Fix it' })], 1, true));
     const v = view(B);
     const list = chatMenu('m', v);
-    expect(labels(list)).toEqual([t('chat.rename'), t('chat.fork'), t('chat.switchAgent'), t('chat.close'), t('chat.delete')]);
+    expect(labels(list)).toEqual([
+      t('chat.rename'),
+      t('chat.fork'),
+      t('chat.switchAgent'),
+      t('chat.export'),
+      t('chat.close'),
+      t('chat.delete'),
+    ]);
     const sw = entry(list, t('chat.switchAgent'));
     expect((sw.submenu ?? []).filter(isItem).map((e) => e.label)).not.toContain('Claude Code');
     expect((sw.submenu ?? []).filter(isItem).map((e) => e.label)).toContain('Codex');
@@ -518,7 +525,13 @@ describe('a chat pane’s menu', () => {
 
   it('has nothing for a closed chat’s close, a leaf without a chat, or a read-only page', () => {
     applyMessage('m', msg([st(B, { state: 'closed' })], 1, true));
-    expect(labels(chatMenu('m', view(B)))).toEqual([t('chat.rename'), t('chat.fork'), t('chat.switchAgent'), t('chat.delete')]);
+    expect(labels(chatMenu('m', view(B)))).toEqual([
+      t('chat.rename'),
+      t('chat.fork'),
+      t('chat.switchAgent'),
+      t('chat.export'),
+      t('chat.delete'),
+    ]);
     expect(chatMenu('m', view('nope'))).toEqual([]);
     useStore.getState().setReadOnly(true);
     expect(chatMenu('m', view(B))).toEqual([]);

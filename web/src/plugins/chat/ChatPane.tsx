@@ -2,13 +2,13 @@
 // conversation view (conversation/Conversation.tsx) from the chat's source
 // (source.ts). Above it a line says which agent it is, the chat's title
 // (renamed in place: a double click, or Rename in the pane's menu), its
-// directory, quick actions (Fork, Switch Agent) and its state; below that what
+// directory, quick actions (Fork, Switch Agent, Export Markdown) and its state; below that what
 // keeps the chat from going on: it is no more, the page or the machine is not
 // connected, the hub refused it, or its agent failed (with what the agent wrote
 // to its error output). The composer says the rest (closed, handed off to a
 // terminal, sleeping agents start again with a message).
 import { createElement, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { ArrowLeftRight, BotMessageSquare, GitFork, TriangleAlert, WifiOff } from 'lucide-react';
+import { ArrowLeftRight, BotMessageSquare, Download, GitFork, TriangleAlert, WifiOff } from 'lucide-react';
 import { actions } from '../../actions';
 import { InlineEdit } from '../../components/InlineEdit';
 import { openMenu } from '../../contextMenu';
@@ -24,7 +24,7 @@ import * as L from '../../term/layout';
 import type { PluginView } from '../../term/layout';
 import type { PaneViewProps } from '../api';
 import { failureText, fullAccessAllowed, visibleModelsFor } from './api';
-import { agentName, brandKindIcon, forkChat, renameChat, switchAgentMenu, useChatUi } from './ops';
+import { agentName, brandKindIcon, exportChatMarkdown, forkChat, renameChat, switchAgentMenu, useChatUi } from './ops';
 import { CHAT_STATES } from './protocol';
 import { useChatSource } from './source';
 import { chatGone, follow, liveKey, useChats } from './state';
@@ -177,6 +177,15 @@ function ChatBody({ m, pane, view, chat }: { m: string; pane: string; view: Plug
               onClick={onSwitchClick}
             >
               <ArrowLeftRight aria-hidden />
+            </button>
+            <button
+              type="button"
+              className="icon sm chat-action-export"
+              title={t('chat.exportHint')}
+              aria-label={t('chat.export')}
+              onClick={() => void exportChatMarkdown(m, chat, { kind })}
+            >
+              <Download aria-hidden />
             </button>
           </span>
         )}

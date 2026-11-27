@@ -27,9 +27,12 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 function trimBytes(s: string, max: number): string {
   const b = Buffer.from(s, 'utf8');
   if (b.length <= max) return s;
-  let cut = max;
+  const ell = '…';
+  const ellBytes = Buffer.byteLength(ell, 'utf8');
+  if (max <= ellBytes) return b.subarray(0, Math.max(0, max)).toString('utf8');
+  let cut = max - ellBytes;
   while (cut > 0 && (b[cut]! & 0xc0) === 0x80) cut--;
-  return b.subarray(0, cut).toString('utf8') + '…';
+  return b.subarray(0, cut).toString('utf8') + ell;
 }
 
 function formatContent(content: unknown[] | undefined): string {
@@ -104,6 +107,7 @@ export function exportMarkdown(events: readonly chat.Event[], opts: ExportOption
   let assistantTools = new Map<string, ToolSummary>();
   let latestPlan: string[] = [];
   const openQuestions = new Map<string, chat.Question[]>();
+  const queuedWaiting = new Map<string, unknown[]>();
 
   const flushAssistant = () => {
     const bodyParts: string[] = [];
@@ -133,6 +137,20 @@ export function exportMarkdown(events: readonly chat.Event[], opts: ExportOption
         flushAssistant();
         const text = formatContent(ev.content);
         if (text) turns.push({ kind: 'user', text: trimBytes(text, MAX_TURN_TEXT) });
+        break;
+      }
+      case chat.EventType.Queued: {
+        if (ev.state === chat.QueuedState.Waiting) {
+          if (ev.message && Array.isArray(ev.content)) queuedWaiting.set(ev.message, ev.content);
+        } else if (ev.state === chat.QueuedState.Cancelled) {
+          if (ev.message) queuedWaiting.delete(ev.message);
+        } else if (ev.state === chat.QueuedState.Taken) {
+          flushAssistant();
+          const content = Array.isArray(ev.content) ? ev.content : ev.message ? queuedWaiting.get(ev.message) : undefined;
+          if (ev.message) queuedWaiting.delete(ev.message);
+          const text = formatContent(content);
+          if (text) turns.push({ kind: 'user', text: trimBytes(text, MAX_TURN_TEXT) });
+        }
         break;
       }
       case chat.EventType.Update: {
@@ -208,7 +226,8 @@ export function exportMarkdown(events: readonly chat.Event[], opts: ExportOption
   if (opts.cwd) headerLines.push(`- **Working directory:** ${opts.cwd}`);
   const header = headerLines.join('\n');
 
-  const planSection = latestPlan.length > 0 ? `\n\n## Latest Plan\n\n${latestPlan.join('\n')}` : '';
+  const planCap = Math.min(8192, Math.floor(maxBytes / 4));
+  const planSection = latestPlan.length > 0 ? trimBytes(`\n\n## Latest Plan\n\n${latestPlan.join('\n')}`, planCap) : '';
   const omittedNote = '\n\n_[Earlier turns omitted to fit context budget]_\n';
 
   if (turns.length === 0) {
@@ -245,7 +264,7 @@ export function exportMarkdown(events: readonly chat.Event[], opts: ExportOption
   kept.reverse();
 
   const body = (truncated ? omittedNote + '\n' : '\n\n') + kept.join('\n\n');
-  return `${header}\n\n## Transcript${body}${planSection}`;
+  return trimBytes(`${header}\n\n## Transcript${body}${planSection}`, maxBytes);
 }
 
 /** Prepends a conversation handoff digest to a user's first prompt blocks. */

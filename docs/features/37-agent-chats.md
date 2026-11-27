@@ -32,13 +32,13 @@ page (chat pane) ──WebSocket──▶ hub (plugin chat) ───yamux──
 
 A kind of `backend/shared/agents/kinds.ts` has a chat when its row has a `chat` spec: the adapter, the command, added environment and, for ACP, the `_meta` of `session/new`. Only the adapter's name reaches the page; the command is looked up on the machine in the login shell's PATH.
 
-| Kind | Adapter | Command |
-| --- | --- | --- |
-| `claude` | `claude` | `claude` and the SDK's arguments |
-| `codex` | `codex` | `codex app-server --listen stdio://` |
-| `agy` | `acp` | `agy acp --stdio` |
-| `kimi` | `acp` | `kimi acp` |
-| `grok` | `acp` | `grok agent --no-leader stdio`, sessions made with `{"yoloMode": false}` |
+| Kind     | Adapter  | Command                                                                  |
+| -------- | -------- | ------------------------------------------------------------------------ |
+| `claude` | `claude` | `claude` and the SDK's arguments                                         |
+| `codex`  | `codex`  | `codex app-server --listen stdio://`                                     |
+| `agy`    | `acp`    | `agy acp --stdio`                                                        |
+| `kimi`   | `acp`    | `kimi acp`                                                               |
+| `grok`   | `acp`    | `grok agent --no-leader stdio`, sessions made with `{"yoloMode": false}` |
 
 ### The chat host (`backend/features/chat/machine/host`)
 
@@ -76,24 +76,24 @@ A chat (`c` + 16 hex digits) is one agent session in one directory. Its state is
 
 JSON lines (≤ 16 MiB) on the socket: the host's hello, then one request per connection, except `attach` and `watch`, which stay open. Agents are named by kind, never by command.
 
-| Request | Answer |
-| --- | --- |
-| `agents {kinds}` | Availability and version per kind. |
-| `models {kind, cwd?, refresh?}` | Cached or freshly probed `ModelOption[]` and `fetchedAt`. |
-| `chats` | Every chat, latest first. |
-| `new {kind, cwd, resume?, import?, options?}` | The chat, `starting`. |
-| `fork {chat, upToSeq?, title?}` | The forked chat. |
-| `switch {chat, targetKind, options?, upToSeq?}` | A new chat of `targetKind` seeded once with a handoff digest. |
-| `export {chat, upToSeq?}` | Bounded Markdown conversation digest. |
-| `attach {chat, from, noCatchUp?}` | The chat, its first kept sequence number, stored events after `from`, then new ones. |
-| `close`, `archive`, `unarchive`, `delete {chat}` | – |
-| `sessions {kind, cwd, cursor}` | A page of the agent's sessions for the directory. |
-| `watch` | Every chat's state, then each change. |
-| `seen {chat, seq}` | – |
-| `configure {settings}` | – (the machine's settings) |
-| `shutdown` | – (`busy` while a chat is busy) |
-| `trust`, `untrust {cwd}`, `trusted` | – / the trusted folders |
-| `host_status` | Version, pid, connections, live agents, sizes, settings. |
+| Request                                          | Answer                                                                               |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `agents {kinds}`                                 | Availability and version per kind.                                                   |
+| `models {kind, cwd?, refresh?}`                  | Cached or freshly probed `ModelOption[]` and `fetchedAt`.                            |
+| `chats`                                          | Every chat, latest first.                                                            |
+| `new {kind, cwd, resume?, import?, options?}`    | The chat, `starting`.                                                                |
+| `fork {chat, upToSeq?, title?}`                  | The forked chat.                                                                     |
+| `switch {chat, targetKind, options?, upToSeq?}`  | A new chat of `targetKind` seeded once with a handoff digest.                        |
+| `export {chat, upToSeq?}`                        | Bounded Markdown conversation digest.                                                |
+| `attach {chat, from, noCatchUp?}`                | The chat, its first kept sequence number, stored events after `from`, then new ones. |
+| `close`, `archive`, `unarchive`, `delete {chat}` | –                                                                                    |
+| `sessions {kind, cwd, cursor}`                   | A page of the agent's sessions for the directory.                                    |
+| `watch`                                          | Every chat's state, then each change.                                                |
+| `seen {chat, seq}`                               | –                                                                                    |
+| `configure {settings}`                           | – (the machine's settings)                                                           |
+| `shutdown`                                       | – (`busy` while a chat is busy)                                                      |
+| `trust`, `untrust {cwd}`, `trusted`              | – / the trusted folders                                                              |
+| `host_status`                                    | Version, pid, connections, live agents, sizes, settings.                             |
 
 An attached connection sends commands answered by `ack`: `prompt` (with optional `delivery`), `cancel`, `permission`, `answer`, `set_config`, `cancel_queued`, `steer_queued`, `compact` (with optional `instructions`), `stop_task`, `rewind`, `rename`, `handoff`.
 
@@ -105,13 +105,13 @@ An attached connection sends commands answered by `ack`: `prompt` (with optional
 
 Startup loads chats and their first kept sequence numbers together. A chat loads its saved prompt identifiers on its first identified prompt after recovery. Bounds enforcement reclaims free pages in limited batches. Live increments waiting behind journal writes have a per-chat byte and event limit. Stored events still provide the complete item.
 
-| Bound | Setting | Default | Range |
-| --- | --- | --- | --- |
-| Bytes of a chat's events | `chat.maxChatMB` | 64 MB | 8–256 |
-| Bytes of all events | `chat.maxTotalMB` | 512 MB | 64–2048 |
-| Chats kept | `chat.maxChats` | 500 | 50–2000 |
-| Days a closed chat is kept | `chat.retentionDays` | 30 | 1–365 |
-| One stored event | – | 1 MiB | – |
+| Bound                      | Setting              | Default | Range   |
+| -------------------------- | -------------------- | ------- | ------- |
+| Bytes of a chat's events   | `chat.maxChatMB`     | 64 MB   | 8–256   |
+| Bytes of all events        | `chat.maxTotalMB`    | 512 MB  | 64–2048 |
+| Chats kept                 | `chat.maxChats`      | 500     | 50–2000 |
+| Days a closed chat is kept | `chat.retentionDays` | 30      | 1–365   |
+| One stored event           | –                    | 1 MiB   | –       |
 
 A chat over its bytes loses its oldest events; past the other bounds closed chats go, archived ones first, oldest first; a new chat with nothing left to remove is refused (`too_many`). Oversized events are cut. An event the journal refuses fails the chat, so a log never has a gap. A newer host's journal is not used; other hosts' journals on a shared home unopened for 30 days are removed.
 
@@ -124,14 +124,15 @@ Claude Code keeps at most 16 pending prompt records. A queued prompt releases it
 - **Claude Code** (`claude/`, on `@anthropic-ai/claude-agent-sdk`): the protocol spoken by Anthropic's Agent SDK ([42](42-typescript-backend.md#claude-code)), the program run through the host's processes, the user's own `claude`; recorded with Claude Code 2.1.330. Full access needs `--allow-dangerously-skip-permissions`, so switching to it restarts the program on the same session. `CLAUDE_CODE_ENTRYPOINT` marks its sessions as the SDK's. `can_use_tool`, `AskUserQuestion` and `ExitPlanMode` become permission, question and plan; tool results are mapped by `backend/shared/agents/transcript`. A permission the program cancelled (an interrupt) is answered with a denial, as the SDK answers every request it hands on; a mode set is the one asked for, the SDK passing on no answer of the program's; lines that are no JSON objects and `keep_alive` the SDK drops itself. A session with a live `<claude dir>/sessions/<pid>.json` record is `in_terminal`. Sessions and imports read `~/.claude/projects`. The SDK is Anthropic's, all rights reserved, so no executable carries it: a machine gets the pinned npm tarball when a Claude Code chat needs it, downloading it itself or from the hub, checked against the pinned integrity, into `<data>/claude-agent-sdk/<version>`, which the chat host loads; a machine that cannot refuses the chat with `sdk_unavailable` ([42](42-typescript-backend.md#claude-code)).
 - **Codex** (`codex/`): `codex app-server`, protocol v2, one per live chat. It is written against TypeScript types generated from the JSON schema Codex prints of the version pinned (`appserver.gen.ts`, by `backend/scripts/codex-schema.ts` from `spec/codex-app-server`, which `make check` holds them to): the typecheck holds the adapter to the protocol, and its tests validate the recordings and what it sends against the schema itself (`appserver.test.ts`). A thread started writable records its directory in `~/.codex/config.toml`, so threads start read-only and each turn carries the mode as policy:
 
-  | Mode | Approval policy | Sandbox | Collaboration mode |
-  | --- | --- | --- | --- |
-  | `default` | `untrusted` | `workspaceWrite` of the directory | default |
-  | `acceptEdits` | `on-request` | `workspaceWrite` of the directory | default |
-  | `plan` | `on-request` | `readOnly` | `plan` |
-  | `full` | `never` | `dangerFullAccess` | default |
+  | Mode          | Approval policy | Sandbox                           | Collaboration mode |
+  | ------------- | --------------- | --------------------------------- | ------------------ |
+  | `default`     | `untrusted`     | `workspaceWrite` of the directory | default            |
+  | `acceptEdits` | `on-request`    | `workspaceWrite` of the directory | default            |
+  | `plan`        | `on-request`    | `readOnly`                        | `plan`             |
+  | `full`        | `never`         | `dangerFullAccess`                | default            |
 
   (`default` is `untrusted` because under `on-request` the model refuses to write instead of asking.) Approvals never map to the amendments Codex saves. A command still running 2 s after an interrupt has the app-server restarted. Close closes stdin before SIGTERM: Codex killed outright leaves its shell snapshots. Its framing is its own (no `jsonrpc` member, as Codex writes it; a line over 16 MiB passed over), every message handed on in the order of the app-server's output. What it keeps of the tool calls that started and did not complete and of the subagents' threads is bounded (4096 each, the oldest going: such a call is then not marked cancelled at its turn's end, and such a thread is its own parent).
+
 - **ACP** (`acp/`, on `@agentclientprotocol/sdk`): Antigravity (`agy`), Kimi Code and Grok. No file system or terminal capability is offered: every request of the agent but a permission is answered "method not found". One turn per prompt; prompts during a turn wait FIFO in the adapter (at most 16), with `delivery: 'interrupt'` cancelling the active turn without dropping unrelated queued messages; permissions offer the agent's `allow_once` and `reject_once` options only, at most 64 waiting. `session/resume` falls back once to `session/load` when `-32603` indicates unreadable state; `session/close` runs with a bounded timeout (≤ 2 s) before process stop; `session/fork` and `/compact` are enabled dynamically when advertised by the agent; `models()` probes via `initialize` + `session/new` + `session/close`. Sessions and imports run a short agent process (`session/list` filtered to `cwd`, `session/load`, whose replay is lossy). An ACP agent cannot tell that a terminal runs a session.
 
 Each adapter's tests replay `spec/vectors/chat/<adapter>` through a fake agent (Claude Code's through the SDK) and compare what the host gets with the golden files of the same recordings (`testdata/golden` beside the adapter's tests, edited by hand after a deliberate change of the mapping).
@@ -154,7 +155,7 @@ The host gets its adapters by name from its composition root (`backend/hosts/mac
 
 ### The page (`web/src/plugins/chat`, `web/src/conversation`)
 
-- **The pane**: a layout leaf `{view: {plugin: chat, kind: chat, chat, agent}}` with the agent's brand icon in both the tab and the bottom-left of the composer, drawn by the conversation view from a `ChatSource`. Markdown with tables, code and KaTeX (also `\[…\]` and `\(…\)`, `conversation/format.ts`); cards answer permissions, questions (including non-blocking Codex async questions) and plans; a collapsible background tasks and subagents bar surfaces live `Chat.tasks` with per-task Stop buttons; user messages offer Edit & Rewind and Fork-from-here actions. The composer sends on Enter (defaulting to Slack-style per-message queuing while a turn runs, with individual Steer/Edit/Withdraw actions and explicit Steer/Interrupt via `Cmd/Ctrl+Enter`), supports Markdown auto-completion, indentation, formatting shortcuts and a Markdown preview toggle, takes pasted or dropped images, recursive `@` file completion (`GET /api/m/{id}/p/files/find`), a standalone file browser picker (`FilePicker`) and `/` commands, offers filtered model, effort and mode selectors (with **Manage models…** opening the provider's settings sub-page; full access shown unavailable where not allowed), and shows session cost alongside an interactive click-to-compact context meter (without duplicating subscription rate limits). Header & menu: Fork, Switch Agent, Rename, **Continue in Terminal**, Close, Delete.
+- **The pane**: a layout leaf `{view: {plugin: chat, kind: chat, chat, agent}}` with the agent's brand icon in both the tab and the bottom-left of the composer, drawn by the conversation view from a `ChatSource`. Markdown with tables, code and KaTeX (also `\[…\]` and `\(…\)`, `conversation/format.ts`); cards answer permissions, questions (including non-blocking Codex async questions) and plans; a collapsible background tasks and subagents bar surfaces live `Chat.tasks` with per-task Stop buttons; user messages offer Edit & Rewind and Fork-from-here actions. The composer sends on Enter (defaulting to Slack-style per-message queuing while a turn runs, with individual Steer/Edit/Withdraw actions and explicit Steer/Interrupt via `Cmd/Ctrl+Enter`), supports Markdown auto-completion, indentation, formatting shortcuts and a Markdown preview toggle, takes pasted or dropped images, recursive `@` file completion (`GET /api/m/{id}/p/files/find`), a standalone file browser picker (`FilePicker`) and `/` commands, offers filtered model, effort and mode selectors (with **Manage models…** opening the provider's settings sub-page; full access shown unavailable where not allowed), and shows session cost alongside an interactive click-to-compact context meter (without duplicating subscription rate limits). Header & menu: Fork, Switch Agent, Export Markdown, Rename, **Continue in Terminal**, Close, Delete.
 - **Settings › Agent Chats**: general chat bounds and per-provider sub-pages (`claude`, `codex`, `agy`, `kimi`, `grok`, modeled on AI Usage settings) with Refresh Model List and model visibility checkboxes (`chat.visibleModels.<kind>`), plus Headless Chat Hosts and Trusted Folders on the root page.
 - **New chats** from the new-tab menu, the command `chat.new` and the Chats panel, in the focused pane's directory.
 - **The Chats panel** (right sidebar): the machine's chats by urgency, archived ones folded below, the agents' earlier sessions of the directory, and a link to the Agent Chats page in Settings (hosts, sessions and trusted folders per machine).
@@ -175,17 +176,17 @@ A terminal core stop ends the host and its agents. The next use starts a host th
 
 ## Alternatives considered
 
-| Option | Why not |
-| --- | --- |
-| The conversation drawn over the agent's terminal | Input pasted into a program, confirmation a turn late, permissions only in the terminal, no streaming. |
-| ACP for every agent | Claude Code and Codex speak it only through third-party adapters, without their permissions, plans, questions, effort, usage and limits. |
-| The Agent SDK in Node as a sidecar | A Node runtime per machine (often offline); the machine side runs on Bun, which loads the SDK itself. |
-| `character-ai/claude-agent-sdk-go` | One-shot `claude --print` without control requests: no permissions, questions, plans, model changes, interrupts or queues. |
-| The host as a child of the agent | It would die with every ssh drop and hub restart; as a terminal of the terminal core it lives as the user's programs do. |
-| A socket or port the hub reaches directly | Nothing listens on TCP on machines; the agent's stream suffices. |
-| JSONL files per chat | Bounds and eviction would need their own crash-safe rewriting; SQLite gives transactions ([38](38-sqlite-state.md)). |
-| Storing live increments | Every token in the log; a reattach gets the whole item instead. |
-| OpenCode through ACP | It listens on a TCP port without authentication. |
+| Option                                           | Why not                                                                                                                                  |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| The conversation drawn over the agent's terminal | Input pasted into a program, confirmation a turn late, permissions only in the terminal, no streaming.                                   |
+| ACP for every agent                              | Claude Code and Codex speak it only through third-party adapters, without their permissions, plans, questions, effort, usage and limits. |
+| The Agent SDK in Node as a sidecar               | A Node runtime per machine (often offline); the machine side runs on Bun, which loads the SDK itself.                                    |
+| `character-ai/claude-agent-sdk-go`               | One-shot `claude --print` without control requests: no permissions, questions, plans, model changes, interrupts or queues.               |
+| The host as a child of the agent                 | It would die with every ssh drop and hub restart; as a terminal of the terminal core it lives as the user's programs do.                 |
+| A socket or port the hub reaches directly        | Nothing listens on TCP on machines; the agent's stream suffices.                                                                         |
+| JSONL files per chat                             | Bounds and eviction would need their own crash-safe rewriting; SQLite gives transactions ([38](38-sqlite-state.md)).                     |
+| Storing live increments                          | Every token in the log; a reattach gets the whole item instead.                                                                          |
+| OpenCode through ACP                             | It listens on a TCP port without authentication.                                                                                         |
 
 ## Failure modes
 

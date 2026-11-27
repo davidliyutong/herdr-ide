@@ -92,10 +92,89 @@ describe('exportMarkdown', () => {
       });
     }
     const md = exportMarkdown(events, { maxBytes: 2500 });
-    expect(Buffer.byteLength(md, 'utf8')).toBeLessThanOrEqual(2700);
+    expect(Buffer.byteLength(md, 'utf8')).toBeLessThanOrEqual(2500);
     expect(md).toContain('Earlier turns omitted');
     expect(md).toContain('Turn 20');
     expect(md).not.toContain('Turn 1:');
+  });
+
+  test('includes taken queued messages and ignores cancelled or still-waiting ones', () => {
+    const events: chat.Event[] = [
+      { seq: 1, t: chat.EventType.User, content: [{ type: 'text', text: 'Initial task' }] },
+      {
+        seq: 2,
+        t: chat.EventType.Update,
+        item: 'a1',
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Working on initial task.' } },
+      },
+      {
+        seq: 3,
+        t: chat.EventType.Queued,
+        message: 'q-taken',
+        state: chat.QueuedState.Waiting,
+        content: [{ type: 'text', text: 'Steer: also update tests' }],
+      },
+      {
+        seq: 4,
+        t: chat.EventType.Queued,
+        message: 'q-cancel',
+        state: chat.QueuedState.Waiting,
+        content: [{ type: 'text', text: 'Withdrawn follow-up' }],
+      },
+      {
+        seq: 5,
+        t: chat.EventType.Queued,
+        message: 'q-cancel',
+        state: chat.QueuedState.Cancelled,
+      },
+      {
+        seq: 6,
+        t: chat.EventType.Queued,
+        message: 'q-taken',
+        state: chat.QueuedState.Taken,
+      },
+      {
+        seq: 7,
+        t: chat.EventType.Update,
+        item: 'a2',
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Updated tests too.' } },
+      },
+      {
+        seq: 8,
+        t: chat.EventType.Queued,
+        message: 'q-waiting',
+        state: chat.QueuedState.Waiting,
+        content: [{ type: 'text', text: 'Still pending in queue' }],
+      },
+    ];
+    const md = exportMarkdown(events, { title: 'Steered chat', kind: 'codex' });
+    expect(md).toContain('Initial task');
+    expect(md).toContain('Working on initial task.');
+    expect(md).toContain('Steer: also update tests');
+    expect(md).toContain('Updated tests too.');
+    expect(md).not.toContain('Withdrawn follow-up');
+    expect(md).not.toContain('Still pending in queue');
+  });
+
+  test('caps oversized plan entries within maxBytes', () => {
+    const events: chat.Event[] = [
+      { seq: 1, t: chat.EventType.User, content: [{ type: 'text', text: 'Build a plan' }] },
+      {
+        seq: 2,
+        t: chat.EventType.Update,
+        update: {
+          sessionUpdate: 'plan',
+          entries: Array.from({ length: 100 }, (_, i) => ({
+            content: `Step ${i + 1}: ${'z'.repeat(120)}`,
+            status: 'pending',
+          })),
+        },
+      },
+    ];
+    const md = exportMarkdown(events, { maxBytes: 2500 });
+    expect(Buffer.byteLength(md, 'utf8')).toBeLessThanOrEqual(2500);
+    expect(md).toContain('Build a plan');
+    expect(md).toContain('## Latest Plan');
   });
 
   test('wrapSeedPrompt prepends handoff context block before user content', () => {
