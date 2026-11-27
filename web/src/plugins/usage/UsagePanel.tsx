@@ -30,6 +30,7 @@ import {
 import {
   accountUsedPct,
   costOf,
+  cycleWindowLabel,
   dailyDetails,
   dayOf,
   duration,
@@ -197,7 +198,7 @@ function Tiles({
       </button>
       {providers.map((p) => {
         const entry = byProvider.get(p);
-        const used = entry ? accountUsedPct(entry, now) : undefined;
+        const used = entry ? accountUsedPct(entry, now, cost) : undefined;
         const l = used !== undefined ? Math.max(0, Math.min(100, 100 - used)) : undefined;
         let title = providerName(p);
         if (entry && isMergedAccount(entry)) {
@@ -325,7 +326,7 @@ function Overview({ accounts, cost }: { accounts: UsageAccount[]; cost?: CostRep
           <h4 className="usage-heading">{t('usage.accounts')}</h4>
           <div className="usage-rows">
             {rows.map((a) => (
-              <AccountRow key={a.key} account={a} showEmail={shared.has(a.provider)} />
+              <AccountRow key={a.key} account={a} cost={cost} showEmail={shared.has(a.provider)} />
             ))}
           </div>
         </section>
@@ -337,12 +338,20 @@ function Overview({ accounts, cost }: { accounts: UsageAccount[]; cost?: CostRep
 /** An account (or merged multi-account summary) in the overview: shows only
  * the merged approximate usage for providers with 2+ accounts; a click opens
  * the provider's detail tab. */
-function AccountRow({ account: a, showEmail = false }: { account: UsageAccount | MergedUsageAccount; showEmail?: boolean }) {
+function AccountRow({
+  account: a,
+  cost,
+  showEmail = false,
+}: {
+  account: UsageAccount | MergedUsageAccount;
+  cost?: CostReport;
+  showEmail?: boolean;
+}) {
   const remaining = useUsage((s) => s.remaining);
   const now = useNow();
   const merged = isMergedAccount(a);
   const w = tightestWindow(a, now);
-  const usedPct = accountUsedPct(a, now);
+  const usedPct = accountUsedPct(a, now, cost);
   const shown = usedPct !== undefined ? (remaining ? 100 - usedPct : usedPct) : undefined;
   const valText = merged ? mergedValueText(a, remaining) : undefined;
   const cycleText = merged && a.summary.window ? windowLabel(a.summary.window) : undefined;
@@ -416,6 +425,7 @@ function Provider({ provider, accounts, cost }: { provider: string; accounts: Us
           <AccountCard
             key={a.key}
             account={a}
+            cost={cost}
             collapsible={collapsible}
             collapsed={collapsible && !!collapsedMap[k]}
             onToggle={() => toggleAccount(a.key)}
@@ -458,11 +468,13 @@ function MergedSummaryBar({ account: a }: { account: MergedUsageAccount }) {
 
 function AccountCard({
   account: a,
+  cost,
   collapsible = false,
   collapsed = false,
   onToggle,
 }: {
   account: UsageAccount;
+  cost?: CostReport;
   collapsible?: boolean;
   collapsed?: boolean;
   onToggle?: () => void;
@@ -484,10 +496,10 @@ function AccountCard({
   const groups = groupWindows(a.windows ?? []);
   const activeIssues = (a.issues ?? []).filter((i) => !isDisabled(i.machine));
   const disabledIssueMachines = [...new Set((a.issues ?? []).filter((i) => isDisabled(i.machine)).map((i) => i.machine))];
-  const headlineUsed = accountUsedPct(a, now);
+  const headlineUsed = accountUsedPct(a, now, cost);
   const headlineShown = headlineUsed !== undefined ? (remaining ? 100 - headlineUsed : headlineUsed) : undefined;
   const headlineLevel = headlineUsed !== undefined ? levelPct(headlineUsed) : 'none';
-  const balanceAvail = headlineUsed === undefined ? estimateAccountValue(a, now).availableUsd : undefined;
+  const balanceAvail = headlineUsed === undefined ? estimateAccountValue(a, now, { cost }).availableUsd : undefined;
   const accountLabel = a.email || (a.home ? `${providerName(a.provider)} (${a.home})` : providerName(a.provider));
   return (
     <section className={`usage-card${collapsible ? ' collapsible' : ''}${collapsed ? ' collapsed' : ''}`} data-account={a.key}>
@@ -626,15 +638,7 @@ export function groupWindows(windows: UsageWindow[]): { label?: string; windows:
     }));
 }
 
-/** A window's name in a row: its kind (its group says the rest), else, for
- * a model's own window, the model. */
-function windowLabel(w: UsageWindow, grouped = false): string {
-  if (w.kind === 'model') return w.label ?? t('usage.kind.model');
-  // A session of whole hours says how long it is (5 hours).
-  const hours = w.kind === 'session' && w.windowSec && w.windowSec % 3600 === 0 ? w.windowSec / 3600 : 0;
-  const kind = hours ? t('usage.kind.hours', { n: hours }) : t(`usage.kind.${w.kind}` as 'usage.kind.session');
-  return w.label && !grouped ? `${w.label} · ${kind}` : kind;
-}
+const windowLabel = cycleWindowLabel;
 
 /** The machines that could not read an account, by why. */
 function issueGroups(issues: NonNullable<UsageAccount['issues']>): [string, string[]][] {

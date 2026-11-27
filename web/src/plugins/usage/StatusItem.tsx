@@ -18,6 +18,7 @@ import {
   SUMMARY_WINDOW_ID,
   accountUsedPct,
   costOf,
+  cycleWindowLabel,
   duration,
   is5hWindow,
   is7dWindow,
@@ -31,6 +32,7 @@ import {
   tightestWindow,
   tokens,
   windowName,
+  type CostReport,
   type MergedUsageAccount,
   type StatusBarProvider,
   type StatusBarWindowMode,
@@ -77,6 +79,7 @@ export function AccountLine({
   remaining,
   warnAt,
   nowSec,
+  cost,
 }: {
   account: UsageAccount;
   window: UsageWindow;
@@ -84,10 +87,11 @@ export function AccountLine({
   remaining: boolean;
   warnAt: number;
   nowSec: number;
+  cost?: CostReport;
 }) {
   const merged = isMergedAccount(a);
   const isSummary = merged && w.id === SUMMARY_WINDOW_ID;
-  const summaryCycle = isSummary && a.summary.window ? windowName(a.summary.window) : undefined;
+  const summaryCycle = isSummary && a.summary.window ? cycleWindowLabel(a.summary.window) : undefined;
   const summaryVal = isSummary ? mergedValueText(a, remaining) : undefined;
   const subtitle = isSummary ? [summaryCycle, summaryVal].filter(Boolean).join(' · ') || t('usage.merged.combined') : windowName(w);
   return (
@@ -113,7 +117,7 @@ export function AccountLine({
       {merged && (
         <div className="usage-hover-members">
           {a.members.map((m) => {
-            const mPct = accountUsedPct(m, nowSec);
+            const mPct = accountUsedPct(m, nowSec, cost);
             return (
               <div key={m.key} className="usage-hover-sub muted" data-member={m.key}>
                 <span className="ellipsis">{m.email || m.plan || m.key}</span>
@@ -206,7 +210,7 @@ export function UsageStatusItem() {
     }
     const w = tightestWindow(a, nowSec);
     if (w) return w;
-    const pct = accountUsedPct(a, nowSec);
+    const pct = accountUsedPct(a, nowSec, cost);
     return pct !== undefined ? { kind: 'monthly', usedPct: pct } : undefined;
   };
   const rows = previewAccounts(snapshot?.accounts ?? [], nowSec, cost)
@@ -241,6 +245,7 @@ export function UsageStatusItem() {
               remaining={remaining}
               warnAt={warnAt}
               nowSec={nowSec}
+              cost={cost}
             />
           ))}
           {today && <div className="usage-hover-today">{today}</div>}

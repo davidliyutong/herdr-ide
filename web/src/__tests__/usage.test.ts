@@ -1684,9 +1684,155 @@ describe('usage panel and status item', () => {
       expect(claudeHover.textContent).toContain('$450 / $2100');
       expect(codexHover.textContent).toContain('2 accounts');
       expect(codexHover.textContent).toContain('33% used');
+      expect(codexHover.textContent).toContain('5 hours');
       expect(codexHover.textContent).toContain('$50.00 / $150');
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('aggregates only sub-quotas with expected full-cycle value estimates when accounts use disjoint sub-quota pools', async () => {
+    const todayStr = dayOf(new Date(now * 1000));
+    // Account 1 (nus-ws-1): Gemini untouched (0%), Claude and GPT models 62.22% used ($54.11 spent -> ~$86.97 full).
+    const accClaudeOnly = account('antigravity:u1', [], {
+      email: 'u1@example.com',
+      machines: ['nus-ws-1'],
+      windows: [
+        { kind: 'session', label: 'Gemini Models', usedPct: 0, resetsAt: now + 4 * 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 0, resetsAt: now + 6 * 86400, windowSec: 604800 },
+        { kind: 'session', label: 'Claude and GPT models', usedPct: 0, resetsAt: now + 4 * 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Claude and GPT models', usedPct: 62.22, resetsAt: now + 4 * 86400, windowSec: 604800 },
+      ],
+    });
+    // Account 2 (localhost, m920x): Gemini 28.28% used ($405 spent -> ~$1432.11 full), Claude and GPT untouched (0%).
+    const accGeminiOnly = account('antigravity:u2', [], {
+      email: 'u2@example.com',
+      machines: ['localhost', 'm920x'],
+      windows: [
+        { kind: 'session', label: 'Gemini Models', usedPct: 8.06, resetsAt: now + 4 * 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 28.28, resetsAt: now + 6 * 86400, windowSec: 604800 },
+        { kind: 'session', label: 'Claude and GPT models', usedPct: 0, resetsAt: now + 4 * 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Claude and GPT models', usedPct: 0, resetsAt: now + 6 * 86400, windowSec: 604800 },
+      ],
+    });
+    const mixedCost: CostReport = {
+      generatedAt: now,
+      days: 90,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'claude-sonnet-4-6',
+          machine: 'nus-ws-1',
+          input: 50_000_000,
+          cached: 76_000_000,
+          cacheWrite: 0,
+          output: 300_000,
+          requests: 120,
+          cost: 54.11,
+          priced: true,
+        },
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'gemini-3-pro',
+          machine: 'localhost',
+          input: 200_000_000,
+          cached: 800_000_000,
+          cacheWrite: 0,
+          output: 5_000_000,
+          requests: 400,
+          cost: 405,
+          priced: true,
+        },
+      ],
+      recentSince: now - 8 * 86400,
+      recent: [
+        { at: now - 86400, provider: 'antigravity', machine: 'nus-ws-1', tokens: 126_300_000, requests: 120, cost: 54.11, priced: true },
+        { at: now - 1800, provider: 'antigravity', machine: 'localhost', tokens: 69_000_000, requests: 40, cost: 21.93, priced: true },
+        { at: now - 7200, provider: 'antigravity', machine: 'localhost', tokens: 931_000_000, requests: 360, cost: 383.07, priced: true },
+      ],
+    };
+
+    // Single-account headlines reflect each account's genuinely active sub-quota (62.22% and 28.28%).
+    expect(accountUsedPct(accClaudeOnly, now, mixedCost)).toBeCloseTo(62.22, 1);
+    expect(accountUsedPct(accGeminiOnly, now, mixedCost)).toBeCloseTo(28.28, 1);
+
+    // Merged weekly summary sums ONLY the valued sub-quotas: (54.11 + 405) / (86.97 + 1432.11) = 459.11 / 1519.07 = 30.22% used (~70% left).
+    // Untouched Gemini on Account 1 and untouched Claude/GPT on Account 2 are NOT imputed!
+    const merged = mergeProviderAccounts([accClaudeOnly, accGeminiOnly], 'antigravity', now, mixedCost)!;
+    expect(merged.summary.weighting).toBe('api');
+    expect(merged.summary.window?.kind).toBe('weekly');
+    expect(merged.summary.usedUsd).toBeCloseTo(459.11, 1);
+    expect(merged.summary.capacityUsd).toBeCloseTo(1519.07, 0);
+    expect(merged.summary.availableUsd).toBeCloseTo(1059.96, 0);
+    expect(merged.summary.usedPct).toBeCloseTo(30.22, 1);
+    expect(merged.summary.remainingPct).toBeCloseTo(69.78, 1);
+
+    // UI Remaining mode shows ~70% left (NOT 55% equal average and NOT 86% imputed Ultra Gemini),
+    // while per-account cards show 38% left and 72% left!
+    useUsage.setState({ snapshot: snapshot([accClaudeOnly, accGeminiOnly]), cost: mixedCost, remaining: true });
+    await act(async () => setView({ tab: 'antigravity', remaining: true }));
+    await act(async () => root.render(createElement(UsagePanel)));
+    const summaryBar = host.querySelector<HTMLElement>('.usage-summary-bar[data-merged-summary="antigravity"]')!;
+    expect(summaryBar.textContent).toContain('~70% left');
+    expect(summaryBar.textContent).toContain('$1060 / $1519');
+    const u1Card = host.querySelector<HTMLElement>('.usage-card[data-account="antigravity:u1"]')!;
+    const u2Card = host.querySelector<HTMLElement>('.usage-card[data-account="antigravity:u2"]')!;
+    expect(u1Card.querySelector('.usage-card-pct')?.textContent).toBe('38% left');
+    expect(u2Card.querySelector('.usage-card-pct')?.textContent).toBe('72% left');
+
+    // Same-machine account using BOTH Gemini and Claude/GPT splits CostReport.recent cleanly via CostReport.rows.
+    const bothUsed = account('antigravity:both', [], {
+      machines: ['m-both'],
+      windows: [
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 25, resetsAt: now + 5 * 86400, windowSec: 604800 },
+        { kind: 'weekly', label: 'Claude and GPT models', usedPct: 50, resetsAt: now + 5 * 86400, windowSec: 604800 },
+      ],
+    });
+    const bothCost: CostReport = {
+      generatedAt: now,
+      days: 90,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'gemini-3-pro',
+          machine: 'm-both',
+          input: 1000,
+          cached: 0,
+          cacheWrite: 0,
+          output: 100,
+          requests: 10,
+          cost: 200,
+          priced: true,
+        },
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'claude-opus-4-6',
+          machine: 'm-both',
+          input: 500,
+          cached: 0,
+          cacheWrite: 0,
+          output: 100,
+          requests: 5,
+          cost: 50,
+          priced: true,
+        },
+      ],
+      recentSince: now - 8 * 86400,
+      recent: [{ at: now - 3600, provider: 'antigravity', machine: 'm-both', tokens: 1700, requests: 15, cost: 250, priced: true }],
+    };
+    const gSpend = windowSpend(bothCost, bothUsed, bothUsed.windows[0], now)!;
+    const cSpend = windowSpend(bothCost, bothUsed, bothUsed.windows[1], now)!;
+    expect(gSpend).toMatchObject({ cost: 200, full: { cost: 800 } });
+    expect(cSpend).toMatchObject({ cost: 50, full: { cost: 100 } });
   });
 });
