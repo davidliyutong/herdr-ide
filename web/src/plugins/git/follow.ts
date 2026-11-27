@@ -8,7 +8,7 @@ import { useSettings } from '../../settings';
 import { isPluginOn, usePluginList } from '../registry';
 import { useShownDirs } from '../files/decorations';
 import { registerQuickDiff } from '../files/quickDiff';
-import { gitApi, isAbortError, limitGitRead, noRepo } from './api';
+import { gitApi, limitGitRead, noRepo } from './api';
 import { openDiff } from './ops';
 import { onForgetRepos, repoKey, RETRY_MS, seedRepoInfo, useGit, watchRepo } from './state';
 
@@ -33,7 +33,10 @@ onForgetRepos(() => {
 });
 
 function awaitRepo(key: string, pending: PendingRepo, signal?: AbortSignal): Promise<string | undefined> {
-  if (!signal) return pending.promise;
+  if (!signal) {
+    pending.waiters++;
+    return pending.promise;
+  }
   if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
   pending.waiters++;
   let done = false;
@@ -80,13 +83,15 @@ export function repoOf(m: string, dir: string, signal?: AbortSignal): Promise<st
   const ac = new AbortController();
   const pending: PendingRepo = {
     promise: undefined as unknown as Promise<string | undefined>,
-    waiters: signal ? 0 : 1,
+    waiters: 0,
     ac,
   };
   pending.promise = limitGitRead(m, () => gitApi.repo(m, dir, ac.signal), ac.signal).then(
     (info) => {
-      known.set(key, { root: info.root, nested: info.nested, at: Date.now() });
-      seedRepoInfo(m, info);
+      if (known.get(key)?.pending === pending && !ac.signal.aborted) {
+        known.set(key, { root: info.root, nested: info.nested, at: Date.now() });
+        seedRepoInfo(m, info);
+      }
       return info.root as string | undefined;
     },
     (e: unknown) => {
@@ -94,7 +99,9 @@ export function repoOf(m: string, dir: string, signal?: AbortSignal): Promise<st
         if (known.get(key)?.pending === pending) known.delete(key);
         throw e;
       }
-      known.set(key, { at: Date.now() });
+      if (known.get(key)?.pending === pending && !ac.signal.aborted) {
+        known.set(key, { at: Date.now() });
+      }
       return undefined;
     },
   );
@@ -133,8 +140,8 @@ function begin(l: Lease) {
       const stops = [...new Set(roots)].map((r) => watchRepo(l.m, r));
       l.stop = () => stops.forEach((s) => s());
     },
-    (e) => {
-      if (l.gen === gen && !isAbortError(e)) l.timer = setTimeout(() => l.gen === gen && begin(l), RETRY_MS);
+    () => {
+      if (l.gen === gen && !ac.signal.aborted) l.timer = setTimeout(() => l.gen === gen && begin(l), RETRY_MS);
     },
   );
 }

@@ -35,11 +35,15 @@ export class BrowserError extends PluginError {
 
 const failure = failureOf((code, message) => new BrowserError(code, message));
 
+const isAbortError = (e: unknown, signal?: AbortSignal | null): boolean =>
+  !!signal?.aborted || (typeof e === 'object' && e !== null && (e as { name?: unknown }).name === 'AbortError');
+
 async function send<T>(url: string, init?: RequestInit): Promise<T> {
   let r: Response;
   try {
     r = await fetch(url, init);
   } catch (e) {
+    if (isAbortError(e, init?.signal)) throw e;
     throw new BrowserError('network', e instanceof Error ? e.message : String(e));
   }
   return answer<T>(r, failure);

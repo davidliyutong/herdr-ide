@@ -194,7 +194,7 @@ export function GraphPane({ m, view }: PaneViewProps) {
     gitApi
       .log(m, repo, { limit, branches: filter.length ? filter : undefined, remotes, signal: ac.signal })
       .then((l) => {
-        if (page.current !== pg) return;
+        if (page.current !== pg || ac.signal.aborted) return;
         pg.next = l.commits.length;
         pg.ready = true;
         setData({ commits: l.commits, more: l.more, refs: l.refs ?? [], stashes: l.stashes ?? [], head: l.head, branch: l.branch });
@@ -238,7 +238,7 @@ export function GraphPane({ m, view }: PaneViewProps) {
         remotes,
         signal,
       });
-      if (page.current !== pg) return;
+      if (page.current !== pg || signal?.aborted) return;
       pg.next += l.commits.length;
       setData((d) => d && { ...d, commits: appendCommits(d.commits, l.commits), more: l.more && l.commits.length > 0 });
     } catch (e) {

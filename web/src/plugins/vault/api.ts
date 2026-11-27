@@ -163,14 +163,14 @@ const base = '/api/p/vault';
 /** The page's vault session (memory only). */
 let token = '';
 
-async function request(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
+async function request(method: string, path: string, body?: unknown, signal?: AbortSignal, endOnAuthFail = true): Promise<Response> {
   const init = jsonInit(method, body, token ? { 'X-Vault-Session': token } : {});
   const res = await fetch(base + path, signal ? { ...init, signal } : init);
   if (!res.ok) {
     const data = await jsonBody(res);
     const code = String(data.error ?? res.status);
     // The gate refused: the session ended (idle, locked, passphrase changed).
-    if (code === 'vault_session') endLocalSession();
+    if (code === 'vault_session' && endOnAuthFail) endLocalSession();
     // The session a proof opened may not change what guards the vault.
     if (code === 'vault_passphrase') useVault.setState({ sessionProof: true });
     throw new VaultError(code, data.message, typeof data.name === 'string' ? data.name : undefined);
@@ -178,8 +178,8 @@ async function request(method: string, path: string, body?: unknown, signal?: Ab
   return res;
 }
 
-async function call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-  const res = await request(method, path, body, signal);
+async function call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal, endOnAuthFail = true): Promise<T> {
+  const res = await request(method, path, body, signal, endOnAuthFail);
   return (await jsonBody(res)) as T;
 }
 
@@ -267,7 +267,7 @@ export const vaultApi = {
   requests: () => call<{ requests: VaultRequest[] }>('GET', '/requests'),
   answer: (id: string, answer: Answer, verify?: { proof?: Proof; passphrase?: string }) =>
     call('POST', `/requests/${enc(id)}`, { answer, ...verify }),
-  log: (signal?: AbortSignal) => call<{ log: VaultAccess[] }>('GET', '/log', undefined, signal),
+  log: (signal?: AbortSignal, endOnAuthFail = true) => call<{ log: VaultAccess[] }>('GET', '/log', undefined, signal, endOnAuthFail),
   /** An export file of the variables named (or all), as its text: the hub
    * seals it, so values never reach the page. */
   exportFile: async (body: { passphrase: string; filePassphrase: string; names?: string[]; all?: boolean }) =>
@@ -603,7 +603,7 @@ export async function loadVault(): Promise<void> {
     const sent = token;
     const [list, log] = await Promise.all([
       vaultApi.list(ac.signal),
-      sent ? vaultApi.log(ac.signal).catch(() => ({ log: [] })) : { log: [] },
+      sent ? vaultApi.log(ac.signal, false).catch(() => ({ log: [] })) : { log: [] },
     ]);
     if (seq !== loadSeq || ac.signal.aborted) return;
     if (token === sent && !list.session) token = '';
@@ -713,6 +713,10 @@ export function reloadVault() {
 }
 
 registerWorkspacePresetSaver(async (machine, workspace, presets, passphrase) => {
-  await vaultApi.setWorkspacePresets(machine, workspace, presets, passphrase ? { passphrase } : undefined);
-  await loadVault();
+  try {
+    await vaultApi.setWorkspacePresets(machine, workspace, presets, passphrase ? { passphrase } : undefined);
+    await loadVault();
+  } catch (e) {
+    throw e instanceof VaultError ? new VaultError(e.code, errorText(e), e.variable) : e;
+  }
 });

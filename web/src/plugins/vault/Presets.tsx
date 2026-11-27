@@ -1,7 +1,7 @@
 // The vault panel's presets tab: named collections of variables and groups
 // that can be linked to workspaces for automatic env injection when new
-// panels (terminals and chats) are created.
-import { useMemo, useState } from 'react';
+// panes (terminals and chats) are created.
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Folder, Layers, Link2, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { useStore } from '../../state/store';
@@ -13,6 +13,7 @@ import { t } from '../../i18n';
 import { Picker, type PickerItem } from '../../components/Picker';
 import { errorText, loadVault, useVault, vaultApi, VaultError, type VaultPreset } from './api';
 import { FreshPassphrase } from './fields';
+import { isComposing, useBackdropDismiss } from './shared';
 
 export function Presets({ session }: { session: boolean }) {
   const presets = useVault((s) => s.presets);
@@ -24,6 +25,8 @@ export function Presets({ session }: { session: boolean }) {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<VaultPreset | 'new' | undefined>();
   const [linking, setLinking] = useState<VaultPreset | undefined>();
+  const [err, setErr] = useState('');
+  const [removing, setRemoving] = useState<string | undefined>();
 
   const groupNames = useMemo(() => new Map(groups.map((g) => [g.id, g.name])), [groups]);
 
@@ -60,6 +63,7 @@ export function Presets({ session }: { session: boolean }) {
   }, [presets, query, groupNames]);
 
   const removePreset = async (preset: VaultPreset) => {
+    if (removing) return;
     const ok = await confirmDialog({
       title: t('vault.preset.deleteTitle'),
       message: t('vault.preset.deleteMessage', { name: preset.name }),
@@ -67,8 +71,16 @@ export function Presets({ session }: { session: boolean }) {
       danger: true,
     });
     if (!ok) return;
-    await vaultApi.deletePreset(preset.id);
-    await loadVault();
+    setErr('');
+    setRemoving(preset.id);
+    try {
+      await vaultApi.deletePreset(preset.id);
+      await loadVault();
+    } catch (e) {
+      setErr(errorText(e));
+    } finally {
+      setRemoving(undefined);
+    }
   };
 
   return (
@@ -94,6 +106,7 @@ export function Presets({ session }: { session: boolean }) {
           <Plus /> {t('vault.preset.add')}
         </button>
       </div>
+      {err && <div className="callout error">{err}</div>}
       {presets.length === 0 ? (
         <div className="empty-note">
           <Layers />
@@ -176,7 +189,7 @@ export function Presets({ session }: { session: boolean }) {
                     title={session ? t('vault.delete') : t('vault.needSession')}
                     aria-label={t('vault.delete')}
                     data-action="delete-preset"
-                    disabled={!session}
+                    disabled={!session || !!removing}
                     onClick={() => void removePreset(preset)}
                   >
                     <Trash2 />
@@ -195,6 +208,7 @@ export function Presets({ session }: { session: boolean }) {
 
 /** Creates or edits a preset: name, description, included groups and variables. */
 function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void }) {
+  const backdrop = useBackdropDismiss(onDone);
   const variables = useVault((s) => s.variables);
   const groups = useVault((s) => s.groups);
   const workspaceLinks = useVault((s) => s.workspaceLinks);
@@ -210,6 +224,8 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
   const [busy, setBusy] = useState(false);
 
   const groupNames = useMemo(() => new Map(groups.map((g) => [g.id, g.name])), [groups]);
+  // Prune externally deleted group IDs so save never submits 404 group_not_found.
+  const effectiveGroups = useMemo(() => pickedGroups.filter((gid) => groupNames.has(gid)), [pickedGroups, groupNames]);
   const groupItems: PickerItem[] = useMemo(
     () =>
       groups.map((g) => ({
@@ -235,13 +251,21 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
   }, [variables, groupNames, pickedVars]);
 
   const summary = useMemo(
-    () => resolvePresetSummary({ id: preset?.id ?? '', name: name.trim(), variables: pickedVars, groups: pickedGroups }, variables),
-    [preset?.id, name, pickedVars, pickedGroups, variables],
+    () => resolvePresetSummary({ id: preset?.id ?? '', name: name.trim(), variables: pickedVars, groups: effectiveGroups }, variables),
+    [preset?.id, name, pickedVars, effectiveGroups, variables],
   );
 
   const isLinked = !!preset && workspaceLinks.some((l) => l.presets.includes(preset.id));
   const widensLinked =
-    !!preset && isLinked && (pickedVars.some((v) => !preset.variables.includes(v)) || pickedGroups.some((g) => !preset.groups.includes(g)));
+    !!preset &&
+    isLinked &&
+    (pickedVars.some((v) => !preset.variables.includes(v)) || effectiveGroups.some((g) => !preset.groups.includes(g)));
+  useEffect(() => {
+    if (asking && !widensLinked) {
+      setAsking(false);
+      setPass('');
+    }
+  }, [asking, widensLinked]);
 
   const trimmed = name.trim();
   const nameOk = trimmed.length > 0 && trimmed.length <= 128;
@@ -259,7 +283,7 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
       if (preset) {
         await vaultApi.updatePreset(
           preset.id,
-          { name: trimmed, description: description.trim(), variables: pickedVars, groups: pickedGroups },
+          { name: trimmed, description: description.trim(), variables: pickedVars, groups: effectiveGroups },
           fresh,
         );
       } else {
@@ -267,7 +291,7 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
           name: trimmed,
           description: description.trim(),
           variables: pickedVars,
-          groups: pickedGroups,
+          groups: effectiveGroups,
         });
       }
       await loadVault();
@@ -285,7 +309,7 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
   };
 
   const remove = async () => {
-    if (!preset) return;
+    if (!preset || busy) return;
     const ok = await confirmDialog({
       title: t('vault.preset.deleteTitle'),
       message: t('vault.preset.deleteMessage', { name: preset.name }),
@@ -293,24 +317,28 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
       danger: true,
     });
     if (!ok) return;
+    setErr('');
+    setBusy(true);
     try {
       await vaultApi.deletePreset(preset.id);
       await loadVault();
       onDone();
     } catch (e) {
       setErr(errorText(e));
+    } finally {
+      setBusy(false);
     }
   };
 
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onDone()}>
+    <div className="modal-backdrop" {...backdrop}>
       <form
         className="modal dialog vault-editor"
         role="dialog"
         aria-label={preset ? t('vault.preset.editTitle', { name: preset.name }) : t('vault.preset.addTitle')}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === 'Escape') onDone();
+          if (e.key === 'Escape' && !isComposing(e)) onDone();
         }}
         onSubmit={(e) => {
           e.preventDefault();
@@ -332,7 +360,7 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
               value={name}
               autoFocus
               maxLength={128}
-              placeholder="Production API"
+              placeholder={t('vault.preset.namePlaceholder')}
               onChange={(e) => setName(e.target.value)}
             />
           </label>
@@ -351,7 +379,7 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
                 placeholder={t('vault.group.search')}
                 emptyText={t('vault.group.noMatch')}
                 items={groupItems}
-                value={pickedGroups}
+                value={effectiveGroups}
                 onChange={setPickedGroups}
               />
             </div>
@@ -403,7 +431,7 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
         </div>
         <div className="dialog-actions">
           {preset && (
-            <button type="button" className="ghost danger-text" onClick={() => void remove()}>
+            <button type="button" className="ghost danger-text" disabled={busy} onClick={() => void remove()}>
               <Trash2 /> {t('vault.delete')}
             </button>
           )}
@@ -423,6 +451,7 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
 
 /** Links or unlinks a preset across workspaces on all machines. */
 function LinkWorkspacesDialog({ preset, onDone }: { preset: VaultPreset; onDone(): void }) {
+  const backdrop = useBackdropDismiss(onDone);
   const workspaceLinks = useVault((s) => s.workspaceLinks);
   const guard = useVault((s) => s.guard);
   const machines = useStore((s) => s.machines);
@@ -478,31 +507,65 @@ function LinkWorkspacesDialog({ preset, onDone }: { preset: VaultPreset; onDone(
       ),
     [rows, initialByWs, preset.id],
   );
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(initialSelected));
+  // Track explicit user toggle overrides over reactive initialSelected so
+  // external updates or late-loading machine layouts are never reverted on Save.
+  const [overrides, setOverrides] = useState<Map<string, boolean>>(() => new Map());
   const [asking, setAsking] = useState(false);
   const [pass, setPass] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const selected = useMemo(() => {
+    const out = new Set<string>();
+    for (const r of rows) {
+      const key = workspaceKey(r.machine, r.workspace);
+      if (overrides.get(key) ?? initialSelected.has(key)) out.add(key);
+    }
+    return out;
+  }, [rows, overrides, initialSelected]);
+
   const toggle = (key: string) =>
-    setSelected((cur) => {
-      const next = new Set(cur);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+    setOverrides((cur) => {
+      const next = new Map(cur);
+      const want = !(next.get(key) ?? initialSelected.has(key));
+      if (want === initialSelected.has(key)) next.delete(key);
+      else next.set(key, want);
       return next;
     });
 
   const allKeys = useMemo(() => rows.map((r) => workspaceKey(r.machine, r.workspace)), [rows]);
   const allSelected = allKeys.length > 0 && allKeys.every((k) => selected.has(k));
   const someSelected = allKeys.some((k) => selected.has(k));
-  const selectAll = () => setSelected(new Set(allKeys));
-  const clearAll = () => setSelected(new Set());
+  const selectAll = () =>
+    setOverrides((cur) => {
+      const next = new Map(cur);
+      for (const k of allKeys) {
+        if (initialSelected.has(k)) next.delete(k);
+        else next.set(k, true);
+      }
+      return next;
+    });
+  const clearAll = () =>
+    setOverrides((cur) => {
+      const next = new Map(cur);
+      for (const k of allKeys) {
+        if (!initialSelected.has(k)) next.delete(k);
+        else next.set(k, false);
+      }
+      return next;
+    });
 
   const changed = rows.filter((r) => {
     const key = workspaceKey(r.machine, r.workspace);
     return selected.has(key) !== initialSelected.has(key);
   });
   const widening = changed.some((r) => selected.has(workspaceKey(r.machine, r.workspace)));
+  useEffect(() => {
+    if (asking && !widening) {
+      setAsking(false);
+      setPass('');
+    }
+  }, [asking, widening]);
 
   const save = async () => {
     if (!changed.length) return onDone();
@@ -512,6 +575,8 @@ function LinkWorkspacesDialog({ preset, onDone }: { preset: VaultPreset; onDone(
     }
     setErr('');
     setBusy(true);
+    let savedAny = false;
+    let refreshed = false;
     try {
       const fresh = asking && pass ? { passphrase: pass } : undefined;
       for (const r of changed) {
@@ -519,8 +584,16 @@ function LinkWorkspacesDialog({ preset, onDone }: { preset: VaultPreset; onDone(
         const cur = initialByWs.get(key) ?? [];
         const next = selected.has(key) ? [...new Set([...cur, preset.id])] : cur.filter((id) => id !== preset.id);
         await vaultApi.setWorkspacePresets(r.machine, r.workspace, next, fresh);
+        savedAny = true;
+        setOverrides((curMap) => {
+          if (!curMap.has(key)) return curMap;
+          const copy = new Map(curMap);
+          copy.delete(key);
+          return copy;
+        });
       }
       await loadVault();
+      refreshed = true;
       onDone();
     } catch (e) {
       if (e instanceof VaultError && e.code === 'vault_proof' && !asking) {
@@ -530,19 +603,20 @@ function LinkWorkspacesDialog({ preset, onDone }: { preset: VaultPreset; onDone(
         setErr(errorText(e));
       }
     } finally {
+      if (savedAny && !refreshed) await loadVault();
       setBusy(false);
     }
   };
 
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onDone()}>
+    <div className="modal-backdrop" {...backdrop}>
       <form
         className="modal dialog vault-editor"
         role="dialog"
         aria-label={t('vault.preset.linkTitle', { name: preset.name })}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === 'Escape') onDone();
+          if (e.key === 'Escape' && !isComposing(e)) onDone();
         }}
         onSubmit={(e) => {
           e.preventDefault();

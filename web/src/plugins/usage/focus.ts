@@ -108,7 +108,7 @@ export function useFocusedAgent(): FocusedAgent | undefined {
   const terminal = record?.address;
   const provider = usageProvider(kind);
   const on = useSettings((s) => !!provider && s.values[`usage.providers.${provider}`]?.value !== false);
-  const key = m && kind && (session || cwd) ? targetKey({ m, kind, session, cwd, pid, terminal }) : undefined;
+  const key = m && kind && (session || cwd) ? targetKey({ m, kind, session, cwd, terminal }) : undefined;
   const model = useUsage((s) => {
     const e = key ? s.sessions[key] : undefined;
     return e && !e.code ? e.usage?.model : undefined;

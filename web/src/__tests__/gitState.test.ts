@@ -29,6 +29,7 @@ import {
   applyOptimisticStatus,
   changed,
   forgetInput,
+  forgetRepos,
   nudge,
   NUDGE_MS,
   POLL_MS,
@@ -452,5 +453,149 @@ describe('following a repository', () => {
     await Promise.all(tasks.filter((_, i) => i !== 8));
     expect(peak).toBe(MAX_CONCURRENT_GIT_READS);
     expect(active).toBe(0);
+  });
+
+  it('hands off semaphore slots synchronously without exceeding MAX_CONCURRENT_GIT_READS when new callers arrive during completions', async () => {
+    let active = 0;
+    let peak = 0;
+    let finished = 0;
+    const releases: Array<() => void> = [];
+    const run = () =>
+      limitGitRead('m-handoff', async () => {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise<void>((r) => releases.push(r));
+        active--;
+        finished++;
+      });
+    const first = Array.from({ length: MAX_CONCURRENT_GIT_READS + 2 }, () => run());
+    expect(active).toBe(MAX_CONCURRENT_GIT_READS);
+    // Release all active tasks in the same turn and immediately enqueue MAX_CONCURRENT_GIT_READS newcomers before microtasks drain.
+    for (let i = 0; i < MAX_CONCURRENT_GIT_READS; i++) releases.shift()!();
+    const newcomers = Array.from({ length: MAX_CONCURRENT_GIT_READS }, () => run());
+    const total = first.length + newcomers.length;
+    while (finished < total) {
+      while (releases.length > 0) releases.shift()!();
+      await Promise.resolve();
+    }
+    await Promise.all([...first, ...newcomers]);
+    expect(peak).toBe(MAX_CONCURRENT_GIT_READS);
+    expect(active).toBe(0);
+  });
+
+  it('keeps shared repoOf alive for signal-less callers when a signalled caller aborts', async () => {
+    let releaseRepo!: () => void;
+    let fetchSignal: AbortSignal | undefined;
+    const origFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+      if (String(input).includes('/repo')) {
+        fetchSignal = init?.signal ?? undefined;
+        await new Promise<void>((r) => (releaseRepo = r));
+      }
+      return origFetch(input, init);
+    });
+    const ac = new AbortController();
+    const p1 = repoOf('m', `${root}/shared`, ac.signal);
+    const p2 = repoOf('m', `${root}/shared`);
+    const p1Rej = expect(p1).rejects.toThrow();
+    ac.abort();
+    await p1Rej;
+    expect(fetchSignal?.aborted).toBe(false);
+    releaseRepo();
+    await expect(p2).resolves.toBe(root);
+  });
+
+  it('recovers follow leases after forgetRepos aborts an in-flight repoOf and ignores stale repoOf completions', async () => {
+    // 1. Active lease recovers after forgetRepos aborts its in-flight repoOf.
+    let firstHeld = true;
+    const origFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+      if (String(input).includes('/repo') && firstHeld) {
+        firstHeld = false;
+        return new Promise<Response>((_res, rej) => {
+          init?.signal?.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError')), { once: true });
+        });
+      }
+      return origFetch(input, init);
+    });
+    await act(async () => useShownDirs.setState({ m: 'm', dirs: [`${root}/lease`] }));
+    await advance(0);
+    expect(leaseCount()).toEqual({ held: 1, watching: 0 });
+    forgetRepos();
+    await advance(0);
+    await advance(RETRY_MS);
+    expect(leaseCount()).toEqual({ held: 1, watching: 1 });
+    await act(async () => useShownDirs.setState({ m: undefined, dirs: [] }));
+    expect(leaseCount()).toEqual({ held: 0, watching: 0 });
+
+    // 2. Stale repoOf resolution after forgetRepos does not poison known or clobber a newer pending lookup.
+    let resolveStale!: (r: Response) => void;
+    let resolveFresh!: (r: Response) => void;
+    let nCall = 0;
+    vi.stubGlobal('fetch', async (input: string) => {
+      if (String(input).includes('/repo')) {
+        nCall++;
+        return new Promise<Response>((r) => {
+          if (nCall === 1) resolveStale = r;
+          else resolveFresh = r;
+        });
+      }
+      return origFetch(input);
+    });
+    const stale = repoOf('m', `${root}/race`);
+    forgetRepos();
+    const fresh = repoOf('m', `${root}/race`);
+    resolveStale(json({ root: '/stale-root', ahead: 0, behind: 0, remotes: [] }));
+    await stale;
+    resolveFresh(json({ root, ahead: 0, behind: 0, remotes: [] }));
+    await expect(fresh).resolves.toBe(root);
+    await expect(repoOf('m', `${root}/race`)).resolves.toBe(root);
+  });
+
+  it('ignores stale read failures racing with runGit and runs full changed when inline follows non-inline action', async () => {
+    files = [{ path: 'a.txt', x: '.', y: 'M', kind: 'changed' }];
+    await act(async () => void (await refresh('m', root)));
+    expect(state().error).toBeUndefined();
+
+    // 1. Stale read fails while runGit is active -> must not set error on repo state.
+    let releaseStale!: () => void;
+    let failFirstStatus = true;
+    const origFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+      if (String(input).includes('/status') && failFirstStatus) {
+        failFirstStatus = false;
+        await new Promise<void>((r) => (releaseStale = r));
+        return json({ error: 'timeout', message: 'timeout' }, 504);
+      }
+      return origFetch(input, init);
+    });
+    const stale = refresh('m', root);
+    const stageDone = runGit('m', root, 'stage', { paths: ['a.txt'] });
+    releaseStale();
+    await act(async () => void (await stale));
+    expect(state().error).toBeUndefined();
+    await act(async () => void (await stageDone));
+    expect(state().error).toBeUndefined();
+
+    // 2. Non-inline commit followed immediately by inline stage on a repo without prior watch tokens:
+    // even if the trailing stage's watch resolves before the commit's watch, full changed runs (refs bumped & repo info read).
+    const freshRoot = `${root}-full`;
+    let watchCalls = 0;
+    let releaseFirstWatch!: () => void;
+    const baseFetch = origFetch;
+    vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+      if (String(input).includes('/watch') && String(input).includes(encodeURIComponent(freshRoot))) {
+        watchCalls++;
+        if (watchCalls === 1) await new Promise<void>((r) => (releaseFirstWatch = r));
+      }
+      return baseFetch(input, init);
+    });
+    const c1 = runGit('m', freshRoot, 'commit', { message: 'm' });
+    const c2 = runGit('m', freshRoot, 'stage', { paths: ['a.txt'] });
+    await act(async () => void (await c2));
+    releaseFirstWatch();
+    await act(async () => void (await c1));
+    expect(useGit.getState().repos[repoKey('m', freshRoot)].refs).toBeGreaterThan(0);
+    expect(count('repo', freshRoot)).toBeGreaterThan(0);
   });
 });

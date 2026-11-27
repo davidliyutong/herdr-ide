@@ -18,7 +18,13 @@ vi.mock('../lib/files', () => ({
 
 import { useStore } from '../state/store';
 import { setTermModel, TermModel, terms, useTerms } from '../state/terms';
-import { resetWorkspacePresets, syncVaultWorkspacePresets, workspacePresetIds } from '../state/workspacePresets';
+import {
+  resetWorkspacePresets,
+  saveWorkspacePresets,
+  syncVaultWorkspacePresets,
+  useWorkspacePresets,
+  workspacePresetIds,
+} from '../state/workspacePresets';
 import { editWorkspaceDialog, newWorkspaceDialog, useDialog } from '../dialog';
 import { Dialogs } from '../components/Dialogs';
 import { t } from '../i18n';
@@ -27,13 +33,17 @@ import { TermConnection } from '../term/connection';
 import { VaultPanel } from '../plugins/vault/VaultPanel';
 import {
   endSession,
+  loadVault,
   openSession,
   useVault,
+  VaultError,
   type VaultGroup,
   type VaultPreset,
   type VaultVariable,
   type VaultWorkspaceLink,
 } from '../plugins/vault/api';
+import { en as vaultEn } from '../plugins/vault/i18n/en';
+import { zhCN as vaultZh } from '../plugins/vault/i18n/zh-CN';
 import { newChat } from '../plugins/chat/ops';
 import '../plugins';
 
@@ -637,6 +647,291 @@ describe('vault groups, presets and workspace linking UI', () => {
     await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
     await flush();
     expect(variables.find((v) => v.name === 'DB_URL')?.group).toBe('g3');
+  });
+
+  it('commits fresh vault list when parallel log fetch returns 401 vault_session', async () => {
+    await act(async () => openSession(PASS));
+    expect(useVault.getState().session).toBe(true);
+    locked = true;
+    const prevFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (url === '/api/p/vault/log') return new Response(JSON.stringify({ error: 'vault_session' }), { status: 401 });
+      if (url === '/api/p/vault' && (init?.method ?? 'GET') === 'GET') {
+        return new Response(
+          JSON.stringify({
+            status: { mode: 'passphrase', locked: true },
+            session: false,
+            variables: [{ name: 'FRESH_VAR', description: '', machines: [], injectOnly: false, created: '1', updated: '1' }],
+            groups: [],
+            presets: [],
+            workspaceLinks: [],
+            guard: { desktop: false, webauthn: false, authenticators: [] },
+          }),
+          { status: 200 },
+        );
+      }
+      return prevFetch(url, init);
+    });
+    await act(async () => loadVault());
+    expect(useVault.getState().status?.locked).toBe(true);
+    expect(useVault.getState().session).toBe(false);
+    expect(useVault.getState().variables.map((v) => v.name)).toEqual(['FRESH_VAR']);
+    expect(useWorkspacePresets.getState().locked).toBe(true);
+    expect(useWorkspacePresets.getState().session).toBe(false);
+  });
+
+  it('normalizes externally deleted group IDs in variable, bulk-group, and preset editors', async () => {
+    groups = [{ id: 'g1', name: 'AI', created: '1', updated: '1' }];
+    variables = [
+      { name: 'OPENAI_API_KEY', description: 'OpenAI', machines: [], injectOnly: false, group: 'g1', created: '1', updated: '1' },
+      { name: 'DB_URL', description: 'Postgres', machines: [], injectOnly: false, created: '1', updated: '1' },
+    ];
+    presets = [{ id: 'p1', name: 'Prod', groups: ['g1'], variables: ['DB_URL'], created: '1', updated: '1' }];
+
+    await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+    await act(async () => openSession(PASS));
+    await flush();
+
+    // 1. Variable editor: group g1 deleted externally while dialog is open -> submits group: ''.
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-name="OPENAI_API_KEY"] [data-action="edit"]')!.click());
+    await act(async () => useVault.setState({ groups: [] }));
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
+    await flush();
+    expect(calls.findLast((c) => c.method === 'PUT' && c.url === '/api/p/vault/vars/OPENAI_API_KEY')?.body).toMatchObject({ group: '' });
+
+    // 2. BulkGroup dialog: selected group g1 deleted externally -> submits group: ''.
+    await act(async () => useVault.setState({ groups: [{ id: 'g1', name: 'AI', created: '1', updated: '1' }] }));
+    await act(async () => host.querySelector<HTMLInputElement>('[data-name="DB_URL"] .vault-row-check')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-bulk="group"]')!.click());
+    await selectGroup('AI');
+    await act(async () => useVault.setState({ groups: [] }));
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
+    await flush();
+    expect(calls.findLast((c) => c.method === 'POST' && c.url === '/api/p/vault/groups/assign')?.body).toMatchObject({ group: '' });
+
+    // 3. PresetEditor: referenced group g1 deleted externally -> submits groups: [].
+    await act(async () => useVault.setState({ groups: [{ id: 'g1', name: 'AI', created: '1', updated: '1' }] }));
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][data-tab="presets"]')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-preset="p1"] [data-action="edit-preset"]')!.click());
+    await act(async () => useVault.setState({ groups: [] }));
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
+    await flush();
+    expect(calls.findLast((c) => c.method === 'PUT' && c.url === '/api/p/vault/presets/p1')?.body).toMatchObject({ groups: [] });
+  });
+
+  it('guards IME composition Escape, uses localized placeholder and pane vocabulary, and dismisses picker before outer modal on backdrop click', async () => {
+    groups = [{ id: 'g1', name: 'AI', created: '1', updated: '1' }];
+    await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+    await act(async () => openSession(PASS));
+    await flush();
+
+    // i18n vocabulary checks (P1-36 & Docs P2-5).
+    expect(vaultEn['vault.preset.namePlaceholder']).toBe('Production API');
+    expect(vaultZh['vault.preset.namePlaceholder']).toBeTruthy();
+    expect(vaultEn['vault.preset.empty']).toContain('pane');
+    expect(vaultEn['vault.preset.empty']).not.toContain('panel');
+    expect(vaultEn['vault.inject.locked']).toContain('pane');
+    expect(vaultEn['vault.inject.locked']).not.toContain('panel');
+    expect(vaultZh['vault.preset.empty']).toContain('窗格');
+    expect(vaultZh['vault.preset.empty']).not.toContain('面板');
+    expect(vaultZh['vault.inject.locked']).toContain('窗格');
+    expect(vaultZh['vault.inject.locked']).not.toContain('面板');
+    expect(vaultZh['vault.preset.linkEmpty']).toContain('侧栏');
+    expect(vaultZh['vault.preset.linkEmpty']).not.toContain('侧边栏');
+
+    // Open variable editor, open GroupPicker, click modal backdrop: closes picker only; second click closes modal.
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-name="OPENAI_API_KEY"] [data-action="edit"]')!.click());
+    await act(async () => groupPickerButton().click());
+    expect(pickerPopup()).not.toBeNull();
+    const backdrop = document.querySelector<HTMLElement>('.modal-backdrop')!;
+    await act(async () => {
+      backdrop.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      backdrop.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(pickerPopup()).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+
+    // IME composing Escape (isComposing or keyCode 229) must not close the dialog.
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    await act(async () => {
+      const e1 = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      Object.defineProperty(e1, 'isComposing', { value: true });
+      dialog.dispatchEvent(e1);
+      const e2 = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      Object.defineProperty(e2, 'keyCode', { value: 229 });
+      dialog.dispatchEvent(e2);
+    });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+
+    // Second backdrop press (with picker closed) dismisses the modal.
+    await act(async () => {
+      backdrop.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      backdrop.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    // Preset editor uses localized placeholder and guards IME Escape.
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][data-tab="presets"]')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-action="add-preset"]')!.click());
+    const presetName = document.querySelector<HTMLInputElement>('[role="dialog"] input')!;
+    expect(presetName.placeholder).toBe(t('vault.preset.namePlaceholder'));
+    await act(async () => {
+      const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      Object.defineProperty(e, 'isComposing', { value: true });
+      presetName.dispatchEvent(e);
+    });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    await pressKey('Escape', presetName);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('guards preset deletion while in flight and shows errors on failure', async () => {
+    presets = [{ id: 'p1', name: 'Prod', groups: [], variables: ['DB_URL'], created: '1', updated: '1' }];
+    let finishDelete!: (r: Response) => void;
+    const prevFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (url === '/api/p/vault/presets/p1' && init?.method === 'DELETE') {
+        return new Promise<Response>((r) => (finishDelete = r));
+      }
+      return prevFetch(url, init);
+    });
+
+    await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+    await act(async () => openSession(PASS));
+    await flush();
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][data-tab="presets"]')!.click());
+
+    const delBtn = () => host.querySelector<HTMLButtonElement>('[data-preset="p1"] [data-action="delete-preset"]')!;
+    await act(async () => delBtn().click());
+    act(() => {
+      const req = useDialog.getState().current;
+      if (req?.kind === 'confirm') {
+        useDialog.setState({ current: undefined });
+        req.resolve(true);
+      }
+    });
+    await flush();
+    expect(delBtn().disabled).toBe(true);
+
+    await act(async () => finishDelete(new Response(JSON.stringify({ error: 'failed' }), { status: 500 })));
+    await flush();
+    expect(delBtn().disabled).toBe(false);
+    expect(host.querySelector('.callout.error')?.textContent).toBeTruthy();
+  });
+
+  it('applies Shift-click range selection in visible grouped order and skips collapsed groups', async () => {
+    groups = [
+      { id: 'g1', name: 'Alpha', created: '1', updated: '1' },
+      { id: 'g2', name: 'Beta', created: '1', updated: '1' },
+    ];
+    variables = [
+      { name: 'Z_VAR', description: '', machines: [], injectOnly: false, group: 'g1', created: '1', updated: '1' },
+      { name: 'A_VAR', description: '', machines: [], injectOnly: false, group: 'g2', created: '1', updated: '1' },
+      { name: 'B_VAR', description: '', machines: [], injectOnly: false, group: 'g2', created: '1', updated: '1' },
+      { name: 'M_VAR', description: '', machines: [], injectOnly: false, created: '1', updated: '1' },
+    ];
+
+    await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+    await act(async () => openSession(PASS));
+    await flush();
+
+    // Collapse Beta so A_VAR and B_VAR are hidden; visible order is Z_VAR, M_VAR.
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-group-section="g2"] .vault-group-toggle')!.click());
+    const checkOf = (name: string) => host.querySelector<HTMLInputElement>(`[data-name="${name}"] .vault-row-check`)!;
+    await act(async () => checkOf('Z_VAR').click());
+    await act(async () => {
+      checkOf('M_VAR').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    });
+    expect(host.querySelector('.vault-select-bar')?.textContent).toContain(t('vault.bulk.selected', { n: 2 }));
+
+    // Expand Beta, clear selection, click Z_VAR then Shift-click A_VAR: selects Z_VAR and A_VAR only (grouped order, not alphabetical).
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-group-section="g2"] .vault-group-toggle')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.vault-select-bar button:last-child')!.click());
+    await act(async () => checkOf('Z_VAR').click());
+    await act(async () => {
+      checkOf('A_VAR').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    });
+    expect(checkOf('Z_VAR').checked).toBe(true);
+    expect(checkOf('A_VAR').checked).toBe(true);
+    expect(checkOf('B_VAR').checked).toBe(false);
+    expect(checkOf('M_VAR').checked).toBe(false);
+  });
+
+  it('tracks reactive workspace link updates, refreshes on partial failure, and localizes workspace preset save errors', async () => {
+    presets = [{ id: 'p1', name: 'Prod', groups: [], variables: ['DB_URL'], created: '1', updated: '1' }];
+    useTerms.setState({
+      connected: true,
+      machines: {
+        m1: {
+          terminals: {},
+          layout: {
+            version: 2,
+            selected: 0,
+            workspaces: [
+              { id: 'ws-1', name: 'Backend', cwd: '/srv/b', selected: 0, tabs: [] },
+              { id: 'ws-2', name: 'Frontend', cwd: '/srv/f', selected: 0, tabs: [] },
+              { id: 'ws-3', name: 'Worker', cwd: '/srv/w', selected: 0, tabs: [] },
+            ],
+          },
+        },
+      },
+    });
+
+    await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+    await act(async () => openSession(PASS));
+    await flush();
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][data-tab="presets"]')!.click());
+
+    // Open LinkWorkspacesDialog, then externally link ws-2 while open.
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-preset="p1"] [data-action="link-preset"]')!.click());
+    workspaceLinks = [{ machine: 'm1', workspace: 'ws-2', presets: ['p1'], updated: '1' }];
+    await act(async () => useVault.setState({ workspaceLinks }));
+    const boxes = () => [...document.querySelectorAll<HTMLInputElement>('.vault-link-option input[type="checkbox"]')];
+    expect(boxes().map((b) => b.checked)).toEqual([false, true, false]);
+
+    // Check ws-1 and save -> only ws-1 is PUT; ws-2 is NOT reverted.
+    await act(async () => boxes()[0].click());
+    calls.length = 0;
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
+    await flush();
+    expect(calls.filter((c) => c.method === 'PUT').map((c) => c.url)).toEqual(['/api/p/vault/workspaces/m1/ws-1']);
+    expect(workspacePresetIds('m1', 'ws-2')).toEqual(['p1']);
+
+    // Partial failure: ws-1 succeeds, ws-3 fails -> loadVault() refreshes state anyway.
+    const prevFetch = globalThis.fetch;
+    let failWs3 = true;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (url === '/api/p/vault/workspaces/m1/ws-3' && init?.method === 'PUT' && failWs3) {
+        return new Response(JSON.stringify({ error: 'failed' }), { status: 500 });
+      }
+      return prevFetch(url, init);
+    });
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-preset="p1"] [data-action="link-preset"]')!.click());
+    await act(async () => boxes()[0].click());
+    await act(async () => boxes()[2].click());
+    calls.length = 0;
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
+    await flush();
+    expect(calls.some((c) => c.method === 'GET' && c.url === '/api/p/vault')).toBe(true);
+    expect(workspacePresetIds('m1', 'ws-1')).toEqual([]);
+    expect(document.querySelector('[role="dialog"] .callout.error')).not.toBeNull();
+    failWs3 = false;
+
+    // Workspace preset saver wraps VaultError with localized error text (Nit #9).
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ error: 'vault_session' }), { status: 401 }));
+    let caught: unknown;
+    try {
+      await saveWorkspacePresets('m1', 'ws-1', ['p1']);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(VaultError);
+    expect((caught as VaultError).message).toBe(t('vault.error.vault_session'));
   });
 });
 

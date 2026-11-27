@@ -196,6 +196,11 @@ interface Saved {
 }
 
 interface Watched {
+  /** Monotonic counter bumped on pause/forget so pre-disconnect completions
+   * are ignored and never clobber post-reconnect state. */
+  epoch: number;
+  /** Aborts in-flight requests when paused or forgotten. */
+  ac: AbortController;
   /** Whether the machine's backend was ready on the last sync. */
   wasReady: boolean;
   /** The cached list predates a disconnect/reconnect: keep shown preludes
@@ -290,13 +295,15 @@ function askList(m: string, w: Watched) {
 async function readList(m: string, w: Watched) {
   if (watched.get(m) !== w || !w.due || w.listing) return;
   if (hidden() || !backendReady(m)) return;
+  const epoch = w.epoch;
+  const signal = w.ac.signal;
   w.due = false;
   w.listing = true;
   w.listedAt = Date.now();
   let ok = false;
   try {
-    const list = await listHistory(m);
-    if (watched.get(m) !== w) return;
+    const list = await listHistory(m, signal);
+    if (watched.get(m) !== w || w.epoch !== epoch) return;
     w.list = list;
     w.staleList = false;
     w.failed.clear();
@@ -305,9 +312,9 @@ async function readList(m: string, w: Watched) {
     // The machine is away or refused: what was listed stays, and the list
     // is tried again after a while.
   } finally {
-    w.listing = false;
+    if (w.epoch === epoch) w.listing = false;
   }
-  if (watched.get(m) !== w) return;
+  if (watched.get(m) !== w || w.epoch !== epoch) return;
   if (ok) w.listFailures = 0;
   else if (backendReady(m)) retryList(m, w);
   apply(m, w);
@@ -316,11 +323,12 @@ async function readList(m: string, w: Watched) {
 
 /** Tries a failed list again after its back-off. */
 function retryList(m: string, w: Watched) {
+  const epoch = w.epoch;
   w.listFailures++;
   clearTimeout(w.retryTimer);
   w.retryTimer = setTimeout(() => {
     w.retryTimer = undefined;
-    if (watched.get(m) !== w) return;
+    if (watched.get(m) !== w || w.epoch !== epoch) return;
     w.due = true;
     void readList(m, w);
   }, retryAfter(w.listFailures));
@@ -346,11 +354,13 @@ function hide(m: string, w: Watched, address: string) {
  * back-off. */
 function read(m: string, w: Watched, c: Choice, key: string) {
   if (w.reading.has(key)) return;
+  const epoch = w.epoch;
+  const signal = w.ac.signal;
   w.reading.add(key);
-  readHistory(m, c.terminal, c.generation)
+  readHistory(m, c.terminal, c.generation, signal)
     .then(
       (r) => {
-        if (watched.get(m) !== w) return;
+        if (watched.get(m) !== w || w.epoch !== epoch) return;
         w.readFailures.delete(key);
         if (r.pid === c.snapshot.pid && r.at === c.snapshot.at) w.bytes.set(key, { bytes: r.bytes, cols: r.cols, rows: r.rows });
         else {
@@ -359,12 +369,13 @@ function read(m: string, w: Watched, c: Choice, key: string) {
         }
       },
       (e) => {
-        if (watched.get(m) !== w) return;
+        if (watched.get(m) !== w || w.epoch !== epoch) return;
         w.failed.add(key);
         if (!transient(e)) {
           if (e instanceof HistoryError && e.code === 'not_found') askList(m, w);
           return;
         }
+        if (!backendReady(m)) return;
         const n = (w.readFailures.get(key) ?? 0) + 1;
         w.readFailures.set(key, n);
         clearTimeout(w.readRetries.get(key));
@@ -372,7 +383,7 @@ function read(m: string, w: Watched, c: Choice, key: string) {
           key,
           setTimeout(() => {
             w.readRetries.delete(key);
-            if (watched.get(m) !== w) return;
+            if (watched.get(m) !== w || w.epoch !== epoch) return;
             w.failed.delete(key);
             apply(m, w);
           }, retryAfter(n)),
@@ -380,6 +391,7 @@ function read(m: string, w: Watched, c: Choice, key: string) {
       },
     )
     .finally(() => {
+      if (w.epoch !== epoch) return;
       w.reading.delete(key);
       if (watched.get(m) === w) apply(m, w);
     });
@@ -398,31 +410,34 @@ function adopt(m: string, w: Watched, leaf: L.TerminalLeaf, record: TerminalReco
   if (!newest) return;
   const was = w.adoptions.get(leaf.terminal);
   if (was?.from === from && (was.busy || was.done || was.timer !== undefined)) return;
+  const epoch = w.epoch;
+  const signal = w.ac.signal;
   const a: Adoption = { from, busy: true, done: false, failures: was?.from === from ? was.failures : 0 };
   w.adoptions.set(leaf.terminal, a);
-  adoptHistory(m, from, leaf.terminal).then(
+  adoptHistory(m, from, leaf.terminal, signal).then(
     (moved) => {
+      if (watched.get(m) !== w || w.epoch !== epoch) return;
       a.busy = false;
       a.done = true;
       if (moved) a.moved = { pid: newest.pid, at: newest.at };
-      if (watched.get(m) === w) {
-        askList(m, w);
-        apply(m, w);
-      }
+      askList(m, w);
+      apply(m, w);
     },
     (err) => {
+      if (watched.get(m) !== w || w.epoch !== epoch) return;
       a.busy = false;
       if (!transient(err)) {
         a.done = true;
-        if (watched.get(m) === w) apply(m, w);
+        apply(m, w);
         return;
       }
+      if (!backendReady(m)) return;
       a.failures++;
       a.timer = setTimeout(() => {
         a.timer = undefined;
-        if (watched.get(m) === w) apply(m, w);
+        if (watched.get(m) === w && w.epoch === epoch) apply(m, w);
       }, retryAfter(a.failures));
-      if (watched.get(m) === w) apply(m, w);
+      apply(m, w);
     },
   );
 }
@@ -509,6 +524,11 @@ function awaitCapture(m: string, w: Watched, waiting: boolean) {
 /** Pauses timers and retries while a machine's backend is not ready (offline,
  * rebooting, disabled), keeping shown preludes and cached bytes intact. */
 function pause(w: Watched) {
+  w.epoch++;
+  w.ac.abort();
+  w.ac = new AbortController();
+  w.listing = false;
+  w.reading.clear();
   clearTimeout(w.timer);
   w.timer = undefined;
   clearTimeout(w.retryTimer);
@@ -518,6 +538,7 @@ function pause(w: Watched) {
   for (const timer of w.readRetries.values()) clearTimeout(timer);
   w.readRetries.clear();
   for (const a of w.adoptions.values()) {
+    a.busy = false;
     clearTimeout(a.timer);
     a.timer = undefined;
   }
@@ -553,6 +574,8 @@ function sync() {
     const pids = livePids(mt.terminals);
     if (!w) {
       w = {
+        epoch: 0,
+        ac: new AbortController(),
         wasReady: true,
         staleList: false,
         pids,
@@ -581,7 +604,13 @@ function sync() {
       w.listedAt = 0;
       w.failed.clear();
       w.readFailures.clear();
-      for (const a of w.adoptions.values()) a.failures = 0;
+      for (const timer of w.readRetries.values()) clearTimeout(timer);
+      w.readRetries.clear();
+      for (const a of w.adoptions.values()) {
+        a.failures = 0;
+        clearTimeout(a.timer);
+        a.timer = undefined;
+      }
       clearTimeout(w.retryTimer);
       w.retryTimer = undefined;
       clearTimeout(w.waitTimer);
@@ -634,6 +663,7 @@ export function historyCleared(m: string) {
   const w = watched.get(m);
   if (!w) return;
   w.list = { terminals: [], restoreScreen: w.list?.restoreScreen ?? false };
+  w.staleList = false;
   w.bytes.clear();
   apply(m, w);
   askList(m, w);

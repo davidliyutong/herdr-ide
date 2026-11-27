@@ -50,9 +50,12 @@ const MAX_ACCOUNTS = 6;
  * threshold) on, else "". */
 export const levelOf = (used: number, warnAt: number) => (used >= 100 ? 'out' : used >= warnAt ? 'warn' : '');
 
+const clampShown = (used: number, remaining: boolean) =>
+  Math.min(100, Math.max(0, Number.isFinite(used) ? (remaining ? 100 - used : used) : 0));
+
 /** A window's share as the panel's switch says it: used or left. */
 export const pctText = (used: number, remaining: boolean) =>
-  t(remaining ? 'usage.pctLeft' : 'usage.pctUsed', { pct: Math.round(remaining ? 100 - used : used) });
+  t(remaining ? 'usage.pctLeft' : 'usage.pctUsed', { pct: Math.round(clampShown(used, remaining)) });
 
 /** The first threshold of usage.thresholds (default 80). */
 export const useWarnAt = () => parseThresholds(useSettings((s) => s.values['usage.thresholds']?.value))[0] ?? 80;
@@ -142,7 +145,7 @@ export function formatStatusBarLabel(
   mode: StatusBarWindowMode,
   remaining: boolean,
 ): string {
-  const shown = (w: UsageWindow) => Math.round(remaining ? 100 - w.usedPct : w.usedPct);
+  const shown = (w: UsageWindow) => Math.round(clampShown(w.usedPct, remaining));
   if (mode === 'both' && secondary) {
     return t(remaining ? 'usage.statusBar.bothLeft' : 'usage.statusBar.both', { p5: shown(primary), p7: shown(secondary) });
   }

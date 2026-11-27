@@ -97,7 +97,7 @@ export function TaskManagerPanel() {
 
   // Poll metrics and processes while mounted and unpaused.
   useEffect(() => {
-    if (!m || machine?.status !== 'ready') return;
+    if (!m || machine?.status !== 'ready' || paused) return;
     const ac = new AbortController();
     const poll = () => {
       if (ac.signal.aborted || document.hidden) return;
@@ -105,7 +105,6 @@ export function TaskManagerPanel() {
       void fetchProcesses(m, ac.signal);
     };
     poll();
-    if (paused) return () => ac.abort();
     const timer = setInterval(poll, intervalMs);
     const onVis = () => {
       if (!document.hidden) poll();

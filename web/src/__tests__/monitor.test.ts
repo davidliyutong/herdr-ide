@@ -28,7 +28,7 @@ import {
   tempLevel,
 } from '../plugins/monitor/model';
 import type { Metrics, ProcessInfo, ProcessesReply } from '../plugins/monitor/api';
-import { useMonitor } from '../plugins/monitor/state';
+import { fetchMetrics, fetchProcesses, useMonitor } from '../plugins/monitor/state';
 import { MachineHoverMonitor, MonitorStatusItem } from '../plugins/monitor/StatusItem';
 import { TaskManagerPanel } from '../plugins/monitor/TaskManagerPanel';
 
@@ -540,5 +540,147 @@ describe('monitor UI components', () => {
       '/api/m/gpu/p/monitor/signal',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ pid: 201, signal: 'TERM' }) }),
     );
+  });
+
+  it('does not abort or restart polling when opening or closing the status bar popover, and does not fetch when pausing Task Manager', async () => {
+    const signals: Array<AbortSignal | undefined> = [];
+    let metricsCalls = 0;
+    let procCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/metrics')) {
+          metricsCalls++;
+          signals.push(init?.signal ?? undefined);
+          return new Response(JSON.stringify(sampleMetrics), { status: 200 });
+        }
+        if (url.endsWith('/processes')) {
+          procCalls++;
+          return new Response(JSON.stringify(sampleProcReply), { status: 200 });
+        }
+        return new Response('{}', { status: 404 });
+      }),
+    );
+
+    await act(async () => root.render(createElement(MonitorStatusItem)));
+    expect(metricsCalls).toBe(1);
+    const btn = host.querySelector<HTMLButtonElement>('.monitor-status-item')!;
+    await act(async () => btn.click());
+    await act(async () => btn.click());
+    expect(metricsCalls).toBe(1);
+    expect(signals[0]?.aborted).toBe(false);
+
+    // TaskManagerPanel: clicking Pause must not trigger another /processes fetch.
+    await act(async () => root.render(createElement(TaskManagerPanel)));
+    expect(procCalls).toBe(1);
+    const pauseBtn = host.querySelector<HTMLButtonElement>('button[aria-label="Pause updates"]')!;
+    await act(async () => pauseBtn.click());
+    expect(procCalls).toBe(1);
+  });
+});
+
+describe('monitor state abort and loading-flag races', () => {
+  const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+  beforeEach(() => {
+    useMonitor.setState({ machines: {}, targetMachine: undefined });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('ref-counts shared fetchMetrics waiters and never lets an aborted flight clear a newer flight’s loading flag', async () => {
+    const calls: Array<{ signal?: AbortSignal; resolve: (r: Response) => void; reject: (e: unknown) => void }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((resolve, reject) => {
+            calls.push({ signal: init?.signal ?? undefined, resolve, reject });
+          }),
+      ),
+    );
+
+    const ac1 = new AbortController();
+    const ac2 = new AbortController();
+    const p1 = fetchMetrics('m1', ac1.signal);
+    const p2 = fetchMetrics('m1', ac2.signal);
+    expect(calls).toHaveLength(1);
+    expect(useMonitor.getState().machines.m1.metricsLoading).toBe(true);
+
+    // Aborting first of two waiters keeps the underlying request alive.
+    ac1.abort();
+    await p1;
+    expect(calls[0].signal?.aborted).toBe(false);
+
+    // Aborting the last waiter aborts flight 1, then starting flight 2 immediately must stay loading even after flight 1 rejects.
+    ac2.abort();
+    await p2;
+    expect(calls[0].signal?.aborted).toBe(true);
+
+    const ac3 = new AbortController();
+    const p3 = fetchMetrics('m1', ac3.signal);
+    expect(calls).toHaveLength(2);
+    expect(useMonitor.getState().machines.m1.metricsLoading).toBe(true);
+
+    calls[0].reject(new DOMException('aborted', 'AbortError'));
+    await flush();
+    expect(useMonitor.getState().machines.m1.metricsLoading).toBe(true);
+
+    calls[1].resolve(new Response(JSON.stringify(sampleMetrics), { status: 200 }));
+    await p3;
+    expect(useMonitor.getState().machines.m1.metricsLoading).toBe(false);
+    expect(useMonitor.getState().machines.m1.metrics?.hostname).toBe('gpu-box');
+
+    // Aborting when idle clears metricsLoading even if the request resolves right after abort.
+    const ac4 = new AbortController();
+    const p4 = fetchMetrics('m1', ac4.signal);
+    expect(useMonitor.getState().machines.m1.metricsLoading).toBe(true);
+    ac4.abort();
+    await p4;
+    calls[2].resolve(new Response(JSON.stringify(sampleMetrics), { status: 200 }));
+    await flush();
+    expect(useMonitor.getState().machines.m1.metricsLoading).toBe(false);
+  });
+
+  it('keeps processesLoading true when an aborted fetchProcesses settles after a replacement flight starts', async () => {
+    const calls: Array<{ signal?: AbortSignal; resolve: (r: Response) => void; reject: (e: unknown) => void }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((resolve, reject) => {
+            calls.push({ signal: init?.signal ?? undefined, resolve, reject });
+          }),
+      ),
+    );
+
+    const ac1 = new AbortController();
+    const p1 = fetchProcesses('m2', ac1.signal);
+    ac1.abort();
+    await p1;
+    expect(calls[0].signal?.aborted).toBe(true);
+
+    const ac2 = new AbortController();
+    const p2 = fetchProcesses('m2', ac2.signal);
+    expect(calls).toHaveLength(2);
+    expect(useMonitor.getState().machines.m2.processesLoading).toBe(true);
+
+    calls[0].reject(new DOMException('aborted', 'AbortError'));
+    await flush();
+    expect(useMonitor.getState().machines.m2.processesLoading).toBe(true);
+
+    calls[1].resolve(new Response(JSON.stringify(sampleProcReply), { status: 200 }));
+    await p2;
+    expect(useMonitor.getState().machines.m2.processesLoading).toBe(false);
+    expect(useMonitor.getState().machines.m2.processes?.total).toBe(sampleProcs.length);
+
+    // Aborting when idle clears processesLoading on abort rejection.
+    const ac3 = new AbortController();
+    const p3 = fetchProcesses('m2', ac3.signal);
+    ac3.abort();
+    await p3;
+    calls[2].reject(new DOMException('aborted', 'AbortError'));
+    await flush();
+    expect(useMonitor.getState().machines.m2.processesLoading).toBe(false);
   });
 });

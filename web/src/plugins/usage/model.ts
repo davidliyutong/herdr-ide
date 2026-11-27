@@ -241,6 +241,12 @@ function antigravityPoolOf(label?: string): AntigravityPool | undefined {
   return undefined;
 }
 
+/** Whether w is an unentitled 100% Antigravity third-party (Claude/GPT) wall
+ * on an account that also exposes Gemini windows. */
+function isUnentitledAntigravityWindow(provider: string, hasGemini: boolean, w: UsageWindow): boolean {
+  return provider === 'antigravity' && hasGemini && ANTIGRAVITY_THIRD_PARTY_LABEL.test(w.label ?? '') && w.usedPct >= 100;
+}
+
 /** Filters an account's windows to its active/primary quota pool for single-account
  * headline and non-log summaries. Antigravity exposes separate third-party quotas
  * (Claude/GPT) that often sit at 100% when unentitled alongside Gemini quotas;
@@ -262,7 +268,9 @@ export function primaryWindowsOf(a: Pick<UsageAccount, 'provider' | 'windows'>):
  * pool still in the period it was read in. */
 export function tightestWindow(a: UsageAccount, now = Date.now() / 1000): UsageWindow | undefined {
   let best: UsageWindow | undefined;
-  for (const w of primaryWindowsOf(a)) if (!pastReset(w, now) && (!best || w.usedPct > best.usedPct)) best = w;
+  for (const w of primaryWindowsOf(a)) {
+    if (!pastReset(w, now) && Number.isFinite(w.usedPct) && (!best || w.usedPct > best.usedPct)) best = w;
+  }
   return best;
 }
 
@@ -380,7 +388,7 @@ const CURRENCY_TO_USD: Record<string, number> = {
 };
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
-const clampPct = (v: number) => round2(Math.min(100, Math.max(0, v)));
+const clampPct = (v: number) => (Number.isFinite(v) ? round2(Math.min(100, Math.max(0, v))) : 0);
 const finiteNonNeg = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
 
 /** Estimates the relative quota capacity multiplier of a subscription plan
@@ -396,13 +404,13 @@ export function estimatePlanWeight(provider: string, plan?: string): number | un
   const mult = /\b(\d+(?:\.\d+)?)\s*x\b/i.exec(norm);
   if (mult) {
     const n = Number(mult[1]);
-    if (Number.isFinite(n) && n > 0) return round2(n);
+    if (Number.isFinite(n) && n > 0) return Math.max(0.01, round2(n));
   }
   const explicit = /\$\s*(\d+(?:\.\d+)?)/.exec(norm);
   if (explicit) {
     const n = Number(explicit[1]);
     const base = PROVIDER_BASELINE_USD[provider.toLowerCase()] ?? 20;
-    if (Number.isFinite(n) && n > 0) return round2(n / base);
+    if (Number.isFinite(n) && n > 0) return Math.max(0.01, round2(n / base));
   }
   return undefined;
 }
@@ -938,7 +946,11 @@ function evaluateCycle(
 
   const poolComps = new Map<string, EvaluatedComp[]>();
   for (const [poolKey, entries] of byPool) {
-    const comps: EvaluatedComp[] = machineComponents(entries).map((compEntries) => {
+    // For multi-pool providers (e.g. Antigravity Gemini vs Claude/GPT), exclude
+    // untouched 0%-used sub-quota entries so co-hosted sibling accounts never
+    // impute capacity for an unused pool or spuriously link disjoint machines.
+    const compInput = multiPool ? entries.filter((e) => e.usedPct > 0) : entries;
+    const comps: EvaluatedComp[] = machineComponents(compInput).map((compEntries) => {
       const totalWeight = compEntries.reduce((s, e) => s + e.meta.priorWeight, 0);
       const usedWeight = compEntries.reduce((s, e) => s + e.meta.priorWeight * (e.usedPct / 100), 0);
       const activeWeight = compEntries.reduce((s, e) => s + (e.usedPct > 0 ? e.meta.priorWeight : 0), 0);
@@ -983,7 +995,7 @@ function evaluateCycle(
 
   const allReliable = [...poolComps.values()].flat().filter((c) => c.reliable && c.obsCap !== undefined);
 
-  // Branch A: At least one sub-quota has a measured full-cycle API value (`用满本周期`)!
+  // Branch A: At least one sub-quota has a measured full-cycle API value (full-cycle capacity)!
   // Sum only the sub-quotas with expected full-cycle value estimates (and for
   // single-pool providers, standby/off-host accounts not already valued via another
   // sub-quota), never fabricating capacity for untouched sub-quotas!
@@ -1142,13 +1154,16 @@ export function mergeProviderAccounts(
 ): MergedUsageAccount | undefined {
   const matching = accounts.filter((a) => a.provider === provider);
   if (matching.length < 2) return undefined;
-  const members = sortAccounts(matching, now);
+  const members = sortAccounts(matching, now, cost);
 
   const metas: MemberMeta[] = members.map((account) => {
     const explicit = explicitMoneyOf(account);
     const hasExplicitCap = (explicit.capacityUsd ?? 0) > 0;
     const subWindows = subWindowsOf(account, hasExplicitCap);
-    const allCycleWindows = (account.windows ?? []).filter((w) => cycleKeyOf(w) !== undefined);
+    const hasGemini = account.provider === 'antigravity' && (account.windows ?? []).some((w) => GEMINI_LABEL.test(w.label ?? ''));
+    const allCycleWindows = (account.windows ?? []).filter(
+      (w) => cycleKeyOf(w) !== undefined && !isUnentitledAntigravityWindow(account.provider, hasGemini, w),
+    );
     const tierWeight = subWindows.length > 0 || allCycleWindows.length > 0 ? estimatePlanWeight(account.provider, account.plan) : undefined;
     return { account, explicit, subWindows, allCycleWindows, tierWeight, priorWeight: tierWeight ?? 1 };
   });
@@ -1255,7 +1270,7 @@ export function mergeProviderAccounts(
   const buckets = new Map<string, { sample: UsageWindow; items: { w: UsageWindow; weight: number }[] }>();
   metas.forEach((m) => {
     const weight = hasKnownTier ? m.priorWeight : 1;
-    for (const w of m.account.windows ?? []) {
+    for (const w of primaryWindowsOf(m.account)) {
       const k = `${w.kind}\0${w.label ?? ''}\0${w.windowSec ?? 0}`;
       const b = buckets.get(k);
       if (b) b.items.push({ w, weight });
@@ -1443,6 +1458,20 @@ export function pickAccountWindows(
       const exact = allActive.filter((w) => antigravityWindowMatches(w, model));
       if (exact.length > 0) {
         pool = exact;
+      } else if (isMergedAccount(a)) {
+        const memberMatched = a.members.flatMap((m) =>
+          (m.windows ?? []).filter((w) => !pastReset(w, now) && antigravityWindowMatches(w, model)),
+        );
+        const entitled = memberMatched.filter((w) => w.usedPct < 100);
+        const chosen = entitled.length > 0 ? entitled : memberMatched;
+        if (chosen.length > 0) {
+          pool = chosen;
+        } else if (ANTIGRAVITY_THIRD_PARTY_LABEL.test(model)) {
+          const third = allActive.filter((w) => ANTIGRAVITY_THIRD_PARTY_LABEL.test(w.label ?? ''));
+          pool = third.length ? third : primaryActive;
+        } else {
+          pool = primaryActive;
+        }
       } else if (ANTIGRAVITY_THIRD_PARTY_LABEL.test(model)) {
         const third = allActive.filter((w) => ANTIGRAVITY_THIRD_PARTY_LABEL.test(w.label ?? ''));
         pool = third.length ? third : primaryActive;
@@ -1998,8 +2027,16 @@ export function contextShort(u: SessionUsage): string {
 
 /** The account of provider whose subscription an agent on machine m uses:
  * of those read on m, the one closest to running out of a window. */
-export function sessionAccount(s: UsageSnapshot | undefined, provider: string, m: string): UsageAccount | undefined {
-  return sortAccounts((s?.accounts ?? []).filter((a) => a.provider === provider && (a.machines ?? []).includes(m))).find((a) =>
-    tightestWindow(a),
-  );
+export function sessionAccount(
+  s: UsageSnapshot | undefined,
+  provider: string,
+  m: string,
+  now = Date.now() / 1000,
+  cost?: CostReport,
+): UsageAccount | undefined {
+  return sortAccounts(
+    (s?.accounts ?? []).filter((a) => a.provider === provider && (a.machines ?? []).includes(m)),
+    now,
+    cost,
+  ).find((a) => tightestWindow(a, now));
 }

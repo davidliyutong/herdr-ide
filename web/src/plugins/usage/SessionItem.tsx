@@ -99,7 +99,7 @@ export function UsageSessionItem() {
   const ctx = contextShort(u);
   const nowSec = Date.now() / 1000;
   const counted = tightestFor(snapshot, provider, target.m, u.model, nowSec, costReport);
-  const account = counted?.account ?? sessionAccount(snapshot, provider, target.m);
+  const account = counted?.account ?? sessionAccount(snapshot, provider, target.m, nowSec, costReport);
   const limit = counted?.window ?? (account && tightestWindow(account, nowSec));
   const accounts = (snapshot?.accounts ?? []).filter((a) => a.provider === provider).length;
   return (
@@ -151,7 +151,15 @@ export function UsageSessionItem() {
           </dl>
           {account && limit && (
             <div className="usage-session-account">
-              <AccountLine account={account} window={limit} email={accounts > 1} remaining={remaining} warnAt={warnAt} nowSec={nowSec} />
+              <AccountLine
+                account={account}
+                window={limit}
+                email={accounts > 1}
+                remaining={remaining}
+                warnAt={warnAt}
+                nowSec={nowSec}
+                cost={costReport}
+              />
             </div>
           )}
         </div>

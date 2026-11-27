@@ -86,7 +86,7 @@ export function VaultPanel() {
                 className={tab === id ? 'on' : ''}
                 onClick={() => setTab(id)}
               >
-                <Icon /> {label}
+                <Icon /> <span className="ellipsis">{label}</span>
               </button>
             ))}
           </div>

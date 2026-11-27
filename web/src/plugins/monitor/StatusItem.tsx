@@ -51,9 +51,11 @@ export function MonitorStatusItem() {
 
   useDismiss(open, card, close, btn);
 
+  const active = shown || open;
+
   // Poll the active machine while the status bar item or its popup is visible.
   useEffect(() => {
-    if (!machineId || machine?.status !== 'ready' || (!shown && !open)) return;
+    if (!machineId || machine?.status !== 'ready' || !active) return;
     const ac = new AbortController();
     const poll = () => {
       if (ac.signal.aborted || document.hidden) return;
@@ -70,7 +72,7 @@ export function MonitorStatusItem() {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [machineId, machine?.status, shown, open, intervalMs]);
+  }, [machineId, machine?.status, active, intervalMs]);
 
   // Keep the upward-floating menu within the viewport's left edge.
   useLayoutEffect(() => {

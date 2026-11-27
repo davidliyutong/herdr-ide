@@ -710,6 +710,129 @@ describe('usage session reads', () => {
     expect(kept[sessionKey('local', 'claude', id(0))]).toBeUndefined();
     expect(kept[sessionKey('local', 'claude', id(SESSION_KEEP))]).toBeDefined();
   });
+
+  it('preserves cached usage when a session read aborts mid-body and retries immediately after rapid A -> B -> A switch', async () => {
+    // 1. Mid-body abort must not overwrite cached usage with empty zeros.
+    show([rec('t1', { agent_status: 'working' }), rec('t2', { agent_session: S2 })], 't1');
+    await render();
+    expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$1.23');
+
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      return {
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise((_, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+          }),
+      } as unknown as Response;
+    });
+    await advance(SESSION_WORKING_EVERY);
+    // Switch to t2 while t1's r.json() is in flight -> aborts t1's body read.
+    await set(() => show([rec('t1', { agent_status: 'working' }), rec('t2', { agent_session: S2 })], 't2'));
+    expect(useUsage.getState().sessions[sessionKey('local', 'claude', S1)]?.usage?.cost).toBeCloseTo(1.234, 3);
+
+    // 2. Rapid A -> B -> A while A's read is in flight starts a fresh read for A immediately and ignores the aborted one.
+    resetSessionReads();
+    useUsage.setState({ sessions: {} });
+    const pending: Array<{ url: string; signal?: AbortSignal; resolve: (r: Response) => void }> = [];
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      return new Promise<Response>((resolve) => {
+        pending.push({ url: String(url), signal: init?.signal ?? undefined, resolve });
+      });
+    });
+    await set(() => show([rec('t1', { agent_session: S1 }), rec('t2', { agent_session: S2 })], 't1'));
+    expect(pending).toHaveLength(1);
+    await set(() => show([rec('t1', { agent_session: S1 }), rec('t2', { agent_session: S2 })], 't2'));
+    expect(pending[0].signal?.aborted).toBe(true);
+    expect(pending).toHaveLength(2);
+    // Switch straight back to t1 before read 1 settles -> read 3 for t1 starts immediately!
+    await set(() => show([rec('t1', { agent_session: S1 }), rec('t2', { agent_session: S2 })], 't1'));
+    expect(pending[1].signal?.aborted).toBe(true);
+    expect(pending).toHaveLength(3);
+    expect(pending[2].url).toContain(S1);
+    // Late settlement of aborted read 1 is ignored; read 3 updates the display.
+    await set(() => pending[0].resolve(new Response(JSON.stringify(usage({ cost: 9.99 })), { status: 200 })));
+    expect(item()).toBeNull();
+    await set(() => pending[2].resolve(new Response(JSON.stringify(usage({ cost: 2.5 })), { status: 200 })));
+    expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$2.50');
+  });
+
+  it('keeps targetKey stable across transient foreground pid changes on cwd-matched agents and passes cost to AccountLine', async () => {
+    answers.set('grok:/work/g', { status: 200, body: usage({ model: 'grok-4', cost: 0.42 }) });
+    show(
+      [
+        rec('t1', {
+          agent: 'grok',
+          agent_session: undefined,
+          agent_session_source: undefined,
+          cwd: '/work/g',
+          foreground: { pid: 100, name: 'grok', cwd: '/work/g' },
+        }),
+      ],
+      't1',
+    );
+    await render();
+    expect(reads).toEqual(['grok:/work/g']);
+    // Open hover card.
+    const anchor = item()!.parentElement!;
+    const over = new MouseEvent('pointerover', { bubbles: true });
+    Object.defineProperty(over, 'pointerType', { value: 'mouse' });
+    await set(() => void anchor.dispatchEvent(over));
+    await advance(HOVER_OPEN_MS + 10);
+    expect(host.querySelector('.usage-session-hover')).not.toBeNull();
+    // Transient foreground pid change does not change targetKey, refetch, or close the hover card.
+    await set(() =>
+      show(
+        [
+          rec('t1', {
+            agent: 'grok',
+            agent_session: undefined,
+            agent_session_source: undefined,
+            cwd: '/work/g',
+            foreground: { pid: 101, name: 'grok', cwd: '/work/g' },
+          }),
+        ],
+        't1',
+      ),
+    );
+    expect(reads).toEqual(['grok:/work/g']);
+    expect(host.querySelector('.usage-session-hover')).not.toBeNull();
+
+    // P2-16: hover card passes cost report to AccountLine so hybrid member sub-row shows blended 50% (not raw 100%).
+    const cHyb = account('claude:hyb', ['m1'], [], {
+      plan: 'Pro',
+      windows: [{ kind: 'weekly', usedPct: 100, resetsAt: now + 86400, windowSec: 604800 }],
+      credits: { unit: 'usd', enabled: true, limit: 50, used: 0 },
+    });
+    const cMax = account('claude:max', ['m2'], [], {
+      plan: 'Max 20x',
+      windows: [{ kind: 'weekly', usedPct: 20, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    useUsage.setState({
+      snapshot: snap([cHyb, cMax]),
+      cost: {
+        generatedAt: now,
+        days: 90,
+        weekHours: 168,
+        monthHours: 750,
+        machines: {},
+        rows: [],
+        recentSince: now - 8 * 86400,
+        recent: [
+          { at: now - 3600, provider: 'claude', machine: 'm1', tokens: 1000, requests: 1, cost: 50, priced: true },
+          { at: now - 3600, provider: 'claude', machine: 'm2', tokens: 1000, requests: 1, cost: 400, priced: true },
+        ],
+      },
+    });
+    await set(() => show([rec('t1', { agent: 'claude', agent_session: S1 })], 't1'));
+    const anchor2 = item()!.parentElement!;
+    const over2 = new MouseEvent('pointerover', { bubbles: true });
+    Object.defineProperty(over2, 'pointerType', { value: 'mouse' });
+    await set(() => void anchor2.dispatchEvent(over2));
+    await advance(HOVER_OPEN_MS + 10);
+    expect(host.querySelector('[data-member="claude:hyb"]')?.textContent).toContain('50% used');
+  });
 });
 
 describe('usage session in the status bar', () => {

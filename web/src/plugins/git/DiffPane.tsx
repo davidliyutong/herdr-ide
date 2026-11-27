@@ -311,6 +311,7 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
     })();
     return () => {
       disposed = true;
+      showAbort.current?.abort();
       const c = created ?? ed.current;
       ed.current = undefined;
       sub?.dispose();

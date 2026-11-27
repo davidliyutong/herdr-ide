@@ -174,6 +174,8 @@ function notify(text: string, tag: string) {
 let snapshotEtag: string | undefined;
 let costEtag: string | undefined;
 let costEtagTZ: number | undefined;
+let costAbort: AbortController | undefined;
+let costSeq = 0;
 
 /** Fetches the snapshot; watch tells the hub the panel is open. Sends
  * If-None-Match when a snapshot is already loaded so unchanged watch
@@ -218,25 +220,37 @@ export function costStale(now = Date.now() / 1000): boolean {
 
 /** Fetches the cost of the last 90 days (the user's days). Sends
  * If-None-Match so unchanged reports return 304 Not Modified without
- * re-transferring 90 days of rows. */
+ * re-transferring 90 days of rows. Supersedes any earlier in-flight fetch. */
 export async function fetchCost(): Promise<void> {
+  costAbort?.abort();
+  const ac = new AbortController();
+  costAbort = ac;
+  const seq = ++costSeq;
   useUsage.setState({ costLoading: true, costError: undefined });
   try {
     const tz = -new Date().getTimezoneOffset();
     const cur = useUsage.getState().cost;
     const headers: Record<string, string> = {};
     if (costEtag && costEtagTZ === tz && cur) headers['If-None-Match'] = costEtag;
-    const r = await fetch(`/api/p/usage/cost?days=90&tz=${tz}`, Object.keys(headers).length ? { headers } : undefined);
+    const init: RequestInit = Object.keys(headers).length ? { headers, signal: ac.signal } : { signal: ac.signal };
+    const r = await fetch(`/api/p/usage/cost?days=90&tz=${tz}`, init);
+    if (seq !== costSeq || ac.signal.aborted) return;
     if (r.status === 304 && cur) {
       useUsage.setState({ cost: { ...cur, generatedAt: Math.floor(Date.now() / 1000) }, costLoading: false });
       return;
     }
     if (!r.ok) throw new Error(`http_${r.status}`);
-    costEtag = r.headers?.get('ETag') ?? undefined;
+    const etag = r.headers?.get('ETag') ?? undefined;
+    const cost = (await r.json()) as CostReport;
+    if (seq !== costSeq || ac.signal.aborted) return;
+    costEtag = etag;
     costEtagTZ = tz;
-    useUsage.setState({ cost: (await r.json()) as CostReport, costLoading: false });
+    useUsage.setState({ cost, costLoading: false });
   } catch (e) {
+    if (seq !== costSeq || ac.signal.aborted) return;
     useUsage.setState({ costLoading: false, costError: e instanceof Error ? e.message : 'failed' });
+  } finally {
+    if (costAbort === ac) costAbort = undefined;
   }
 }
 

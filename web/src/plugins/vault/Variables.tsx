@@ -31,7 +31,7 @@ import { Picker, type PickerItem } from '../../components/Picker';
 import { FreshPassphrase } from './fields';
 import { openVaultExport, openVaultImport } from './dialogs';
 import { ways, widens, withFresh } from './proof';
-import { CopyButton, machineItems } from './shared';
+import { CopyButton, isComposing, machineItems, useBackdropDismiss } from './shared';
 
 const FILTER_ALL = '__all__';
 const FILTER_UNGROUPED = '__ungrouped__';
@@ -78,17 +78,41 @@ export function Variables({ session }: { session: boolean }) {
     });
   }, [variables, activeFilter, groupIds, query]);
 
+  const activeGroupObj =
+    activeFilter !== FILTER_ALL && activeFilter !== FILTER_UNGROUPED ? groups.find((g) => g.id === activeFilter) : undefined;
+  const showGroupedSections = groups.length > 0 && activeFilter === FILTER_ALL;
+
+  const groupedSections = useMemo(() => {
+    if (!showGroupedSections) return [];
+    const q = query.trim();
+    const sections: Array<{ id: string; group?: VaultGroup; title: string; description?: string; items: VaultVariable[] }> = [];
+    for (const g of groups) {
+      const items = shown.filter((v) => v.group === g.id);
+      if (items.length > 0 || !q) sections.push({ id: g.id, group: g, title: g.name, description: g.description, items });
+    }
+    const ungrouped = shown.filter((v) => !v.group || !groupIds.has(v.group));
+    if (ungrouped.length > 0) sections.push({ id: FILTER_UNGROUPED, title: t('vault.group.none'), items: ungrouped });
+    return sections;
+  }, [showGroupedSections, groups, shown, groupIds, query]);
+
   // The selection holds variables that are still there.
   const selected = picked.filter((n) => variables.some((v) => v.name === n));
   const shownNames = shown.map((v) => v.name);
+  const visibleNames = useMemo(
+    () =>
+      showGroupedSections
+        ? groupedSections.flatMap((sec) => (collapsed[sec.id] ? [] : sec.items.map((v) => v.name)))
+        : shown.map((v) => v.name),
+    [showGroupedSections, groupedSections, collapsed, shown],
+  );
   const allShown = shownNames.length > 0 && shownNames.every((n) => selected.includes(n));
   const someShown = shownNames.some((n) => selected.includes(n));
 
-  /** A row's checkbox: shift extends from the last one clicked. */
+  /** A row's checkbox: shift extends from the last one clicked in visible order. */
   const toggle = (name: string, on: boolean, range: boolean) => {
-    const from = anchor ? shownNames.indexOf(anchor) : -1;
-    const to = shownNames.indexOf(name);
-    const names = range && from >= 0 && to >= 0 ? shownNames.slice(Math.min(from, to), Math.max(from, to) + 1) : [name];
+    const from = anchor ? visibleNames.indexOf(anchor) : -1;
+    const to = visibleNames.indexOf(name);
+    const names = range && from >= 0 && to >= 0 ? visibleNames.slice(Math.min(from, to), Math.max(from, to) + 1) : [name];
     setPicked((p) => (on ? [...p.filter((n) => !names.includes(n)), ...names] : p.filter((n) => !names.includes(n))));
     setAnchor(name);
   };
@@ -124,23 +148,6 @@ export function Variables({ session }: { session: boolean }) {
   };
 
   const toggleCollapse = (id: string) => setCollapsed((c) => ({ ...c, [id]: !c[id] }));
-
-  const activeGroupObj =
-    activeFilter !== FILTER_ALL && activeFilter !== FILTER_UNGROUPED ? groups.find((g) => g.id === activeFilter) : undefined;
-  const showGroupedSections = groups.length > 0 && activeFilter === FILTER_ALL;
-
-  const groupedSections = useMemo(() => {
-    if (!showGroupedSections) return [];
-    const q = query.trim();
-    const sections: Array<{ id: string; group?: VaultGroup; title: string; description?: string; items: VaultVariable[] }> = [];
-    for (const g of groups) {
-      const items = shown.filter((v) => v.group === g.id);
-      if (items.length > 0 || !q) sections.push({ id: g.id, group: g, title: g.name, description: g.description, items });
-    }
-    const ungrouped = shown.filter((v) => !v.group || !groupIds.has(v.group));
-    if (ungrouped.length > 0) sections.push({ id: FILTER_UNGROUPED, title: t('vault.group.none'), items: ungrouped });
-    return sections;
-  }, [showGroupedSections, groups, shown, groupIds, query]);
 
   return (
     <>
@@ -210,9 +217,10 @@ export function Variables({ session }: { session: boolean }) {
               type="button"
               className={`vault-group-pill${activeFilter === g.id ? ' on' : ''}`}
               data-group-filter={g.id}
+              title={g.name}
               onClick={() => setGroupFilter(g.id)}
             >
-              <Folder /> {g.name} <span className="muted">{counts.byGroup.get(g.id) ?? 0}</span>
+              <Folder /> <span className="ellipsis">{g.name}</span> <span className="muted">{counts.byGroup.get(g.id) ?? 0}</span>
             </button>
           ))}
           <button
@@ -704,6 +712,7 @@ function GroupPicker({ groups, value, onChange }: { groups: readonly VaultGroup[
 
 /** Creates or renames a group in a dialog. */
 function GroupEditor({ group, onDone }: { group?: VaultGroup; onDone(): void }) {
+  const backdrop = useBackdropDismiss(onDone);
   const [name, setName] = useState(group?.name ?? '');
   const [description, setDescription] = useState(group?.description ?? '');
   const [err, setErr] = useState('');
@@ -728,14 +737,14 @@ function GroupEditor({ group, onDone }: { group?: VaultGroup; onDone(): void }) 
   };
 
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onDone()}>
+    <div className="modal-backdrop" {...backdrop}>
       <form
         className="modal dialog vault-editor"
         role="dialog"
         aria-label={group ? t('vault.group.editTitle') : t('vault.group.add')}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === 'Escape') onDone();
+          if (e.key === 'Escape' && !isComposing(e)) onDone();
         }}
         onSubmit={(e) => {
           e.preventDefault();
@@ -777,6 +786,7 @@ function GroupEditor({ group, onDone }: { group?: VaultGroup; onDone(): void }) 
 
 /** Moves several variables to a chosen group (or ungrouped) in one call. */
 function BulkGroup({ names, onDone }: { names: string[]; onDone(err?: string): void }) {
+  const backdrop = useBackdropDismiss(() => onDone());
   const groups = useVault((s) => s.groups);
   const presets = useVault((s) => s.presets);
   const workspaceLinks = useVault((s) => s.workspaceLinks);
@@ -787,21 +797,32 @@ function BulkGroup({ names, onDone }: { names: string[]; onDone(err?: string): v
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Drop deleted group IDs so the dialog never submits 404 group_not_found.
+  const effectiveGroup = group && groups.some((g) => g.id === group) ? group : '';
+
   const inLinkedPreset = (gid: string) => {
     if (!gid) return false;
     const linked = new Set(workspaceLinks.flatMap((l) => l.presets));
     return presets.some((p) => linked.has(p.id) && p.groups.includes(gid));
   };
+  const needsFresh = inLinkedPreset(effectiveGroup);
+  useEffect(() => {
+    if (asking && !needsFresh) {
+      setAsking(false);
+      setPass('');
+    }
+  }, [asking, needsFresh]);
 
   const save = async () => {
-    if (!!guard?.verifyEachAllow && inLinkedPreset(group) && !asking) {
+    if (!names.length) return;
+    if (!!guard?.verifyEachAllow && needsFresh && !asking) {
       setAsking(true);
       return;
     }
     setErr('');
     setBusy(true);
     try {
-      await vaultApi.assignGroup(names, group, asking && pass ? { passphrase: pass } : undefined);
+      await vaultApi.assignGroup(names, effectiveGroup, asking && pass ? { passphrase: pass } : undefined);
       await loadVault();
       onDone();
     } catch (e) {
@@ -817,14 +838,14 @@ function BulkGroup({ names, onDone }: { names: string[]; onDone(err?: string): v
   };
 
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onDone()}>
+    <div className="modal-backdrop" {...backdrop}>
       <form
         className="modal dialog vault-editor"
         role="dialog"
         aria-label={t('vault.bulk.groupTitle', { n: names.length })}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === 'Escape') onDone();
+          if (e.key === 'Escape' && !isComposing(e)) onDone();
         }}
         onSubmit={(e) => {
           e.preventDefault();
@@ -846,7 +867,7 @@ function BulkGroup({ names, onDone }: { names: string[]; onDone(err?: string): v
           </div>
           <div className="vault-field">
             <span>{t('vault.group')}</span>
-            <GroupPicker groups={groups} value={group} onChange={setGroup} />
+            <GroupPicker groups={groups} value={effectiveGroup} onChange={setGroup} />
           </div>
           {asking && (
             <div className="vault-field" data-fresh="group-assign">
@@ -861,7 +882,7 @@ function BulkGroup({ names, onDone }: { names: string[]; onDone(err?: string): v
           <button type="button" onClick={() => onDone()}>
             {t('dialog.cancel')}
           </button>
-          <button className="primary" type="submit" disabled={busy || (asking && !pass)}>
+          <button className="primary" type="submit" disabled={busy || names.length === 0 || (asking && !pass)}>
             {t('vault.save')}
           </button>
         </div>
@@ -874,6 +895,7 @@ function BulkGroup({ names, onDone }: { names: string[]; onDone(err?: string): v
 /** Changes who may read the variables named without asking, one call
  * each (their values are sealed again with their machines). */
 function BulkAccess({ names, onDone }: { names: string[]; onDone(err?: string): void }) {
+  const backdrop = useBackdropDismiss(() => onDone());
   const [mode, setMode] = useState<AccessMode>('ask');
   const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -881,8 +903,19 @@ function BulkAccess({ names, onDone }: { names: string[]; onDone(err?: string): 
   const variables = useVault((s) => s.variables);
   const [asking, setAsking] = useState(false);
   const [pass, setPass] = useState('');
+  const machines = machinesFor(mode, picked);
+  const anyWidens = names.some((n) => {
+    const cur = variables.find((x) => x.name === n);
+    return !!cur && widens(cur, { machines });
+  });
+  useEffect(() => {
+    if (asking && !anyWidens) {
+      setAsking(false);
+      setPass('');
+    }
+  }, [asking, anyWidens]);
   const save = async () => {
-    const machines = machinesFor(mode, picked);
+    if (!names.length) return;
     const wide = (n: string) => {
       const cur = variables.find((x) => x.name === n);
       return !!guard?.verifyEachAllow && !!cur && widens(cur, { machines });
@@ -907,14 +940,14 @@ function BulkAccess({ names, onDone }: { names: string[]; onDone(err?: string): 
     onDone(err);
   };
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onDone()}>
+    <div className="modal-backdrop" {...backdrop}>
       <form
         className="modal dialog vault-editor"
         role="dialog"
         aria-label={t('vault.bulk.accessTitle', { n: names.length })}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === 'Escape') onDone();
+          if (e.key === 'Escape' && !isComposing(e)) onDone();
         }}
         onSubmit={(e) => {
           e.preventDefault();
@@ -942,7 +975,11 @@ function BulkAccess({ names, onDone }: { names: string[]; onDone(err?: string): 
           <button type="button" onClick={() => onDone()}>
             {t('dialog.cancel')}
           </button>
-          <button className="primary" type="submit" disabled={busy || (mode === 'some' && !picked.length) || (asking && !pass)}>
+          <button
+            className="primary"
+            type="submit"
+            disabled={busy || names.length === 0 || (mode === 'some' && !picked.length) || (asking && !pass)}
+          >
             {t('vault.save')}
           </button>
         </div>
@@ -955,6 +992,7 @@ function BulkAccess({ names, onDone }: { names: string[]; onDone(err?: string): 
 /** Adds or changes a variable, in a dialog: the value field only sets a new
  * value; optional group assignment; who may read it without asking; inject-only. */
 function Editor({ variable, defaultGroup, onDone }: { variable?: VaultVariable; defaultGroup?: string; onDone(): void }) {
+  const backdrop = useBackdropDismiss(onDone);
   const groups = useVault((s) => s.groups);
   const presets = useVault((s) => s.presets);
   const workspaceLinks = useVault((s) => s.workspaceLinks);
@@ -976,23 +1014,40 @@ function Editor({ variable, defaultGroup, onDone }: { variable?: VaultVariable; 
   const [pass, setPass] = useState('');
   const target = name.trim();
   const nameOk = /^[A-Za-z_][A-Za-z0-9_]*$/.test(target) && target.length <= 128;
-  const machinesOf = (): string[] => machinesFor(mode, picked);
+  // Drop externally deleted group IDs so save never submits 404 group_not_found.
+  const effectiveGroup = group && groups.some((g) => g.id === group) ? group : '';
+  const machines = machinesFor(mode, picked);
   const linkedPresetIds = useMemo(() => new Set(workspaceLinks.flatMap((l) => l.presets)), [workspaceLinks]);
   const groupWidens =
-    !!group && group !== (variable?.group ?? '') && presets.some((p) => linkedPresetIds.has(p.id) && p.groups.includes(group));
+    !!effectiveGroup &&
+    effectiveGroup !== (variable?.group ?? '') &&
+    presets.some((p) => linkedPresetIds.has(p.id) && p.groups.includes(effectiveGroup));
   const varWidens =
     !!target && (!variable || target !== variable.name) && presets.some((p) => linkedPresetIds.has(p.id) && p.variables.includes(target));
+  const needsWidening = variable ? widens(variable, { machines, injectOnly }) || groupWidens || varWidens : groupWidens || varWidens;
+  useEffect(() => {
+    if (asking && !needsWidening) {
+      setAsking(false);
+      setPass('');
+    }
+  }, [asking, needsWidening]);
   const save = async () => {
     setErr('');
     // A new variable cannot be proved via POST /proof (it does not exist yet):
     // when verifyEachAllow requires confirmation for a linked group or name, ask
     // for the passphrase directly.
     const to = variable && target !== variable.name ? { to: target } : {};
-    const groupField = variable ? (group !== (variable.group ?? '') ? { group } : {}) : group ? { group } : {};
+    const groupField = variable
+      ? effectiveGroup !== (variable.group ?? '')
+        ? { group: effectiveGroup }
+        : {}
+      : effectiveGroup
+        ? { group: effectiveGroup }
+        : {};
     const body = {
       ...to,
       description,
-      machines: machinesOf(),
+      machines,
       injectOnly,
       ...groupField,
       ...(value !== '' || !variable ? { value } : {}),
@@ -1034,7 +1089,7 @@ function Editor({ variable, defaultGroup, onDone }: { variable?: VaultVariable; 
     }
   };
   const remove = async () => {
-    if (!variable) return;
+    if (!variable || busy) return;
     const ok = await confirmDialog({
       title: t('vault.deleteTitle'),
       message: t('vault.deleteMessage', { name: variable.name }),
@@ -1042,23 +1097,27 @@ function Editor({ variable, defaultGroup, onDone }: { variable?: VaultVariable; 
       danger: true,
     });
     if (!ok) return;
+    setErr('');
+    setBusy(true);
     try {
       await vaultApi.remove(variable.name);
       await loadVault();
       onDone();
     } catch (e) {
       setErr(errorText(e));
+    } finally {
+      setBusy(false);
     }
   };
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onDone()}>
+    <div className="modal-backdrop" {...backdrop}>
       <form
         className="modal dialog vault-editor"
         role="dialog"
         aria-label={variable ? t('vault.editTitle', { name: variable.name }) : t('vault.addTitle')}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === 'Escape') onDone();
+          if (e.key === 'Escape' && !isComposing(e)) onDone();
         }}
         onSubmit={(e) => {
           e.preventDefault();
@@ -1092,7 +1151,7 @@ function Editor({ variable, defaultGroup, onDone }: { variable?: VaultVariable; 
           {groups.length > 0 && (
             <div className="vault-field">
               <span>{t('vault.group')}</span>
-              <GroupPicker groups={groups} value={group} onChange={setGroup} />
+              <GroupPicker groups={groups} value={effectiveGroup} onChange={setGroup} />
             </div>
           )}
           <label className="vault-field">
@@ -1143,7 +1202,7 @@ function Editor({ variable, defaultGroup, onDone }: { variable?: VaultVariable; 
         </div>
         <div className="dialog-actions">
           {variable && (
-            <button type="button" className="ghost danger-text" onClick={() => void remove()}>
+            <button type="button" className="ghost danger-text" disabled={busy} onClick={() => void remove()}>
               <Trash2 /> {t('vault.delete')}
             </button>
           )}

@@ -66,6 +66,9 @@ import {
 import { OverviewLogo, ProviderLogo, providerColor } from './logos';
 import './usage.css';
 
+const clampShown = (used: number, remaining: boolean) =>
+  Math.min(100, Math.max(0, Number.isFinite(used) ? (remaining ? 100 - used : used) : 0));
+
 /** Seconds since the epoch, every 30 s. */
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now() / 1000);
@@ -122,18 +125,19 @@ export function UsagePanel() {
     pricingSeen.current = pricing;
     void fetchCost();
   }, [pricing]);
-  const accounts = useMemo(() => sortAccounts(snapshot?.accounts ?? []), [snapshot]);
+  const now = useNow();
+  const accounts = useMemo(() => sortAccounts(snapshot?.accounts ?? [], now, cost), [snapshot, now, cost]);
   const providers = useMemo(() => shownProviders(accounts, cost), [accounts, cost]);
   // DeepSeek's page has the form for its key, so it opens without one.
   const shown: UsageTab = tab === 'overview' || providers.includes(tab) || (tab === 'deepseek' && deepseekOn) ? tab : 'overview';
   return (
     <div className="usage-panel">
-      <Tiles providers={providers} accounts={accounts} cost={cost} shown={shown} />
-      <Meta />
+      <Tiles providers={providers} accounts={accounts} cost={cost} shown={shown} now={now} />
+      <Meta now={now} />
       {shown === 'overview' ? (
-        <Overview accounts={accounts} cost={cost} />
+        <Overview accounts={accounts} cost={cost} now={now} />
       ) : (
-        <Provider key={shown} provider={shown} accounts={accounts.filter((a) => a.provider === shown)} cost={cost} />
+        <Provider key={shown} provider={shown} accounts={accounts.filter((a) => a.provider === shown)} cost={cost} now={now} />
       )}
     </div>
   );
@@ -172,13 +176,14 @@ function Tiles({
   accounts,
   cost,
   shown,
+  now,
 }: {
   providers: string[];
   accounts: UsageAccount[];
   cost?: CostReport;
   shown: UsageTab;
+  now: number;
 }) {
-  const now = useNow();
   const byProvider = useMemo(() => {
     const map = new Map<string, UsageAccount | MergedUsageAccount>();
     for (const entry of previewAccounts(accounts, now, cost)) map.set(entry.provider, entry);
@@ -236,12 +241,11 @@ const REFRESH_MODES = ['adaptive', 'manual', '1', '2', '5', '15', '30', '60'] as
 
 /** When the numbers were read, the used/left switch, how often to read
  * (usage.refresh) and Refresh. */
-function Meta() {
+function Meta({ now }: { now: number }) {
   const snapshot = useUsage((s) => s.snapshot);
   const remaining = useUsage((s) => s.remaining);
   const readOnly = useSettings((s) => s.readOnly);
   const mode = useSettings((s) => String(s.values['usage.refresh']?.value ?? snapshot?.refresh ?? 'adaptive'));
-  const now = useNow();
   const [error, setError] = useState<string>();
   const refresh = async () => {
     setError(undefined);
@@ -304,10 +308,9 @@ function Meta() {
 
 // ---- overview ----
 
-function Overview({ accounts, cost }: { accounts: UsageAccount[]; cost?: CostReport }) {
+function Overview({ accounts, cost, now }: { accounts: UsageAccount[]; cost?: CostReport; now: number }) {
   const snapshot = useUsage((s) => s.snapshot);
   const readOnly = useSettings((s) => s.readOnly);
-  const now = useNow();
   const deepseekOn = useSettings((s) => s.values['usage.providers.deepseek']?.value !== false);
   const noDeepseek = deepseekOn && !readOnly && !accounts.some((a) => a.provider === 'deepseek');
   const rows = useMemo(() => previewAccounts(accounts, now, cost), [accounts, now, cost]);
@@ -326,7 +329,7 @@ function Overview({ accounts, cost }: { accounts: UsageAccount[]; cost?: CostRep
           <h4 className="usage-heading">{t('usage.accounts')}</h4>
           <div className="usage-rows">
             {rows.map((a) => (
-              <AccountRow key={a.key} account={a} cost={cost} showEmail={shared.has(a.provider)} />
+              <AccountRow key={a.key} account={a} cost={cost} now={now} showEmail={shared.has(a.provider)} />
             ))}
           </div>
         </section>
@@ -341,18 +344,19 @@ function Overview({ accounts, cost }: { accounts: UsageAccount[]; cost?: CostRep
 function AccountRow({
   account: a,
   cost,
+  now,
   showEmail = false,
 }: {
   account: UsageAccount | MergedUsageAccount;
   cost?: CostReport;
+  now: number;
   showEmail?: boolean;
 }) {
   const remaining = useUsage((s) => s.remaining);
-  const now = useNow();
   const merged = isMergedAccount(a);
   const w = tightestWindow(a, now);
   const usedPct = accountUsedPct(a, now, cost);
-  const shown = usedPct !== undefined ? (remaining ? 100 - usedPct : usedPct) : undefined;
+  const shown = usedPct !== undefined ? clampShown(usedPct, remaining) : undefined;
   const valText = merged ? mergedValueText(a, remaining) : undefined;
   const cycleText = merged && a.summary.window ? windowLabel(a.summary.window) : undefined;
   const resetAt = merged ? a.summary.resetsAt : w?.resetsAt;
@@ -368,7 +372,7 @@ function AccountRow({
       ? `${windowLabel(w)}${w.resetsAt ? ` · ${t('usage.resetsIn', { in: duration(w.resetsAt - now) })}` : ''}`
       : undefined;
   const barWindow: UsageWindow | undefined =
-    usedPct !== undefined ? (merged ? { kind: 'session', usedPct } : (w ?? { kind: 'monthly', usedPct })) : undefined;
+    usedPct !== undefined ? (merged ? { kind: 'session', usedPct } : w ? { ...w, usedPct } : { kind: 'monthly', usedPct }) : undefined;
   return (
     <button
       className={`usage-row level-${usedPct !== undefined ? levelPct(usedPct) : 'none'}`}
@@ -402,9 +406,8 @@ function AccountRow({
 
 // ---- a service ----
 
-function Provider({ provider, accounts, cost }: { provider: string; accounts: UsageAccount[]; cost?: CostReport }) {
+function Provider({ provider, accounts, cost, now }: { provider: string; accounts: UsageAccount[]; cost?: CostReport; now: number }) {
   const readOnly = useSettings((s) => s.readOnly);
-  const now = useNow();
   const merged = mergeProviderAccounts(accounts, provider, now, cost);
   const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>(() => loadCollapsedAccounts());
   const toggleAccount = (accountKey: string) => {
@@ -426,6 +429,7 @@ function Provider({ provider, accounts, cost }: { provider: string; accounts: Us
             key={a.key}
             account={a}
             cost={cost}
+            now={now}
             collapsible={collapsible}
             collapsed={collapsible && !!collapsedMap[k]}
             onToggle={() => toggleAccount(a.key)}
@@ -445,7 +449,7 @@ function MergedSummaryBar({ account: a }: { account: MergedUsageAccount }) {
   const remaining = useUsage((s) => s.remaining);
   useSettings((s) => s.values['usage.thresholds']);
   const usedPct = a.summary.usedPct;
-  const shown = usedPct !== undefined ? (remaining ? 100 - usedPct : usedPct) : undefined;
+  const shown = usedPct !== undefined ? clampShown(usedPct, remaining) : undefined;
   const lvl = usedPct !== undefined ? levelPct(usedPct) : 'ok';
   const valText = mergedValueText(a, remaining);
   const cycleText = a.summary.window ? windowLabel(a.summary.window) : undefined;
@@ -469,12 +473,14 @@ function MergedSummaryBar({ account: a }: { account: MergedUsageAccount }) {
 function AccountCard({
   account: a,
   cost,
+  now,
   collapsible = false,
   collapsed = false,
   onToggle,
 }: {
   account: UsageAccount;
   cost?: CostReport;
+  now: number;
   collapsible?: boolean;
   collapsed?: boolean;
   onToggle?: () => void;
@@ -484,7 +490,6 @@ function AccountCard({
   const remaining = useUsage((s) => s.remaining);
   const incident = useUsage((s) => s.snapshot?.status[a.provider]);
   useSettings((s) => s.values['usage.thresholds']);
-  const now = useNow();
   const labelOf = (m: string) => machines[m]?.label ?? m;
   const isDisabled = (m: string) => {
     const st = machines[m];
@@ -497,10 +502,17 @@ function AccountCard({
   const activeIssues = (a.issues ?? []).filter((i) => !isDisabled(i.machine));
   const disabledIssueMachines = [...new Set((a.issues ?? []).filter((i) => isDisabled(i.machine)).map((i) => i.machine))];
   const headlineUsed = accountUsedPct(a, now, cost);
-  const headlineShown = headlineUsed !== undefined ? (remaining ? 100 - headlineUsed : headlineUsed) : undefined;
+  const headlineShown = headlineUsed !== undefined ? clampShown(headlineUsed, remaining) : undefined;
   const headlineLevel = headlineUsed !== undefined ? levelPct(headlineUsed) : 'none';
   const balanceAvail = headlineUsed === undefined ? estimateAccountValue(a, now, { cost }).availableUsd : undefined;
   const accountLabel = a.email || (a.home ? `${providerName(a.provider)} (${a.home})` : providerName(a.provider));
+  const updatedText = a.fetchedAt
+    ? a.status !== 'ok'
+      ? a.asOf && a.asOf !== a.fetchedAt
+        ? `${t('usage.updated', { ago: duration(now - a.fetchedAt) })} · ${t('usage.asOf', { ago: duration(now - a.asOf) })}`
+        : t('usage.asOf', { ago: duration(now - a.fetchedAt) })
+      : t('usage.updated', { ago: duration(now - a.fetchedAt) })
+    : '';
   return (
     <section className={`usage-card${collapsible ? ' collapsible' : ''}${collapsed ? ' collapsed' : ''}`} data-account={a.key}>
       {collapsible ? (
@@ -530,12 +542,9 @@ function AccountCard({
                   <span className="usage-card-pct muted">{money(balanceAvail)}</span>
                 ) : null}
               </div>
-              {!collapsed && a.fetchedAt && (
+              {!collapsed && updatedText && (
                 <div className="usage-card-line muted">
-                  <span>
-                    {t('usage.updated', { ago: duration(now - a.fetchedAt) })}
-                    {a.status !== 'ok' ? ` · ${t('usage.asOf', { ago: duration(now - a.fetchedAt) })}` : ''}
-                  </span>
+                  <span>{updatedText}</span>
                 </div>
               )}
             </div>
@@ -551,10 +560,7 @@ function AccountCard({
               {a.email && <span className="usage-email ellipsis">{a.email}</span>}
             </div>
             <div className="usage-card-line muted">
-              <span>
-                {a.fetchedAt ? t('usage.updated', { ago: duration(now - a.fetchedAt) }) : ''}
-                {a.status !== 'ok' && a.fetchedAt ? ` · ${t('usage.asOf', { ago: duration(now - a.fetchedAt) })}` : ''}
-              </span>
+              <span>{updatedText}</span>
               <span className="spacer" />
               {a.plan && <span className="usage-plan">{a.plan}</span>}
             </div>
@@ -690,7 +696,7 @@ function WindowRow({ account, w, grouped, now }: { account: UsageAccount; w: Usa
   const cost = useUsage((s) => s.cost);
   const spend = windowSpend(cost, account, w, now);
   useSettings((s) => s.values['usage.thresholds']);
-  const shown = remaining ? 100 - w.usedPct : w.usedPct;
+  const shown = clampShown(w.usedPct, remaining);
   const ahead = w.pace ? Math.round(w.usedPct - w.pace.expectedPct) : 0;
   // Past its reset the numbers are of the period before: said so, not
   // counted as a warning.

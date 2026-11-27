@@ -56,9 +56,9 @@ export const SESSION_NOT_FOUND_RECHECK_MS = 15_000;
 /** The key of a session in useUsage.sessions. */
 export const sessionKey = (m: string, kind: string, session: string): string => JSON.stringify([m, kind, session]);
 
-/** The key of a SessionTarget (by session id when known, else cwd + pid/terminal). */
+/** The key of a SessionTarget (by session id when known, else cwd + stable terminal). */
 export const targetKey = (t: Pick<SessionTarget, 'm' | 'kind' | 'session' | 'cwd' | 'pid' | 'terminal'>): string =>
-  t.session ? sessionKey(t.m, t.kind, t.session) : sessionKey(t.m, t.kind, `cwd:${t.cwd ?? ''}:${t.pid ?? t.terminal ?? ''}`);
+  t.session ? sessionKey(t.m, t.kind, t.session) : sessionKey(t.m, t.kind, `cwd:${t.cwd ?? ''}:${t.terminal ?? t.pid ?? ''}`);
 
 /** The reads of a session: when the last began (ms), whether one is under
  * way and another must follow it, whether one waits for the page to show,
@@ -69,6 +69,7 @@ interface Slot {
   busy: boolean;
   again: boolean;
   owed: boolean;
+  gen: number;
   abort?: AbortController;
   timer?: ReturnType<typeof setTimeout>;
   retry?: ReturnType<typeof setTimeout>;
@@ -79,7 +80,7 @@ const slots = new Map<string, Slot>();
 function slotOf(key: string): Slot {
   let s = slots.get(key);
   if (s) return s;
-  s = { at: 0, busy: false, again: false, owed: false };
+  s = { at: 0, busy: false, again: false, owed: false, gen: 0 };
   slots.set(key, s);
   // Those of sessions long gone, the oldest first; none with a read under
   // way or waiting.
@@ -113,7 +114,7 @@ function put(key: string, e: SessionEntry) {
  * answered, 'aborted' when cancelled before completion (e.g. pane switch),
  * 'failed' otherwise (offline, network, timeout). A failure keeps what was
  * known. */
-async function load(t: SessionTarget, key: string, slot: Slot): Promise<'ok' | 'aborted' | 'failed'> {
+async function load(t: SessionTarget, key: string, slot: Slot, gen: number): Promise<'ok' | 'aborted' | 'failed'> {
   const q = new URLSearchParams({ kind: t.kind });
   if (t.session) q.set('session', t.session);
   if (t.cwd) q.set('cwd', t.cwd);
@@ -127,12 +128,16 @@ async function load(t: SessionTarget, key: string, slot: Slot): Promise<'ok' | '
   }, SESSION_TIMEOUT_MS);
   try {
     const r = await fetch(`/api/m/${encodeURIComponent(t.m)}/p/usage/session?${q}`, { signal: abort.signal });
-    const j = await jsonBody(r);
+    if (abort.signal.aborted || slot.gen !== gen) return timedOut ? 'failed' : 'aborted';
     if (r.ok) {
+      const j: unknown = await r.json();
+      if (abort.signal.aborted || slot.gen !== gen) return timedOut ? 'failed' : 'aborted';
       const usage = sessionUsageOf(j);
       if (usage) put(key, { usage, at: Date.now() });
       return usage ? 'ok' : 'failed';
     }
+    const j = await jsonBody(r);
+    if (abort.signal.aborted || slot.gen !== gen) return timedOut ? 'failed' : 'aborted';
     if (typeof j.error === 'string' && CODES.has(j.error)) {
       put(key, { code: j.error as SessionCode, status: t.status, at: Date.now() });
       return 'ok';
@@ -176,7 +181,9 @@ export function requestSession(t: SessionTarget, final = false, retry = false) {
   s.owed = false;
   s.at = Date.now();
   s.busy = true;
-  void load(t, key, s).then((res) => {
+  const gen = ++s.gen;
+  void load(t, key, s, gen).then((res) => {
+    if (s.gen !== gen) return;
     s.busy = false;
     if (res === 'aborted') {
       // Cancelled on pane switch / unmount: allow an immediate read if focused again.
@@ -197,14 +204,16 @@ export function requestSession(t: SessionTarget, final = false, retry = false) {
   });
 }
 
-/** Aborts an in-flight read for a single session key (e.g. when switching
- * away from its terminal pane so it does not hold a machine read slot). */
-export function abortSessionRead(key: string) {
-  const s = slots.get(key);
-  if (!s) return;
-  if (s.abort) {
-    s.abort.abort();
-    s.abort = undefined;
+function abortSlot(s: Slot) {
+  if (s.abort || s.busy) {
+    s.gen++;
+    if (s.abort) {
+      s.abort.abort();
+      s.abort = undefined;
+    }
+    s.busy = false;
+    s.at = 0;
+    s.again = false;
   }
   clearTimeout(s.timer);
   s.timer = undefined;
@@ -212,19 +221,18 @@ export function abortSessionRead(key: string) {
   s.retry = undefined;
 }
 
+/** Aborts an in-flight read for a single session key (e.g. when switching
+ * away from its terminal pane so it does not hold a machine read slot). */
+export function abortSessionRead(key: string) {
+  const s = slots.get(key);
+  if (!s) return;
+  abortSlot(s);
+}
+
 /** Cancels in-flight reads and reads waiting for their gap or retry (the
  * status bar's item is gone). */
 export function cancelSessionReads() {
-  for (const s of slots.values()) {
-    if (s.abort) {
-      s.abort.abort();
-      s.abort = undefined;
-    }
-    clearTimeout(s.timer);
-    s.timer = undefined;
-    clearTimeout(s.retry);
-    s.retry = undefined;
-  }
+  for (const s of slots.values()) abortSlot(s);
 }
 
 /** Forgets every session's reads: when they were and what is owed. */

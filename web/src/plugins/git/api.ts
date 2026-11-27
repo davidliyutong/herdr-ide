@@ -201,7 +201,9 @@ export async function limitGitRead<T>(m: string, fn: () => Promise<T>, signal?: 
     gate = { active: 0, queue: [] };
     machineGates.set(m, gate);
   }
-  if (gate.active >= MAX_CONCURRENT_GIT_READS) {
+  if (gate.active < MAX_CONCURRENT_GIT_READS) {
+    gate.active++;
+  } else {
     await new Promise<void>((resolve, reject) => {
       const wake = () => {
         signal?.removeEventListener('abort', onAbort);
@@ -216,15 +218,16 @@ export async function limitGitRead<T>(m: string, fn: () => Promise<T>, signal?: 
       gate!.queue.push(wake);
     });
   }
-  gate.active++;
   try {
     if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
     return await fn();
   } finally {
-    gate.active--;
     const next = gate.queue.shift();
     if (next) next();
-    else if (gate.active === 0) machineGates.delete(m);
+    else {
+      gate.active--;
+      if (gate.active === 0 && machineGates.get(m) === gate) machineGates.delete(m);
+    }
   }
 }
 

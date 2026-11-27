@@ -57,7 +57,7 @@ type Status =
   | { s: 'loading' }
   | { s: 'ready' }
   /** A page that cannot be framed here: it opens in the browser. */
-  | { s: 'outside' }
+  | { s: 'outside'; url: string }
   /** own: the app's own address, which a pane does not show. */
   | { s: 'refused'; own?: boolean }
   /** A machine's port that is not forwarded and that the user did not ask
@@ -72,7 +72,7 @@ const OTHER_MACHINE = 'other_machine';
 /** Fields of a view that say where its page is. */
 type Fields = { url: string; m?: string; port?: number; title?: string };
 
-const outside = (url: string) => void window.open(url, '_blank', 'noopener');
+const outside = (url: string) => void window.open(url, '_blank', 'noopener,noreferrer');
 
 export function BrowserPane({ m, pane, view }: PaneViewProps) {
   const url = typeof view.url === 'string' ? view.url : '';
@@ -136,7 +136,7 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
     } else if (canFrame(url)) {
       load(p.url);
     } else {
-      fail({ s: 'outside' });
+      fail({ s: 'outside', url: p.url });
     }
     return () => {
       dead = true;
@@ -189,7 +189,7 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
   const local = page?.forward?.local;
   const forwarded = !!vm && port !== undefined;
   const loadedSrc = page?.src;
-  const realUrl = loadedSrc ?? (status.s === 'outside' ? url : undefined);
+  const realUrl = loadedSrc ?? (status.s === 'outside' ? status.url : undefined);
 
   return (
     <div className="browser-pane">
@@ -217,7 +217,6 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
         <Body
           m={m}
           label={label}
-          url={url}
           port={port}
           vm={vm}
           status={status}
@@ -237,7 +236,6 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
 function Body({
   m,
   label,
-  url,
   vm,
   port,
   status,
@@ -247,7 +245,6 @@ function Body({
 }: {
   m: string;
   label: string;
-  url: string;
   vm?: string;
   port?: number;
   status: Status;
@@ -274,8 +271,8 @@ function Body({
       <div className="browser-cover">
         <div className="browser-start">
           <div className="muted">{t('browser.outside')}</div>
-          <div className="browser-url ellipsis">{url}</div>
-          <button className="primary" onClick={() => outside(url)}>
+          <div className="browser-url ellipsis">{status.url}</div>
+          <button className="primary" onClick={() => outside(status.url)}>
             {t('browser.outsideOpen')}
           </button>
         </div>

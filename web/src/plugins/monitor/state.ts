@@ -66,8 +66,11 @@ function attachSignal(map: Map<string, InFlight>, key: string, flight: InFlight,
   }
   if (signal.aborted) return Promise.resolve();
   flight.waiters++;
+  let done = false;
   return new Promise<void>((resolve) => {
     const onAbort = () => {
+      if (done) return;
+      done = true;
       flight.waiters--;
       if (flight.waiters <= 0) {
         if (map.get(key) === flight) map.delete(key);
@@ -77,6 +80,7 @@ function attachSignal(map: Map<string, InFlight>, key: string, flight: InFlight,
     };
     signal.addEventListener('abort', onAbort, { once: true });
     void flight.promise.finally(() => {
+      done = true;
       signal.removeEventListener('abort', onAbort);
       resolve();
     });
@@ -98,10 +102,17 @@ export function fetchMetrics(m: string, signal?: AbortSignal): Promise<void> {
   const ac = new AbortController();
   patchMachine(m, (cur) => ({ ...cur, metricsLoading: true }));
   const flight: InFlight = { promise: undefined as unknown as Promise<void>, ac, waiters: 0 };
+  const clearIfIdle = () => {
+    const active = inflightMetrics.get(m);
+    if (!active || active === flight) patchMachine(m, (cur) => ({ ...cur, metricsLoading: false }));
+  };
   flight.promise = monitorApi
     .metrics(m, ac.signal)
     .then((metrics) => {
-      if (ac.signal.aborted) return;
+      if (ac.signal.aborted) {
+        clearIfIdle();
+        return;
+      }
       patchMachine(m, (cur) => {
         const pt: HistoryPoint = {
           ts: metrics.timestampMs,
@@ -117,7 +128,7 @@ export function fetchMetrics(m: string, signal?: AbortSignal): Promise<void> {
     })
     .catch((err) => {
       if (ac.signal.aborted) {
-        patchMachine(m, (cur) => ({ ...cur, metricsLoading: false }));
+        clearIfIdle();
         return;
       }
       patchMachine(m, (cur) => ({ ...cur, metricsLoading: false, metricsError: errorText(err) }));
@@ -138,15 +149,22 @@ export function fetchProcesses(m: string, signal?: AbortSignal): Promise<void> {
   const ac = new AbortController();
   patchMachine(m, (cur) => ({ ...cur, processesLoading: true }));
   const flight: InFlight = { promise: undefined as unknown as Promise<void>, ac, waiters: 0 };
+  const clearIfIdle = () => {
+    const active = inflightProcesses.get(m);
+    if (!active || active === flight) patchMachine(m, (cur) => ({ ...cur, processesLoading: false }));
+  };
   flight.promise = monitorApi
     .processes(m, ac.signal)
     .then((processes) => {
-      if (ac.signal.aborted) return;
+      if (ac.signal.aborted) {
+        clearIfIdle();
+        return;
+      }
       patchMachine(m, (cur) => ({ ...cur, processes, processesLoading: false, processesError: undefined }));
     })
     .catch((err) => {
       if (ac.signal.aborted) {
-        patchMachine(m, (cur) => ({ ...cur, processesLoading: false }));
+        clearIfIdle();
         return;
       }
       patchMachine(m, (cur) => ({ ...cur, processesLoading: false, processesError: errorText(err) }));

@@ -139,7 +139,7 @@ describe('GitPanel', () => {
   let upstream: string | undefined;
   /** Answers log, show or POST requests instead of the defaults, when set. */
   let logImpl: ((q: URLSearchParams) => Promise<Response>) | undefined;
-  let showImpl: ((q: URLSearchParams) => Promise<Response>) | undefined;
+  let showImpl: ((q: URLSearchParams, signal?: AbortSignal) => Promise<Response>) | undefined;
   let postImpl: ((action: string, body: Record<string, unknown>) => Promise<Response>) | undefined;
   let head: string | undefined;
   const logs: URLSearchParams[] = [];
@@ -224,7 +224,7 @@ describe('GitPanel', () => {
         }
         case 'show':
           shows.push(url.searchParams);
-          if (showImpl) return showImpl(url.searchParams);
+          if (showImpl) return showImpl(url.searchParams, init?.signal ?? undefined);
           return new Response(
             JSON.stringify({ base: 'h0', target: 'h1', files: [{ path: 'src/a.ts', status: 'M', added: 3, deleted: 1 }] }),
           );
@@ -856,6 +856,47 @@ describe('GitPanel', () => {
       await act(async () => amend().click());
       expect(box().value).toBe('');
     });
+
+    it('aborts in-flight amend prefill on uncheck/unmount, retries after remount, and avoids spurious show after commit', async () => {
+      const signals: Array<AbortSignal | undefined> = [];
+      showImpl = (_q, signal) => {
+        signals.push(signal);
+        return new Promise<Response>((_res, rej) => {
+          signal?.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError')), { once: true });
+        });
+      };
+      // Unchecking Amend aborts the in-flight show fetch.
+      await act(async () => amend().click());
+      expect(signals).toHaveLength(1);
+      expect(signals[0]?.aborted).toBe(false);
+      await act(async () => amend().click());
+      expect(signals[0]?.aborted).toBe(true);
+
+      // Unmounting mid-flight aborts the fetch, and remounting retries prefill automatically.
+      await act(async () => amend().click());
+      expect(signals).toHaveLength(2);
+      expect(signals[1]?.aborted).toBe(false);
+      await act(async () => root.unmount());
+      expect(signals[1]?.aborted).toBe(true);
+
+      showImpl = async (q) => commitResp(q.get('rev')!, 'Recovered amend message');
+      root = createRoot(host);
+      await act(async () => root.render(createElement(GitPanel)));
+      await flush();
+      expect(amend().checked).toBe(true);
+      expect(box().value).toBe('Recovered amend message');
+
+      // Committing the unchanged amend clears amendPrefill before POST so new HEAD does not fire a spurious show.
+      shows.length = 0;
+      postImpl = async (action) => {
+        if (action === 'commit') head = 'h2';
+        return new Response('{}');
+      };
+      await act(async () => host.querySelector<HTMLButtonElement>('.git-commit button.primary')!.click());
+      await flush();
+      expect(amend().checked).toBe(false);
+      expect(shows).toHaveLength(0);
+    });
   });
 
   describe('smooth staging, unstaging and discarding without view jumps', () => {
@@ -1009,6 +1050,41 @@ describe('GitPanel', () => {
       await act(async () => releasePost());
       await flush();
       expect(host.querySelector('.git-busy')).toBeNull();
+    });
+
+    it('sets scroll anchor only after discard confirmation so background status updates during the dialog do not consume it', async () => {
+      const groupsEl = host.querySelector<HTMLElement>('.git-groups')!;
+      let stagedHeight = 72;
+      const attachGeometry = () => {
+        const stagedSec = host.querySelector<HTMLElement>('.git-section-staged');
+        const changesSec = host.querySelector<HTMLElement>('.git-section-changes');
+        if (stagedSec) {
+          Object.defineProperty(stagedSec, 'offsetTop', { configurable: true, get: () => 0 });
+          Object.defineProperty(stagedSec, 'offsetHeight', { configurable: true, get: () => stagedHeight });
+        }
+        if (changesSec) {
+          Object.defineProperty(changesSec, 'offsetTop', { configurable: true, get: () => stagedHeight });
+          Object.defineProperty(changesSec, 'offsetHeight', { configurable: true, get: () => 240 });
+        }
+      };
+      attachGeometry();
+      groupsEl.scrollTop = 120;
+      await act(async () => void groupsEl.dispatchEvent(new Event('scroll')));
+
+      const todoRow = rowOf(t('git.group.changes'), 'todo.md');
+      await act(async () => button(t('git.discard'), todoRow)!.click());
+      const req = useDialog.getState().current as { resolve(ok: boolean): void };
+      expect(req).toBeDefined();
+      // Background refresh arrives while confirmation dialog is open: must NOT consume anchor.
+      await act(async () => button(t('git.refresh'))!.click());
+      await flush();
+      expect(groupsEl.scrollTop).toBe(120);
+      // Confirming discard now anchors scroll when geometry shifts.
+      stagedHeight = 96;
+      status = status.filter((f) => f.path !== 'notes/todo.md');
+      await act(async () => req.resolve(true));
+      await flush();
+      expect(groupsEl.scrollTop).toBe(144);
     });
   });
 });

@@ -115,6 +115,9 @@ interface Track {
   gen: number;
   /** Number of UI mutations currently queued or running for this repo. */
   pending: number;
+  /** Whether a non-inline mutation ran in the current pending batch so a
+   * trailing inline mutation never suppresses refs/info reconciliation. */
+  fullChanged: boolean;
   /** Serializes mutations on the same repository so consecutive stage/unstage
    * clicks never race on .git/index.lock. */
   queue: Promise<void>;
@@ -123,7 +126,20 @@ const tracks = new Map<string, Track>();
 const track = (k: string): Track => {
   let tr = tracks.get(k);
   if (!tr)
-    tracks.set(k, (tr = { due: false, info: false, failures: 0, nextAt: 0, activeAt: 0, gen: 0, pending: 0, queue: Promise.resolve() }));
+    tracks.set(
+      k,
+      (tr = {
+        due: false,
+        info: false,
+        failures: 0,
+        nextAt: 0,
+        activeAt: 0,
+        gen: 0,
+        pending: 0,
+        fullChanged: false,
+        queue: Promise.resolve(),
+      }),
+    );
   return tr;
 };
 
@@ -304,10 +320,11 @@ async function read(m: string, root: string, withInfo: boolean) {
   const k = repoKey(m, root);
   const tr = track(k);
   const gen = tr.gen;
-  const t0 = Date.now();
+  let t0 = Date.now();
   const needInfo = withInfo || !useGit.getState().repos[k]?.info;
   try {
     const [info, status] = await limitGitRead(m, async () => {
+      t0 = Date.now();
       // Run info (when needed) and status sequentially within one per-machine
       // read slot so expanding many submodules or focusing the window never
       // exceeds the machine's MAX_RUNS semaphore.
@@ -344,6 +361,7 @@ async function read(m: string, root: string, withInfo: boolean) {
     });
     if (!kept) refreshDecorations();
   } catch (e) {
+    if (tr.pending > 0 || tr.gen !== gen) return;
     failed(k, e);
     patch(m, root, () => ({ error: errorText(e), readAt: Date.now() }));
   }
@@ -581,6 +599,7 @@ export async function runGit(m: string, root: string, action: string, params: Re
   const inline = INLINE_ACTIONS.has(action);
   tr.gen++;
   tr.pending++;
+  if (!inline) tr.fullChanged = true;
   if (inline) {
     tr.seen = undefined;
     let applied = false;
@@ -616,9 +635,11 @@ export async function runGit(m: string, root: string, action: string, params: Re
     tr.pending--;
     if (!inline) patch(m, root, () => ({ busy: undefined }));
     const moreQueued = tr.pending > 0;
+    const needFull = !inline || tr.fullChanged;
+    if (!moreQueued) tr.fullChanged = false;
     release();
     if (!moreQueued || !inline) {
-      await changed(m, root, inline ? { indexOnly: true } : {});
+      await changed(m, root, needFull ? {} : { indexOnly: true });
     }
   }
 }

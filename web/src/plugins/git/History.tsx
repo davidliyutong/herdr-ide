@@ -98,7 +98,7 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
     gitApi
       .log(m, root, { limit, signal: ac.signal })
       .then((l) => {
-        if (page.current !== pg) return;
+        if (page.current !== pg || ac.signal.aborted) return;
         pg.next = l.commits.length;
         pg.ready = true;
         setCommits(l.commits);
@@ -117,7 +117,7 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
     const signal = pageAbort.current?.signal;
     try {
       const l = await gitApi.log(m, root, { skip: pg.next, limit: PAGE, signal });
-      if (page.current !== pg) return;
+      if (page.current !== pg || signal?.aborted) return;
       pg.next += l.commits.length;
       setCommits((c) => appendCommits(c, l.commits));
       setMore(l.more && l.commits.length > 0);

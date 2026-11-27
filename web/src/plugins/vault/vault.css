@@ -124,14 +124,21 @@
 /* ---- tabs and tools ---- */
 .vault-tabs {
   display: flex;
+  min-width: 0;
 }
 .vault-tabs button {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  font-size: var(--fs-md);
+  gap: 4px;
+  padding: 0 6px;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+}
+.vault-tabs button > .lucide {
+  flex: none;
 }
 .vault-toolbar {
   display: flex;
@@ -194,10 +201,11 @@
 /* Choosing variables: all of those shown, and what to do with the chosen. */
 .vault-select-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-height: var(--ctl);
-  padding: 0 8px 0 10px;
+  padding: 2px 8px 2px 10px;
   font-size: var(--fs-md);
 }
 .vault-select-bar .muted {
@@ -720,14 +728,18 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
-  padding: 0 8px;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 2px 8px;
   border: 1px solid var(--line-2);
   border-radius: 999px;
   background: var(--bg);
   color: var(--fg-dim);
   font-size: var(--fs-sm);
   cursor: pointer;
+}
+.vault-group-pill > .lucide {
+  flex: none;
 }
 .vault-group-pill:hover {
   background: var(--bg-2);

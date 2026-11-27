@@ -797,4 +797,91 @@ describe('the history plugin in the page', () => {
     expect(peak).toBe(MAX_CONCURRENT_READS);
     for (let i = 0; i < total; i++) expect(text(preludeOf('a', `t${i}`)?.bytes)).toBe(`snap-${i}`);
   });
+
+  it('ignores pre-disconnect list/adopt completions after reconnect and clears preludes on historyCleared while staleList is set', async () => {
+    // 1. Pre-disconnect listHistory resolving after reconnect does not overwrite post-reconnect state or stall fresh listing.
+    let staleListSignal: AbortSignal | undefined;
+    let resolveStaleList!: (r: Response) => void;
+    let interceptFirstList = true;
+    const origFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      const u = String(url);
+      if (u === '/api/m/a/p/history' && interceptFirstList) {
+        interceptFirstList = false;
+        staleListSignal = init?.signal ?? undefined;
+        return new Promise<Response>((r) => (resolveStaleList = r));
+      }
+      return origFetch(url, init);
+    });
+
+    restarted();
+    stop = startHistory();
+    await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS + 10);
+    expect(staleListSignal).toBeDefined();
+    expect(staleListSignal?.aborted).toBe(false);
+
+    // Machine disconnects -> aborts pre-disconnect list.
+    machine([], layoutOf({ terminal: 't1' }), 'error');
+    expect(staleListSignal?.aborted).toBe(true);
+
+    // Machine reconnects with fresh post-reboot history.
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 300, 9000, { pid: 200, at: 7000 })] };
+    hub.data.set('t1 previous', { bytes: enc('fresh post-reconnect'), pid: 200, at: 7000 });
+    machine([rec('t1', 300)], layoutOf({ terminal: 't1' }), 'ready');
+
+    // Stale pre-disconnect list resolves late -> must be ignored and must not block reconnect's fresh list.
+    resolveStaleList(
+      new Response(JSON.stringify({ restoreScreen: false, terminals: [entry('t1', 200, 5000, { pid: 100, at: 3000 })] }), { status: 200 }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(preludeOf('a', 't1')).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS + 20);
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('fresh post-reconnect');
+
+    // 2. historyCleared while staleList is true (right after reconnect before fresh list fires) immediately clears preludes.
+    machine([], layoutOf({ terminal: 't1' }), 'error');
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('fresh post-reconnect');
+    machine([rec('t1', 400)], layoutOf({ terminal: 't1' }), 'ready');
+    historyCleared('a');
+    expect(preludeOf('a', 't1')).toBeUndefined();
+    stop();
+
+    // 3. Pre-disconnect adoptHistory rejecting after disconnect does not schedule offline retries or stall post-reconnect adoption.
+    let adoptSignal: AbortSignal | undefined;
+    let resolveOldAdopt!: (r: Response) => void;
+    let interceptFirstAdopt = true;
+    hub = new FakeHistory();
+    hub.install();
+    const baseFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      const u = String(url);
+      if (u.startsWith('/api/m/a/p/history/adopt') && interceptFirstAdopt) {
+        interceptFirstAdopt = false;
+        adoptSignal = init?.signal ?? undefined;
+        return new Promise<Response>((r) => (resolveOldAdopt = r));
+      }
+      return baseFetch(url, init);
+    });
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 100, 3000)] };
+    hub.data.set('t1 current', { bytes: enc('old terminal'), pid: 100, at: 3000 });
+    machine([rec('t2', 300)], layoutOf({ terminal: 't2', before: 't1' }), 'ready');
+    stop = startHistory();
+    await settle();
+    expect(adoptSignal).toBeDefined();
+    expect(adoptSignal?.aborted).toBe(false);
+
+    // Disconnect aborts adopt; even if the old fetch settles with 409 offline, ZERO retries run while offline.
+    machine([], layoutOf({ terminal: 't2', before: 't1' }), 'error');
+    expect(adoptSignal?.aborted).toBe(true);
+    resolveOldAdopt(new Response('{"error":"offline"}', { status: 409 }));
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(hub.adopts()).toHaveLength(0);
+
+    // Reconnect runs adoption cleanly (was not stuck in busy state).
+    machine([rec('t2', 300)], layoutOf({ terminal: 't2', before: 't1' }), 'ready');
+    await settle();
+    expect(hub.adopts()).toHaveLength(1);
+  });
 });

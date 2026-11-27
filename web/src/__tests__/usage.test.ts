@@ -1835,4 +1835,258 @@ describe('usage panel and status item', () => {
     expect(gSpend).toMatchObject({ cost: 200, full: { cost: 800 } });
     expect(cSpend).toMatchObject({ cost: 50, full: { cost: 100 } });
   });
+
+  it('excludes unentitled 100% Antigravity third-party windows from merged capacity and buckets while keeping explicit model lookup', () => {
+    const todayStr = dayOf(new Date(now * 1000));
+    // Account A has Gemini (20% used, $40 logs -> $200) and an unentitled 100% Claude/GPT window.
+    const accA = account('antigravity:a', [], {
+      plan: 'Pro',
+      machines: ['m1'],
+      windows: [
+        { kind: 'session', label: 'Gemini Models', usedPct: 20, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 20, resetsAt: now + 86400, windowSec: 604800 },
+        { kind: 'session', label: 'Claude and GPT', usedPct: 100, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Claude and GPT', usedPct: 100, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    // Account B has Gemini (10% used, $20 logs -> $200) and real Claude/GPT spend (50% used, $50 logs -> $100).
+    const accB = account('antigravity:b', [], {
+      plan: 'Pro',
+      machines: ['m2'],
+      windows: [
+        { kind: 'session', label: 'Gemini Models', usedPct: 10, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 10, resetsAt: now + 86400, windowSec: 604800 },
+        { kind: 'session', label: 'Claude and GPT', usedPct: 0, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Claude and GPT', usedPct: 50, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    const cost: CostReport = {
+      generatedAt: now,
+      days: 90,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'gemini-3-pro',
+          machine: 'm1',
+          input: 1,
+          cached: 0,
+          cacheWrite: 0,
+          output: 1,
+          requests: 1,
+          cost: 40,
+          priced: true,
+        },
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'gemini-3-pro',
+          machine: 'm2',
+          input: 1,
+          cached: 0,
+          cacheWrite: 0,
+          output: 1,
+          requests: 1,
+          cost: 20,
+          priced: true,
+        },
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'claude-sonnet-4-5',
+          machine: 'm2',
+          input: 1,
+          cached: 0,
+          cacheWrite: 0,
+          output: 1,
+          requests: 1,
+          cost: 50,
+          priced: true,
+        },
+      ],
+      recentSince: now - 8 * 86400,
+      recent: [
+        { at: now - 3600, provider: 'antigravity', machine: 'm1', tokens: 100, requests: 1, cost: 40, priced: true },
+        { at: now - 3600, provider: 'antigravity', machine: 'm2', tokens: 100, requests: 2, cost: 70, priced: true },
+      ],
+    };
+    const mergedWithCost = mergeProviderAccounts([accA, accB], 'antigravity', now, cost)!;
+    // Total is $40/$200 (A Gemini) + $20/$200 (B Gemini) + $50/$100 (B Claude) = $110 / $500 = 22%.
+    expect(mergedWithCost.summary).toMatchObject({ weighting: 'api', usedUsd: 110, capacityUsd: 500, availableUsd: 390 });
+    expect(mergedWithCost.summary.usedPct).toBeCloseTo(22, 1);
+
+    // Without cost: merging A (Claude 100%) + B0 (Claude 0%) must NOT produce a synthetic 50% bucket hijacking 5h/7d/both.
+    const accB0 = account('antigravity:b0', [], {
+      plan: 'Pro',
+      machines: ['m2'],
+      windows: [
+        { kind: 'session', label: 'Gemini Models', usedPct: 10, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 10, resetsAt: now + 86400, windowSec: 604800 },
+        { kind: 'session', label: 'Claude and GPT', usedPct: 0, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Claude and GPT', usedPct: 0, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    const mergedNoCost = mergeProviderAccounts([accA, accB0], 'antigravity', now)!;
+    expect(pickAccountWindows(mergedNoCost, '5h', undefined, now, false)?.primary.usedPct).toBeCloseTo(15, 1);
+    expect(pickAccountWindows(mergedNoCost, '7d', undefined, now, false)?.primary.usedPct).toBeCloseTo(15, 1);
+    expect(pickAccountWindows(mergedNoCost, 'both', undefined, now, false)?.primary.usedPct).toBeCloseTo(15, 1);
+    // Explicit model-matched lookup for Claude on the merged account still finds the entitled Claude window.
+    expect(pickAccountWindows(mergedNoCost, 'auto', 'claude-sonnet-4-5', now, true)?.primary).toMatchObject({
+      label: 'Claude and GPT',
+      usedPct: 0,
+    });
+  });
+
+  it('does not impute untouched 0% sub-quotas on shared-machine multi-pool accounts', () => {
+    const todayStr = dayOf(new Date(now * 1000));
+    const accA = account('antigravity:s1', [], {
+      plan: 'Pro',
+      machines: ['m1'],
+      windows: [
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 50, resetsAt: now + 86400, windowSec: 604800 },
+        { kind: 'weekly', label: 'Claude and GPT', usedPct: 0, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    const accB = account('antigravity:s2', [], {
+      plan: 'Pro',
+      machines: ['m1'],
+      windows: [
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 0, resetsAt: now + 86400, windowSec: 604800 },
+        { kind: 'weekly', label: 'Claude and GPT', usedPct: 50, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    const sharedCost: CostReport = {
+      generatedAt: now,
+      days: 90,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'gemini-3-pro',
+          machine: 'm1',
+          input: 1,
+          cached: 0,
+          cacheWrite: 0,
+          output: 1,
+          requests: 1,
+          cost: 100,
+          priced: true,
+        },
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'claude-sonnet-4-5',
+          machine: 'm1',
+          input: 1,
+          cached: 0,
+          cacheWrite: 0,
+          output: 1,
+          requests: 1,
+          cost: 50,
+          priced: true,
+        },
+      ],
+      recentSince: now - 8 * 86400,
+      recent: [{ at: now - 3600, provider: 'antigravity', machine: 'm1', tokens: 200, requests: 2, cost: 150, priced: true }],
+    };
+    const merged = mergeProviderAccounts([accA, accB], 'antigravity', now, sharedCost)!;
+    expect(merged.summary).toMatchObject({ weighting: 'api', usedUsd: 150, capacityUsd: 300, availableUsd: 150 });
+    expect(merged.summary.usedPct).toBeCloseTo(50, 1);
+  });
+
+  it('aborts superseded fetchCost calls and ignores stale responses', async () => {
+    const signals: AbortSignal[] = [];
+    const resolvers: Array<(r: Response) => void> = [];
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      if (init?.signal) signals.push(init.signal);
+      return new Promise<Response>((r) => resolvers.push(r));
+    });
+    const makeReport = (cost: number): CostReport => ({
+      generatedAt: now,
+      days: 90,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [
+        {
+          day: dayOf(new Date(now * 1000)),
+          provider: 'claude',
+          model: 'claude-opus-4-6',
+          machine: 'local',
+          input: 1,
+          cached: 0,
+          cacheWrite: 0,
+          output: 1,
+          requests: 1,
+          cost,
+          priced: true,
+        },
+      ],
+    });
+    const p1 = fetchCost();
+    const p2 = fetchCost();
+    expect(signals).toHaveLength(2);
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+    // Resolve second (newer) fetch first, then first (stale) fetch.
+    resolvers[1](new Response(JSON.stringify(makeReport(9.99)), { status: 200 }));
+    await p2;
+    resolvers[0](new Response(JSON.stringify(makeReport(1.11)), { status: 200 }));
+    await p1;
+    expect(useUsage.getState().cost?.rows[0].cost).toBe(9.99);
+    expect(useUsage.getState().costError).toBeUndefined();
+    expect(useUsage.getState().costLoading).toBe(false);
+  });
+
+  it('matches AccountRow bar to blended hybrid percentage and guards NaN, tiny weights, and stale timestamp duplication', async () => {
+    // Nit #8: NaN window skipped, tiny weights >= 0.01.
+    const nanAcc = account('claude:nan', [], {
+      windows: [
+        { kind: 'session', usedPct: Number.NaN, resetsAt: now + 3600 },
+        { kind: 'weekly', usedPct: 30, resetsAt: now + 86400 },
+      ],
+    });
+    expect(tightestWindow(nanAcc, now)?.usedPct).toBe(30);
+    expect(estimatePlanWeight('claude', '$0.05')).toBe(0.01);
+    expect(estimatePlanWeight('claude', '0.001x')).toBe(0.01);
+
+    // P2-16: hybrid subscription (100% weekly, $50 logs) + untouched $50 USD credit -> 50% blended text & meter bar.
+    const hybrid = account('claude:hyb', [], {
+      plan: 'Pro',
+      machines: ['m1'],
+      status: 'stale',
+      code: 'token_expired',
+      fetchedAt: now - 120,
+      asOf: now - 120,
+      windows: [{ kind: 'weekly', usedPct: 100, resetsAt: now + 86400, windowSec: 604800 }],
+      credits: { unit: 'usd', enabled: true, limit: 50, used: 0 },
+    });
+    const cost: CostReport = {
+      generatedAt: now,
+      days: 90,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [],
+      recentSince: now - 8 * 86400,
+      recent: [{ at: now - 3600, provider: 'claude', machine: 'm1', tokens: 1000, requests: 1, cost: 50, priced: true }],
+    };
+    useUsage.setState({ snapshot: snapshot([hybrid]), cost, remaining: false });
+    await act(async () => setView({ tab: 'overview', remaining: false }));
+    await act(async () => root.render(createElement(UsagePanel)));
+    const row = host.querySelector<HTMLElement>('.usage-row[data-account="claude:hyb"]')!;
+    expect(row.textContent).toContain('50%');
+    expect(row.querySelector('[role="meter"]')?.getAttribute('aria-valuenow')).toBe('50');
+
+    // AccountCard with status !== 'ok' and equal asOf/fetchedAt does not print duplicate timestamp.
+    await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!.click());
+    const head = host.querySelector<HTMLElement>('.usage-card[data-account="claude:hyb"] .usage-card-head')!;
+    expect(head.textContent!.match(/2m ago/g) ?? []).toHaveLength(1);
+  });
 });

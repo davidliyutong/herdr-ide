@@ -414,6 +414,15 @@ function RepoView({
     },
     [m, root, view.ref],
   );
+  // The groups shown and whether each is open (only open groups' rows
+  // take the keyboard).
+  const open: Record<Group, boolean> = {
+    merge: useSectionOpen('git.merge')[0],
+    staged: useSectionOpen('git.staged')[0],
+    changes: useSectionOpen('git.changes')[0],
+    untracked: useSectionOpen('git.untracked')[0],
+  };
+
   // Scroll anchoring & focus preservation across status updates (staging,
   // unstaging, discarding, background polls): when a section above changes
   // height while scrolled down, adjust scrollTop by the anchor section's shift
@@ -465,25 +474,29 @@ function RepoView({
       }
     }
     prevLayoutRef.current = cur;
-  });
+  }, [m, root, status, tree, separate, collapsed, open.merge, open.staged, open.changes, open.untracked, rowH, view.top, view.height]);
 
   // Checking Amend prefills HEAD's full commit message when the draft is empty
   // (never clobbering user-typed text) and restores the prior draft if Amend is
   // unchecked before the user edits the prefilled message.
   const prefillReq = useRef(0);
-  useEffect(
-    () => () => {
-      prefillReq.current++;
-    },
-    [],
-  );
+  const prefillAbort = useRef<AbortController | undefined>(undefined);
+  const cancelPrefill = useCallback(() => {
+    prefillReq.current++;
+    prefillAbort.current?.abort();
+    prefillAbort.current = undefined;
+  }, []);
+  useEffect(() => () => cancelPrefill(), [cancelPrefill]);
   const prefillAmend = useCallback(
     (targetHead: string, expectedDraft: string, prior: string) => {
+      cancelPrefill();
       const req = ++prefillReq.current;
+      const ac = new AbortController();
+      prefillAbort.current = ac;
       void gitApi
-        .show(m, root, targetHead, { noFiles: true })
+        .show(m, root, targetHead, { noFiles: true, signal: ac.signal })
         .then((shown) => {
-          if (prefillReq.current !== req) return;
+          if (prefillReq.current !== req || ac.signal.aborted) return;
           const mem = panelMemory(m, root);
           if (!mem.amend || mem.draft !== expectedDraft) return;
           const msg = shown.commit?.message;
@@ -493,22 +506,17 @@ function RepoView({
         })
         .catch(() => undefined);
     },
-    [m, root, setDraft],
+    [m, root, setDraft, cancelPrefill],
   );
   const toggleAmend = (checked: boolean) => {
-    prefillReq.current++;
+    cancelPrefill();
     const mem = panelMemory(m, root);
     if (checked) {
       setAmend(true);
       if (message.trim() === '') {
-        if (head) {
-          mem.amendPrefill = undefined;
-          prefillAmend(head, message, message);
-        } else {
-          // HEAD not loaded yet (or unborn repo): fill once HEAD appears if
-          // Amend is still checked and the box is still untouched.
-          mem.amendPrefill = { head: '', filled: message, prior: message };
-        }
+        // Keep a pending prefill marker so the effect loads HEAD's message now
+        // (and again if RepoView unmounts while git show is still in flight).
+        mem.amendPrefill = { head: '', filled: message, prior: message };
       } else {
         mem.amendPrefill = undefined;
       }
@@ -528,14 +536,6 @@ function RepoView({
   }, [m, root, amend, head, prefillAmend]);
   const typeahead = useMemo(() => new TypeAhead(), []);
 
-  // The groups shown and whether each is open (only open groups' rows
-  // take the keyboard).
-  const open: Record<Group, boolean> = {
-    merge: useSectionOpen('git.merge')[0],
-    staged: useSectionOpen('git.staged')[0],
-    changes: useSectionOpen('git.changes')[0],
-    untracked: useSectionOpen('git.untracked')[0],
-  };
   const shown = (g: Group) => g === 'changes' || (g === 'untracked' ? separate && groups.untracked.length > 0 : groups[g].length > 0);
   const rows = useMemo(() => {
     const out = {} as Record<Group, ChangeRow[]>;
@@ -564,11 +564,19 @@ function RepoView({
       });
       if (!ok || !(await runGit(m, root, 'stage', { all: true }))) return;
     }
-    if (await runGit(m, root, 'commit', { message, amend })) {
-      prefillReq.current++;
+    const wasAmend = amend;
+    const priorPrefill = panelMemory(m, root).amendPrefill;
+    if (wasAmend) {
+      cancelPrefill();
+      panelMemory(m, root).amendPrefill = undefined;
+    }
+    if (await runGit(m, root, 'commit', { message, amend: wasAmend })) {
+      cancelPrefill();
       panelMemory(m, root).amendPrefill = undefined;
       setDraft('');
       setAmend(false);
+    } else if (wasAmend && priorPrefill && panelMemory(m, root).amend && panelMemory(m, root).draft === priorPrefill.filled) {
+      panelMemory(m, root).amendPrefill = priorPrefill;
     }
   };
 
@@ -668,14 +676,12 @@ function RepoView({
     void runGit(m, root, 'unstage', { paths: files.flatMap((g) => unstagePaths(g.file)) });
   };
   const discardFiles = (files: GroupedFile[], group: Group) => {
-    anchorGroupRef.current = group;
     void discard(
       m,
       root,
       files.map((g) => g.file),
-    ).then((done) => {
-      if (!done && anchorGroupRef.current === group) anchorGroupRef.current = undefined;
-    });
+      { onConfirmed: () => prepareListAction(group, true) },
+    );
   };
   /** Opens the diffs of files: one reuses Source Control's diff pane,
    * several open each in its own. back: the keyboard stays in the list. */
@@ -1066,7 +1072,7 @@ function RepoView({
             value={message}
             placeholder={t('git.commit.placeholder', { branch: branch ?? 'HEAD', key: commitKey })}
             onChange={(e) => {
-              prefillReq.current++;
+              cancelPrefill();
               setDraft(e.target.value);
             }}
             onKeyDown={(e) => {
