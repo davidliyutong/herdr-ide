@@ -35,6 +35,15 @@ export interface PaneViewProps {
   shown?: boolean;
 }
 
+/** What a plugin pane's custom header receives inside PaneHeader (PaneViewDef.header). */
+export interface PaneHeaderViewProps {
+  m: string;
+  /** The pane's key (view:<id>). */
+  pane: string;
+  view: PluginView;
+  home?: string;
+}
+
 /** A kind of pane a plugin draws: the layout's leaf {view: {id, plugin,
  * kind, ...}}, whose other fields are the plugin's. */
 export interface PaneViewDef {
@@ -57,6 +66,12 @@ export interface PaneViewDef {
    * struck through and its tooltip ends with that, as VS Code marks the
    * editors of deleted files. */
   useGone?(m: string, view: PluginView): string | undefined;
+  /** Optional custom heading + plugin actions rendered inside the pane's
+   * single header bar before PaneActions, replacing the default heading. */
+  header?: ComponentType<PaneHeaderViewProps>;
+  /** Optional rename trigger called by PaneHeader keyboard shortcuts (F2 /
+   * Enter on the header or editable title) when the pane supports inline rename. */
+  startRename?(m: string, view: PluginView): void;
   /** Entries the menus of the pane's header and tab start with. */
   menu?(m: string, view: PluginView): MenuEntry[];
   component: ComponentType<PaneViewProps>;
@@ -196,6 +211,10 @@ export interface ViewStatusDef {
   /** Status of the pane showing `view` on machine m: 'working' | 'blocked' | 'done' | 'idle', or undefined.
    * Pure: reads state only. */
   status(m: string, view: PluginView): AgentStatus | undefined;
+  /** Whether the pane showing `view` on machine m has an actively working,
+   * waiting, or starting task whose mounted render context should be protected
+   * across tab/workspace switches. Pure: reads state only. */
+  isActive?(m: string, view: PluginView): boolean;
   /** Calls fn whenever a status may have changed; returns an unsubscribe. */
   subscribe(fn: () => void): () => void;
   /** The pane key (`view:<id>`) an agent notification of this plugin (the /ws agent data, which has

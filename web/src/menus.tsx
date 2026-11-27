@@ -13,6 +13,7 @@ import {
   ClipboardPaste,
   Columns2,
   Copy,
+  CornerDownLeft,
   Download,
   ExternalLink,
   Eye,
@@ -45,7 +46,8 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { actions, current, workspaceTitle } from './actions';
+import { actions, current, tabName, workspaceTitle } from './actions';
+import { dockCurrentTab, isDetachedWindow, openDetachedTab } from './detachedWindow';
 import { CodeIcon } from './components/icons';
 import { isPluginOn, newTabGroups, paneView } from './plugins/registry';
 import { openMenu, type MenuEntry } from './contextMenu';
@@ -124,6 +126,13 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
       run: () => actions.zoom(m, pane),
     },
   ];
+  if (isDetachedWindow()) {
+    arrange.push({
+      label: t('window.returnToMain'),
+      icon: <CornerDownLeft />,
+      run: () => dockCurrentTab(),
+    });
+  }
   // Into a new tab of another workspace of the machine, or of a new one.
   const here = layout && L.locate(layout, pane);
   const others = (layout?.workspaces ?? []).filter((_, i) => i !== here?.workspace);
@@ -487,6 +496,11 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
     { label: t('menu.moveLeft'), icon: <ArrowLeft />, disabled: index <= 0, run: move(-1) },
     { label: t('menu.moveRight'), icon: <ArrowRight />, disabled: index >= n - 1, run: move(1) },
     { label: t('menu.moveToWorkspace'), icon: <ArrowRightLeft />, submenu: moveTabsSubmenu(m, ws, [tabId(w.tabs[index])]) },
+    {
+      label: t('menu.openInNewWindow'),
+      icon: <ExternalLink />,
+      run: () => void openDetachedTab(m, ws, index, { title: shown ? tabName(m, shown) : undefined }),
+    },
     'sep',
     {
       label: t('command.tab.close'),

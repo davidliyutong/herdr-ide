@@ -513,6 +513,23 @@
 .pane-agent {
   color: var(--accent);
 }
+.pane-header .chat-agent {
+  flex: none;
+  font-weight: 600;
+  color: var(--fg);
+}
+.pane-header .chat-state {
+  flex: none;
+  margin-left: auto;
+  padding: 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+.pane-header .chat-state + .pane-plugin-actions,
+.pane-header .chat-state ~ .pane-actions {
+  margin-left: 0;
+}
 .pane-cwd {
   color: var(--fg-mute);
   overflow: hidden;
@@ -564,7 +581,7 @@
 .pane-actions button.danger:hover {
   color: var(--error);
 }
-.pane-actions .sep {
+:is(.pane-actions, .pane-plugin-actions) .sep {
   width: 1px;
   height: 1.1rem;
   background: var(--line-2);
@@ -585,6 +602,7 @@
 }
 @container (max-width: 26rem) {
   .pane-header .pane-agent,
+  .pane-header .chat-agent,
   .pane-header .pane-actions .code,
   .pane-header .pane-plugin-actions {
     display: none;
@@ -592,13 +610,20 @@
   .pane-header .pane-plugin-actions + .pane-actions {
     margin-left: auto;
   }
+  .pane-header .chat-state ~ .pane-actions {
+    margin-left: 0;
+  }
   .pane-header .pane-actions .more {
     display: inline-flex;
   }
 }
 @container (max-width: 18rem) {
-  .pane-header .pane-actions .split {
+  .pane-header .pane-actions .split,
+  .pane-header .chat-state {
     display: none;
+  }
+  .pane-header .chat-state ~ .pane-actions {
+    margin-left: auto;
   }
 }
 @container (max-width: 12rem) {

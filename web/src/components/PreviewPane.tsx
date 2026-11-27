@@ -96,7 +96,21 @@ function keepShown(key: string, shown: { text?: string; dirEntries?: RemoteStat[
   }
 }
 
-export function PreviewPane({ m, pane, path, shown = true }: { m: string; pane: string; path: string; shown?: boolean }) {
+export function PreviewPane({
+  m,
+  pane,
+  path,
+  focused,
+  shown = true,
+  onActivate,
+}: {
+  m: string;
+  pane: string;
+  path: string;
+  focused?: boolean;
+  shown?: boolean;
+  onActivate?(): void;
+}) {
   const readOnly = useStore((s) => s.readOnly);
   const code = usePluginOn('vscode');
   const [siblings, setSiblings] = useState<RemoteStat[]>([]);
@@ -127,7 +141,7 @@ export function PreviewPane({ m, pane, path, shown = true }: { m: string; pane: 
 
   useEffect(() => {
     if (!shown) return;
-    let cancelled = false;
+    const ac = new AbortController();
     const key = `${m}\n${path}`;
     const last = shownLast.get(key);
     setError(undefined);
@@ -140,12 +154,12 @@ export function PreviewPane({ m, pane, path, shown = true }: { m: string; pane: 
       // list as a directory when the hub reports 400 is a directory.
       if (!isMedia) {
         try {
-          const r = await fetch(url, { headers: { Range: 'bytes=0-2097151' } });
+          const r = await fetch(url, { headers: { Range: 'bytes=0-2097151' }, signal: ac.signal });
           if (r.status === 400) {
             const msg = await r.text().catch(() => '');
             if (/is a directory/i.test(msg)) {
-              const d = await listDir(m, path);
-              if (cancelled) return;
+              const d = await listDir(m, path, ac.signal);
+              if (ac.signal.aborted) return;
               setText(undefined);
               setDirEntries(d.entries);
               keepShown(key, { dirEntries: d.entries });
@@ -155,7 +169,7 @@ export function PreviewPane({ m, pane, path, shown = true }: { m: string; pane: 
           }
           if (r.status === 404 && last) {
             // Gone since it was shown: what it showed stays.
-            if (cancelled) return;
+            if (ac.signal.aborted) return;
             if (last.text !== undefined) setText(last.text);
             else setDirEntries(last.dirEntries);
             return;
@@ -163,26 +177,26 @@ export function PreviewPane({ m, pane, path, shown = true }: { m: string; pane: 
           if (!r.ok) throw new Error(await r.text());
           const buf = new Uint8Array(await r.arrayBuffer());
           if (buf.subarray(0, 8000).includes(0)) throw new Error(t('preview.binary'));
-          if (cancelled) return;
+          if (ac.signal.aborted) return;
           const next = new TextDecoder().decode(buf);
           setDirEntries(undefined);
           setText(next);
           keepShown(key, { text: next });
         } catch (e) {
-          if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+          if (!ac.signal.aborted) setError(e instanceof Error ? e.message : String(e));
         }
       }
     })();
     // Sibling media navigation (← →) only applies to media files.
     if (isMedia) {
-      listDir(m, dirname(path))
-        .then((d) => !cancelled && setSiblings(d.entries.filter((e) => !e.is_dir && mediaExt.test(e.name))))
+      listDir(m, dirname(path), ac.signal)
+        .then((d) => !ac.signal.aborted && setSiblings(d.entries.filter((e) => !e.is_dir && mediaExt.test(e.name))))
         .catch(() => {});
     } else {
       setSiblings([]);
     }
     return () => {
-      cancelled = true;
+      ac.abort();
     };
   }, [m, path, url, isMedia, loads, shown]);
 
@@ -193,12 +207,19 @@ export function PreviewPane({ m, pane, path, shown = true }: { m: string; pane: 
     show(dirname(path) + '/' + next.name);
   };
 
+  const activate = () => {
+    if (!shown || focused) return;
+    if (onActivate) onActivate();
+    else terms.mutate(m, (l) => L.focusPane(l, pane));
+  };
+
   return (
     <div
       className="preview"
       ref={containerRef}
       tabIndex={-1}
-      onMouseDown={() => terms.mutate(m, (l) => L.focusPane(l, pane))}
+      onMouseDownCapture={activate}
+      onFocusCapture={activate}
       onKeyDown={(e) => {
         if (e.key === 'ArrowLeft') go(-1);
         if (e.key === 'ArrowRight') go(1);

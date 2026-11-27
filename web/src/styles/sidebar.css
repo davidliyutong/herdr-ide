@@ -183,6 +183,9 @@ body.resizing .sidebar-resizer::after {
 .machine-status.ms-notice {
   background: var(--bg-2);
 }
+.machine-status .row {
+  flex-wrap: wrap;
+}
 .ws-item {
   display: flex;
   align-items: center;

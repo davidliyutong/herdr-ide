@@ -41,8 +41,10 @@ export interface CloseGuard {
   setUnsaved(n: number): void;
   /** The window's close event: true lets it close now (on to the page's
    * objection to unloading, if any); false prevents it while the page
-   * asks. A shutdown is never held. */
-  onClose(shutdown?: boolean): boolean;
+   * asks. With alwaysAsk, asks even when unsaved is 0 (for detached tab
+   * windows that must close their tab before the window closes). A shutdown
+   * is never held. */
+  onClose(shutdown?: boolean, alwaysAsk?: boolean): boolean;
   /** The page's answer to the question. */
   answer(a: CloseAnswer): void;
   /** The page is gone or another one loaded: nothing it said holds, and a
@@ -66,8 +68,8 @@ export function closeGuard(host: CloseGuardHost): CloseGuard {
     setUnsaved(n) {
       unsaved = n;
     },
-    onClose(shutdown = false) {
-      if (shutdown || unsaved === 0) return true;
+    onClose(shutdown = false, alwaysAsk = false) {
+      if (shutdown || (!alwaysAsk && unsaved === 0)) return true;
       if (through) {
         through = false;
         return true;

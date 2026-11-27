@@ -119,3 +119,15 @@ test('only well-formed messages count', () => {
   assert.equal(parseUnsaved(12), 12);
   for (const v of [-1, 1.5, 10001, '3', NaN, null]) assert.equal(parseUnsaved(v), undefined);
 });
+
+test('alwaysAsk asks even with zero unsaved changes so detached windows can close their tab', () => {
+  const { h, log } = host();
+  const g = closeGuard(h);
+  assert.equal(g.onClose(false, true), false);
+  assert.deepEqual(log, ['ask']);
+  g.answer('asking');
+  g.answer('close');
+  assert.deepEqual(log, ['ask', 'close']);
+  assert.equal(g.onClose(false, true), true);
+  assert.equal(g.onClose(true, true), true, 'shutdown still never waits');
+});

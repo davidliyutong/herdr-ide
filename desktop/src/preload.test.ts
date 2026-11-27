@@ -19,6 +19,7 @@ const common = [
   'setDisabledCommands',
   'setUnsaved',
   'verifyUser',
+  'windows',
 ];
 
 test('the page gets its channels and the desktopShell bridge, with these functions', () => {
@@ -126,12 +127,41 @@ test('closing with unsaved changes: a count and an answer from the page, a reque
     { channel: channels.closeAnswer, value: 'close' },
   ]);
   let asked = 0;
-  const off = shell.onCloseRequest(() => asked++);
+  const reasons: Array<'close' | 'quit' | undefined> = [];
+  const off = shell.onCloseRequest((reason) => {
+    asked++;
+    reasons.push(reason);
+  });
   receive(channels.closeRequest, undefined);
+  receive(channels.closeRequest, 'close');
+  receive(channels.closeRequest, 'quit');
   receive(channels.closeRequest, 'payload');
   off();
   receive(channels.closeRequest, undefined);
-  assert.equal(asked, 1);
+  assert.equal(asked, 3);
+  assert.deepEqual(reasons, [undefined, 'close', 'quit']);
+  sent.length = 0;
+});
+
+test('detached tab windows bridge validates requests and omits macOS integrated titlebar', async () => {
+  const det = desktopShellFor('darwin', true);
+  assert.equal(det.detached, true);
+  assert.equal(det.titlebar, undefined);
+  invoked.length = 0;
+  sent.length = 0;
+  answers.set(channels.windowOpenTab, true);
+  answers.set(channels.windowIsOverMain, true);
+  assert.equal(await shell.windows!.openTab({ m: '', pane: 't1' }), false);
+  assert.equal(await shell.windows!.openTab({ m: 'local', pane: 't1', x: 50, y: 60 }), true);
+  shell.windows!.focusMain();
+  assert.equal(await shell.windows!.isOverMain(NaN, 10), false);
+  assert.equal(await shell.windows!.isOverMain(100, 200), true);
+  assert.deepEqual(invoked, [
+    { channel: channels.windowOpenTab, args: [{ m: 'local', pane: 't1', x: 50, y: 60 }] },
+    { channel: channels.windowIsOverMain, args: [{ x: 100, y: 200 }] },
+  ]);
+  assert.deepEqual(sent, [{ channel: channels.windowFocusMain, value: undefined }]);
+  invoked.length = 0;
   sent.length = 0;
 });
 

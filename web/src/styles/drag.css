@@ -20,6 +20,11 @@ body.dragging * {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.drag-ghost.detach {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
 .drop-marker {
   position: fixed;
   z-index: 70;

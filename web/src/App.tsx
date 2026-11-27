@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Check, CircleAlert, SlidersHorizontal, TriangleAlert } from 'lucide-react';
+import { Check, CircleAlert, TriangleAlert } from 'lucide-react';
 import { useStore } from './state/store';
 import { terms, useTerms } from './state/terms';
 import { rememberFollowed } from './state/followed';
@@ -44,6 +44,7 @@ import { openMenu, type MenuEntry } from './contextMenu';
 import './plugins';
 import './commands';
 import { actions, current, workspaceTitle } from './actions';
+import { initMainWindowSync } from './detachedWindow';
 import { noteFocus } from './paneHistory';
 import { loadConfig, retryFailedBootstrap, startBootstrap } from './bootstrap';
 
@@ -186,6 +187,7 @@ export function App() {
     const offClose = followDesktopClose();
     const offFolders = takeOpenedFolders();
     const offWorkers = followVSCodeSwitch();
+    const offWindows = initMainWindowSync({ onDock: (dm, dpane) => actions.focusPane(dm, dpane) });
     const off = onChordChange(setChord);
     // Ctrl+B escapes focus from editors and pane inputs before they consume it;
     // terminals route their own keys through TermPane -> appKey -> handleKey.
@@ -213,6 +215,7 @@ export function App() {
       offClose();
       offFolders();
       offWorkers();
+      offWindows();
       window.removeEventListener('keydown', onCaptureKey, true);
       window.removeEventListener('keydown', onKey);
     };
@@ -420,17 +423,6 @@ export function StatusBar({ connected, chord }: { connected: boolean; chord: boo
       {chord && <span className="prefix-badge">{pendingChord()}</span>}
       {!hidden.has('app.keyboardShortcuts') && <StatusCommand widgetId="app.keyboardShortcuts" command="app.keyboardShortcuts" />}
       {!hidden.has('app.commandPalette') && <StatusCommand widgetId="app.commandPalette" command="app.commandPalette" />}
-      <button
-        className="status-widgets-btn"
-        title={t('statusbar.customize')}
-        aria-label={t('statusbar.customize')}
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          openWidgetMenu({ clientX: r.right, clientY: r.top, preventDefault() {}, stopPropagation: () => e.stopPropagation() });
-        }}
-      >
-        <SlidersHorizontal />
-      </button>
     </footer>
   );
 }

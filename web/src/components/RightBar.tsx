@@ -6,19 +6,21 @@
 // and a panel itself can be a pane (panelPanes.ts): its rail button or its
 // title dragged onto the panes, or Open in Pane.
 import { useEffect } from 'react';
-import { SquareArrowOutUpLeft, X } from 'lucide-react';
-import { PANEL_WIDTH, useStore } from '../state/store';
+import { ArrowDown, ArrowUp, Check, SquareArrowOutUpLeft, X } from 'lucide-react';
+import { moveRailId, orderRailItems, PANEL_WIDTH, useStore } from '../state/store';
 import { usePanels } from '../plugins/registry';
 import { keyHint } from '../keymap';
 import { t } from '../i18n';
 import type { PanelDef } from '../plugins/api';
+import { openMenu, type MenuEntry } from '../contextMenu';
 import { PluginBoundary } from './PluginBoundary';
 import { openPanelInPane, startPanelDrag } from '../panelPanes';
 
-/** A press that may become a drag of a panel onto the panes. */
-function dragPanel(ev: React.PointerEvent, panel: PanelDef) {
-  if (ev.button !== 0 || useStore.getState().readOnly) return;
-  startPanelDrag(ev, panel);
+/** A press that may become a drag of a panel along the rail or onto the panes. */
+function dragPanel(ev: React.PointerEvent, panel: PanelDef, fromRail = false) {
+  if (ev.button !== 0) return;
+  if (!fromRail && useStore.getState().readOnly) return;
+  startPanelDrag(ev, panel, { fromRail });
 }
 
 /** Shows a panel, or hides the right sidebar when it is the one shown. */
@@ -30,14 +32,91 @@ export function togglePanel(id: string) {
 export function RightBar() {
   const panels = usePanels();
   const id = useStore((s) => s.panel);
+  const railOrder = useStore((s) => s.railOrder);
+  const hiddenList = useStore((s) => s.hiddenRailPanels);
+  const ordered = orderRailItems(panels, railOrder);
+  const hidden = new Set(hiddenList);
+  const visible = ordered.filter((p) => !hidden.has(p.id));
   const shown = panels.find((p) => p.id === id);
   if (!panels.length) return null;
+
+  const openRailMenu = (
+    ev: { clientX: number; clientY: number; preventDefault(): void; stopPropagation(): void },
+    targetPanelId?: string,
+  ) => {
+    const s = useStore.getState();
+    const curOrdered = orderRailItems(panels, s.railOrder);
+    const curHidden = new Set(s.hiddenRailPanels);
+    const curVisible = curOrdered.filter((p) => !curHidden.has(p.id));
+    const fullIds = curOrdered.map((p) => p.id);
+    const visibleIds = curVisible.map((p) => p.id);
+    const entries: MenuEntry[] = [];
+    if (targetPanelId) {
+      const target = curOrdered.find((p) => p.id === targetPanelId);
+      const visIdx = visibleIds.indexOf(targetPanelId);
+      if (target && visIdx >= 0) {
+        entries.push({
+          label: t('plugins.railHide', { name: t(target.title) }),
+          run: () => s.setRailPanelVisible(target.id, false),
+        });
+        if (visIdx > 0) {
+          entries.push({
+            label: t('plugins.railMoveUp'),
+            icon: <ArrowUp />,
+            run: () => s.setRailOrder(moveRailId(fullIds, visibleIds, target.id, visIdx - 1)),
+          });
+        }
+        if (visIdx < visibleIds.length - 1) {
+          entries.push({
+            label: t('plugins.railMoveDown'),
+            icon: <ArrowDown />,
+            run: () => s.setRailOrder(moveRailId(fullIds, visibleIds, target.id, visIdx + 2)),
+          });
+        }
+        entries.push('sep');
+      }
+    }
+    for (const p of curOrdered) {
+      const isVisible = !curHidden.has(p.id);
+      entries.push({
+        label: t(p.title),
+        icon: isVisible ? <Check /> : <span className="status-menu-blank" aria-hidden />,
+        run: () => s.toggleRailPanel(p.id),
+      });
+    }
+    const anyHidden = curOrdered.some((p) => curHidden.has(p.id));
+    const customOrder = curOrdered.some((p, i) => p.id !== panels[i]?.id);
+    if (anyHidden || customOrder) {
+      entries.push('sep');
+      if (anyHidden) {
+        entries.push({
+          label: t('plugins.railShowAll'),
+          run: () => s.showAllRailPanels(),
+        });
+      }
+      if (customOrder) {
+        entries.push({
+          label: t('plugins.railResetOrder'),
+          run: () => s.resetRailOrder(),
+        });
+      }
+    }
+    openMenu(ev, entries);
+  };
+
   return (
     <>
       {shown && <Panel panel={shown} />}
       {shown && <div className="panel-backdrop" onClick={() => useStore.getState().setPanel(undefined)} />}
-      <nav className="panel-rail" aria-label={t('plugins.rail')}>
-        {panels.map((p) => {
+      <nav
+        className="panel-rail"
+        aria-label={t('plugins.rail')}
+        onContextMenu={(e) => {
+          const hit = (e.target as HTMLElement).closest<HTMLElement>('[data-panel]')?.dataset.panel;
+          openRailMenu(e, hit);
+        }}
+      >
+        {visible.map((p) => {
           const Icon = p.icon;
           const key = p.command ? keyHint(p.command) : '';
           const label = t(p.title);
@@ -49,7 +128,7 @@ export function RightBar() {
               aria-label={label}
               aria-pressed={p.id === id}
               data-panel={p.id}
-              onPointerDown={(e) => dragPanel(e, p)}
+              onPointerDown={(e) => dragPanel(e, p, true)}
               onClick={() => togglePanel(p.id)}
             >
               <Icon />

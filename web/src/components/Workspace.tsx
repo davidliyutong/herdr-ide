@@ -10,14 +10,15 @@ import { CodeSlot } from './CodeLayer';
 import { FileTitle, LeafIcon, PluginPane, ViewTitle } from './PluginPane';
 
 const PreviewPane = lazy(() => import('./PreviewPane').then((m) => ({ default: m.PreviewPane })));
-import { describeView, newTabGroups, useActivePlugins, useViewStatusOf } from '../plugins/registry';
+import { describeView, newTabGroups, useActivePlugins, useViewStatusOf, viewActive } from '../plugins/registry';
 import { StatusDot } from './StatusDot';
 import { codeText, shortPath, terminalTitle } from '../lib/machine';
 import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
 import { startTabDrag } from '../tabDrag';
-import { isKeepableFileLeaf, keepFilePanes, keepPanes, resetKeptPanes } from '../keptPanes';
+import { detachedRecordForTab, requestDockAll, useDetachedTabs } from '../detachedWindow';
+import { isKeepableChatLeaf, isKeepableFileLeaf, keepChatPanes, keepFilePanes, keepPanes, resetKeptPanes } from '../keptPanes';
 import { usePrefs } from '../prefs';
 import { openMenu } from '../contextMenu';
 import { newTabMenu, tabMenu, tabsMenu } from '../menus';
@@ -130,6 +131,7 @@ export function Workspace() {
   const layout = mt?.layout;
   const ws = layout ? L.selectedWorkspace(layout) : undefined;
   const sel = useMulti((s) => s.sel);
+  const detachedRecords = useDetachedTabs((s) => s.records);
   // The new-tab menu follows the plugins that are on, the tabs' dots the
   // statuses of the plugins' panes (a chat's) as of terminals.
   useActivePlugins();
@@ -182,7 +184,11 @@ export function Workspace() {
       </main>
     );
   }
-  const tab = ws.tabs[ws.selected];
+  const visibleTabs = ws.tabs.map((tb, i) => ({ tb, i })).filter(({ tb }) => !detachedRecordForTab(m, tb, detachedRecords));
+  const detachedCount = ws.tabs.length - visibleTabs.length;
+  const selectedEntry = visibleTabs.find((x) => x.i === ws.selected) ?? visibleTabs[0];
+  const tab = selectedEntry?.tb;
+  const activeTabIndex = selectedEntry?.i ?? -1;
   const kinds = newTabGroups(m).length > 0;
   const picked = new Set(selectedIds(tabsOf(m, ws.id), sel));
   const tabTip = (label: string) => (readOnly ? label : t('workspace.tabHint', { label }));
@@ -205,7 +211,7 @@ export function Workspace() {
             if (row && tabsRef.current) rove(tabsRef.current, row);
           }}
         >
-          {ws.tabs.map((tb, i) => {
+          {visibleTabs.map(({ tb, i }) => {
             const st = tabStatus(m, tb, !!ws.muted);
             const id = `${ws.id}:${i}`;
             // A tab the user has not named shows its number, or, holding no
@@ -228,9 +234,9 @@ export function Workspace() {
             return (
               <div
                 key={`${i}:${tb.focused}`}
-                className={`tab ${i === ws.selected ? 'active' : ''} ${picked.has(key) ? 'multi' : ''} ${tb.pinned ? 'pinned' : ''}`}
+                className={`tab ${i === activeTabIndex ? 'active' : ''} ${picked.has(key) ? 'multi' : ''} ${tb.pinned ? 'pinned' : ''}`}
                 role="tab"
-                aria-selected={i === ws.selected || picked.has(key)}
+                aria-selected={i === activeTabIndex || picked.has(key)}
                 tabIndex={-1}
                 data-nav={key}
                 onDoubleClick={(e) => !readOnly && !e.shiftKey && !e.metaKey && !e.ctrlKey && actions.startRename('tab', m, id)}
@@ -384,6 +390,20 @@ export function Workspace() {
       <div className="workspace-body">
         {tab ? (
           <TabView m={m} ws={ws.id} tab={tab} />
+        ) : detachedCount > 0 ? (
+          <div className="empty-state">
+            <div>{t('window.detachedCount', { n: detachedCount })}</div>
+            <div className="row">
+              <button className="primary" onClick={() => requestDockAll(m, ws.id)}>
+                {t('window.bringAllBack')}
+              </button>
+              {!readOnly && (
+                <button className="btn" onClick={() => void actions.newTab(m, ws.id)}>
+                  {withKey(t('command.tab.new'), 'tab.new')}
+                </button>
+              )}
+            </div>
+          </div>
         ) : (
           <div className="empty-state">
             <div>{t('workspace.noTabs')}</div>
@@ -442,7 +462,7 @@ function paneAbout(m: string, leaf: L.Leaf | null, key: string, record: Paramete
 /** A tab's panes, each placed by its share of the split tree; the panes
  * keep their terminals (and VS Code its window) while the tree around them
  * changes. */
-function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
+export function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
   const zoomed = useStore((s) => (s.zoomed?.m === m ? s.zoomed.pane : undefined));
   const readOnly = useStore((s) => s.readOnly);
   const panes = L.tabPanes(tab);
@@ -472,6 +492,19 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
     const live = layout ? L.findLeaf(layout, k.pane) : null;
     return live && isKeepableFileLeaf(live) ? live : null;
   });
+  const shownChatPanes = [...rects].flatMap(([pane, rect]) => {
+    const leaf = L.leafOf(tab.root, pane);
+    return leaf && isKeepableChatLeaf(leaf) ? [{ m, pane, rect, leaf }] : [];
+  });
+  const keptChats = keepChatPanes(
+    shownChatPanes,
+    (k) => {
+      const layout = terms.layout(k.m);
+      const live = layout ? L.findLeaf(layout, k.pane) : null;
+      return live && isKeepableChatLeaf(live) ? live : null;
+    },
+    (k) => viewActive(k.m, k.leaf.view),
+  );
   // Without a tab shown the kept terminals unmount with this view: they are
   // forgotten, not mounted again hidden, where they would not attach.
   useEffect(() => resetKeptPanes, []);
@@ -546,10 +579,24 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
               ) : L.isCodeLeaf(leaf) ? (
                 <CodeSlot m={m} pane={key} view={leaf.code} />
               ) : L.isPluginLeaf(leaf) ? (
-                <PluginPane m={m} pane={key} view={leaf.view} focused={focused} shown />
+                <PluginPane
+                  m={m}
+                  pane={key}
+                  view={leaf.view}
+                  focused={focused}
+                  shown
+                  onActivate={() => key !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, key))}
+                />
               ) : (
                 <Suspense fallback={null}>
-                  <PreviewPane m={m} pane={key} path={leaf.preview.path} shown />
+                  <PreviewPane
+                    m={m}
+                    pane={key}
+                    path={leaf.preview.path}
+                    focused={focused}
+                    shown
+                    onActivate={() => key !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, key))}
+                  />
                 </Suspense>
               )}
             </div>
@@ -585,6 +632,18 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
                 <PreviewPane m={k.m} pane={k.pane} path={k.leaf.preview.path} shown={false} />
               </Suspense>
             )}
+          </div>
+        )),
+        ...keptChats.map((k) => (
+          <div
+            key={`${k.m}\n${k.pane}`}
+            className="pane kept"
+            style={{ left: pct(k.rect.x), top: pct(k.rect.y), width: pct(k.rect.w), height: pct(k.rect.h) }}
+            aria-hidden
+          >
+            {/* The header's place, so that the chat pane stays the second child. */}
+            {null}
+            <PluginPane m={k.m} pane={k.pane} view={k.leaf.view} focused={false} shown={false} />
           </div>
         )),
       ]}

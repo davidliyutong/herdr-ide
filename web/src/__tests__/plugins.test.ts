@@ -171,4 +171,59 @@ describe('plugins', () => {
     );
     expect(host.textContent).toContain('gone');
   });
+
+  it('customizes right sidebar rail order and icon visibility independently of disabling plugins', async () => {
+    useStore.setState({ railOrder: [], hiddenRailPanels: [], panel: undefined });
+    await act(async () => root.render(createElement(RightBar)));
+    const rail = () => [...host.querySelectorAll<HTMLButtonElement>('.rail-button')];
+    expect(rail().map((b) => b.dataset.panel)).toEqual(['files', 'git']);
+
+    // Reorder via railOrder preference.
+    await act(async () => useStore.getState().setRailOrder(['git', 'files']));
+    expect(rail().map((b) => b.dataset.panel)).toEqual(['git', 'files']);
+
+    // Hiding a rail icon removes its button without disabling its plugin or commands.
+    await act(async () => useStore.getState().setRailPanelVisible('files', false));
+    expect(rail().map((b) => b.dataset.panel)).toEqual(['git']);
+    expect(pluginCommand('test.run')).toBeDefined();
+    // Opening a hidden panel programmatically still shows its panel body.
+    await act(async () => useStore.getState().setPanel('files'));
+    expect(host.querySelector('.files-body')).not.toBeNull();
+
+    // Hiding all icons still keeps the rail reachable for right-click customization.
+    await act(async () => useStore.getState().setRailPanelVisible('git', false));
+    expect(rail()).toHaveLength(0);
+    expect(host.querySelector('.panel-rail')).not.toBeNull();
+    expect(host.querySelector('.rail-customize')).toBeNull();
+
+    // Resetting restores visibility and default order.
+    await act(async () => {
+      useStore.getState().showAllRailPanels();
+      useStore.getState().resetRailOrder();
+    });
+    expect(rail().map((b) => b.dataset.panel)).toEqual(['files', 'git']);
+  });
+
+  it('activates an unfocused PluginPane on pointer or focus interaction in split mode', async () => {
+    const view = { id: 'v1', plugin: 'files', kind: 'editor', path: '/p/a.go' };
+    const onActivate = vi.fn();
+    await act(async () =>
+      root.render(createElement(PluginPane, { m: 'm', pane: 'view:v1', view, focused: false, shown: true, onActivate })),
+    );
+    const paneEl = host.querySelector<HTMLElement>('.plugin-pane')!;
+    await act(async () => {
+      paneEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(onActivate).toHaveBeenCalledTimes(1);
+
+    // Focusing an already-focused pane does not re-trigger onActivate.
+    onActivate.mockClear();
+    await act(async () =>
+      root.render(createElement(PluginPane, { m: 'm', pane: 'view:v1', view, focused: true, shown: true, onActivate })),
+    );
+    await act(async () => {
+      paneEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(onActivate).not.toHaveBeenCalled();
+  });
 });

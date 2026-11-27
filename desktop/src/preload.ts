@@ -13,6 +13,7 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { DesktopEnroll, DesktopShell, DesktopUnlock, NotificationTarget, OpenedFolders, ProcessUsage } from '../../web/src/shell';
 import { channels } from './bridge';
+import { parseOpenTabRequest } from './detached';
 import { setUpFrame } from './frames';
 import { parseBadgeCount, parseNotificationOptions, parseNotificationTarget, sanitizeTag } from './notifications';
 import { MAC_TITLEBAR_INSET, MAC_TITLEBAR_MIN_HEIGHT, MAC_TITLEBAR_TOP_SPACE } from './titlebar';
@@ -115,11 +116,35 @@ const shell: DesktopShell = {
   onCloseRequest: (fn) =>
     listen(
       channels.closeRequest,
-      (v): v is undefined => v === undefined,
-      () => fn(),
+      (v): v is 'close' | 'quit' | undefined => v === undefined || v === 'close' || v === 'quit',
+      (reason) => fn(reason),
     ),
   answerClose(answer) {
     if (answer === 'asking' || answer === 'close' || answer === 'stay') ipcRenderer.send(channels.closeAnswer, answer);
+  },
+  windows: {
+    async openTab(opts) {
+      const valid = parseOpenTabRequest(opts);
+      if (!valid) return false;
+      try {
+        return (await ipcRenderer.invoke(channels.windowOpenTab, valid)) === true;
+      } catch {
+        return false;
+      }
+    },
+    focusMain() {
+      ipcRenderer.send(channels.windowFocusMain);
+    },
+    async isOverMain(screenX, screenY) {
+      if (typeof screenX !== 'number' || typeof screenY !== 'number' || !Number.isFinite(screenX) || !Number.isFinite(screenY)) {
+        return false;
+      }
+      try {
+        return (await ipcRenderer.invoke(channels.windowIsOverMain, { x: screenX, y: screenY })) === true;
+      } catch {
+        return false;
+      }
+    },
   },
   browser: { onOpen: (fn) => listen(channels.browserOpen, isWebURL, fn) },
   async metrics() {
@@ -204,32 +229,36 @@ const shell: DesktopShell = {
 };
 
 /** The bridge of a system (process.platform): Full Disk Access and the
- * integrated title bar are macOS's. */
-export function desktopShellFor(platform: string): DesktopShell {
+ * integrated title bar are macOS's (detached windows keep native frames). */
+export function desktopShellFor(platform: string, detached = false): DesktopShell {
   return {
     ...shell,
+    ...(detached && { detached: true }),
     ...(platform === 'darwin' && {
       privacy: {
         openFullDiskAccess: () => ipcRenderer.send(channels.openFullDiskAccess),
         revealTerminalCore: () => ipcRenderer.send(channels.revealTerminalCore),
         relaunch: () => ipcRenderer.send(channels.relaunch),
       },
-      titlebar: {
-        kind: 'mac',
-        inset: MAC_TITLEBAR_INSET,
-        minHeight: MAC_TITLEBAR_MIN_HEIGHT,
-        topSpace: MAC_TITLEBAR_TOP_SPACE,
-        onFullScreen(fn) {
-          const off = listen(channels.fullScreen, isBoolean, fn);
-          ipcRenderer.send(channels.fullScreenQuery);
-          return off;
+      ...(!detached && {
+        titlebar: {
+          kind: 'mac',
+          inset: MAC_TITLEBAR_INSET,
+          minHeight: MAC_TITLEBAR_MIN_HEIGHT,
+          topSpace: MAC_TITLEBAR_TOP_SPACE,
+          onFullScreen(fn) {
+            const off = listen(channels.fullScreen, isBoolean, fn);
+            ipcRenderer.send(channels.fullScreenQuery);
+            return off;
+          },
         },
-      },
+      }),
     }),
   };
 }
 
-// The shell's bridge is the main window's page's, not its frames' (VS
+// The shell's bridge is the app window's top frame's, not its subframes' (VS
 // Code's among them).
+const isDetachedPage = location.pathname === '/window/tab' || location.pathname === '/window/tab/';
 if (setUpFrame({ origin: self.origin, pathname: location.pathname }) && window.top === window)
-  contextBridge.exposeInMainWorld('desktopShell', desktopShellFor(process.platform));
+  contextBridge.exposeInMainWorld('desktopShell', desktopShellFor(process.platform, isDetachedPage));

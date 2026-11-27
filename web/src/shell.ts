@@ -17,7 +17,34 @@ export type NotificationTarget =
   | { kind: 'chat'; machine: string; chat: string; agent?: string }
   | { kind: 'panel'; panel: string };
 
+/** Options for opening a tab in a standalone secondary window. */
+export interface OpenTabWindowOptions {
+  /** Machine id. */
+  m: string;
+  /** Pane key identifying the tab in the machine's layout. */
+  pane: string;
+  /** Optional screen position where the user released the dragged tab. */
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  /** Initial native window title. */
+  title?: string;
+}
+
+/** Secondary standalone tab windows managed by the desktop shell. */
+export interface DesktopWindows {
+  /** Opens (or focuses) a standalone window showing only the core pane(s) of a tab. */
+  openTab(opts: OpenTabWindowOptions): Promise<boolean>;
+  /** Brings the main window forward (e.g. when docking a detached tab back). */
+  focusMain(): void;
+  /** Reports whether screen point (screenX, screenY) lies inside the main window. */
+  isOverMain(screenX: number, screenY: number): Promise<boolean>;
+}
+
 export interface DesktopShell {
+  /** True when this page is a detached secondary tab window rather than the main window. */
+  detached?: boolean;
   /** Calls fn with the command ("tab.new", "pane.close") of each menu item
    * chosen, by a click or by its key when the page left the key to the
    * menu; returns a function that stops it. */
@@ -41,10 +68,10 @@ export interface DesktopShell {
   /** Tells the shell how many panes have unsaved changes: while any has,
    * closing the main window or quitting asks the page (onCloseRequest). */
   setUnsaved(count: number): void;
-  /** Calls fn when the main window is about to close while panes have
-   * unsaved changes; the page answers with answerClose. Returns a function
-   * that stops it. */
-  onCloseRequest(fn: () => void): () => void;
+  /** Calls fn when the window is about to close (main window with unsaved
+   * changes, or a detached tab window); reason is 'quit' during app quit
+   * (keep tabs) or 'close' when the user closed the window directly. */
+  onCloseRequest(fn: (reason?: 'close' | 'quit') => void): () => void;
   /** The page's answer: it shows the question (at once), the window may
    * close, or it stays. */
   answerClose(answer: 'asking' | 'close' | 'stay'): void;
@@ -60,6 +87,8 @@ export interface DesktopShell {
   metrics?(): Promise<ProcessUsage[]>;
   /** Native OS notifications through Electron's Notification API. */
   notifications?: DesktopNotifications;
+  /** Standalone secondary tab windows (tear-off multi-window support). */
+  windows?: DesktopWindows;
 }
 
 /** Options accepted by the native desktop notification bridge. */

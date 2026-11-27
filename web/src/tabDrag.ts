@@ -10,6 +10,7 @@
 // their order, as one block along the bar (no merging).
 
 import { actions } from './actions';
+import { openDetachedTab } from './detachedWindow';
 import { trackDrag, type Box, type DragStart } from './drag';
 import { blockSlot, insertSlot, near, type Slot } from './reorderDrag';
 import { terms } from './state/terms';
@@ -18,7 +19,16 @@ import { t } from './i18n';
 
 type Edge = Exclude<L.DropZone, 'center'>;
 
-export type TabTarget = ({ kind: 'slot' } & Slot) | { kind: 'pane'; pane: string; zone: Edge; rect: DOMRect };
+export type TabTarget =
+  | ({ kind: 'slot' } & Slot)
+  | { kind: 'pane'; pane: string; zone: Edge; rect: DOMRect }
+  | { kind: 'detach'; screenX: number; screenY: number };
+
+/** Whether a viewport point lies outside the browser/app window bounds,
+ * signalling a tear-off drag into a standalone window. */
+export function isOutsideWindow(x: number, y: number): boolean {
+  return x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight;
+}
 
 export interface TabSource {
   m: string;
@@ -98,8 +108,13 @@ export function startTabDrag(ev: DragStart, src: TabSource) {
   };
   trackDrag<TabTarget>(ev, {
     label: src.label,
-    find: (x, y) => {
+    ghost: (tg) => (tg?.kind === 'detach' ? { label: `${src.label} · ↗ ${t('window.detachHint')}`, detach: true } : { label: src.label }),
+    find: (x, y, screen) => {
       rest(x, y);
+      if (isOutsideWindow(x, y)) {
+        last = { kind: 'detach', screenX: screen?.screenX ?? x, screenY: screen?.screenY ?? y };
+        return last;
+      }
       const l = near(tabsList(src), '.tab[data-tab]', 'data-tab', x, y, 'x');
       if (l) {
         const slot = insertSlot(l.boxes, l.ids.indexOf(String(src.index)), x, y, 'x');
@@ -107,20 +122,32 @@ export function startTabDrag(ev: DragStart, src: TabSource) {
       } else last = paneTarget(src, x, y);
       return last;
     },
-    marker: (tg) => (tg.kind === 'slot' ? { box: tg.box, zone: 'slot' } : { box: edgeBox(tg.rect, tg.zone), zone: tg.zone }),
+    marker: (tg) => {
+      if (tg.kind === 'detach') return undefined;
+      return tg.kind === 'slot' ? { box: tg.box, zone: 'slot' } : { box: edgeBox(tg.rect, tg.zone), zone: tg.zone };
+    },
     begin: () => {
       const other = otherTab(src.index, src.shown, ws()?.tabs.length ?? 0);
       if (other !== undefined) actions.selectTab(src.m, src.ws, other);
     },
     drop: async (tg) => {
+      if (tg.kind === 'detach') {
+        const ok = await openDetachedTab(src.m, src.ws, src.index, {
+          screenX: tg.screenX,
+          screenY: tg.screenY,
+          title: src.label,
+        });
+        if (!ok && key) terms.mutate(src.m, (l) => L.focusPane(l, key));
+        return;
+      }
       if (tg.kind === 'slot') return actions.moveTab(src.m, src.ws, src.index, tg.index);
       terms.mutate(src.m, (l) => L.dropTabOnPane(l, src.ws, src.index, tg.pane, tg.zone));
     },
-    // Before the drop: a tab that will not be merged is shown again (a
-    // reorder keeps it shown where it goes).
+    // Before the drop: a tab that will not be merged or detached is shown
+    // again (a reorder keeps it shown where it goes).
     end: (dropped) => {
       if (spring) window.clearTimeout(spring.timer);
-      if (key && !(dropped && last?.kind === 'pane')) terms.mutate(src.m, (l) => L.focusPane(l, key));
+      if (key && !(dropped && (last?.kind === 'pane' || last?.kind === 'detach'))) terms.mutate(src.m, (l) => L.focusPane(l, key));
     },
     failed: (error) => t('pane.moveFailed', { error }),
   });

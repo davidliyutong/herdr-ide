@@ -32,12 +32,15 @@ export function PluginPane({
   view,
   focused,
   shown = true,
+  onActivate,
 }: {
   m: string;
   pane: string;
   view: L.PluginView;
   focused: boolean;
   shown?: boolean;
+  /** Pointer or focus interaction inside the pane focuses it in the layout. */
+  onActivate?(): void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // Re-rendered when a plugin is turned on or off, or finishes lazy-loading.
@@ -58,8 +61,11 @@ export function PluginPane({
   useEffect(() => {
     if (loading) void ensurePluginLoaded(view.plugin);
   }, [loading, view.plugin]);
+  const activate = () => {
+    if (shown && !focused) onActivate?.();
+  };
   return (
-    <div ref={ref} className="plugin-pane" tabIndex={-1}>
+    <div ref={ref} className="plugin-pane" tabIndex={-1} onMouseDownCapture={activate} onFocusCapture={activate}>
       {Body ? (
         <PluginBoundary plugin={pluginName(view.plugin)} resetKey={JSON.stringify(view)}>
           <Body m={m} pane={pane} view={view} focused={focused} shown={shown} />

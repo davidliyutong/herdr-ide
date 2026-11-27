@@ -296,6 +296,16 @@ export function viewStatus(m: string, view: PluginView): AgentStatus | undefined
   return typeof s === 'string' && Object.hasOwn(statusRank, s) ? s : undefined;
 }
 
+/** Whether a plugin's pane is actively running (working, waiting, or starting)
+ * and should be protected from kept-pane eviction across tab switches. */
+export function viewActive(m: string, view: PluginView): boolean {
+  const o = statusOwner(view.plugin);
+  if (!o) return false;
+  if (o.def.isActive) return guarded(o.p, 'isActive', () => o.def.isActive!(m, view)) === true;
+  const s = guarded(o.p, 'status', () => o.def.status(m, view));
+  return s === 'working' || s === 'blocked';
+}
+
 /** The pane of machine m an agent notification without a terminal points
  * to (its data, /ws agent): the first answer of a plugin that is on
  * (ViewStatusDef.paneOf), when it is a view:<id> key. */

@@ -9,12 +9,14 @@ import {
   Notification,
   powerMonitor,
   safeStorage,
+  screen,
   session,
   shell,
   systemPreferences,
   type BaseWindow,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
+  type WebContents,
 } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
@@ -25,9 +27,18 @@ import tokens from '../../spec/tokens.json';
 import { APP_NAME, APP_SLUG } from '../../web/src/brand';
 import { detectLocale, translate } from '../../web/src/i18n';
 import type { MessageKey } from '../../web/src/i18n/en';
-import type { OpenedFolders } from '../../web/src/shell';
+import type { OpenedFolders, OpenTabWindowOptions } from '../../web/src/shell';
 import { channels } from './bridge';
 import { closeGuard, isCloseAnswer, parseUnsaved, type CloseGuard } from './closeGuard';
+import {
+  clampWindowBounds,
+  DETACHED_MIN_HEIGHT,
+  DETACHED_MIN_WIDTH,
+  detachedWindowUrl,
+  MAX_DETACHED_WINDOWS,
+  parseOpenTabRequest,
+  pointInBounds,
+} from './detached';
 import {
   channelHead,
   HubHost,
@@ -102,6 +113,31 @@ let hub: HubHost | undefined;
 let mainWindow: BrowserWindow | undefined;
 // The main window's page asks about unsaved changes before it closes.
 let guard: CloseGuard | undefined;
+// Standalone detached tab windows (keyed by `${m}\n${pane}`), each with its own close guard.
+const detachedWindows = new Map<string, { win: BrowserWindow; guard: CloseGuard }>();
+
+function detachedForContents(contents: WebContents) {
+  for (const entry of detachedWindows.values()) {
+    if (!entry.win.isDestroyed() && entry.win.webContents === contents) return entry;
+  }
+  return undefined;
+}
+
+function detachedForWindow(win: BaseWindow | undefined) {
+  if (!win) return undefined;
+  for (const entry of detachedWindows.values()) {
+    if (!entry.win.isDestroyed() && entry.win === win) return entry;
+  }
+  return undefined;
+}
+
+function hasOpenTrackedWindow(): boolean {
+  if (mainWindow && !mainWindow.isDestroyed()) return true;
+  for (const entry of detachedWindows.values()) {
+    if (!entry.win.isDestroyed()) return true;
+  }
+  return false;
+}
 // The origin of the app's pages, which only its session serves.
 const origin = APP_ORIGIN;
 // The hub served once: windows may open.
@@ -202,11 +238,8 @@ app.on('web-contents-created', (_event, contents) => {
   // browser panes' guest, at an address that is not the hub's (policy.ts
   // guestPreferences).
   contents.on('will-attach-webview', (event, prefs, params) => {
-    const ok =
-      !!mainWindow &&
-      contents === mainWindow.webContents &&
-      isInternal(contents.getURL(), origin) &&
-      guestPreferences(prefs, params, origin);
+    const isAppWindow = (!!mainWindow && contents === mainWindow.webContents) || !!detachedForContents(contents);
+    const ok = isAppWindow && isInternal(contents.getURL(), origin) && guestPreferences(prefs, params, origin);
     if (!ok) event.preventDefault();
   });
   if (contents.getType() === 'webview') {
@@ -264,9 +297,34 @@ function showMain() {
   mainWindow.focus();
 }
 
-/** A command of the menu, for the main window's page. In another window (a
- * program's, VS Code's own) closing a pane or a tab closes that window. */
+const DETACHED_COMMANDS = new Set([
+  'pane.splitRight',
+  'pane.splitDown',
+  'pane.zoom',
+  'pane.close',
+  'find.open',
+  'view.zoomIn',
+  'view.zoomOut',
+  'view.zoomReset',
+  'app.commandPalette',
+]);
+
+/** A command of the menu, for the focused app window's page. In a detached tab
+ * window, pane/find/zoom/palette commands act on that window and tab.close
+ * closes it (running its close guard); in other secondary windows (program
+ * windows, standalone VS Code) closing a pane or tab closes that window. */
 function runCommand(command: string, focused: BaseWindow | undefined) {
+  const det = detachedForWindow(focused);
+  if (det) {
+    if (command === 'tab.close') {
+      det.win.close();
+      return;
+    }
+    if (DETACHED_COMMANDS.has(command)) {
+      det.win.webContents.send(channels.command, command);
+      return;
+    }
+  }
   if (focused && focused !== mainWindow && (command === 'pane.close' || command === 'tab.close')) {
     focused.close();
     return;
@@ -292,10 +350,13 @@ function applyDisabled(next: Set<string>) {
   }
 }
 
-/** Zooms the main window's page to the zoom setting. */
+/** Zooms the main window and any detached tab windows to the zoom setting. */
 function applyZoom() {
-  const contents = mainWindow?.webContents;
-  if (contents && !contents.isDestroyed() && contents.getZoomFactor() !== zoomFactor) contents.setZoomFactor(zoomFactor);
+  const apply = (contents: WebContents | undefined) => {
+    if (contents && !contents.isDestroyed() && contents.getZoomFactor() !== zoomFactor) contents.setZoomFactor(zoomFactor);
+  };
+  apply(mainWindow?.webContents);
+  for (const entry of detachedWindows.values()) apply(entry.win.webContents);
 }
 
 /** Keeps the macOS traffic lights vertically centered in the integrated header
@@ -341,6 +402,12 @@ function fromMainPage(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   );
 }
 
+function fromDetachedPage(event: IpcMainEvent | IpcMainInvokeEvent) {
+  const frame = event.senderFrame;
+  if (!frame || frame !== event.sender.mainFrame || frame.origin !== origin || !isInternal(frame.url, origin)) return undefined;
+  return detachedForContents(event.sender);
+}
+
 ipcMain.on(channels.menuState, (event, value: unknown) => {
   if (!fromMainPage(event)) return;
   const next = parseDisabled(value);
@@ -349,11 +416,40 @@ ipcMain.on(channels.menuState, (event, value: unknown) => {
 
 ipcMain.on(channels.unsaved, (event, value: unknown) => {
   const n = parseUnsaved(value);
-  if (fromMainPage(event) && n !== undefined) guard?.setUnsaved(n);
+  if (n === undefined) return;
+  if (fromMainPage(event)) {
+    guard?.setUnsaved(n);
+    return;
+  }
+  fromDetachedPage(event)?.guard.setUnsaved(n);
 });
 
 ipcMain.on(channels.closeAnswer, (event, value: unknown) => {
-  if (fromMainPage(event) && isCloseAnswer(value)) guard?.answer(value);
+  if (!isCloseAnswer(value)) return;
+  if (fromMainPage(event)) {
+    guard?.answer(value);
+    return;
+  }
+  fromDetachedPage(event)?.guard.answer(value);
+});
+
+ipcMain.handle(channels.windowOpenTab, (event, value: unknown) => {
+  if (!fromMainPage(event) && !fromDetachedPage(event)) return false;
+  const req = parseOpenTabRequest(value);
+  return req ? openDetachedTabWindow(req) : false;
+});
+
+ipcMain.on(channels.windowFocusMain, (event) => {
+  if (fromMainPage(event) || fromDetachedPage(event)) showMain();
+});
+
+ipcMain.handle(channels.windowIsOverMain, (event, value: unknown) => {
+  if (!fromDetachedPage(event)) return false;
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return false;
+  if (typeof value !== 'object' || value === null) return false;
+  const { x, y } = value as { x?: unknown; y?: unknown };
+  if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+  return pointInBounds(x, y, mainWindow.getBounds());
 });
 
 ipcMain.on(channels.foldersWanted, (event, wanted: unknown) => {
@@ -581,20 +677,127 @@ function createWindow() {
     notifications.takenBy(undefined);
     notifications.setBadgeCount(0);
     mainWindow = undefined;
-    // Program windows do not keep the app open.
-    if (!reportingError && (quitAfterClose || quitsWithLastWindow(platform))) app.quit();
+    // Program windows do not keep the app open; on Windows/Linux closing the
+    // main window quits the app (closing detached windows cleanly as part of quit).
+    if (!reportingError) {
+      if (quitAfterClose) {
+        if (!hasOpenTrackedWindow()) app.quit();
+      } else if (quitsWithLastWindow(platform)) {
+        app.quit();
+      }
+    }
   });
   void win.loadURL(`${origin}/`).catch(fail);
 }
 
+/** Opens (or focuses) a standalone native-frame window showing only the core
+ * pane(s) of a detached tab. Closing it directly asks its page to check
+ * unsaved changes and close the tab; quitting the app preserves tabs. */
+function openDetachedTabWindow(req: OpenTabWindowOptions): boolean {
+  if (!serving || quitting || reportingError) return false;
+  const key = `${req.m}\n${req.pane}`;
+  const existing = detachedWindows.get(key);
+  if (existing && !existing.win.isDestroyed()) {
+    if (existing.win.isMinimized()) existing.win.restore();
+    existing.win.show();
+    existing.win.focus();
+    return true;
+  }
+  if (detachedWindows.size >= MAX_DETACHED_WINDOWS) return false;
+  const display =
+    req.x !== undefined && req.y !== undefined ? screen.getDisplayNearestPoint({ x: req.x, y: req.y }) : screen.getPrimaryDisplay();
+  const bounds = clampWindowBounds(req, display.workArea);
+  const win = new BrowserWindow({
+    title: req.title || APP_NAME,
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    minWidth: DETACHED_MIN_WIDTH,
+    minHeight: DETACHED_MIN_HEIGHT,
+    show: false,
+    backgroundColor: windowBackground(),
+    ...(platform === 'linux' && { icon: join(app.getAppPath(), 'assets', 'icon.png') }),
+    webPreferences: mainWindowPreferences(join(__dirname, 'preload.cjs')),
+  });
+  const g = closeGuard({
+    ask: () => {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      const reason: 'close' | 'quit' = quitting || quitAfterClose ? 'quit' : 'close';
+      win.webContents.send(channels.closeRequest, reason);
+    },
+    close: () => {
+      if (!win.isDestroyed()) win.close();
+    },
+    cancelled: () => {
+      quitAfterClose = false;
+    },
+    setTimer: (fn, ms) => {
+      const t = setTimeout(fn, ms);
+      return () => clearTimeout(t);
+    },
+  });
+  detachedWindows.set(key, { win, guard: g });
+  const onTheme = () => {
+    if (!win.isDestroyed()) win.setBackgroundColor(windowBackground());
+  };
+  nativeTheme.on('updated', onTheme);
+  win.webContents.on('did-navigate', () => g.reset());
+  win.webContents.on('did-finish-load', applyZoom);
+  win.on('close', (event) => {
+    // Direct close asks the detached page so it can confirm unsaved changes
+    // and close the tab; app quit asks only when unsaved > 0 (keeping tabs).
+    const directClose = !quitting && !quitAfterClose;
+    if (!g.onClose(systemShutdown, directClose)) event.preventDefault();
+  });
+  win.webContents.on('will-prevent-unload', (event) => {
+    if (systemShutdown) return event.preventDefault();
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      buttons: [t('unsaved.leave'), t('dialog.cancel')],
+      defaultId: 1,
+      cancelId: 1,
+      message: t('unsaved.title'),
+      detail: t('unsaved.leaveDetail'),
+    });
+    if (choice === 0) event.preventDefault();
+    else quitAfterClose = false;
+  });
+  win.webContents.on('render-process-gone', () => {
+    g.reset();
+    if (!win.isDestroyed()) win.destroy();
+  });
+  win.on('session-end', () => {
+    systemShutdown = true;
+  });
+  win.once('ready-to-show', () => {
+    if (!reportingError && !quitting && !win.isDestroyed()) win.show();
+  });
+  win.on('closed', () => {
+    g.reset();
+    nativeTheme.off('updated', onTheme);
+    if (detachedWindows.get(key)?.win === win) detachedWindows.delete(key);
+    if (!reportingError && quitAfterClose && !hasOpenTrackedWindow()) app.quit();
+  });
+  void win.loadURL(detachedWindowUrl(origin, req.m, req.pane)).catch(() => {
+    if (!win.isDestroyed()) win.destroy();
+  });
+  return true;
+}
+
 app.on('before-quit', (event) => {
-  // The main window closes first, so a page with unsaved changes can keep
-  // the app (will-prevent-unload) before the hub stops; quitting goes on
-  // once it has closed.
-  if (!stopped && !systemShutdown && mainWindow && !mainWindow.isDestroyed()) {
+  // Close the main window and any detached tab windows first so any page with
+  // unsaved changes can ask before the hub stops; quitting goes on once all
+  // tracked windows have closed.
+  if (!stopped && !systemShutdown && hasOpenTrackedWindow()) {
     event.preventDefault();
     quitAfterClose = true;
-    mainWindow.close();
+    for (const entry of [...detachedWindows.values()]) {
+      if (!entry.win.isDestroyed()) entry.win.close();
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
     return;
   }
   quitting = true;

@@ -674,15 +674,17 @@ describe('machineMenu', () => {
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
       expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/gpu/hc/stop', '/api/m/gpu/enabled']);
 
-      // A machine that is not connected cannot have its terminal core stopped.
-      fetchMock.mockClear();
-      useDialog.setState({ current: undefined });
-      useStore.getState().setMachines([ssh('error')]);
-      find(machineMenu('gpu'), 'Disable Machine…').run!();
-      const plain = useDialog.getState().current;
-      if (plain?.kind !== 'confirm') throw new Error('no dialog');
-      expect(plain.check).toBeUndefined();
-      plain.resolve(false);
+      // Already-offline machines disable directly without asking.
+      for (const status of ['error', 'auth_required', 'connecting'] as const) {
+        fetchMock.mockClear();
+        useDialog.setState({ current: undefined });
+        useStore.getState().setMachines([ssh(status)]);
+        find(machineMenu('gpu'), 'Disable Machine…').run!();
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+        expect(useDialog.getState().current).toBeUndefined();
+        expect(fetchMock.mock.calls[0][0]).toBe('/api/m/gpu/enabled');
+        expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT', body: JSON.stringify({ enabled: false }) });
+      }
 
       // Enabling does not ask.
       fetchMock.mockClear();
