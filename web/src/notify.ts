@@ -19,7 +19,17 @@ import { mutedAgents, playSound, soundFor } from './sound';
 import { onViewStatus, viewOpenTarget, viewPaneOf, viewStatus, viewUnopened } from './plugins/registry';
 import { showPanel } from './panelPanes';
 import { desktopShell, type NotificationTarget } from './shell';
+import { isDetachedWindow } from './detachedWindow';
+import { parseGuiPath } from './gui/state';
 import * as L from './term/layout';
+
+/** True only in the main application window (false in detached tab windows and
+ * standalone GUI program windows, which own their own titles and must not
+ * update global badge counts or mark main-window panes seen). */
+function isMainWindowPage(): boolean {
+  if (isDetachedWindow()) return false;
+  return typeof location === 'undefined' || !parseGuiPath(location.pathname);
+}
 
 export type { NotificationTarget };
 
@@ -361,6 +371,7 @@ type BadgeNavigator = Navigator & { setAppBadge?(n: number): Promise<void>; clea
 let shown = -1;
 
 export function updateBadge(force = false) {
+  if (!isMainWindowPage()) return;
   const s = useStore.getState();
   let blocked = 0;
   const tm = useTerms.getState().machines;
@@ -384,24 +395,26 @@ export function updateBadge(force = false) {
   else nav.clearAppBadge?.().catch(() => {});
 }
 
-// Turning the badge off clears it at once, turning it on shows the count.
-usePrefs.subscribe((st, prev) => {
-  if (st.prefs.notifyBadge !== prev.prefs.notifyBadge) updateBadge();
-});
+if (isMainWindowPage()) {
+  // Turning the badge off clears it at once, turning it on shows the count.
+  usePrefs.subscribe((st, prev) => {
+    if (st.prefs.notifyBadge !== prev.prefs.notifyBadge) updateBadge();
+  });
 
-// Layout changes (including toggling mute on a workspace or tab) and terminal
-// or machine updates refresh the badge immediately.
-useTerms.subscribe((st, prev) => {
-  if (st.machines !== prev.machines && typeof document !== 'undefined') updateBadge();
-});
-useStore.subscribe((st, prev) => {
-  if (st.order !== prev.order && typeof document !== 'undefined') updateBadge();
-});
+  // Layout changes (including toggling mute on a workspace or tab) and terminal
+  // or machine updates refresh the badge immediately.
+  useTerms.subscribe((st, prev) => {
+    if (st.machines !== prev.machines && typeof document !== 'undefined') updateBadge();
+  });
+  useStore.subscribe((st, prev) => {
+    if (st.order !== prev.order && typeof document !== 'undefined') updateBadge();
+  });
 
-// The plugins' panes change the count as terminals do (App.tsx updates it
-// on theirs), and those the user looks at while done are seen (seen.ts).
-onViewStatus(() => typeof document !== 'undefined' && updateBadge());
-followViewsSeen();
+  // The plugins' panes change the count as terminals do (App.tsx updates it
+  // on theirs), and those the user looks at while done are seen (seen.ts).
+  onViewStatus(() => typeof document !== 'undefined' && updateBadge());
+  followViewsSeen();
+}
 
 /** Resets internal notification state (tests). */
 export function resetNotifyForTests() {

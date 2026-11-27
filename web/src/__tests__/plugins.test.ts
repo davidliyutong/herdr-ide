@@ -11,7 +11,7 @@ import { Files, GitBranch } from 'lucide-react';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import { useStore } from '../state/store';
+import { moveRailId, orderRailItems, useStore } from '../state/store';
 import { useSettings } from '../settings';
 import {
   activePanels,
@@ -23,6 +23,7 @@ import {
   pluginOn,
   pluginSwitch,
 } from '../plugins/registry';
+import { lazyPlugin } from '../plugins/lazy';
 import { RightBar } from '../components/RightBar';
 import { PluginPane } from '../components/PluginPane';
 import { commandEnabled, runCommand } from '../keymap';
@@ -225,5 +226,88 @@ describe('plugins', () => {
       paneEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     });
     expect(onActivate).not.toHaveBeenCalled();
+  });
+
+  it('moveRailId and orderRailItems reorder visible panels while preserving hidden panels in place', () => {
+    const items = [{ id: 'files' }, { id: 'search' }, { id: 'git' }, { id: 'vault' }];
+    expect(orderRailItems(items, ['git', 'files']).map((x) => x.id)).toEqual(['git', 'files', 'search', 'vault']);
+
+    // search is hidden; visible = [files, git, vault]. Moving files past vault keeps search at index 1.
+    expect(moveRailId(['files', 'search', 'git', 'vault'], ['files', 'git', 'vault'], 'files', 3)).toEqual([
+      'git',
+      'search',
+      'vault',
+      'files',
+    ]);
+    // Moving vault before files keeps search in place.
+    expect(moveRailId(['files', 'search', 'git', 'vault'], ['files', 'git', 'vault'], 'vault', 0)).toEqual([
+      'vault',
+      'search',
+      'files',
+      'git',
+    ]);
+    // Adjacent no-op slots and unknown ids return unchanged order.
+    expect(moveRailId(['files', 'git'], ['files', 'git'], 'files', 0)).toEqual(['files', 'git']);
+    expect(moveRailId(['files', 'git'], ['files', 'git'], 'files', 1)).toEqual(['files', 'git']);
+    expect(moveRailId(['files', 'git'], ['files', 'git'], 'missing', 0)).toEqual(['files', 'git']);
+  });
+
+  it('view.togglePanel respects railOrder and skips hiddenRailPanels (falling back if all are hidden)', () => {
+    useStore.setState({ railOrder: ['git', 'files'], hiddenRailPanels: [], panel: undefined, lastPanel: undefined });
+    runCommand('view.togglePanel');
+    expect(useStore.getState().panel).toBe('git');
+    runCommand('view.togglePanel');
+    expect(useStore.getState().panel).toBeUndefined();
+
+    // When the first ordered panel (git) is hidden and lastPanel was git, togglePanel opens visible files.
+    useStore.setState({ hiddenRailPanels: ['git'], panel: undefined, lastPanel: 'git' });
+    runCommand('view.togglePanel');
+    expect(useStore.getState().panel).toBe('files');
+    runCommand('view.togglePanel');
+    expect(useStore.getState().panel).toBeUndefined();
+
+    // When every panel icon is hidden, togglePanel falls back to ordered active panels.
+    useStore.setState({ hiddenRailPanels: ['git', 'files'], panel: undefined, lastPanel: undefined });
+    runCommand('view.togglePanel');
+    expect(useStore.getState().panel).toBe('git');
+    useStore.setState({ railOrder: [], hiddenRailPanels: [], panel: undefined, lastPanel: undefined });
+  });
+
+  it('catches lazy plugin chunk-load rejections cleanly and toasts on user-triggered actions', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    useStore.setState({ toasts: [] });
+    const failing = lazyPlugin(
+      {
+        id: 'broken',
+        title: 'plugins.gui.title',
+        icon: Files,
+        commands: { 'broken.run': {} },
+        newTabItems: [{ id: 'broken.tab', title: 'plugins.gui.title', icon: Files }],
+        receivesMessages: true,
+        paneViews: { view: { icon: Files, title: () => 'Broken' } },
+      },
+      () => Promise.reject(new Error('chunk fetch failed')),
+    );
+    definePlugins([failing]);
+
+    // User-triggered command failure catches and shows an error toast.
+    failing.commands!['broken.run'].run();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(useStore.getState().toasts.at(-1)?.kind).toBe('error');
+    expect(useStore.getState().toasts.at(-1)?.msg).toContain('chunk fetch failed');
+
+    // User-triggered new-tab item failure also catches and toasts.
+    useStore.setState({ toasts: [] });
+    failing.newTabItems!('local')[0].run('local', 'ws1');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(useStore.getState().toasts.at(-1)?.kind).toBe('error');
+
+    // Background message / menu preloads catch without toasting or unhandled rejections.
+    useStore.setState({ toasts: [] });
+    failing.onMessage!('local', { ping: 1 });
+    failing.paneViews!.view.menu!('local', { id: 'v1', plugin: 'broken', kind: 'view' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(useStore.getState().toasts).toHaveLength(0);
+    expect(warn).toHaveBeenCalled();
   });
 });

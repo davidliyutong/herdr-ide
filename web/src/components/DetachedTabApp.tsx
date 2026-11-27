@@ -15,11 +15,11 @@ import { CodeLayer } from './CodeLayer';
 import { ContextMenu } from './ContextMenu';
 import { quitDialog, useDialog } from '../dialog';
 import { setLeaving, warnOnUnload } from '../unsaved';
-import { handleKey, handlePaneLeaveKey } from '../keymap';
+import { closeWindowPane, handleKey, handlePaneLeaveKey, leaveWindowPane } from '../keymap';
 import { runMenuCommand } from '../desktop';
 import { desktopShell } from '../shell';
 import { applySettings, loadSettings } from '../settings';
-import { applyKeybindings, loadKeybindings } from '../keybindings';
+import { applyKeybindings, loadKeybindings, useKeys, type Binding } from '../keybindings';
 import { t } from '../i18n';
 import * as L from '../term/layout';
 import { useGui } from '../gui/state';
@@ -30,7 +30,13 @@ import { followVSCodeSwitch } from '../plugins/vscode/workers';
 import { pluginMessage, usePluginOn } from '../plugins/registry';
 import { actions, paneTitle, tabName, terminalPlace, workspaceTitle } from '../actions';
 import { loadConfig, retryFailedBootstrap, startBootstrap } from '../bootstrap';
-import { initDetachedWindowSync, setDockHandler } from '../detachedWindow';
+import {
+  DETACHED_ALLOWED_COMMANDS,
+  initDetachedWindowSync,
+  setDetachedCloseHandler,
+  setDetachedCurrentGetter,
+  setDockHandler,
+} from '../detachedWindow';
 import { APP_NAME } from '../brand';
 import '../plugins';
 import '../commands';
@@ -94,6 +100,7 @@ export function DetachedTabApp({ m, pane }: { m: string; pane: string }) {
   const seenTabRef = useRef(false);
   const wsIdRef = useRef<string | undefined>(undefined);
   const dockingRef = useRef(false);
+  const dockConfirmingRef = useRef(false);
   const closingTabRef = useRef(false);
   const syncRef = useRef<ReturnType<typeof initDetachedWindowSync> | undefined>(undefined);
 
@@ -107,25 +114,16 @@ export function DetachedTabApp({ m, pane }: { m: string; pane: string }) {
     }
   }
 
-  /** Docks this tab back into the main window without closing it. */
-  const dock = useCallback(() => {
-    if (dockingRef.current) return;
-    dockingRef.current = true;
-    const targetPane = found?.tab.focused || knownPanesRef.current[0] || pane;
-    syncRef.current?.notifyDock(targetPane);
-    desktopShell?.windows?.focusMain();
-    setLeaving(true);
-    window.close();
-  }, [found, pane]);
-
-  const dockRef = useRef(dock);
-  dockRef.current = dock;
-
-  /** Checks unsaved changes for this tab's panes; returns true if closing may proceed. */
+  /** Checks unsaved changes for this tab's panes; returns true if transitioning
+   * or closing may proceed. Brings this window forward when asking the user. */
   const confirmTabUnsaved = useCallback(async (): Promise<boolean> => {
     const panes = new Set(knownPanesRef.current);
     const files = allUnsaved().filter((f) => f.m === m && panes.has(f.pane));
     if (!files.length) return true;
+    window.focus();
+    if (desktopShell?.windows) {
+      void desktopShell.windows.openTab({ m, pane });
+    }
     const machineLabel = useStore.getState().machines[m]?.label ?? m;
     const answer = await quitDialog(
       files.map((f) => ({
@@ -142,7 +140,29 @@ export function DetachedTabApp({ m, pane }: { m: string; pane: string }) {
       actions.focusPane(files[answer.show].m, files[answer.show].pane);
     }
     return false;
-  }, [m]);
+  }, [m, pane]);
+
+  /** Docks this tab back into the main window without closing it, confirming
+   * any unsaved edits first so in-memory edits are never silently discarded. */
+  const dock = useCallback(async () => {
+    if (dockingRef.current || dockConfirmingRef.current) return;
+    dockConfirmingRef.current = true;
+    try {
+      if (!(await confirmTabUnsaved())) return;
+      dockingRef.current = true;
+      const live = locateTabByPanes(terms.layout(m), knownPanesRef.current);
+      const targetPane = live?.tab.focused || knownPanesRef.current[0] || pane;
+      syncRef.current?.notifyDock(targetPane);
+      desktopShell?.windows?.focusMain();
+      setLeaving(true);
+      window.close();
+    } finally {
+      dockConfirmingRef.current = false;
+    }
+  }, [m, pane, confirmTabUnsaved]);
+
+  const dockRef = useRef(dock);
+  dockRef.current = dock;
 
   /** Closes the tab in the machine's layout and terminates its terminals. */
   const closeOwnedTab = useCallback(async () => {
@@ -192,8 +212,8 @@ export function DetachedTabApp({ m, pane }: { m: string; pane: string }) {
       onBridgeSend: (bm, text, win, folders) => pasteToAgent(bm, text, win, folders),
       onBridgeDownload: (bm, paths, win) => bridgeDownload(bm, paths, win),
       onBridgeFocus: (bm, win, folders) => void windowFocused(bm, win, folders),
-      onBridgeClose: () => {},
-      onBridgeLeave: () => {},
+      onBridgeClose: (bm, win, folders) => closeWindowPane(bm, win, folders),
+      onBridgeLeave: (bm, win, folders) => leaveWindowPane(bm, win, folders),
       onDownload: (ev) => downloadEvent(ev),
       onGui: (st) => useGui.getState().setState(st),
       onSettings: (msg) => applySettings(msg),
@@ -203,14 +223,53 @@ export function DetachedTabApp({ m, pane }: { m: string; pane: string }) {
     terms.start();
     terms.subscribe(m);
 
+    // Keep keybindings in this detached window restricted to detached-safe
+    // commands so neither app chrome nor terminal key handlers mutate main.
+    let savedEffective: Binding[] | undefined;
+    const pruneBindings = () => {
+      const cur = useKeys.getState().effective;
+      const filtered = cur.filter((b) => DETACHED_ALLOWED_COMMANDS.has(b.command));
+      if (filtered.length !== cur.length) {
+        savedEffective = cur;
+        useKeys.setState({ effective: filtered });
+      }
+    };
+    pruneBindings();
+    const offKeys = useKeys.subscribe(pruneBindings);
+
+    setDetachedCurrentGetter(() => {
+      const live = locateTabByPanes(terms.layout(m), knownPanesRef.current);
+      return live ? { m, wsId: live.ws.id, tabIndex: live.index } : undefined;
+    });
+
     const sync = initDetachedWindowSync({
       m,
+      initialPane: pane,
       getPanes: () => knownPanesRef.current,
       getWorkspace: () => wsIdRef.current,
-      onDockAll: () => dockRef.current(),
+      onDockAll: () => void dockRef.current(),
+      onConfirmClose: async () => {
+        const ok = await confirmTabUnsaved();
+        if (ok) setLeaving(true);
+        return ok;
+      },
     });
     syncRef.current = sync;
-    setDockHandler(() => dockRef.current());
+    setDockHandler(() => void dockRef.current());
+    setDetachedCloseHandler(() => {
+      if (desktopShell) {
+        window.close();
+        return;
+      }
+      void (async () => {
+        if (dockingRef.current || closingTabRef.current) return;
+        if (!(await confirmTabUnsaved())) return;
+        setLeaving(true);
+        await closeOwnedTab();
+        syncRef.current?.notifyClosed();
+        window.close();
+      })();
+    });
 
     const offUnload = warnOnUnload();
     const offWorkers = followVSCodeSwitch();
@@ -262,6 +321,7 @@ export function DetachedTabApp({ m, pane }: { m: string; pane: string }) {
           window.close();
           return;
         }
+        if (!DETACHED_ALLOWED_COMMANDS.has(cmd)) return;
         runMenuCommand(cmd);
       });
     }
@@ -289,6 +349,10 @@ export function DetachedTabApp({ m, pane }: { m: string; pane: string }) {
     window.addEventListener('keydown', onKey);
 
     return () => {
+      offKeys();
+      if (savedEffective) useKeys.setState({ effective: savedEffective });
+      setDetachedCurrentGetter(undefined);
+      setDetachedCloseHandler(undefined);
       setDockHandler(undefined);
       sync.dispose();
       syncRef.current = undefined;
@@ -301,7 +365,7 @@ export function DetachedTabApp({ m, pane }: { m: string; pane: string }) {
       window.removeEventListener('keydown', onCaptureKey, true);
       window.removeEventListener('keydown', onKey);
     };
-  }, [m, confirmTabUnsaved, closeOwnedTab]);
+  }, [m, pane, confirmTabUnsaved, closeOwnedTab]);
 
   // Re-announce whenever the tab's panes change (splits added/closed).
   const panesSig = found ? L.tabPanes(found.tab).join('\n') : '';

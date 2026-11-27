@@ -228,31 +228,52 @@ const shell: DesktopShell = {
   },
 };
 
+/** Narrow per-window bridge exposed to detached tab windows (least privilege:
+ * omits main-window-only privacy, titlebar, vault biometric, notifications,
+ * metrics, opened-folder queue, and menu-state controls). */
+export type DetachedDesktopShell = Pick<
+  DesktopShell,
+  'detached' | 'onCommand' | 'pathForFile' | 'setUnsaved' | 'onCloseRequest' | 'answerClose' | 'windows' | 'browser'
+>;
+
 /** The bridge of a system (process.platform): Full Disk Access and the
- * integrated title bar are macOS's (detached windows keep native frames). */
-export function desktopShellFor(platform: string, detached = false): DesktopShell {
+ * integrated title bar are macOS's; detached windows receive only the narrow
+ * per-window bridge and keep native window frames. */
+export function desktopShellFor(platform: string, detached?: false): DesktopShell;
+export function desktopShellFor(platform: string, detached: true): DetachedDesktopShell;
+export function desktopShellFor(platform: string, detached?: boolean): DesktopShell | DetachedDesktopShell;
+export function desktopShellFor(platform: string, detached = false): DesktopShell | DetachedDesktopShell {
+  if (detached) {
+    return {
+      detached: true,
+      onCommand: shell.onCommand,
+      pathForFile: shell.pathForFile,
+      setUnsaved: shell.setUnsaved,
+      onCloseRequest: shell.onCloseRequest,
+      answerClose: shell.answerClose,
+      windows: shell.windows,
+      browser: shell.browser,
+    };
+  }
   return {
     ...shell,
-    ...(detached && { detached: true }),
     ...(platform === 'darwin' && {
       privacy: {
         openFullDiskAccess: () => ipcRenderer.send(channels.openFullDiskAccess),
         revealTerminalCore: () => ipcRenderer.send(channels.revealTerminalCore),
         relaunch: () => ipcRenderer.send(channels.relaunch),
       },
-      ...(!detached && {
-        titlebar: {
-          kind: 'mac',
-          inset: MAC_TITLEBAR_INSET,
-          minHeight: MAC_TITLEBAR_MIN_HEIGHT,
-          topSpace: MAC_TITLEBAR_TOP_SPACE,
-          onFullScreen(fn) {
-            const off = listen(channels.fullScreen, isBoolean, fn);
-            ipcRenderer.send(channels.fullScreenQuery);
-            return off;
-          },
+      titlebar: {
+        kind: 'mac',
+        inset: MAC_TITLEBAR_INSET,
+        minHeight: MAC_TITLEBAR_MIN_HEIGHT,
+        topSpace: MAC_TITLEBAR_TOP_SPACE,
+        onFullScreen(fn) {
+          const off = listen(channels.fullScreen, isBoolean, fn);
+          ipcRenderer.send(channels.fullScreenQuery);
+          return off;
         },
-      }),
+      },
     }),
   };
 }

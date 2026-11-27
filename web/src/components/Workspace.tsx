@@ -3,7 +3,7 @@ import { BellOff, ChevronDown, Columns2, PanelLeft, Pin, Plus, X } from 'lucide-
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
-import { actions, paneRects, paneTitle, tabLabel, tabName, tabStatus } from '../actions';
+import { actions, focusPaneInLayout, paneRects, paneTitle, tabLabel, tabName, tabStatus } from '../actions';
 import { TerminalView } from './TerminalView';
 import { PaneHeader } from './PaneHeader';
 import { CodeSlot } from './CodeLayer';
@@ -17,7 +17,8 @@ import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
 import { startTabDrag } from '../tabDrag';
-import { detachedRecordForTab, requestDockAll, useDetachedTabs } from '../detachedWindow';
+import { detachedRecordForPane, detachedRecordForTab, isDetachedWindow, requestDockAll, useDetachedTabs } from '../detachedWindow';
+import { dropEdit } from '../unsaved';
 import { isKeepableChatLeaf, isKeepableFileLeaf, keepChatPanes, keepFilePanes, keepPanes, resetKeptPanes } from '../keptPanes';
 import { usePrefs } from '../prefs';
 import { openMenu } from '../contextMenu';
@@ -38,10 +39,13 @@ import { ensureTabStop, isDeleteKey, isMenuKey, isToggleKey, keepFocus, openRowM
 
 const tabsOf = (m: string, ws: string): MultiScope => ({ kind: 'tab', m, ws });
 
-/** The tab a workspace shows, which starts a selection of its tabs. */
+/** The visible tab a workspace shows, which starts a selection of its tabs. */
 const shownTab = (m: string, ws: string) => {
   const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
-  const tab = w?.tabs[w.selected];
+  if (!w) return undefined;
+  const records = useDetachedTabs.getState().records;
+  const visible = w.tabs.map((tb, i) => ({ tb, i })).filter(({ tb }) => !detachedRecordForTab(m, tb, records));
+  const tab = (visible.find((x) => x.i === w.selected) ?? visible[0])?.tb;
   return tab ? tabId(tab) : undefined;
 };
 
@@ -63,6 +67,7 @@ function onTabsKey(e: React.KeyboardEvent<HTMLElement>, m: string, ws: string) {
   if (!row || (e.target as HTMLElement).closest('input')) return;
   const els = [...e.currentTarget.querySelectorAll<HTMLElement>(`.tab${ROW}`)];
   const i = els.indexOf(row);
+  const layoutIndex = Number(row.dataset.tab);
   const id = row.dataset.nav!;
   const scope = tabsOf(m, ws);
   const readOnly = useStore.getState().readOnly;
@@ -85,7 +90,7 @@ function onTabsKey(e: React.KeyboardEvent<HTMLElement>, m: string, ws: string) {
   else if (plain && e.key === 'End') go(els.length - 1);
   else if (plain && (e.key === 'Enter' || e.key === ' ')) {
     done();
-    actions.selectTab(m, ws, i);
+    if (Number.isInteger(layoutIndex) && layoutIndex >= 0) actions.selectTab(m, ws, layoutIndex);
   } else if (isToggleKey(e)) {
     done();
     clickRow({ shiftKey: false, metaKey: true, ctrlKey: true }, scope, id, shownTab(m, ws));
@@ -94,7 +99,7 @@ function onTabsKey(e: React.KeyboardEvent<HTMLElement>, m: string, ws: string) {
     selectAllRows(scope, shownTab(m, ws));
   } else if (e.key === 'F2' && plain && !readOnly) {
     done();
-    actions.startRename('tab', m, `${ws}:${i}`);
+    if (Number.isInteger(layoutIndex) && layoutIndex >= 0) actions.startRename('tab', m, `${ws}:${layoutIndex}`);
   } else if (isDeleteKey(e) && !readOnly) {
     done();
     void actions.closeTabs(m, targetIds(scope, id));
@@ -132,6 +137,14 @@ export function Workspace() {
   const ws = layout ? L.selectedWorkspace(layout) : undefined;
   const sel = useMulti((s) => s.sel);
   const detachedRecords = useDetachedTabs((s) => s.records);
+  // Once a tab moves into a detached window, dispose any kept main-window edit
+  // left behind by an unmounting editor (e.g. after choosing Don't Save before
+  // detaching) so it does not linger in the main window's unsaved list.
+  useEffect(() => {
+    for (const r of Object.values(detachedRecords)) {
+      for (const p of r.panes) dropEdit(r.m, p);
+    }
+  }, [detachedRecords]);
   // The new-tab menu follows the plugins that are on, the tabs' dots the
   // statuses of the plugins' panes (a chat's) as of terminals.
   useActivePlugins();
@@ -459,12 +472,37 @@ function paneAbout(m: string, leaf: L.Leaf | null, key: string, record: Paramete
   return terminalTitle(record, key);
 }
 
+/** Updates the ratio of a split in the tab holding `paneKey` (without relying
+ * on layout.selected / ws.selected, so resizing splits in detached windows or
+ * fallback tabs mutates the right tab). */
+function setSplitRatio(layout: L.Layout, paneKey: string, path: readonly boolean[], ratio: number): L.Layout {
+  const at = L.locate(layout, paneKey);
+  if (!at || !Number.isFinite(ratio)) return layout;
+  const clamped = Math.min(0.9, Math.max(0.1, ratio));
+  const ws = layout.workspaces[at.workspace];
+  const tab = ws.tabs[at.tab];
+  const update = (node: L.Node, rest: readonly boolean[]): L.Node => {
+    if (!L.isSplit(node)) return node;
+    if (!rest.length) return { ...node, ratio: clamped };
+    const [step, ...tail] = rest;
+    const [a, b] = node.children;
+    return { ...node, children: step ? [a, update(b, tail)] : [update(a, tail), b] };
+  };
+  const nextTab = { ...tab, root: update(tab.root, path) };
+  const tabs = ws.tabs.map((t, i) => (i === at.tab ? nextTab : t));
+  const workspaces = layout.workspaces.map((w, i) => (i === at.workspace ? { ...w, tabs } : w));
+  return { ...layout, workspaces };
+}
+
 /** A tab's panes, each placed by its share of the split tree; the panes
  * keep their terminals (and VS Code its window) while the tree around them
  * changes. */
 export function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
   const zoomed = useStore((s) => (s.zoomed?.m === m ? s.zoomed.pane : undefined));
   const readOnly = useStore((s) => s.readOnly);
+  const detachedRecords = useDetachedTabs((s) => s.records);
+  const detachedWin = isDetachedWindow();
+  const isDetachedElsewhere = (km: string, kpane: string) => !detachedWin && !!detachedRecordForPane(km, kpane, detachedRecords);
   const panes = L.tabPanes(tab);
   const zoom = zoomed && panes.includes(zoomed) ? zoomed : undefined;
   const rects = zoom ? new Map([[zoom, { x: 0, y: 0, w: 1, h: 1 }]]) : paneRects(tab.root);
@@ -474,12 +512,14 @@ export function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
   // hidden (keptPanes.ts). They are children of the same list under the same
   // keys as when they are shown, so a terminal keeps its emulator and stream
   // and a file editor/preview keeps its Monaco/Markdown state across tab
-  // switches without remounting or flashing "Loading...".
+  // switches without remounting or flashing "Loading...". Panes owned by a
+  // detached window are immediately excluded from main's kept pools.
   const shownTerminals = [...rects].flatMap(([pane, rect]) => {
     const leaf = L.leafOf(tab.root, pane);
     return leaf && L.isTerminalLeaf(leaf) ? [{ m, pane, rect }] : [];
   });
   const kept = keepPanes(shownTerminals, keptLimit, (k) => {
+    if (isDetachedElsewhere(k.m, k.pane)) return false;
     const layout = terms.layout(k.m);
     return !!layout && L.locate(layout, k.pane) !== null;
   });
@@ -488,6 +528,7 @@ export function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
     return leaf && isKeepableFileLeaf(leaf) ? [{ m, pane, rect, leaf }] : [];
   });
   const keptFiles = keepFilePanes(shownFilePanes, (k) => {
+    if (isDetachedElsewhere(k.m, k.pane)) return null;
     const layout = terms.layout(k.m);
     const live = layout ? L.findLeaf(layout, k.pane) : null;
     return live && isKeepableFileLeaf(live) ? live : null;
@@ -499,6 +540,7 @@ export function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
   const keptChats = keepChatPanes(
     shownChatPanes,
     (k) => {
+      if (isDetachedElsewhere(k.m, k.pane)) return null;
       const layout = terms.layout(k.m);
       const live = layout ? L.findLeaf(layout, k.pane) : null;
       return live && isKeepableChatLeaf(live) ? live : null;
@@ -542,7 +584,7 @@ export function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
       // A press without a move (the first click of a double click) leaves the ratio.
       if (!moved) return;
       const ratio = ratioAt(ev);
-      terms.mutate(m, (l) => L.setRatio(l, bar.path, ratio));
+      if (panes[0]) terms.mutate(m, (l) => setSplitRatio(l, panes[0], bar.path, ratio));
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -574,7 +616,7 @@ export function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
                   m={m}
                   terminal={key}
                   focused={focused}
-                  onActivate={() => key !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, key))}
+                  onActivate={() => key !== tab.focused && terms.mutate(m, (l) => focusPaneInLayout(l, key))}
                 />
               ) : L.isCodeLeaf(leaf) ? (
                 <CodeSlot m={m} pane={key} view={leaf.code} />
@@ -585,7 +627,7 @@ export function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
                   view={leaf.view}
                   focused={focused}
                   shown
-                  onActivate={() => key !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, key))}
+                  onActivate={() => key !== tab.focused && terms.mutate(m, (l) => focusPaneInLayout(l, key))}
                 />
               ) : (
                 <Suspense fallback={null}>
@@ -595,7 +637,7 @@ export function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
                     path={leaf.preview.path}
                     focused={focused}
                     shown
-                    onActivate={() => key !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, key))}
+                    onActivate={() => key !== tab.focused && terms.mutate(m, (l) => focusPaneInLayout(l, key))}
                   />
                 </Suspense>
               )}
@@ -663,7 +705,7 @@ export function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
             title={t('pane.dividerHint')}
             onPointerDown={(e) => e.button === 0 && dragBar(e, b)}
             // A double click shares the split equally again.
-            onDoubleClick={() => terms.mutate(m, (l) => L.setRatio(l, b.path, 0.5))}
+            onDoubleClick={() => panes[0] && terms.mutate(m, (l) => setSplitRatio(l, panes[0], b.path, 0.5))}
           />
         );
       })}

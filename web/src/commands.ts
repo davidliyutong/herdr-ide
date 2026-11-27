@@ -6,6 +6,7 @@
 
 import { actions, attentionList, current, spotOpen } from './actions';
 import { hasClosed } from './closedPanes';
+import { closeDetachedWindow, DETACHED_ALLOWED_COMMANDS, detachedRecordForTab, isDetachedWindow, useDetachedTabs } from './detachedWindow';
 import { fullDiskAccessAvailable, openFullDiskAccess } from './fullDiskAccess';
 import { defineCommands } from './keymap';
 import { openPaneMenu } from './menus';
@@ -13,7 +14,7 @@ import { canGo } from './paneHistory';
 import type { CommandDef } from './plugins/api';
 import { activePanels } from './plugins/registry';
 import { paneHandle } from './state/panes';
-import { useStore } from './state/store';
+import { orderRailItems, useStore } from './state/store';
 import * as L from './term/layout';
 import { findStep, openFind, useFind } from './vt/find';
 import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
@@ -22,8 +23,14 @@ const store = () => useStore.getState();
 /** Whether the page may change things. */
 const changes = () => !store().readOnly;
 const focused = () => actions.focusedContext();
-/** Tabs of the selected workspace. */
-const tabCount = () => current()?.ws?.tabs.length ?? 0;
+/** Visible (non-detached) tabs of the selected workspace. */
+const tabCount = () => {
+  const c = current();
+  if (!c?.ws) return 0;
+  if (isDetachedWindow()) return 1;
+  const records = useDetachedTabs.getState().records;
+  return c.ws.tabs.filter((tb) => !detachedRecordForTab(c.m, tb, records)).length;
+};
 /** Panes of the selected tab. */
 const paneCount = () => {
   const tab = current()?.tab;
@@ -99,9 +106,11 @@ export const commands: Record<string, CommandDef> = {
     enabled: () => activePanels().length > 0,
     run() {
       const s = store();
-      const panels = activePanels();
-      if (s.panel && panels.some((p) => p.id === s.panel)) s.setPanel(undefined);
-      else s.setPanel((panels.find((p) => p.id === s.lastPanel) ?? panels[0])?.id);
+      const ordered = orderRailItems(activePanels(), s.railOrder);
+      const visible = ordered.filter((p) => !s.hiddenRailPanels.includes(p.id));
+      const pool = visible.length > 0 ? visible : ordered;
+      if (s.panel && ordered.some((p) => p.id === s.panel)) s.setPanel(undefined);
+      else s.setPanel((pool.find((p) => p.id === s.lastPanel) ?? pool[0])?.id);
     },
   },
   'view.toggleSidebar': { run: () => actions.toggleSidebar() },
@@ -168,19 +177,32 @@ export const commands: Record<string, CommandDef> = {
   'tab.previous': { enabled: () => tabCount() > 1, run: () => actions.switchTab(-1) },
   'tab.close': {
     enabled: () => changes() && hasTab(),
-    run: withTab((m, ws, index) => void actions.closeTab(m, ws, index)),
+    run() {
+      if (isDetachedWindow()) {
+        closeDetachedWindow();
+        return;
+      }
+      const c = actions.currentTab();
+      if (c) void actions.closeTab(c.m, c.ws, c.index);
+    },
   },
   'tab.closeOthers': {
     enabled() {
       const cur = current();
-      return changes() && !!cur?.ws && cur.ws.tabs.some((t, i) => i !== cur.tabIndex && !t.pinned);
+      const records = useDetachedTabs.getState().records;
+      return (
+        changes() && !!cur?.ws && cur.ws.tabs.some((tb, i) => i !== cur.tabIndex && !tb.pinned && !detachedRecordForTab(cur.m, tb, records))
+      );
     },
     run: withTab((m, ws, index) => void actions.closeTabsBeside(m, ws, index, 'others')),
   },
   'tab.closeRight': {
     enabled() {
       const cur = current();
-      return changes() && !!cur?.ws && cur.ws.tabs.some((t, i) => i > cur.tabIndex && !t.pinned);
+      const records = useDetachedTabs.getState().records;
+      return (
+        changes() && !!cur?.ws && cur.ws.tabs.some((tb, i) => i > cur.tabIndex && !tb.pinned && !detachedRecordForTab(cur.m, tb, records))
+      );
     },
     run: withTab((m, ws, index) => void actions.closeTabsBeside(m, ws, index, 'right')),
   },
@@ -299,5 +321,20 @@ export const commands: Record<string, CommandDef> = {
   'find.next': { enabled: hasTerminal, run: find(true) },
   'find.previous': { enabled: hasTerminal, run: find(false) },
 };
+
+// Gate main-window-only commands so shortcuts, menu commands or palette calls
+// inside a detached window can never mutate the main window.
+for (const [id, def] of Object.entries(commands)) {
+  if (DETACHED_ALLOWED_COMMANDS.has(id)) continue;
+  const prevEnabled = def.enabled;
+  const prevRun = def.run;
+  commands[id] = {
+    enabled: () => !isDetachedWindow() && (prevEnabled ? prevEnabled() : true),
+    run() {
+      if (isDetachedWindow()) return;
+      prevRun();
+    },
+  };
+}
 
 defineCommands(commands);

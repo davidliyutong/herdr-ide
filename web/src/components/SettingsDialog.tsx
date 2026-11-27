@@ -216,7 +216,8 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   const currentPlugin = plugins.find((p) => p.id === pages.find((x) => x.id === current)?.plugin);
   const currentPluginId = currentPlugin?.id;
   useEffect(() => {
-    if (currentPluginId) void ensurePluginLoaded(currentPluginId);
+    if (currentPluginId)
+      void ensurePluginLoaded(currentPluginId).catch((err) => console.warn(`plugin ${currentPluginId}: failed to load`, err));
   }, [currentPluginId]);
   const CurrentExtra = currentPlugin?.settings?.section === current ? currentPlugin.settings.extra : undefined;
   const currentLayout = currentPlugin?.settings?.section === current ? currentPlugin.settings.layout : undefined;

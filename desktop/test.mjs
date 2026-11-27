@@ -8,6 +8,7 @@ const dir = await mkdtemp(join(tmpdir(), 'desktop-tests-'));
 // The tests, built and run from one list: none is built without running.
 const tests = [
   'closeGuard',
+  'detached',
   'hub',
   'hubBridge',
   'enclave',

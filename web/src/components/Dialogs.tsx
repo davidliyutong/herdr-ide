@@ -17,7 +17,7 @@ import { formatSize, listDir, type RemoteStat } from '../lib/files';
 import { shortPath } from '../lib/machine';
 import { useStore } from '../state/store';
 import { useWorkspacePresets, workspacePresetIds } from '../state/workspacePresets';
-import { usePluginOn } from '../plugins/registry';
+import { ensurePluginLoaded, usePluginOn } from '../plugins/registry';
 import { t, type MessageKey } from '../i18n';
 import { match } from '../lib/match';
 import { rangeOf } from './tree/selection';
@@ -204,23 +204,38 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
   const presets = useWorkspacePresets((s) => s.presets);
   const presetOrder = useWorkspacePresets((s) => s.order);
   const presetLinks = useWorkspacePresets((s) => s.links);
+  const presetsLoaded = useWorkspacePresets((s) => s.loaded);
   const vaultSession = useWorkspacePresets((s) => s.session);
   const verifyEachAllow = useWorkspacePresets((s) => s.verifyEachAllow);
   const edit = !!req.edit;
   const initialPresets = req.edit?.id ? workspacePresetIds(req.m, req.edit.id, presetLinks) : [];
+  const initialPresetsKey = initialPresets.join('\n');
   const [cwd, setCwd] = useState(req.cwd);
   const [label, setLabel] = useState(req.edit?.name ?? '');
   const [pickedPresets, setPickedPresets] = useState<string[]>(initialPresets);
+  const [presetsTouched, setPresetsTouched] = useState(false);
   const [passphrase, setPassphrase] = useState('');
   const [dirs, setDirs] = useState<string[]>([]);
   const [sel, setSel] = useState(-1);
+  // Ensure lazy vault plugin loads so presets and their saver are populated
+  // even when opening the dialog from a detached window or fresh startup.
+  useEffect(() => {
+    if (vaultOn && !presetsLoaded) void ensurePluginLoaded('vault').catch(() => {});
+  }, [vaultOn, presetsLoaded]);
   // A request that replaces another one shown starts from its own state.
   useEffect(() => {
     setCwd(req.cwd);
     setLabel(req.edit?.name ?? '');
     setPickedPresets(req.edit?.id ? workspacePresetIds(req.m, req.edit.id) : []);
+    setPresetsTouched(false);
     setPassphrase('');
   }, [req]);
+  // Sync linked presets when vault finishes lazy-loading after the dialog
+  // opened, so saving an edited workspace before touching presets never wipes
+  // existing workspace links.
+  useEffect(() => {
+    if (!presetsTouched) setPickedPresets(initialPresets);
+  }, [presetsLoaded, initialPresetsKey, presetsTouched]);
   // What the machine says of the typed folder: the absolute path it
   // resolves to, or why it cannot be used; undefined while unknown.
   const [check, setCheck] = useState<{ path: string; problem?: FolderProblem; resolved?: string }>();
@@ -298,7 +313,7 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
   };
   const buildResult = (resolvedCwd: string): NewWorkspace => {
     const out: NewWorkspace = { cwd: resolvedCwd, label: label.trim() };
-    if (showPresets && canEditPresets && (edit ? presetsChanged : pickedPresets.length > 0)) {
+    if (showPresets && canEditPresets && (edit ? presetsTouched && presetsChanged : pickedPresets.length > 0)) {
       out.presets = pickedPresets;
       if (needPassphrase && passphrase) out.passphrase = passphrase;
     }
@@ -383,7 +398,10 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
               noneLabel={t('vault.workspace.presetsPick')}
               items={presetItems}
               value={pickedPresets}
-              onChange={setPickedPresets}
+              onChange={(next) => {
+                setPresetsTouched(true);
+                setPickedPresets(next);
+              }}
             />
             {canEditPresets ? (
               <div className="muted small">{t('vault.workspace.presetsHint')}</div>
@@ -414,6 +432,7 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
                 aria-label={t('vault.fresh.passphrase')}
                 value={passphrase}
                 onChange={(e) => setPassphrase(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void submit()}
               />
             )}
           </div>

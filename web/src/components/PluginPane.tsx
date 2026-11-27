@@ -59,7 +59,7 @@ export function PluginPane({
   const Body = on ? def?.component : undefined;
   const loading = on && !Body && isPluginPending(view.plugin);
   useEffect(() => {
-    if (loading) void ensurePluginLoaded(view.plugin);
+    if (loading) void ensurePluginLoaded(view.plugin).catch((err) => console.warn(`plugin ${view.plugin}: failed to load`, err));
   }, [loading, view.plugin]);
   const activate = () => {
     if (shown && !focused) onActivate?.();
@@ -111,7 +111,7 @@ function useFileGoneSource(): PluginDef | undefined {
   const source = active.find((x) => x.useFileGone);
   const pendingFiles = !source && active.some((x) => x.id === 'files' && isPluginPending('files'));
   useEffect(() => {
-    if (pendingFiles) void ensurePluginLoaded('files');
+    if (pendingFiles) void ensurePluginLoaded('files').catch((err) => console.warn('plugin files: failed to load', err));
   }, [pendingFiles]);
   return source;
 }

@@ -25,6 +25,7 @@ import {
 import { t } from '../i18n';
 import { useSettings } from '../settings';
 import { setPluginSwitch, usePluginOn } from '../plugins/registry';
+import { detachedRecordForPane, isDetachedWindow, useDetachedTabs } from '../detachedWindow';
 
 type Machines = ReturnType<typeof useStore.getState>['machines'];
 let usableOf: { machines?: Machines; list: string } = { list: '' };
@@ -91,14 +92,19 @@ export function CodeLayer() {
   const viewsList = useTerms(codeViewsOfLayouts);
   const usable = useMemo(() => new Set(usableList ? usableList.split('\n') : []), [usableList]);
   const views = useMemo(() => new Set(viewsList ? viewsList.split('\n') : []), [viewsList]);
+  const detachedRecords = useDetachedTabs((s) => s.records);
+  const detachedWin = isDetachedWindow();
 
   useEffect(() => {
     // Disabled and removed machines have no code-server, nor any with the
     // plugin off.
     const off = (m: string) => !on || readOnly || !usable.has(m) || !!stopped[m];
-    // A view is alive while its machine's layout holds it; unknown while
-    // that layout is not read (the machine is away).
-    const alive = (fr: Frame) => (views.has(`${fr.m}|`) ? views.has(frameKey(fr.m, fr.id)) : undefined);
+    // A view is alive while its machine's layout holds it and it has not moved
+    // to a detached window; unknown while that layout is not read (away).
+    const alive = (fr: Frame) => {
+      if (!detachedWin && detachedRecordForPane(fr.m, L.codeKey(fr.id), detachedRecords)) return false;
+      return views.has(`${fr.m}|`) ? views.has(frameKey(fr.m, fr.id)) : undefined;
+    };
     const update = () => {
       const s = useFrames.getState();
       const next = nextFrames(s.frames, s.shown, alive, off, Date.now());
@@ -108,7 +114,7 @@ export function CodeLayer() {
     // Frames off screen expire.
     const timer = window.setInterval(update, 60_000);
     return () => window.clearInterval(timer);
-  }, [shown, stopped, readOnly, usable, views, on]);
+  }, [shown, stopped, readOnly, usable, views, on, detachedRecords, detachedWin]);
 
   // Frames are placed relative to the layer: placed again when the window
   // or the layer (the workspace's area, as the sidebar changes) resizes.

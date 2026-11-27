@@ -102,13 +102,43 @@ export function dropped(l: L.Layout, src: DragSource, tg: DropTarget): L.Layout 
 /** Starts tracking a possible drag from a pane header. */
 export function startPaneDrag(ev: DragStart, src: DragSource) {
   const detached = isDetachedWindow();
+  // In the desktop app, probe whether the pointer is actually over the main
+  // window so the "Move Back to Main Window" ghost only shows when releasing
+  // will dock back (never over unrelated desktop space).
+  let overMain = !desktopShell?.windows;
+  let lastProbe = 0;
+  let probing = false;
+  let active = true;
+  const probeMain = (screenX: number, screenY: number) => {
+    const check = desktopShell?.windows?.isOverMain;
+    if (!check || probing) return;
+    const now = Date.now();
+    if (now - lastProbe < 40) return;
+    lastProbe = now;
+    probing = true;
+    void check(screenX, screenY)
+      .then((ok) => {
+        if (active) overMain = ok;
+      })
+      .catch(() => {
+        if (active) overMain = false;
+      })
+      .finally(() => {
+        probing = false;
+      });
+  };
   trackDrag<PaneDragTarget>(ev, {
     label: src.label,
-    ghost: (tg) => (tg?.kind === 'dock' ? { label: `${src.label} · ↩ ${t('window.returnToMain')}`, detach: true } : { label: src.label }),
+    ghost: (tg) =>
+      tg?.kind === 'dock' && overMain ? { label: `${src.label} · ↩ ${t('window.returnToMain')}`, detach: true } : { label: src.label },
     find: (x, y, screen) => {
       if (detached && (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight)) {
-        return { kind: 'dock', screenX: screen?.screenX ?? x, screenY: screen?.screenY ?? y };
+        const screenX = screen?.screenX ?? x;
+        const screenY = screen?.screenY ?? y;
+        probeMain(screenX, screenY);
+        return { kind: 'dock', screenX, screenY };
       }
+      if (desktopShell?.windows) overMain = false;
       return findTarget(src, x, y);
     },
     marker: (tg) => (tg.kind === 'dock' ? undefined : { box: markerRect(tg), zone: tg.kind === 'pane' ? tg.zone : tg.kind }),
@@ -122,6 +152,9 @@ export function startPaneDrag(ev: DragStart, src: DragSource) {
         return;
       }
       terms.mutate(src.m, (l) => dropped(l, src, tg));
+    },
+    end: () => {
+      active = false;
     },
     failed: (error) => t('pane.moveFailed', { error }),
   });

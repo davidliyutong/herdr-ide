@@ -65,9 +65,11 @@ describe('desktop app browser panes on https://<slug>.localhost', () => {
     expect(linkPlace('l', 'https://localhost/', 'loopback')).toBe('pane');
   });
 
-  it('refuses only the app’s own host, allowing https://localhost/ on port 443', () => {
+  it('refuses only the app’s own host (including trailing-dot FQDN spellings), allowing https://localhost/ on port 443', () => {
     expect(parseAddress('https://app.localhost/')).toEqual({ kind: 'refused', own: true });
     expect(parseAddress('http://app.localhost/api/x')).toEqual({ kind: 'refused', own: true });
+    expect(parseAddress('https://app.localhost./')).toEqual({ kind: 'refused', own: true });
+    expect(parseAddress('http://app.localhost.:8443/api/x')).toEqual({ kind: 'refused', own: true });
     expect(parseAddress('https://localhost/')).toEqual({ kind: 'page', url: 'https://localhost/', loopback: true, port: 443 });
   });
 });

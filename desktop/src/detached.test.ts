@@ -2,14 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   clampWindowBounds,
+  DETACHED_COMMANDS,
   DETACHED_DEFAULT_HEIGHT,
   DETACHED_DEFAULT_WIDTH,
   DETACHED_MIN_HEIGHT,
   DETACHED_MIN_WIDTH,
   detachedWindowUrl,
+  menuDisabledFor,
+  nextQuitTarget,
   parseOpenTabRequest,
   pointInBounds,
+  type QuitWindow,
 } from './detached';
+import { menuCommands } from './menu';
 
 test('validates and clamps open-tab requests while rejecting malformed inputs', () => {
   assert.equal(parseOpenTabRequest(null), undefined);
@@ -40,10 +45,7 @@ test('validates and clamps open-tab requests while rejecting malformed inputs', 
 });
 
 test('builds encoded app-origin URLs', () => {
-  assert.equal(
-    detachedWindowUrl('https://veldr.localhost', 'm/1', 'view:a:b'),
-    'https://veldr.localhost/window/tab?m=m%2F1&pane=view%3Aa%3Ab',
-  );
+  assert.equal(detachedWindowUrl('https://app.localhost', 'm/1', 'view:a:b'), 'https://app.localhost/window/tab?m=m%2F1&pane=view%3Aa%3Ab');
 });
 
 test('clamps window bounds to the display workArea including secondary monitors', () => {
@@ -75,4 +77,42 @@ test('checks whether a screen point lies inside window bounds', () => {
   assert.equal(pointInBounds(99, 50, bounds), false);
   assert.equal(pointInBounds(901, 50, bounds), false);
   assert.equal(pointInBounds(500, 651, bounds), false);
+});
+
+test('computes native menu disabled commands for detached windows independently of main window state', () => {
+  const all = menuCommands();
+  const mainDisabled = new Set(['pane.close', 'tab.close', 'pane.splitRight', 'find.open', 'workspace.close']);
+  assert.deepEqual(menuDisabledFor(all, mainDisabled, false), mainDisabled);
+
+  const detDisabled = menuDisabledFor(all, mainDisabled, true);
+  // Detached-supported commands stay enabled even when mainWindow disabled them (e.g. all tabs detached).
+  for (const cmd of ['tab.close', ...DETACHED_COMMANDS]) {
+    assert.equal(detDisabled.has(cmd), false, cmd);
+  }
+  // Main-only commands are disabled while a detached window has focus.
+  for (const cmd of ['tab.new', 'tab.rename', 'tab.next', 'workspace.new', 'workspace.close', 'view.toggleSidebar', 'view.togglePanel']) {
+    assert.equal(detDisabled.has(cmd), true, cmd);
+  }
+  // App-level Settings/Shortcuts remain reachable unless disabled by the main window.
+  assert.equal(detDisabled.has('app.settings'), false);
+  assert.equal(detDisabled.has('app.keyboardShortcuts'), false);
+  assert.equal(menuDisabledFor(all, new Set(['app.settings']), true).has('app.settings'), true);
+});
+
+test('selects dirty windows before clean windows when quitting sequentially', () => {
+  const mainClean: QuitWindow<string> = { window: 'main', kind: 'main', unsaved: false };
+  const mainDirty: QuitWindow<string> = { window: 'main', kind: 'main', unsaved: true };
+  const detClean: QuitWindow<string> = { window: 'd1', kind: 'detached', unsaved: false };
+  const detDirty: QuitWindow<string> = { window: 'd2', kind: 'detached', unsaved: true };
+
+  // Dirty detached is prompted before clean main and clean detached.
+  assert.equal(nextQuitTarget([mainClean, detClean, detDirty])?.window, 'd2');
+  // Dirty main is prompted before clean detached.
+  assert.equal(nextQuitTarget([detClean, mainDirty])?.window, 'main');
+  // Dirty detached before dirty main.
+  assert.equal(nextQuitTarget([mainDirty, detDirty])?.window, 'd2');
+  // Once all dirty windows are gone, clean detached closes before clean main.
+  assert.equal(nextQuitTarget([mainClean, detClean])?.window, 'd1');
+  assert.equal(nextQuitTarget([mainClean])?.window, 'main');
+  assert.equal(nextQuitTarget([]), undefined);
 });

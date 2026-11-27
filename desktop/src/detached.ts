@@ -66,3 +66,65 @@ export function clampWindowBounds(req: Pick<OpenTabWindowOptions, 'x' | 'y' | 'w
 export function pointInBounds(px: number, py: number, rect: Rect): boolean {
   return px >= rect.x && px <= rect.x + rect.width && py >= rect.y && py <= rect.y + rect.height;
 }
+
+/** Commands handled directly by a detached tab window (tab.close closes the
+ * detached window itself; app-level Settings / Shortcuts route to the main
+ * window from the native application menu). */
+export const DETACHED_COMMANDS: ReadonlySet<string> = new Set([
+  'pane.splitRight',
+  'pane.splitDown',
+  'pane.zoom',
+  'pane.close',
+  'pane.leave',
+  'pane.focusLeft',
+  'pane.focusRight',
+  'pane.focusUp',
+  'pane.focusDown',
+  'pane.focusNext',
+  'pane.focusPrevious',
+  'find.open',
+  'find.next',
+  'find.previous',
+  'view.zoomIn',
+  'view.zoomOut',
+  'view.zoomReset',
+  'app.commandPalette',
+]);
+
+/** Application-level commands that stay enabled in the native menu while a
+ * detached window is focused (unless disabled by the main window). */
+const DETACHED_APP_MENU_COMMANDS: ReadonlySet<string> = new Set(['app.settings', 'app.keyboardShortcuts']);
+
+/** Computes which application menu commands should be disabled given the main
+ * window's disabled set and whether a detached tab window currently has focus.
+ * Focusing a detached window enables detached-supported commands even when the
+ * main window has no visible tabs, and disables main-only workspace/tab/panel
+ * commands so native accelerators cannot mutate the main window. */
+export function menuDisabledFor(allCommands: readonly string[], mainDisabled: ReadonlySet<string>, detachedFocused: boolean): Set<string> {
+  if (!detachedFocused) return new Set(mainDisabled);
+  const next = new Set<string>();
+  for (const id of allCommands) {
+    if (id === 'tab.close' || DETACHED_COMMANDS.has(id)) continue;
+    if (DETACHED_APP_MENU_COMMANDS.has(id) && !mainDisabled.has(id)) continue;
+    next.add(id);
+  }
+  return next;
+}
+
+export interface QuitWindow<T = unknown> {
+  window: T;
+  kind: 'main' | 'detached';
+  unsaved: boolean;
+}
+
+/** Picks the next tracked window to close during app quit. Dirty windows are
+ * prompted before any clean window closes so cancelling quit on an unsaved
+ * editor never destroys clean windows (including the main window). */
+export function nextQuitTarget<T>(windows: readonly QuitWindow<T>[]): QuitWindow<T> | undefined {
+  return (
+    windows.find((w) => w.unsaved && w.kind === 'detached') ??
+    windows.find((w) => w.unsaved && w.kind === 'main') ??
+    windows.find((w) => !w.unsaved && w.kind === 'detached') ??
+    windows.find((w) => !w.unsaved && w.kind === 'main')
+  );
+}

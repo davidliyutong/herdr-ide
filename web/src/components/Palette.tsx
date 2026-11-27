@@ -15,6 +15,7 @@ import { useReturnFocus } from './useDismiss';
 import { revealTop, visibleRange } from '../lib/windowed';
 import { useSize } from '../lib/sizes';
 import { AGENT_KINDS, startArgv } from '../conversation/kinds';
+import { DETACHED_ALLOWED_COMMANDS, dockCurrentTab, isDetachedWindow } from '../detachedWindow';
 
 // The matcher is shared with the pickers (lib/match.ts).
 export { matchScore };
@@ -69,6 +70,22 @@ export function Palette() {
 
   const items = useMemo<Item[]>(() => {
     if (!mode) return [];
+    const detached = isDetachedWindow();
+    // Commands that open the palette, the tabs by number and commands that
+    // cannot run now are left out.
+    const hidden = /^(app\.commandPalette|workspace\.switch|tab\.select\d)$/;
+    const cmds: Item[] = useKeys
+      .getState()
+      .commands.filter((c) => !hidden.test(c.id) && (!detached || DETACHED_ALLOWED_COMMANDS.has(c.id)) && commandEnabled(c.id))
+      .map((c) => ({ id: `cmd:${c.id}`, label: commandLabel(c.id), hint: keyHint(c.id) || undefined, run: () => runCommand(c.id) }));
+    if (detached) {
+      cmds.unshift({
+        id: 'window:returnToMain',
+        label: t('window.returnToMain'),
+        run: () => dockCurrentTab(),
+      });
+      return cmds;
+    }
     const s = useStore.getState();
     const ws: Item[] = [];
     const tm = useTerms.getState().machines;
@@ -91,13 +108,6 @@ export function Palette() {
       icon: <StatusDot status={i.status} />,
       run: () => focusAttention(i),
     }));
-    // Commands that open the palette, the tabs by number and commands that
-    // cannot run now are left out.
-    const hidden = /^(app\.commandPalette|workspace\.switch|tab\.select\d)$/;
-    const cmds: Item[] = useKeys
-      .getState()
-      .commands.filter((c) => !hidden.test(c.id) && commandEnabled(c.id))
-      .map((c) => ({ id: `cmd:${c.id}`, label: commandLabel(c.id), hint: keyHint(c.id) || undefined, run: () => runCommand(c.id) }));
     for (const a of agentStartItems()) cmds.push({ id: a.id, label: a.label, run: () => void startBeside(a.argv) });
     for (const l of locales) {
       cmds.push({

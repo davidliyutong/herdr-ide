@@ -18,7 +18,9 @@ import type {
   SettingControlProps,
   StatusItemDef,
 } from './api';
-import type { MessageKey } from '../i18n';
+import { t, type MessageKey } from '../i18n';
+import { DETACHED_ALLOWED_COMMANDS, isDetachedWindow } from '../detachedWindow';
+import { useStore } from '../state/store';
 import type { PluginView } from '../term/layout';
 import { registerPluginLoader, replacePlugin } from './registry';
 
@@ -91,6 +93,14 @@ export function lazyPlugin(stub: LazyPluginStub, load: () => Promise<PluginDef>)
   let pending: Promise<PluginDef> | undefined;
   let buffered: Array<{ m: string; data: unknown }> = [];
 
+  const reportLoadFailure = (err: unknown, toastUser: boolean) => {
+    console.warn(`plugin ${stub.id}: failed to load`, err);
+    if (toastUser) {
+      const error = err instanceof Error ? err.message : String(err);
+      useStore.getState().toast(t('plugins.crashedShort', { plugin: t(stub.title), error }), undefined, undefined, 'error');
+    }
+  };
+
   const ensure = (): Promise<PluginDef> => {
     if (loaded) return Promise.resolve(loaded);
     pending ??= load()
@@ -141,7 +151,7 @@ export function lazyPlugin(stub: LazyPluginStub, load: () => Promise<PluginDef>)
             ...(v.preview ? { preview: (m, view) => loaded?.paneViews?.[kind]?.preview?.(m, view) ?? v.preview!(m, view) } : {}),
             menu: (m, view) => {
               if (loaded) return loaded.paneViews?.[kind]?.menu?.(m, view) ?? [];
-              void ensure();
+              void ensure().catch((err) => reportLoadFailure(err, false));
               return [];
             },
             component: LazyPane,
@@ -156,9 +166,16 @@ export function lazyPlugin(stub: LazyPluginStub, load: () => Promise<PluginDef>)
         Object.entries(stub.commands).map(([id, c]) => [
           id,
           {
-            ...(c.enabled ? { enabled: () => (loaded ? (loaded.commands?.[id]?.enabled?.() ?? true) : c.enabled!()) } : {}),
+            enabled: () => {
+              if (isDetachedWindow() && !DETACHED_ALLOWED_COMMANDS.has(id)) return false;
+              return loaded ? (loaded.commands?.[id]?.enabled?.() ?? true) : (c.enabled?.() ?? true);
+            },
             run() {
-              void ensure().then((real) => real.commands?.[id]?.run());
+              if (isDetachedWindow() && !DETACHED_ALLOWED_COMMANDS.has(id)) return;
+              void ensure().then(
+                (real) => real.commands?.[id]?.run(),
+                (err) => reportLoadFailure(err, true),
+              );
             },
           },
         ]),
@@ -213,7 +230,11 @@ export function lazyPlugin(stub: LazyPluginStub, load: () => Promise<PluginDef>)
     // Triggers loading the plugin when StatusBar mounts so background status
     // components (approvals, dialogs) activate right after first paint.
     const BackgroundLoader = lazy(async () => {
-      await ensure();
+      try {
+        await ensure();
+      } catch (err) {
+        reportLoadFailure(err, false);
+      }
       return { default: Empty };
     });
     statusItems.push(BackgroundLoader);
@@ -227,11 +248,13 @@ export function lazyPlugin(stub: LazyPluginStub, load: () => Promise<PluginDef>)
           title: item.title,
           icon: item.icon,
           run: (machine, ws) => {
-            void ensure().then((real) =>
-              real
-                .newTabItems?.(machine)
-                .find((x) => x.id === item.id)
-                ?.run(machine, ws),
+            void ensure().then(
+              (real) =>
+                real
+                  .newTabItems?.(machine)
+                  .find((x) => x.id === item.id)
+                  ?.run(machine, ws),
+              (err) => reportLoadFailure(err, true),
             );
           },
         }));
@@ -258,7 +281,7 @@ export function lazyPlugin(stub: LazyPluginStub, load: () => Promise<PluginDef>)
               return;
             }
             stub.onMessage!(m, data);
-            void ensure();
+            void ensure().catch((err) => reportLoadFailure(err, false));
           },
         }
       : stub.receivesMessages
@@ -269,7 +292,7 @@ export function lazyPlugin(stub: LazyPluginStub, load: () => Promise<PluginDef>)
                 return;
               }
               if (buffered.length < 64) buffered.push({ m, data });
-              void ensure();
+              void ensure().catch((err) => reportLoadFailure(err, false));
             },
           }
         : {}),

@@ -39,6 +39,8 @@ export interface CloseGuardHost {
 export interface CloseGuard {
   /** The page's count of panes with unsaved changes. */
   setUnsaved(n: number): void;
+  /** Whether the page currently reports any unsaved changes. */
+  hasUnsaved(): boolean;
   /** The window's close event: true lets it close now (on to the page's
    * objection to unloading, if any); false prevents it while the page
    * asks. With alwaysAsk, asks even when unsaved is 0 (for detached tab
@@ -67,6 +69,9 @@ export function closeGuard(host: CloseGuardHost): CloseGuard {
   return {
     setUnsaved(n) {
       unsaved = n;
+    },
+    hasUnsaved() {
+      return unsaved > 0;
     },
     onClose(shutdown = false, alwaysAsk = false) {
       if (shutdown || (!alwaysAsk && unsaved === 0)) return true;

@@ -14,6 +14,7 @@ import { desktopShell } from './shell';
 import { useStore } from './state/store';
 import { terms } from './state/terms';
 import * as L from './term/layout';
+import { confirmUnsaved } from './unsaved';
 
 /** Client-side route served by index.html for a standalone tab window. */
 export const DETACHED_TAB_PATH = '/window/tab';
@@ -21,6 +22,33 @@ export const DETACHED_TAB_PATH = '/window/tab';
 /** Default size of a newly opened standalone tab window. */
 export const DETACHED_WIDTH = 1040;
 export const DETACHED_HEIGHT = 720;
+
+/** Commands permitted inside a detached standalone tab window (shortcuts,
+ * native menu dispatch, and command palette). All other commands are scoped
+ * to the main window so detached windows never mutate the main window. */
+export const DETACHED_ALLOWED_COMMANDS: ReadonlySet<string> = new Set([
+  'pane.splitRight',
+  'pane.splitDown',
+  'pane.zoom',
+  'pane.close',
+  'pane.leave',
+  'pane.actions',
+  'pane.rename',
+  'pane.focusLeft',
+  'pane.focusRight',
+  'pane.focusUp',
+  'pane.focusDown',
+  'pane.focusNext',
+  'pane.focusPrevious',
+  'tab.close',
+  'find.open',
+  'find.next',
+  'find.previous',
+  'view.zoomIn',
+  'view.zoomOut',
+  'view.zoomReset',
+  'app.commandPalette',
+]);
 
 export interface DetachedTarget {
   m: string;
@@ -30,16 +58,28 @@ export interface DetachedTarget {
 export interface DetachedRecord {
   winId: string;
   m: string;
+  /** The initial pane key this detached window was opened with (matches
+   * desktop/src/main.ts's window map key even after splits/focus changes). */
+  initialPane?: string;
   panes: string[];
 }
 
+export interface DetachedCurrent {
+  m: string;
+  wsId: string;
+  tabIndex: number;
+}
+
 type WindowMsg =
-  | { type: 'detached'; winId: string; m: string; panes: string[] }
+  | { type: 'detached'; winId: string; m: string; initialPane?: string; panes: string[] }
   | { type: 'closed'; winId: string }
   | { type: 'ping' }
   | { type: 'dock'; winId: string; m: string; pane: string }
   | { type: 'focus'; winId: string }
-  | { type: 'dockAll'; m?: string; ws?: string };
+  | { type: 'dockAll'; m?: string; ws?: string }
+  | { type: 'confirmClose'; reqId: string; winId: string }
+  | { type: 'confirmCloseAck'; reqId: string; winId: string }
+  | { type: 'confirmCloseReply'; reqId: string; winId: string; ok: boolean };
 
 const CHANNEL_NAME = `${APP_SLUG}:windows`;
 
@@ -132,8 +172,9 @@ export function initMainWindowSync(opts: { onDock: (m: string, pane: string) => 
     const msg = ev.data;
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'detached') {
+      const initialPane = msg.initialPane || msg.panes[0];
       useDetachedTabs.setState((s) => ({
-        records: { ...s.records, [msg.winId]: { winId: msg.winId, m: msg.m, panes: msg.panes } },
+        records: { ...s.records, [msg.winId]: { winId: msg.winId, m: msg.m, initialPane, panes: msg.panes } },
       }));
     } else if (msg.type === 'closed') {
       useDetachedTabs.setState((s) => {
@@ -161,17 +202,20 @@ export function initMainWindowSync(opts: { onDock: (m: string, pane: string) => 
 }
 
 /** Starts detached-window coordination: announces this window's tab panes,
- * answers pings from the main window, and handles focus / dockAll requests. */
+ * answers pings from the main window, and handles focus, dockAll, and
+ * cross-window close confirmation requests. */
 export function initDetachedWindowSync(opts: {
   m: string;
+  initialPane: string;
   getPanes: () => string[];
   getWorkspace: () => string | undefined;
   onDockAll: () => void;
+  onConfirmClose?: () => Promise<boolean>;
 }): { announce: () => void; notifyClosed: () => void; notifyDock: (pane: string) => void; dispose: () => void } {
   const ch = openChannel();
   const announce = () => {
     const panes = opts.getPanes();
-    if (panes.length) post({ type: 'detached', winId: thisWindowId, m: opts.m, panes });
+    if (panes.length) post({ type: 'detached', winId: thisWindowId, m: opts.m, initialPane: opts.initialPane, panes });
   };
   const notifyClosed = () => post({ type: 'closed', winId: thisWindowId });
   const notifyDock = (pane: string) => post({ type: 'dock', winId: thisWindowId, m: opts.m, pane });
@@ -184,6 +228,11 @@ export function initDetachedWindowSync(opts: {
       if (msg.m && msg.m !== opts.m) return;
       if (msg.ws && msg.ws !== opts.getWorkspace()) return;
       opts.onDockAll();
+    } else if (msg.type === 'confirmClose' && msg.winId === thisWindowId) {
+      post({ type: 'confirmCloseAck', reqId: msg.reqId, winId: thisWindowId });
+      void (opts.onConfirmClose ? opts.onConfirmClose() : Promise.resolve(true))
+        .then((ok) => post({ type: 'confirmCloseReply', reqId: msg.reqId, winId: thisWindowId, ok }))
+        .catch(() => post({ type: 'confirmCloseReply', reqId: msg.reqId, winId: thisWindowId, ok: false }));
     }
   };
   ch?.addEventListener('message', onMsg);
@@ -199,6 +248,74 @@ export function initDetachedWindowSync(opts: {
   };
 }
 
+/** Coordinates an unsaved-changes check with any detached window hosting one
+ * of `panes` on machine `m` before the main window removes those tabs from the
+ * layout (e.g. closeWorkspaces / closeTabs). Returns false if any detached
+ * window's user cancels the confirmation. */
+export async function confirmDetachedTabs(m: string, panes: readonly string[], ackTimeoutMs = 1500): Promise<boolean> {
+  const paneSet = new Set(panes);
+  const affected = Object.values(useDetachedTabs.getState().records).filter((r) => r.m === m && r.panes.some((p) => paneSet.has(p)));
+  if (!affected.length) return true;
+  const ch = openChannel();
+  if (!ch) return true;
+  try {
+    for (const rec of affected) {
+      const ok = await confirmOneDetached(ch, rec, ackTimeoutMs);
+      if (!ok) return false;
+    }
+    return true;
+  } finally {
+    ch.close();
+  }
+}
+
+function confirmOneDetached(ch: BroadcastChannel, rec: DetachedRecord, ackTimeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const reqId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `cc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let acked = false;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      ch.removeEventListener('message', onMsg);
+      resolve(ok);
+    };
+    const onMsg = (ev: MessageEvent<WindowMsg>) => {
+      const msg = ev.data;
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'confirmCloseAck' && msg.reqId === reqId && msg.winId === rec.winId) {
+        acked = true;
+        if (timer !== undefined) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+      } else if (msg.type === 'confirmCloseReply' && msg.reqId === reqId && msg.winId === rec.winId) {
+        finish(msg.ok);
+      } else if (msg.type === 'closed' && msg.winId === rec.winId) {
+        finish(true);
+      }
+    };
+    ch.addEventListener('message', onMsg);
+    timer = setTimeout(() => {
+      if (!acked) {
+        useDetachedTabs.setState((s) => {
+          if (!s.records[rec.winId]) return s;
+          const next = { ...s.records };
+          delete next[rec.winId];
+          return { records: next };
+        });
+        finish(true);
+      }
+    }, ackTimeoutMs);
+    ch.postMessage({ type: 'confirmClose', reqId, winId: rec.winId } satisfies WindowMsg);
+  });
+}
+
 /** Asks all detached windows (optionally filtered to one machine/workspace)
  * to dock their tabs back into the main window without closing them. */
 export function requestDockAll(m?: string, ws?: string) {
@@ -210,8 +327,22 @@ export function focusDetachedWindow(winId: string) {
   post({ type: 'focus', winId });
 }
 
-/** Registered by DetachedTabApp so PaneActions and paneDrag can dock the
- * current standalone window back to the main window. */
+/** Brings an already-open detached window to the front using its stable
+ * initialPane key so desktop never spawns a duplicate window after splits or
+ * focus changes inside the detached tab. */
+export async function focusDetachedRecord(rec: DetachedRecord, title?: string): Promise<boolean> {
+  focusDetachedWindow(rec.winId);
+  if (desktopShell?.windows) {
+    const targetPane = rec.initialPane || rec.panes[0];
+    if (targetPane) {
+      return await desktopShell.windows.openTab({ m: rec.m, pane: targetPane, title });
+    }
+  }
+  return true;
+}
+
+/** Registered by DetachedTabApp so PaneActions, Palette and paneDrag can dock
+ * the current standalone window back to the main window. */
 let dockHandler: (() => void) | undefined;
 export function setDockHandler(fn: (() => void) | undefined) {
   dockHandler = fn;
@@ -222,9 +353,33 @@ export function dockCurrentTab() {
   dockHandler?.();
 }
 
+/** Registered by DetachedTabApp so actions.current() resolves to this detached
+ * window's own tab instead of the shared layout's selected workspace/tab. */
+let detachedCurrentGetter: (() => DetachedCurrent | undefined) | undefined;
+export function setDetachedCurrentGetter(fn: (() => DetachedCurrent | undefined) | undefined) {
+  detachedCurrentGetter = fn;
+}
+
+export function getDetachedCurrent(): DetachedCurrent | undefined {
+  return detachedCurrentGetter?.();
+}
+
+/** Registered by DetachedTabApp so tab.close closes this detached window
+ * cleanly after confirming unsaved changes and removing its tab. */
+let detachedCloseHandler: (() => void) | undefined;
+export function setDetachedCloseHandler(fn: (() => void) | undefined) {
+  detachedCloseHandler = fn;
+}
+
+export function closeDetachedWindow() {
+  detachedCloseHandler?.();
+}
+
 /** Opens a tab in a standalone core-pane-only window (Electron BrowserWindow
- * in the desktop app, or a popup window in browsers). Selects a remaining
- * visible tab in the main window when one exists. */
+ * in the desktop app, or a popup window in browsers). Confirms any unsaved
+ * editor edits before detaching so edits are never lost across window
+ * transitions, and selects a remaining visible tab in the main window when one
+ * exists. */
 export async function openDetachedTab(
   m: string,
   wsId: string,
@@ -239,14 +394,27 @@ export async function openDetachedTab(
   const pane = tab.focused || panes[0];
   if (!pane) return false;
 
-  // If already detached, just bring that window forward.
+  // If already detached, just bring that window forward using its stable key.
   const existing = detachedRecordForTab(m, tab);
   if (existing) {
-    focusDetachedWindow(existing.winId);
-    if (desktopShell?.windows) {
-      await desktopShell.windows.openTab({ m, pane, title: opts.title });
-    }
-    return true;
+    return await focusDetachedRecord(existing, opts.title);
+  }
+
+  // Confirm unsaved edits in this tab before opening a separate window where
+  // editors load fresh from disk.
+  if (!(await confirmUnsaved(m, panes))) return false;
+
+  // Re-read layout in case tabs changed while the unsaved dialog was open.
+  const liveLayout = terms.layout(m);
+  const liveWs = liveLayout?.workspaces.find((w) => w.id === wsId);
+  const liveTab = liveWs?.tabs[index];
+  if (!liveWs || !liveTab) return false;
+  const livePanes = L.tabPanes(liveTab);
+  const livePane = liveTab.focused || livePanes[0];
+  if (!livePane) return false;
+  const liveExisting = detachedRecordForTab(m, liveTab);
+  if (liveExisting) {
+    return await focusDetachedRecord(liveExisting, opts.title);
   }
 
   const width = opts.width ?? DETACHED_WIDTH;
@@ -256,12 +424,12 @@ export async function openDetachedTab(
 
   let opened = false;
   if (desktopShell?.windows) {
-    opened = await desktopShell.windows.openTab({ m, pane, x, y, width, height, title: opts.title });
+    opened = await desktopShell.windows.openTab({ m, pane: livePane, x, y, width, height, title: opts.title });
   } else {
     const parts = [`popup`, `width=${width}`, `height=${height}`];
     if (x !== undefined) parts.push(`left=${Math.max(0, x)}`);
     if (y !== undefined) parts.push(`top=${Math.max(0, y)}`);
-    const win = window.open(detachedTabUrl(m, pane), `${APP_SLUG}-tab-${m}-${pane}`, parts.join(','));
+    const win = window.open(detachedTabUrl(m, livePane), `${APP_SLUG}-tab-${m}-${livePane}`, parts.join(','));
     if (win) {
       win.focus();
       opened = true;
@@ -270,10 +438,10 @@ export async function openDetachedTab(
     }
   }
 
-  if (opened && ws.tabs.length > 1) {
+  if (opened && liveWs.tabs.length > 1) {
     const records = useDetachedTabs.getState().records;
-    const nextIdx = ws.tabs.findIndex((tb, i) => i !== index && !detachedRecordForTab(m, tb, records));
-    if (nextIdx >= 0 && ws.selected === index) {
+    const nextIdx = liveWs.tabs.findIndex((tb, i) => i !== index && !detachedRecordForTab(m, tb, records));
+    if (nextIdx >= 0 && liveWs.selected === index) {
       terms.mutate(m, (l) => L.selectTab(l, wsId, nextIdx));
     }
   }

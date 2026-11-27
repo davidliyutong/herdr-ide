@@ -6,7 +6,16 @@
 // they came from (docs/features/05-vscode-panes.md).
 
 import * as L from './term/layout';
-import { describeView, isPluginOn, viewStatus, viewUnopened } from './plugins/registry';
+import { describeView, ensurePluginLoaded, isPluginOn, viewStatus, viewUnopened } from './plugins/registry';
+import {
+  confirmDetachedTabs,
+  detachedRecordForPane,
+  detachedRecordForTab,
+  focusDetachedRecord,
+  getDetachedCurrent,
+  isDetachedWindow,
+  useDetachedTabs,
+} from './detachedWindow';
 import { isLive, type TerminalRecord } from './term/protocol';
 import { terms, useTerms } from './state/terms';
 import { useStore } from './state/store';
@@ -129,13 +138,47 @@ export const paneRects = L.paneRects;
 /** Whether a pane of the history is still open. */
 export const spotOpen = (s: Spot) => paneOpen(useTerms.getState().machines[s.m]?.layout, s.pane);
 
+/** Updates focus to `key` in `layout`: in a detached window, updates only
+ * that tab's focused pane without mutating `layout.selected` or `ws.selected`
+ * so the main window never jumps workspaces or tabs. */
+export function focusPaneInLayout(layout: L.Layout, key: string): L.Layout {
+  if (!isDetachedWindow()) return L.focusPane(layout, key);
+  const at = L.locate(layout, key);
+  if (!at) return layout;
+  const ws = layout.workspaces[at.workspace];
+  const tab = ws.tabs[at.tab];
+  if (tab.focused === key) return layout;
+  const tabs = ws.tabs.map((t, i) => (i === at.tab ? { ...t, focused: key } : t));
+  const workspaces = layout.workspaces.map((w, i) => (i === at.workspace ? { ...w, tabs } : w));
+  return { ...layout, workspaces };
+}
+
+/** Triggers lazy loading of the vault plugin before workspace dialogs so
+ * workspace preset links and their saver are registered (including inside
+ * detached windows where the right rail never mounted). */
+async function ensureVaultReady() {
+  if (isPluginOn('vault')) await ensurePluginLoaded('vault').catch(() => {});
+}
+
 export function current() {
+  if (isDetachedWindow()) {
+    const det = getDetachedCurrent();
+    if (!det) return undefined;
+    const layout = useTerms.getState().machines[det.m]?.layout;
+    const ws = layout?.workspaces.find((w) => w.id === det.wsId);
+    const tab = ws?.tabs[det.tabIndex];
+    if (!layout || !ws || !tab) return undefined;
+    return { m: det.m, layout, ws, tabIndex: det.tabIndex, tab, focused: tab.focused || undefined };
+  }
   const m = useStore.getState().machineId;
   const layout = m ? useTerms.getState().machines[m]?.layout : undefined;
   if (!m || !layout) return undefined;
   const ws = L.selectedWorkspace(layout);
-  const tab = ws?.tabs[ws.selected];
-  return { m, layout, ws, tabIndex: ws?.selected ?? 0, tab, focused: tab?.focused || undefined };
+  if (!ws) return { m, layout, ws: undefined, tabIndex: 0, tab: undefined, focused: undefined };
+  const records = useDetachedTabs.getState().records;
+  const visible = ws.tabs.map((tb, i) => ({ tb, i })).filter(({ tb }) => !detachedRecordForTab(m, tb, records));
+  const entry = visible.find((x) => x.i === ws.selected) ?? visible[0];
+  return { m, layout, ws, tabIndex: entry?.i ?? 0, tab: entry?.tb, focused: entry?.tb.focused || undefined };
 }
 
 /** Puts the keyboard in a pane once it is on screen. */
@@ -343,7 +386,7 @@ export const actions = {
   /** Splits a pane: the new terminal starts in its directory (a VS Code
    * pane's folder, a preview's file's directory). */
   async split(m: string, pane: string, dir: 'right' | 'down', argv?: string[]) {
-    terms.mutate(m, (l) => L.focusPane(l, pane));
+    terms.mutate(m, (l) => focusPaneInLayout(l, pane));
     const layout = terms.layout(m);
     const cwd = layout ? paneDirectory(m, L.findLeaf(layout, pane)) : undefined;
     const at = layout ? L.locate(layout, pane) : null;
@@ -379,12 +422,14 @@ export const actions = {
     const layout = terms.layout(m);
     const leaf = layout && L.findLeaf(layout, pane);
     if (!leaf) return;
+    void ensureVaultReady();
     const def = paneDirectory(m, leaf) || useStore.getState().machines[m]?.info?.home || '~';
     const input = await newWorkspaceDialog(m, def);
     if (!input) return;
     const id = L.newId();
     actions.movePaneToWorkspace(m, pane, id, { name: input.label, cwd: input.cwd });
     if (input.presets?.length) {
+      await ensureVaultReady();
       await saveWorkspacePresets(m, id, input.presets, input.passphrase).catch((e) =>
         useStore
           .getState()
@@ -409,6 +454,7 @@ export const actions = {
    * later, and Undo Close brings it back until then (closedPanes.ts). */
   async closePane(m: string, pane: string) {
     if (!(await confirmUnsaved(m, [pane]))) return;
+    if (!isDetachedWindow() && !(await confirmDetachedTabs(m, [pane]))) return;
     const layout = terms.layout(m);
     if (layout) closeWithUndo(m, layout, [[pane]], t('closed.pane'));
     terms.mutate(m, (l) => L.closePane(l, pane));
@@ -484,8 +530,13 @@ export const actions = {
     const layout = terms.layout(m);
     const tab = layout?.workspaces.find((w) => w.id === ws)?.tabs[index];
     if (!layout || !tab) return;
-    if (!(await confirmUnsaved(m, L.tabPanes(tab)))) return;
-    closeWithUndo(m, layout, [L.tabPanes(tab)], t('closed.tab'));
+    const panes = L.tabPanes(tab);
+    if (!(await confirmUnsaved(m, panes))) return;
+    if (!isDetachedWindow() && !(await confirmDetachedTabs(m, panes))) return;
+    const liveLayout = terms.layout(m);
+    const liveTab = liveLayout?.workspaces.find((w) => w.id === ws)?.tabs[index];
+    if (!liveLayout || !liveTab) return;
+    closeWithUndo(m, liveLayout, [L.tabPanes(liveTab)], t('closed.tab'));
     terms.mutate(m, (l) => L.closeTab(l, ws, index));
   },
 
@@ -497,13 +548,9 @@ export const actions = {
     const found = before && tabsAt(before, keys);
     if (!found) return;
     if (found.indexes.length === 1) return actions.closeTab(m, found.ws.id, found.indexes[0]);
-    if (
-      !(await confirmUnsaved(
-        m,
-        found.indexes.flatMap((i) => L.tabPanes(found.ws.tabs[i])),
-      ))
-    )
-      return;
+    const allPanes = found.indexes.flatMap((i) => L.tabPanes(found.ws.tabs[i]));
+    if (!(await confirmUnsaved(m, allPanes))) return;
+    if (!isDetachedWindow() && !(await confirmDetachedTabs(m, allPanes))) return;
     // Read again: another client may have changed the tabs meanwhile.
     const layout = terms.layout(m);
     const now = layout && tabsAt(layout, keys);
@@ -519,11 +566,15 @@ export const actions = {
   },
 
   /** Closes every tab of a workspace but one (others) or those after it
-   * (right), at once, with one Undo, as closeTabs; pinned tabs stay. */
+   * (right), at once, with one Undo, as closeTabs; pinned and detached tabs
+   * stay open in their own windows. */
   async closeTabsBeside(m: string, ws: string, index: number, which: 'others' | 'right') {
     const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
     if (!w?.tabs[index]) return;
-    const keys = w.tabs.filter((tab, i) => !tab.pinned && (which === 'others' ? i !== index : i > index)).map((tab) => L.tabPanes(tab)[0]);
+    const records = useDetachedTabs.getState().records;
+    const keys = w.tabs
+      .filter((tab, i) => !tab.pinned && !detachedRecordForTab(m, tab, records) && (which === 'others' ? i !== index : i > index))
+      .map((tab) => L.tabPanes(tab)[0]);
     if (keys.length) await actions.closeTabs(m, keys);
   },
 
@@ -566,6 +617,7 @@ export const actions = {
     const layout = terms.layout(m);
     const at = layout && tabsAt(layout, keys);
     if (!at) return;
+    void ensureVaultReady();
     const first = at.ws.tabs[at.indexes[0]];
     const def = paneDirectory(m, L.leafOf(first.root, first.focused)) || useStore.getState().machines[m]?.info?.home || '~';
     const input = await newWorkspaceDialog(m, def);
@@ -573,6 +625,7 @@ export const actions = {
     const id = L.newId();
     actions.moveTabsToWorkspace(m, keys, id, { name: input.label, cwd: input.cwd });
     if (input.presets?.length) {
+      await ensureVaultReady();
       await saveWorkspacePresets(m, id, input.presets, input.passphrase).catch((e) =>
         useStore
           .getState()
@@ -792,6 +845,7 @@ export const actions = {
     let presets: string[] | undefined;
     let passphrase: string | undefined;
     if (cwd === undefined) {
+      void ensureVaultReady();
       const c = current();
       const def = (c?.m === m && terms.directory(m, c.focused)) || useStore.getState().machines[m]?.info?.home || '~';
       const input = await newWorkspaceDialog(m, def);
@@ -807,6 +861,7 @@ export const actions = {
     await whenLoaded(m);
     terms.mutate(m, (l) => L.createWorkspace(l, id, own, dir));
     if (presets?.length) {
+      await ensureVaultReady();
       await saveWorkspacePresets(m, id, presets, passphrase).catch((e) =>
         useStore
           .getState()
@@ -859,13 +914,9 @@ export const actions = {
     const layout = terms.layout(m);
     const list = ids.map((id) => layout?.workspaces.find((w) => w.id === id)).filter((w) => w !== undefined);
     if (!list.length) return;
-    if (
-      !(await confirmUnsaved(
-        m,
-        list.flatMap((w) => w.tabs.flatMap(L.tabPanes)),
-      ))
-    )
-      return;
+    const allPanes = list.flatMap((w) => w.tabs.flatMap(L.tabPanes));
+    if (!(await confirmUnsaved(m, allPanes))) return;
+    if (!isDetachedWindow() && !(await confirmDetachedTabs(m, allPanes))) return;
     // What they hold now: another client may have changed them meanwhile.
     const now = terms.layout(m);
     if (!now) return;
@@ -901,10 +952,12 @@ export const actions = {
   async editWorkspace(m: string, ws: string) {
     const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
     if (!w) return;
+    void ensureVaultReady();
     const input = await editWorkspaceDialog(m, w.cwd, w.name, w.id);
     if (!input) return;
     terms.mutate(m, (l) => L.editWorkspace(l, ws, input.label, input.cwd));
     if (input.presets !== undefined) {
+      await ensureVaultReady();
       await saveWorkspacePresets(m, ws, input.presets, input.passphrase).catch((e) =>
         useStore
           .getState()
@@ -939,18 +992,40 @@ export const actions = {
     terms.mutate(m, (l) => L.selectTab(l, ws, index));
   },
 
-  /** Selects a pane's machine, workspace and tab and gives it the focus. */
+  /** Selects a pane's machine, workspace and tab and gives it the focus.
+   * When called from the main window for a pane hosted in a detached window,
+   * updates that tab's focused pane in place and brings the detached window
+   * forward instead of leaving the main window on a hidden tab. */
   focusPane(m: string, pane: string) {
+    if (!isDetachedWindow()) {
+      const detached = detachedRecordForPane(m, pane);
+      if (detached) {
+        terms.mutate(m, (l) => {
+          const at = L.locate(l, pane);
+          if (!at) return l;
+          const ws = l.workspaces[at.workspace];
+          const tab = ws.tabs[at.tab];
+          if (tab.focused === pane) return l;
+          const tabs = ws.tabs.map((t, i) => (i === at.tab ? { ...t, focused: pane } : t));
+          const workspaces = l.workspaces.map((w, i) => (i === at.workspace ? { ...w, tabs } : w));
+          return { ...l, workspaces };
+        });
+        void focusDetachedRecord(detached);
+        return;
+      }
+    }
     useStore.getState().selectMachine(m);
     terms.subscribe(m);
-    terms.mutate(m, (l) => L.focusPane(l, pane));
+    terms.mutate(m, (l) => focusPaneInLayout(l, pane));
     focusDom(m, pane);
   },
 
   focusDirection(dir: L.Direction) {
     const c = current();
-    const next = c && L.neighbor(c.layout, dir);
-    if (c && next) actions.focusPane(c.m, next);
+    if (!c?.ws || !c.tab) return;
+    const scoped: L.Layout = { version: c.layout.version, selected: 0, workspaces: [{ ...c.ws, selected: c.tabIndex }] };
+    const next = L.neighbor(scoped, dir);
+    if (next) actions.focusPane(c.m, next);
   },
 
   /** Goes back (-1) or forward (1) through the panes focused (paneHistory.ts). */
@@ -976,14 +1051,25 @@ export const actions = {
     actions.selectWorkspace(c.m, c.layout.workspaces[(c.layout.selected + step + n) % n].id);
   },
 
-  /** Selects the next (1) or previous (-1) tab, the tab at an index, or the last one. */
+  /** Selects the next (1) or previous (-1) visible tab, the visible tab at an
+   * index, or the last visible one (skipping tabs open in detached windows). */
   switchTab(step: number | { index: number } | { last: true }) {
     const c = current();
     if (!c?.ws) return;
-    const n = c.ws.tabs.length;
+    const records = useDetachedTabs.getState().records;
+    const visible = c.ws.tabs.map((tb, i) => ({ tb, i })).filter(({ tb }) => !detachedRecordForTab(c.m, tb, records));
+    const n = visible.length;
     if (!n) return;
-    const index = typeof step === 'number' ? (c.ws.selected + step + n) % n : 'last' in step ? n - 1 : step.index;
-    if (index < n) actions.selectTab(c.m, c.ws.id, index);
+    let target: number | undefined;
+    if (typeof step === 'number') {
+      const pos = visible.findIndex((x) => x.i === c.tabIndex);
+      target = visible[((pos >= 0 ? pos : 0) + step + n) % n]?.i;
+    } else if ('last' in step) {
+      target = visible[n - 1]?.i;
+    } else {
+      target = visible[step.index]?.i;
+    }
+    if (target !== undefined) actions.selectTab(c.m, c.ws.id, target);
   },
 
   /** The focused pane (the terminal, when it is one), its machine and the

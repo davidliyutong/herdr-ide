@@ -23,8 +23,13 @@ function host() {
 test('a page without unsaved changes closes at once', () => {
   const { h, log } = host();
   const g = closeGuard(h);
+  assert.equal(g.hasUnsaved(), false);
   assert.equal(g.onClose(), true);
   assert.deepEqual(log, []);
+  g.setUnsaved(2);
+  assert.equal(g.hasUnsaved(), true);
+  g.reset();
+  assert.equal(g.hasUnsaved(), false);
 });
 
 test('the page asks; Close closes once, the next close asks again', () => {

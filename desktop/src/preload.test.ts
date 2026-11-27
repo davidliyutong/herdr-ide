@@ -143,10 +143,20 @@ test('closing with unsaved changes: a count and an answer from the page, a reque
   sent.length = 0;
 });
 
-test('detached tab windows bridge validates requests and omits macOS integrated titlebar', async () => {
-  const det = desktopShellFor('darwin', true);
-  assert.equal(det.detached, true);
-  assert.equal(det.titlebar, undefined);
+test('detached tab windows bridge exposes only per-window methods and validates requests', async () => {
+  const expectedDetached = ['answerClose', 'browser', 'detached', 'onCloseRequest', 'onCommand', 'pathForFile', 'setUnsaved', 'windows'];
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const det = desktopShellFor(platform, true);
+    assert.equal(det.detached, true);
+    assert.deepEqual(Object.keys(det).sort(), expectedDetached);
+    assert.equal('titlebar' in det, false);
+    assert.equal('privacy' in det, false);
+    assert.equal('verifyUser' in det, false);
+    assert.equal('notifications' in det, false);
+    assert.equal('metrics' in det, false);
+    assert.equal('onOpenFolders' in det, false);
+    assert.equal('setDisabledCommands' in det, false);
+  }
   invoked.length = 0;
   sent.length = 0;
   answers.set(channels.windowOpenTab, true);
