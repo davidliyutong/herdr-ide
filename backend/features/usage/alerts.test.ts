@@ -149,3 +149,17 @@ test('kept across restarts', async () => {
   await again.t.u.loadHistory();
   expect(await again.poll(7200, win('weekly', 85, T0 + 86400, 604800))).toEqual([]);
 });
+
+test('suppresses Antigravity unentitled 100% third-party buckets while alerting on genuinely used ones', async () => {
+  const r = alertRun(['80', '95']);
+  const gemini = { ...win('weekly', 20, T0 + 86400, 604800), label: 'Gemini Models' };
+  const unentitled = { ...win('weekly', 100, T0 + 86400, 604800), label: 'Claude and GPT' };
+  // Pinned at 100% from the start alongside Gemini: no false 80%/95% alerts.
+  expect(await r.poll(0, gemini, unentitled)).toEqual([]);
+  expect(await r.poll(90_000, { ...gemini, resetsAt: T0 + 200_000 }, { ...unentitled, resetsAt: T0 + 200_000 })).toEqual([]);
+  // A genuinely active Claude and GPT sub-quota (<100% -> 85% -> 100%) still alerts normally.
+  const active = alertRun(['80', '95']);
+  expect(await active.poll(0, gemini, { ...unentitled, usedPct: 62 })).toEqual([]);
+  expect(await active.poll(300, gemini, { ...unentitled, usedPct: 85 })).toEqual(['threshold:80']);
+  expect(await active.poll(600, gemini, { ...unentitled, usedPct: 100 })).toEqual(['threshold:95']);
+});

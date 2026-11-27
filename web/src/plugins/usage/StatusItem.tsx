@@ -18,6 +18,7 @@ import {
   SUMMARY_WINDOW_ID,
   accountUsedPct,
   costOf,
+  cycleWindowLabel,
   duration,
   is5hWindow,
   is7dWindow,
@@ -31,6 +32,7 @@ import {
   tightestWindow,
   tokens,
   windowName,
+  type CostReport,
   type MergedUsageAccount,
   type StatusBarProvider,
   type StatusBarWindowMode,
@@ -77,6 +79,7 @@ export function AccountLine({
   remaining,
   warnAt,
   nowSec,
+  cost,
 }: {
   account: UsageAccount;
   window: UsageWindow;
@@ -84,10 +87,13 @@ export function AccountLine({
   remaining: boolean;
   warnAt: number;
   nowSec: number;
+  cost?: CostReport;
 }) {
   const merged = isMergedAccount(a);
   const isSummary = merged && w.id === SUMMARY_WINDOW_ID;
-  const subtitle = isSummary ? (mergedValueText(a, remaining) ?? t('usage.merged.combined')) : windowName(w);
+  const summaryCycle = isSummary && a.summary.window ? cycleWindowLabel(a.summary.window) : undefined;
+  const summaryVal = isSummary ? mergedValueText(a, remaining) : undefined;
+  const subtitle = isSummary ? [summaryCycle, summaryVal].filter(Boolean).join(' · ') || t('usage.merged.combined') : windowName(w);
   return (
     <div
       className={`usage-hover-row level-${levelOf(w.usedPct, warnAt) || 'ok'}`}
@@ -111,7 +117,7 @@ export function AccountLine({
       {merged && (
         <div className="usage-hover-members">
           {a.members.map((m) => {
-            const mPct = accountUsedPct(m, nowSec);
+            const mPct = accountUsedPct(m, nowSec, cost);
             return (
               <div key={m.key} className="usage-hover-sub muted" data-member={m.key}>
                 <span className="ellipsis">{m.email || m.plan || m.key}</span>
@@ -180,7 +186,7 @@ export function UsageStatusItem() {
   }, [hover]);
   const agent = useFocusedAgent();
   const nowSec = Date.now() / 1000;
-  const top = statusBarSelection(snapshot, { agent, defaultProvider, windowMode, machineId, now: nowSec });
+  const top = statusBarSelection(snapshot, { agent, defaultProvider, windowMode, machineId, now: nowSec, cost });
   if (!top || !shown) return null;
   const label = formatStatusBarLabel(top.primary, top.secondary, windowMode, remaining);
   const worstPct = top.secondary ? Math.max(top.primary.usedPct, top.secondary.usedPct) : top.primary.usedPct;
@@ -194,14 +200,20 @@ export function UsageStatusItem() {
     : `${providerName(top.account.provider)} · ${primaryName}`;
   const hoverWindow = (a: UsageAccount | MergedUsageAccount): UsageWindow | undefined => {
     if (isMergedAccount(a) && a.summary.usedPct !== undefined) {
-      return { id: SUMMARY_WINDOW_ID, kind: 'monthly', usedPct: a.summary.usedPct, resetsAt: a.summary.resetsAt };
+      return {
+        id: SUMMARY_WINDOW_ID,
+        kind: a.summary.window?.kind ?? 'monthly',
+        windowSec: a.summary.window?.windowSec,
+        usedPct: a.summary.usedPct,
+        resetsAt: a.summary.resetsAt,
+      };
     }
     const w = tightestWindow(a, nowSec);
     if (w) return w;
-    const pct = accountUsedPct(a, nowSec);
+    const pct = accountUsedPct(a, nowSec, cost);
     return pct !== undefined ? { kind: 'monthly', usedPct: pct } : undefined;
   };
-  const rows = previewAccounts(snapshot?.accounts ?? [], nowSec)
+  const rows = previewAccounts(snapshot?.accounts ?? [], nowSec, cost)
     .map((account) => ({ account, window: hoverWindow(account) }))
     .filter((entry): entry is { account: UsageAccount | MergedUsageAccount; window: UsageWindow } => !!entry.window)
     .slice(0, MAX_ACCOUNTS);
@@ -233,6 +245,7 @@ export function UsageStatusItem() {
               remaining={remaining}
               warnAt={warnAt}
               nowSec={nowSec}
+              cost={cost}
             />
           ))}
           {today && <div className="usage-hover-today">{today}</div>}

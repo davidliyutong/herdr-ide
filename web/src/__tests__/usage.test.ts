@@ -31,12 +31,16 @@ import {
   costOf,
   daily,
   dailyDetails,
+  dayOf,
   equivalents,
   estimateAccountValue,
   estimatePlanUsd,
+  estimatePlanWeight,
   isMergedAccount,
   mergeProviderAccounts,
+  pickAccountWindows,
   previewAccounts,
+  primaryWindowsOf,
   rank,
   rankTokens,
   sortAccounts,
@@ -45,6 +49,7 @@ import {
   shortModel,
   tightest,
   tightestFor,
+  tightestWindow,
   tokenKinds,
   windowApplies,
   windowSpend,
@@ -941,24 +946,30 @@ describe('usage panel and status item', () => {
     expect(btn.querySelector('.ai-logo')).not.toBeNull();
   });
 
-  it('merges multi-account providers across all services with monetary-value weighting and clean equal-weight fallback', () => {
-    expect(estimatePlanUsd('claude', 'Pro')).toBe(20);
-    expect(estimatePlanUsd('claude', 'Max 5x')).toBe(100);
+  it('merges multi-account providers using quota tier weights, cycle-consistent bucketing, and empirical cycle API value', () => {
+    // True quota tier multipliers (baseline paid plan = 1; Claude Max 20x is 20x Pro, not 10x).
+    expect(estimatePlanWeight('claude', 'Pro')).toBe(1);
+    expect(estimatePlanWeight('claude', 'Max 5x')).toBe(5);
+    expect(estimatePlanWeight('claude', 'Max 20x')).toBe(20);
+    expect(estimatePlanWeight('codex', 'Plus')).toBe(1);
+    expect(estimatePlanWeight('codex', 'Pro')).toBe(10);
+    expect(estimatePlanWeight('antigravity', 'Free')).toBe(0.2);
+    expect(estimatePlanWeight('antigravity', 'Google AI Pro')).toBe(1);
+    expect(estimatePlanWeight('antigravity', 'Google One AI Ultra')).toBe(12.5);
+    expect(estimatePlanWeight('grok', 'SuperGrok')).toBe(1);
+    expect(estimatePlanWeight('grok', 'SuperGrok Heavy')).toBe(10);
+    expect(estimatePlanWeight('claude', 'UnknownTier')).toBeUndefined();
     expect(estimatePlanUsd('claude', 'Max 20x')).toBe(200);
-    expect(estimatePlanUsd('codex', 'Plus')).toBe(20);
-    expect(estimatePlanUsd('codex', 'Pro')).toBe(200);
-    expect(estimatePlanUsd('antigravity', 'Free')).toBe(4);
-    expect(estimatePlanUsd('antigravity', 'Google AI Pro')).toBe(20);
-    expect(estimatePlanUsd('antigravity', 'Google One AI Ultra')).toBe(250);
-    expect(estimatePlanUsd('grok', 'SuperGrok')).toBe(30);
-    expect(estimatePlanUsd('grok', 'SuperGrok Heavy')).toBe(300);
-    expect(estimatePlanUsd('claude', 'UnknownTier')).toBeUndefined();
 
-    // Claude Pro ($20, tightest 80% used -> $4 avail) + Max 20x ($200, tightest 20% used -> $160 avail)
-    // Total capacity $220, available $164, used $56 -> 74.55% left / 25.45% used.
+    // Without CostReport: tier-weighted over comparable cycles (never mixes 5h with 7d,
+    // never displays monthly subscription fees as current-cycle API capacity).
+    // Claude Pro (1x: 5h=80%, 7d=50%) + Max 20x (20x: 5h=10%, 7d=20%)
+    // 5h merged = (1*80 + 20*10) / 21 = 13.33%; 7d merged = (1*50 + 20*20) / 21 = 21.43%.
+    // Tightest shared cycle is 7d (21.43% used / 78.57% left).
     const cPro = account('claude:pro', [], {
       plan: 'Pro',
       email: 'pro@example.com',
+      machines: ['m1'],
       windows: [
         { kind: 'session', usedPct: 80, resetsAt: now + 3600, windowSec: 18000 },
         { kind: 'weekly', usedPct: 50, resetsAt: now + 86400, windowSec: 604800 },
@@ -967,98 +978,289 @@ describe('usage panel and status item', () => {
     const cMax = account('claude:max', [], {
       plan: 'Max 20x',
       email: 'max@example.com',
+      machines: ['m2'],
       windows: [
         { kind: 'session', usedPct: 10, resetsAt: now + 3600, windowSec: 18000 },
-        { kind: 'weekly', usedPct: 20, resetsAt: now + 86400, windowSec: 604800 },
+        { kind: 'weekly', usedPct: 20, resetsAt: now + 2 * 86400, windowSec: 604800 },
       ],
     });
-    const mergedClaude = mergeProviderAccounts([cPro, cMax], 'claude', now)!;
-    expect(isMergedAccount(mergedClaude)).toBe(true);
-    expect(mergedClaude.key).toBe('claude:merged');
-    expect(mergedClaude.accountCount).toBe(2);
-    expect(mergedClaude.summary.weighting).toBe('value');
-    expect(mergedClaude.summary.capacityUsd).toBe(220);
-    expect(mergedClaude.summary.availableUsd).toBe(164);
-    expect(mergedClaude.summary.usedUsd).toBe(56);
-    expect(mergedClaude.summary.usedPct).toBeCloseTo(25.45, 1);
-    expect(mergedClaude.summary.remainingPct).toBeCloseTo(74.55, 1);
-    // Per-window buckets are also weighted by subscription tier ($20 vs $200).
-    expect(mergedClaude.windows.find((w) => w.kind === 'session')?.usedPct).toBeCloseTo(16.36, 1);
-    expect(mergedClaude.windows.find((w) => w.kind === 'weekly')?.usedPct).toBeCloseTo(22.73, 1);
+    const mergedClaudeTier = mergeProviderAccounts([cPro, cMax], 'claude', now)!;
+    expect(isMergedAccount(mergedClaudeTier)).toBe(true);
+    expect(mergedClaudeTier.key).toBe('claude:merged');
+    expect(mergedClaudeTier.accountCount).toBe(2);
+    expect(mergedClaudeTier.summary.weighting).toBe('tier');
+    expect(mergedClaudeTier.summary.window?.kind).toBe('weekly');
+    expect(mergedClaudeTier.summary.capacityUsd).toBeUndefined();
+    expect(mergedClaudeTier.summary.usedUsd).toBeUndefined();
+    expect(mergedClaudeTier.summary.usedPct).toBeCloseTo(21.43, 1);
+    expect(mergedClaudeTier.summary.remainingPct).toBeCloseTo(78.57, 1);
+    expect(mergedClaudeTier.summary.resetsAt).toBe(now + 86400);
+    expect(mergedClaudeTier.windows.find((w) => w.kind === 'session')?.usedPct).toBeCloseTo(13.33, 1);
+    expect(mergedClaudeTier.windows.find((w) => w.kind === 'weekly')?.usedPct).toBeCloseTo(21.43, 1);
 
-    // Codex Plus ($20, 100% used -> $0 avail) + Pro ($200, 20% used -> $160 avail)
-    // Total capacity $220, available $160 -> 72.73% left / 27.27% used.
+    // With CostReport (disjoint machines): estimates real current-cycle equivalent API value!
+    // m1 (Pro, 7d=50%) spent $50 -> $100 full 7d API capacity;
+    // m2 (Max 20x, 7d=20%) spent $400 -> $2000 full 7d API capacity.
+    // Combined 7d cycle: $450 used / $2100 total ($1650 left) = 21.43% used.
+    const slot = (provider: string, machine: string, at: number, cost: number): CostSlot => ({
+      at,
+      provider,
+      machine,
+      tokens: 1000,
+      requests: 1,
+      cost,
+      priced: true,
+    });
+    const costRep = (recent: CostSlot[], rows: CostRow[] = []): CostReport => ({
+      generatedAt: now,
+      days: 90,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows,
+      recentSince: now - 8 * 86400,
+      recent,
+    });
+    const claudeCost = costRep([
+      slot('claude', 'm1', now - 2 * 86400, 42),
+      slot('claude', 'm1', now - 1800, 8),
+      slot('claude', 'm2', now - 2 * 86400, 380),
+      slot('claude', 'm2', now - 1800, 20),
+    ]);
+    const mergedClaudeApi = mergeProviderAccounts([cPro, cMax], 'claude', now, claudeCost)!;
+    expect(mergedClaudeApi.summary).toMatchObject({
+      weighting: 'api',
+      usedUsd: 450,
+      capacityUsd: 2100,
+      availableUsd: 1650,
+      priced: true,
+    });
+    expect(mergedClaudeApi.summary.usedPct).toBeCloseTo(21.43, 1);
+    expect(mergedClaudeApi.summary.remainingPct).toBeCloseTo(78.57, 1);
+
+    // Disjoint machines where one large-tier sibling is unused (0% used, $0 logs):
+    // Pro (1x, 60% used, $60 spent -> $100/unit) calibrates Max 20x (20x, 0% used -> $2000 full, $0 used).
+    const cPro60 = account('claude:p60', [], {
+      plan: 'Pro',
+      machines: ['m1'],
+      windows: [{ kind: 'weekly', usedPct: 60, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    const cMax0 = account('claude:m0', [], {
+      plan: 'Max 20x',
+      machines: ['m2'],
+      windows: [{ kind: 'weekly', usedPct: 0, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    const mergedCalibrated = mergeProviderAccounts([cPro60, cMax0], 'claude', now, costRep([slot('claude', 'm1', now - 3600, 60)]))!;
+    expect(mergedCalibrated.summary).toMatchObject({ weighting: 'api', usedUsd: 60, capacityUsd: 2100, availableUsd: 2040 });
+    expect(mergedCalibrated.summary.usedPct).toBeCloseTo(2.86, 1);
+
+    // Same shared machine: logs are deduplicated (never double-counted), weighted by tier ratio!
+    const sharedPro = account('claude:sp', [], {
+      plan: 'Pro',
+      machines: ['local'],
+      windows: [{ kind: 'weekly', usedPct: 80, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    const sharedMax = account('claude:sm', [], {
+      plan: 'Max 20x',
+      machines: ['local'],
+      windows: [{ kind: 'weekly', usedPct: 20, resetsAt: now + 2 * 86400, windowSec: 604800 }],
+    });
+    const mergedShared = mergeProviderAccounts([sharedPro, sharedMax], 'claude', now, costRep([slot('claude', 'local', now - 3600, 480)]))!;
+    // Weighted used = 1*0.8 + 20*0.2 = 4.8 out of 21 units = 22.86%; $480 / (4.8/21) = $2100.
+    expect(mergedShared.summary).toMatchObject({ weighting: 'api', usedUsd: 480, capacityUsd: 2100, availableUsd: 1620 });
+    expect(mergedShared.summary.usedPct).toBeCloseTo(22.86, 1);
+
+    // Same shared machine with unused large-tier sibling (0%): activeFraction = 60% >= 5% still calibrates cleanly!
+    const sharedPro60 = account('claude:sp60', [], {
+      plan: 'Pro',
+      machines: ['local'],
+      windows: [{ kind: 'weekly', usedPct: 60, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    const sharedMax0 = account('claude:sm0', [], {
+      plan: 'Max 20x',
+      machines: ['local'],
+      windows: [{ kind: 'weekly', usedPct: 0, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    const mergedSharedZero = mergeProviderAccounts(
+      [sharedPro60, sharedMax0],
+      'claude',
+      now,
+      costRep([slot('claude', 'local', now - 3600, 60)]),
+    )!;
+    expect(mergedSharedZero.summary).toMatchObject({ weighting: 'api', usedUsd: 60, capacityUsd: 2100, availableUsd: 2040 });
+    expect(mergedSharedZero.summary.usedPct).toBeCloseTo(2.86, 1);
+
+    // Incomplete local logs guard (known tiers on disjoint hosts): Max 20x used 40% mostly off-host
+    // ($2 local logs vs Pro's $100/unit) is calibrated from Pro instead of collapsing its tier weight.
+    const cMaxOffHost = account('claude:moff', [], {
+      plan: 'Max 20x',
+      machines: ['m2'],
+      windows: [{ kind: 'weekly', usedPct: 40, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    const mergedOffHost = mergeProviderAccounts(
+      [cPro60, cMaxOffHost],
+      'claude',
+      now,
+      costRep([slot('claude', 'm1', now - 3600, 60), slot('claude', 'm2', now - 3600, 2)]),
+    )!;
+    // Pro: $60/$100; Max 20x calibrated at $100/unit -> $800/$2000 -> total $860/$2100 (40.95%).
+    expect(mergedOffHost.summary).toMatchObject({ weighting: 'api', usedUsd: 860, capacityUsd: 2100, availableUsd: 1240 });
+    expect(mergedOffHost.summary.usedPct).toBeCloseTo(40.95, 1);
+
+    // Unknown plan tiers on disjoint hosts with observed logs: empirical API capacity
+    // automatically discovers the real 1:12 tier ratio without a plan field!
+    const unkSmall = account('kimi:u1', [], {
+      machines: ['m1'],
+      windows: [{ kind: 'weekly', usedPct: 80, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    const unkLarge = account('kimi:u2', [], {
+      machines: ['m2'],
+      windows: [{ kind: 'weekly', usedPct: 10, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    const mergedUnkApi = mergeProviderAccounts(
+      [unkSmall, unkLarge],
+      'kimi',
+      now,
+      costRep([slot('kimi', 'm1', now - 3600, 40), slot('kimi', 'm2', now - 3600, 60)]),
+    )!;
+    // u1: $40 / 0.8 = $50; u2: $60 / 0.1 = $600 -> combined $100 / $650 = 15.38% used!
+    expect(mergedUnkApi.summary).toMatchObject({ weighting: 'api', usedUsd: 100, capacityUsd: 650, availableUsd: 550 });
+    expect(mergedUnkApi.summary.usedPct).toBeCloseTo(15.38, 1);
+
+    // Early in cycle (<5% used): reports observed spend so far without noisy capacity extrapolation.
+    const early1 = account('codex:e1', [], {
+      plan: 'Plus',
+      machines: ['m1'],
+      windows: [{ kind: 'weekly', usedPct: 2, resetsAt: now + 6 * 86400, windowSec: 604800 }],
+    });
+    const early2 = account('codex:e2', [], {
+      plan: 'Pro',
+      machines: ['m2'],
+      windows: [{ kind: 'weekly', usedPct: 1, resetsAt: now + 6 * 86400, windowSec: 604800 }],
+    });
+    const mergedEarly = mergeProviderAccounts(
+      [early1, early2],
+      'codex',
+      now,
+      costRep([slot('codex', 'm1', now - 3600, 3), slot('codex', 'm2', now - 3600, 15)]),
+    )!;
+    expect(mergedEarly.summary.weighting).toBe('tier');
+    expect(mergedEarly.summary.usedUsd).toBe(18);
+    expect(mergedEarly.summary.capacityUsd).toBeUndefined();
+    expect(mergedEarly.summary.usedPct).toBeCloseTo(1.09, 1);
+
+    // Long >8d cycle (e.g. Kimi 30-day monthly window) falls back to daily CostReport.rows when recent does not reach back.
+    const todayStr = dayOf(new Date(now * 1000));
+    const kimiMon1 = account('kimi:m1', [], {
+      plan: 'Moderato',
+      machines: ['m1'],
+      windows: [{ kind: 'monthly', usedPct: 50, resetsAt: now + 15 * 86400, windowSec: 30 * 86400 }],
+    });
+    const kimiMon2 = account('kimi:m2', [], {
+      plan: 'Vivace',
+      machines: ['m2'],
+      windows: [{ kind: 'monthly', usedPct: 10, resetsAt: now + 15 * 86400, windowSec: 30 * 86400 }],
+    });
+    const monRow = (machine: string, cost: number): CostRow => ({
+      day: todayStr,
+      provider: 'kimi',
+      model: 'kimi-k2',
+      machine,
+      input: 100,
+      cached: 0,
+      cacheWrite: 0,
+      output: 50,
+      requests: 1,
+      cost,
+      priced: true,
+    });
+    const mergedKimiMonthly = mergeProviderAccounts([kimiMon1, kimiMon2], 'kimi', now, costRep([], [monRow('m1', 50), monRow('m2', 100)]))!;
+    // m1: $50 / 0.5 = $100; m2: $100 / 0.1 = $1000 -> combined $150 / $1100 = 13.64%.
+    expect(mergedKimiMonthly.summary).toMatchObject({ weighting: 'api', usedUsd: 150, capacityUsd: 1100, availableUsd: 950 });
+    expect(mergedKimiMonthly.summary.usedPct).toBeCloseTo(13.64, 1);
+
+    // Codex Plus (1x, 100% used) + Pro (10x, 20% used) without cost report -> 27.27% used (tier weighting).
     const xPlus = account('codex:plus', [100], { plan: 'Plus', email: 'plus@example.com' });
     const xPro = account('codex:pro', [20], { plan: 'Pro', email: 'pro@example.com' });
     const mergedCodex = mergeProviderAccounts([xPlus, xPro], 'codex', now)!;
-    expect(mergedCodex.summary).toMatchObject({ weighting: 'value', capacityUsd: 220, availableUsd: 160, usedUsd: 60 });
+    expect(mergedCodex.summary.weighting).toBe('tier');
+    expect(mergedCodex.summary.capacityUsd).toBeUndefined();
     expect(mergedCodex.summary.usedPct).toBeCloseTo(27.27, 1);
     expect(mergedCodex.summary.remainingPct).toBeCloseTo(72.73, 1);
 
-    // Antigravity Free ($4, 100% used) + Pro ($20, 50% used) + Ultra ($250, 10% used)
-    // Capacity $274, available $0 + $10 + $225 = $235 -> 14.23% used / 85.77% left.
+    // Antigravity Free (0.2x, 100% used) + Pro (1x, 50% used) + Ultra (12.5x, 10% used)
+    // Weighted = (0.2*100 + 1*50 + 12.5*10) / 13.7 = 195 / 13.7 = 14.23% used.
     const agFree = account('antigravity:f', [100], { plan: 'Free' });
     const agPro = account('antigravity:p', [50], { plan: 'Pro' });
     const agUltra = account('antigravity:u', [10], { plan: 'Ultra' });
     const mergedAg = mergeProviderAccounts([agFree, agPro, agUltra], 'antigravity', now)!;
-    expect(mergedAg.summary).toMatchObject({ weighting: 'value', capacityUsd: 274, availableUsd: 235, usedUsd: 39 });
+    expect(mergedAg.summary.weighting).toBe('tier');
     expect(mergedAg.summary.usedPct).toBeCloseTo(14.23, 1);
 
-    // Grok SuperGrok ($30, 90% used -> $3) + SuperGrok Heavy ($300, 10% used -> $270)
+    // Grok SuperGrok (1x, 90% used) + SuperGrok Heavy (10x, 10% used) -> 190 / 11 = 17.27% used.
     const g1 = account('grok:1', [90], { plan: 'SuperGrok' });
     const g2 = account('grok:2', [10], { plan: 'SuperGrok Heavy' });
     const mergedGrok = mergeProviderAccounts([g1, g2], 'grok', now)!;
-    expect(mergedGrok.summary).toMatchObject({ weighting: 'value', capacityUsd: 330, availableUsd: 273, usedUsd: 57 });
+    expect(mergedGrok.summary.weighting).toBe('tier');
     expect(mergedGrok.summary.usedPct).toBeCloseTo(17.27, 1);
 
     // Explicit dollar balances / limits without subscription windows.
     const cr1 = account('claude:cr1', [], { credits: { unit: 'usd', balance: 80, limit: 100, enabled: true } });
     const cr2 = account('claude:cr2', [], { credits: { unit: 'usd', used: 15, limit: 20, enabled: true } });
     const mergedCredits = mergeProviderAccounts([cr1, cr2], 'claude', now)!;
-    expect(mergedCredits.summary).toMatchObject({ weighting: 'value', capacityUsd: 120, availableUsd: 85, usedUsd: 35 });
+    expect(mergedCredits.summary).toMatchObject({ weighting: 'explicit', capacityUsd: 120, availableUsd: 85, usedUsd: 35 });
     expect(mergedCredits.summary.usedPct).toBeCloseTo(29.17, 1);
 
-    // Hybrid: subscription + enabled USD extra usage (synthetic Extra window not double-counted);
-    // disabled extra usage is ignored.
+    // Hybrid: subscription + enabled USD extra usage with observed API logs (deducts extra-usage
+    // overlap at 100% so extra usage logged locally is never double-counted; synthetic Extra window excluded).
     const hybrid = account('claude:hyb', [], {
       plan: 'Pro',
+      machines: ['m1'],
       windows: [
-        { kind: 'session', usedPct: 100, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', usedPct: 100, resetsAt: now + 86400, windowSec: 604800 },
         { kind: 'monthly', label: 'Extra', usedPct: 50 },
       ],
       credits: { unit: 'usd', enabled: true, limit: 30, used: 15 },
     });
-    const max5 = account('claude:m5', [50], {
+    const max5 = account('claude:m5', [], {
       plan: 'Max 5x',
+      machines: ['m2'],
+      windows: [{ kind: 'weekly', usedPct: 20, resetsAt: now + 86400, windowSec: 604800 }],
       credits: { unit: 'usd', enabled: false, limit: 100, used: 0 },
     });
-    expect(estimateAccountValue(hybrid, now)).toMatchObject({ capacityUsd: 50, availableUsd: 15, usedUsd: 35, basis: 'hybrid' });
-    expect(estimateAccountValue(max5, now)).toMatchObject({ capacityUsd: 100, availableUsd: 50, usedUsd: 50, basis: 'plan' });
-    const mergedHybrid = mergeProviderAccounts([hybrid, max5], 'claude', now)!;
-    expect(mergedHybrid.summary).toMatchObject({ weighting: 'value', capacityUsd: 150, availableUsd: 65, usedUsd: 85 });
-    expect(mergedHybrid.summary.usedPct).toBeCloseTo(56.67, 1);
-
-    // Mixed known + unknown plan: unknown sibling falls back to provider baseline ($20 for Claude).
-    const cUnknown = account('claude:unk', [90]);
-    const mergedMixed = mergeProviderAccounts([cMax, cUnknown], 'claude', now)!;
-    expect(mergedMixed.summary).toMatchObject({ weighting: 'value', capacityUsd: 220, availableUsd: 162, usedUsd: 58 });
-
-    // Unknown plan + explicit USD credits alongside sibling with windows (e.g. Kimi Code with boosterWallet):
-    // subscription windows are NOT dropped, and bucket weights use subscriptionUsd ($19) rather than wallet size.
-    const kimiBoost = account('kimi:boost', [90], {
-      credits: { unit: 'usd', enabled: true, limit: 20, used: 0 },
+    const hybridCost = costRep([slot('claude', 'm1', now - 3600, 115), slot('claude', 'm2', now - 3600, 100)]);
+    // hybrid on m1: $115 logs - $15 extra overlap = $100 sub cap + $30 extra cap = $130 ($115 used, $15 avail).
+    // max5 on m2: $100 logs at 20% = $500 sub cap ($100 used, $400 avail). Disabled extra ignored.
+    expect(estimateAccountValue(hybrid, now, { cost: hybridCost })).toMatchObject({
+      capacityUsd: 130,
+      availableUsd: 15,
+      usedUsd: 115,
+      basis: 'hybrid',
     });
-    const kimiPlain = account('kimi:plain', [20]);
-    const mergedKimiBoost = mergeProviderAccounts([kimiBoost, kimiPlain], 'kimi', now)!;
-    // kimiBoost: $19 sub (90% used -> $1.90 avail) + $20 wallet ($20 avail) = $21.90 / $39
-    // kimiPlain: $19 sub (20% used -> $15.20 avail) = $15.20 / $19
-    // Total: $37.10 avail / $58 cap -> $20.90 used -> 36.03% used.
-    expect(mergedKimiBoost.summary).toMatchObject({ weighting: 'value', capacityUsd: 58, availableUsd: 37.1, usedUsd: 20.9 });
-    expect(mergedKimiBoost.summary.usedPct).toBeCloseTo(36.03, 1);
-    // Session bucket uses equal $19 subscription weights -> (90 + 20) / 2 = 55%, not weighted by $39 vs $19.
-    expect(mergedKimiBoost.windows.find((w) => w.kind === 'session')?.usedPct).toBe(55);
+    expect(estimateAccountValue(max5, now, { cost: hybridCost })).toMatchObject({
+      capacityUsd: 500,
+      availableUsd: 400,
+      usedUsd: 100,
+      basis: 'api',
+    });
+    const mergedHybrid = mergeProviderAccounts([hybrid, max5], 'claude', now, hybridCost)!;
+    expect(mergedHybrid.summary).toMatchObject({ weighting: 'api', capacityUsd: 630, availableUsd: 415, usedUsd: 215 });
+    expect(mergedHybrid.summary.usedPct).toBeCloseTo(34.13, 1);
 
-    // Prepaid balance mixed with bounded account: prepaid balance is preserved in both single-account and merged totals.
+    // Mixed known + unknown plan without cost: unknown sibling defaults to baseline tier (1x).
+    const cMax7d = account('claude:m7', [], {
+      plan: 'Max 20x',
+      windows: [{ kind: 'weekly', usedPct: 20, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    const cUnknown = account('claude:unk', [], {
+      windows: [{ kind: 'weekly', usedPct: 90, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    const mergedMixed = mergeProviderAccounts([cMax7d, cUnknown], 'claude', now)!;
+    // (20*20 + 1*90) / 21 = 490 / 21 = 23.33%.
+    expect(mergedMixed.summary.weighting).toBe('tier');
+    expect(mergedMixed.summary.usedPct).toBeCloseTo(23.33, 1);
+
+    // Prepaid balance mixed with explicit bounded credit account.
     const boundedAndPrepaid = account('claude:bp', [], {
       credits: { unit: 'usd', enabled: true, limit: 100, used: 40 },
       balances: [{ currency: 'USD', total: 20 }],
@@ -1071,22 +1273,20 @@ describe('usage panel and status item', () => {
       balances: [{ currency: 'USD', total: 20 }],
     });
     const mergedPrepaidMix = mergeProviderAccounts([boundedOnly, prepaidOnly], 'claude', now)!;
-    expect(mergedPrepaidMix.summary).toMatchObject({ weighting: 'value', capacityUsd: 120, availableUsd: 80, usedUsd: 40 });
+    expect(mergedPrepaidMix.summary).toMatchObject({ weighting: 'explicit', capacityUsd: 120, availableUsd: 80, usedUsd: 40 });
     expect(mergedPrepaidMix.summary.usedPct).toBeCloseTo(33.33, 1);
 
-    // All plans unknown and no explicit USD limits: clean equal-weight fallback.
+    // All plans unknown and no cost/credits: clean equal-weight fallback.
     const k1 = account('kimi:k1', [80]);
     const k2 = account('kimi:k2', [20]);
     const mergedKimi = mergeProviderAccounts([k1, k2], 'kimi', now)!;
-    expect(mergedKimi.summary).toEqual({
-      usedPct: 50,
-      remainingPct: 50,
-      availableUsd: undefined,
-      capacityUsd: undefined,
-      usedUsd: undefined,
-      weighting: 'equal',
-      resetsAt: now + 3600,
-    });
+    expect(mergedKimi.summary.usedPct).toBe(50);
+    expect(mergedKimi.summary.remainingPct).toBe(50);
+    expect(mergedKimi.summary.availableUsd).toBeUndefined();
+    expect(mergedKimi.summary.capacityUsd).toBeUndefined();
+    expect(mergedKimi.summary.usedUsd).toBeUndefined();
+    expect(mergedKimi.summary.weighting).toBe('equal');
+    expect(mergedKimi.summary.resetsAt).toBe(now + 3600);
 
     // Prepaid balance-only accounts (DeepSeek): sums available balance without inventing a %.
     const ds1 = account('deepseek:d1', [], { balances: [{ currency: 'USD', total: 10 }] });
@@ -1100,25 +1300,148 @@ describe('usage panel and status item', () => {
     const singleGrok = account('grok:solo', [40]);
     const preview = previewAccounts([cPro, cMax, xPlus, xPro, k1, k2, singleGrok], now);
     expect(preview.map((a) => a.key)).toEqual(['kimi:merged', 'grok:solo', 'codex:merged', 'claude:merged']);
-    expect(accountUsedPct(mergedClaude, now)).toBeCloseTo(25.45, 1);
+    expect(accountUsedPct(mergedClaudeTier, now)).toBeCloseTo(21.43, 1);
 
-    // Status bar selection and tightestFor merge 2+ accounts for non-Antigravity providers too.
+    // Status bar selection and tightestFor merge 2+ accounts consistently across 5h/7d/both/auto.
     const snapMulti = snapshot([cPro, cMax, xPlus, xPro]);
     const sbClaude = statusBarSelection(snapMulti, { defaultProvider: 'claude', windowMode: 'both', now })!;
     expect(sbClaude.account.key).toBe('claude:merged');
-    expect(sbClaude.primary.usedPct).toBeCloseTo(16.36, 1);
-    expect(sbClaude.secondary?.usedPct).toBeCloseTo(22.73, 1);
+    expect(sbClaude.primary.usedPct).toBeCloseTo(13.33, 1);
+    expect(sbClaude.secondary?.usedPct).toBeCloseTo(21.43, 1);
     const sbCodex = statusBarSelection(snapMulti, { agent: { provider: 'codex', m: 'local' }, windowMode: 'auto', now })!;
     expect(sbCodex.account.key).toBe('codex:merged');
     expect(sbCodex.primary.usedPct).toBeCloseTo(27.27, 1);
     const tf = tightestFor(snapMulti, 'claude', 'local', undefined, now)!;
     expect(tf.account.key).toBe('claude:merged');
-    expect(tf.window.usedPct).toBeCloseTo(22.73, 1);
+    expect(tf.window.usedPct).toBeCloseTo(21.43, 1);
+  });
+
+  it('uses primary Gemini windows (not third-party Claude/GPT quotas) for Antigravity summaries while still showing all windows in cards', async () => {
+    // 1. Antigravity agy CLI shape: Gemini Models vs exhausted Claude and GPT.
+    const agCli = account('antigravity:cli1', [], {
+      plan: 'Pro',
+      email: 'cli@example.com',
+      machines: ['m1'],
+      windows: [
+        { kind: 'session', label: 'Gemini Models', usedPct: 10, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 25, resetsAt: now + 86400, windowSec: 604800 },
+        { kind: 'session', label: 'Claude and GPT', usedPct: 100, resetsAt: now + 1800, windowSec: 18000 },
+        { kind: 'weekly', label: 'Claude and GPT', usedPct: 100, resetsAt: now + 2 * 86400, windowSec: 604800 },
+      ],
+    });
+    expect(primaryWindowsOf(agCli).map((w) => w.label)).toEqual(['Gemini Models', 'Gemini Models']);
+    expect(tightestWindow(agCli, now)).toMatchObject({ kind: 'weekly', label: 'Gemini Models', usedPct: 25 });
+    expect(accountUsedPct(agCli, now)).toBe(25);
+    // Default / 5h / 7d / both status bar modes pick Gemini Models, never Claude and GPT.
+    expect(pickAccountWindows(agCli, 'auto', undefined, now, false)?.primary).toMatchObject({ label: 'Gemini Models', usedPct: 25 });
+    expect(pickAccountWindows(agCli, '5h', undefined, now, false)?.primary).toMatchObject({ label: 'Gemini Models', usedPct: 10 });
+    expect(pickAccountWindows(agCli, '7d', undefined, now, false)?.primary).toMatchObject({ label: 'Gemini Models', usedPct: 25 });
+    // Model-filtered focused pane: Gemini model -> Gemini Models; Claude model -> Claude and GPT; unknown -> Gemini Models.
+    expect(pickAccountWindows(agCli, 'auto', 'gemini-3-pro', now, true)?.primary).toMatchObject({ label: 'Gemini Models', usedPct: 25 });
+    expect(pickAccountWindows(agCli, 'auto', 'claude-sonnet-4-5', now, true)?.primary).toMatchObject({
+      label: 'Claude and GPT',
+      usedPct: 100,
+    });
+    expect(pickAccountWindows(agCli, 'auto', undefined, now, true)?.primary).toMatchObject({ label: 'Gemini Models', usedPct: 25 });
+
+    // 2. Antigravity LS shape: per-model windows (Gemini 3 Pro/Flash vs Claude/GPT).
+    const agLs = account('antigravity:ls1', [], {
+      plan: 'Pro',
+      email: 'ls@example.com',
+      windows: [
+        { kind: 'model', label: 'Gemini 3 Pro (High)', usedPct: 30, resetsAt: now + 3600 },
+        { kind: 'model', label: 'Gemini 3 Flash', usedPct: 15, resetsAt: now + 3600 },
+        { kind: 'model', label: 'Claude Sonnet 4.5', usedPct: 100, resetsAt: now + 7200 },
+        { kind: 'model', label: 'GPT-OSS 120B (Medium)', usedPct: 100, resetsAt: now + 7200 },
+      ],
+    });
+    expect(tightestWindow(agLs, now)).toMatchObject({ label: 'Gemini 3 Pro (High)', usedPct: 30 });
+    expect(accountUsedPct(agLs, now)).toBe(30);
+    expect(pickAccountWindows(agLs, 'auto', 'gemini-3-pro', now, true)?.primary).toMatchObject({
+      label: 'Gemini 3 Pro (High)',
+      usedPct: 30,
+    });
+    expect(pickAccountWindows(agLs, 'auto', 'claude-sonnet-4-5', now, true)?.primary).toMatchObject({
+      label: 'Claude Sonnet 4.5',
+      usedPct: 100,
+    });
+
+    // 3. Past-reset Gemini with active exhausted Claude/GPT must not leak Claude/GPT into summary.
+    const agPastGemini = account('antigravity:past', [], {
+      plan: 'Pro',
+      windows: [
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 80, resetsAt: now - 60, windowSec: 604800 },
+        { kind: 'weekly', label: 'Claude and GPT', usedPct: 100, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    expect(tightestWindow(agPastGemini, now)).toBeUndefined();
+
+    // 4. Multi-account Antigravity merge (Pro 1x + Ultra 12.5x) ignores exhausted Claude/GPT
+    // and estimates combined Gemini cycle API value from logs.
+    const agUltra = account('antigravity:cli2', [], {
+      plan: 'Google AI Ultra',
+      email: 'ultra@example.com',
+      machines: ['m2'],
+      windows: [
+        { kind: 'session', label: 'Gemini Models', usedPct: 5, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 10, resetsAt: now + 2 * 86400, windowSec: 604800 },
+        { kind: 'session', label: 'Claude and GPT', usedPct: 100, resetsAt: now + 1800, windowSec: 18000 },
+        { kind: 'weekly', label: 'Claude and GPT', usedPct: 100, resetsAt: now + 2 * 86400, windowSec: 604800 },
+      ],
+    });
+    const agCost: CostReport = {
+      generatedAt: now,
+      days: 90,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [],
+      recentSince: now - 8 * 86400,
+      recent: [
+        { at: now - 3600, provider: 'antigravity', machine: 'm1', tokens: 1000, requests: 1, cost: 25, priced: true },
+        { at: now - 3600, provider: 'antigravity', machine: 'm2', tokens: 1000, requests: 1, cost: 125, priced: true },
+      ],
+    };
+    const mergedAg = mergeProviderAccounts([agCli, agUltra], 'antigravity', now, agCost)!;
+    // m1 Pro: $25 / 0.25 = $100; m2 Ultra: $125 / 0.10 = $1250 -> total $150 / $1350 = 11.11% used!
+    expect(mergedAg.summary).toMatchObject({ weighting: 'api', usedUsd: 150, capacityUsd: 1350, availableUsd: 1200 });
+    expect(mergedAg.summary.usedPct).toBeCloseTo(11.11, 1);
+    expect(mergedAg.summary.resetsAt).toBe(now + 86400);
+
+    // UI check: tile, overview, and summary bar show ~11% used ($150 / $1350), NOT 100% from Claude/GPT,
+    // while expanded account cards still list both Gemini Models and Claude and GPT groups.
+    useUsage.setState({ snapshot: snapshot([agCli, agUltra]), cost: agCost, remaining: false });
+    await act(async () => setView({ tab: 'overview', remaining: false }));
+    await act(async () => root.render(createElement(UsagePanel)));
+    const tile = host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="antigravity"]')!;
+    expect(tile.title).toContain('89%');
+    expect(tile.title).toContain('$1200 / $1350');
+    const row = host.querySelector<HTMLElement>('.usage-row[data-account="antigravity:merged"]')!;
+    expect(row.textContent).toContain('~11%');
+    expect(row.textContent).toContain('$150 / $1350');
+    await act(async () => tile.click());
+    const summaryBar = host.querySelector<HTMLElement>('.usage-summary-bar[data-merged-summary="antigravity"]')!;
+    expect(summaryBar.textContent).toContain('~11% used');
+    expect(summaryBar.textContent).toContain('$150 / $1350');
+    const card = host.querySelector<HTMLElement>('.usage-card[data-account="antigravity:cli1"]')!;
+    expect(card.textContent).toContain('25% used');
+    expect(card.textContent).toContain('Gemini Models');
+    expect(card.textContent).toContain('Claude and GPT');
   });
 
   it('shows only merged approximate usage in overview/tiles and one compact summary bar in provider detail (no bulky merged card)', async () => {
-    const cPro = account('claude:pro', [80], { plan: 'Pro', email: 'pro@example.com' });
-    const cMax = account('claude:max', [10], { plan: 'Max 20x', email: 'max@example.com' });
+    const cPro = account('claude:pro', [], {
+      plan: 'Pro',
+      email: 'pro@example.com',
+      machines: ['m1'],
+      windows: [{ kind: 'weekly', usedPct: 80, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    const cMax = account('claude:max', [], {
+      plan: 'Max 20x',
+      email: 'max@example.com',
+      machines: ['m2'],
+      windows: [{ kind: 'weekly', usedPct: 10, resetsAt: now + 2 * 86400, windowSec: 604800 }],
+    });
     const ag1 = account('antigravity:a1', [], {
       email: 'one@example.com',
       windows: [
@@ -1129,25 +1452,41 @@ describe('usage panel and status item', () => {
     const ag2 = account('antigravity:a2', [], {
       email: 'two@example.com',
       windows: [
-        // Past reset counts as replenished (0% used) in the Gemini 3 Pro bucket; tightest active is 20%.
+        // Past reset counts as replenished (0% used) in the Gemini 3 Pro bucket; weekly is 20%.
         { kind: 'model', label: 'Gemini 3 Pro', usedPct: 90, resetsAt: now - 60 },
         { kind: 'weekly', label: 'Gemini Models', usedPct: 20, resetsAt: now + 5400, windowSec: 604800 },
       ],
     });
     const soloCodex = account('codex:solo', [35], { plan: 'Plus', email: 'solo@example.com' });
+    // Real API-priced logs for Claude: m1 (Pro, 80%) spent $80 -> $100 full; m2 (Max 20x, 10%) spent $200 -> $2000 full.
+    // Combined Claude 7d: $280 / $2100 used = 13.33% used (86.67% left, $1820 left).
+    // Antigravity shared weekly cycle: (60 + 20) / 2 = 40% used (60% left), equal-weight without logs.
+    const demoCost: CostReport = {
+      generatedAt: now,
+      days: 90,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [],
+      recentSince: now - 8 * 86400,
+      recent: [
+        { at: now - 3600, provider: 'claude', machine: 'm1', tokens: 1000, requests: 1, cost: 80, priced: true },
+        { at: now - 3600, provider: 'claude', machine: 'm2', tokens: 1000, requests: 1, cost: 200, priced: true },
+      ],
+    };
 
-    useUsage.setState({ snapshot: snapshot([cPro, cMax, ag1, ag2, soloCodex]), remaining: false });
+    useUsage.setState({ snapshot: snapshot([cPro, cMax, ag1, ag2, soloCodex]), cost: demoCost, remaining: false });
     await act(async () => setView({ tab: 'overview', remaining: false }));
     await act(async () => root.render(createElement(UsagePanel)));
 
-    // Tiles show value-weighted remaining % for Claude (~84% left) and equal-weight remaining % for Antigravity (~50% left).
+    // Tiles show empirical API-value-weighted remaining % for Claude (~87% left) and equal-weight remaining % for Antigravity (~60% left).
     const claudeTile = host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!;
-    expect(claudeTile.title).toContain('84%');
-    expect(claudeTile.title).toContain('$184');
-    expect(claudeTile.querySelector<HTMLElement>('.usage-tile-meter i')?.style.width).toBe('83.64%');
+    expect(claudeTile.title).toContain('87%');
+    expect(claudeTile.title).toContain('$1820 / $2100');
+    expect(claudeTile.querySelector<HTMLElement>('.usage-tile-meter i')?.style.width).toBe('86.67%');
     const agTile = host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="antigravity"]')!;
-    expect(agTile.title).toContain('50%');
-    expect(agTile.querySelector<HTMLElement>('.usage-tile-meter i')?.style.width).toBe('50%');
+    expect(agTile.title).toContain('60%');
+    expect(agTile.querySelector<HTMLElement>('.usage-tile-meter i')?.style.width).toBe('60%');
 
     // Overview displays ONLY merged rows for multi-account providers — NO nested per-account subrows.
     expect(host.querySelectorAll('.usage-subrow')).toHaveLength(0);
@@ -1155,20 +1494,19 @@ describe('usage panel and status item', () => {
     expect(overviewRows.map((r) => r.dataset.account)).toEqual(['antigravity:merged', 'codex:solo', 'claude:merged']);
     const claudeRow = host.querySelector<HTMLElement>('.usage-row[data-account="claude:merged"]')!;
     expect(claudeRow.textContent).toContain('2 accounts');
-    expect(claudeRow.textContent).toContain('~16%');
-    expect(claudeRow.textContent).toContain('$36.00 / $220');
-    expect(claudeRow.title).toContain('$184');
-    // Equal-weight merged row shows combined estimate subtitle, never a single bucket's window label.
+    expect(claudeRow.textContent).toContain('~13%');
+    expect(claudeRow.textContent).toContain('$280 / $2100');
+    expect(claudeRow.title).toContain('$1820');
+    // Antigravity merged row shows shared cycle label (Weekly), never a single model's name.
     const agRow = host.querySelector<HTMLElement>('.usage-row[data-account="antigravity:merged"]')!;
-    expect(agRow.textContent).toContain('~50%');
-    expect(agRow.textContent).toContain('Combined estimate');
+    expect(agRow.textContent).toContain('~40%');
     expect(agRow.textContent).not.toContain('Gemini 3 Pro');
 
-    // Toggling to Remaining keeps overview row and tile consistent (100 - 16.36 = 83.64 -> ~84%).
+    // Toggling to Remaining keeps overview row and tile consistent (100 - 13.33 = 86.67 -> ~87%).
     const remBtn = [...host.querySelectorAll<HTMLButtonElement>('.usage-meta [role=radio]')].find((b) => b.textContent === 'Remaining')!;
     await act(async () => remBtn.click());
-    expect(claudeRow.textContent).toContain('~84%');
-    expect(claudeRow.textContent).toContain('$184 / $220');
+    expect(claudeRow.textContent).toContain('~87%');
+    expect(claudeRow.textContent).toContain('$1820 / $2100');
 
     // Provider detail tab: NO bulky MergedAccountCard; ONLY one compact summary progress bar above individual account cards.
     await act(async () => claudeTile.click());
@@ -1179,15 +1517,15 @@ describe('usage panel and status item', () => {
     expect(summaryBar.querySelectorAll('[role="meter"]')).toHaveLength(1);
     expect(summaryBar.querySelectorAll('.usage-window')).toHaveLength(0);
     expect(summaryBar.textContent).toContain('Combined (2 accounts)');
-    expect(summaryBar.textContent).toContain('~84% left');
-    expect(summaryBar.textContent).toContain('$184 / $220');
-    expect(summaryBar.title).toContain('$184');
+    expect(summaryBar.textContent).toContain('~87% left');
+    expect(summaryBar.textContent).toContain('$1820 / $2100');
+    expect(summaryBar.title).toContain('$1820');
 
-    // Switching back to Used mode updates the summary bar consistently (~16% used).
+    // Switching back to Used mode updates the summary bar consistently (~13% used).
     const usedBtn = [...host.querySelectorAll<HTMLButtonElement>('.usage-meta [role=radio]')].find((b) => b.textContent === 'Used')!;
     await act(async () => usedBtn.click());
-    expect(summaryBar.textContent).toContain('~16% used');
-    expect(summaryBar.textContent).toContain('$36.00 / $220');
+    expect(summaryBar.textContent).toContain('~13% used');
+    expect(summaryBar.textContent).toContain('$280 / $2100');
 
     // Individual account cards are listed without a synthetic merged card.
     const cards = [...host.querySelectorAll<HTMLElement>('.usage-card[data-account]')].map((c) => c.dataset.account);
@@ -1265,14 +1603,15 @@ describe('usage panel and status item', () => {
     expect(after[accountCollapseKey('codex', 'codex:x2')]).toBe(true);
   });
 
-  it('merges non-Antigravity providers in the status bar button and hover preview with matching summary percentages and subtitles', async () => {
+  it('merges non-Antigravity providers in the status bar button and hover preview with matching summary percentages and API value subtitles', async () => {
     vi.useFakeTimers();
     try {
-      // Multi-window Claude accounts whose tightest windows differ (Pro 5h=80%/7d=50% -> $4/$20; Max 20x 5h=10%/7d=20% -> $160/$200)
-      // => summary = 25.45% used ($56/$220), while merged buckets max is 22.73% (7d).
+      // Multi-window Claude accounts: Pro (1x: 5h=80%/7d=50%, $50 logs -> $100) + Max 20x (20x: 5h=10%/7d=20%, $400 logs -> $2000)
+      // => 7d tightest cycle = 21.43% used ($450 / $2100).
       const cPro = account('claude:pro', [], {
         plan: 'Pro',
         email: 'pro@example.com',
+        machines: ['m1'],
         windows: [
           { kind: 'session', usedPct: 80, resetsAt: now + 3600, windowSec: 18000 },
           { kind: 'weekly', usedPct: 50, resetsAt: now + 86400, windowSec: 604800 },
@@ -1281,24 +1620,42 @@ describe('usage panel and status item', () => {
       const cMax = account('claude:max', [], {
         plan: 'Max 20x',
         email: 'max@example.com',
+        machines: ['m2'],
         windows: [
           { kind: 'session', usedPct: 10, resetsAt: now + 3600, windowSec: 18000 },
-          { kind: 'weekly', usedPct: 20, resetsAt: now + 86400, windowSec: 604800 },
+          { kind: 'weekly', usedPct: 20, resetsAt: now + 2 * 86400, windowSec: 604800 },
         ],
       });
-      // Hybrid subscription (100% used on $20 Pro) + untouched $50 extra USD credits => 28.57% used ($20/$70) alongside $20 Pro (0% used) => 22.22% used ($20/$90).
+      // Hybrid subscription (100% used on Plus, $50 logs + untouched $50 extra USD credits) alongside Plus (0% used, calibrated $50)
+      // => $50 / $150 = 33.33% used.
       const hyb1 = account('codex:hyb1', [], {
         plan: 'Plus',
         email: 'hyb1@example.com',
+        machines: ['m1'],
         windows: [{ kind: 'session', usedPct: 100, resetsAt: now + 3600, windowSec: 18000 }],
         credits: { unit: 'usd', enabled: true, limit: 50, used: 0 },
       });
       const hyb2 = account('codex:hyb2', [], {
         plan: 'Plus',
         email: 'hyb2@example.com',
+        machines: ['m2'],
         windows: [{ kind: 'session', usedPct: 0, resetsAt: now + 3600, windowSec: 18000 }],
       });
-      useUsage.setState({ snapshot: snapshot([cPro, cMax, hyb1, hyb2]), remaining: false });
+      const sbCost: CostReport = {
+        generatedAt: now,
+        days: 90,
+        weekHours: 168,
+        monthHours: 750,
+        machines: {},
+        rows: [],
+        recentSince: now - 8 * 86400,
+        recent: [
+          { at: now - 3600, provider: 'claude', machine: 'm1', tokens: 1000, requests: 1, cost: 50, priced: true },
+          { at: now - 3600, provider: 'claude', machine: 'm2', tokens: 1000, requests: 1, cost: 400, priced: true },
+          { at: now - 1800, provider: 'codex', machine: 'm1', tokens: 1000, requests: 1, cost: 50, priced: true },
+        ],
+      };
+      useUsage.setState({ snapshot: snapshot([cPro, cMax, hyb1, hyb2]), cost: sbCost, remaining: false });
       useSettings.setState({
         values: {
           'usage.statusBar': { value: true, source: 'global' },
@@ -1308,8 +1665,8 @@ describe('usage panel and status item', () => {
       });
       await act(async () => root.render(createElement(UsageStatusItem)));
       const btn = host.querySelector<HTMLButtonElement>('.usage-status-item')!;
-      // Button in auto mode matches summary.usedPct: Claude 25.45% (25%) > Codex hybrid 22.22% (22%) — NOT Codex's raw 50% session bucket!
-      expect(btn.textContent?.trim()).toBe('25% used');
+      // Button in auto mode matches summary.usedPct: Codex hybrid 33.33% (33%) > Claude 21.43% (21%).
+      expect(btn.textContent?.trim()).toBe('33% used');
       expect(btn.getAttribute('aria-label')).toContain('Combined (2 accounts)');
       const anchor = btn.parentElement!;
       const hoverEvt = new MouseEvent('pointerover', { bubbles: true });
@@ -1320,17 +1677,162 @@ describe('usage panel and status item', () => {
       });
       const claudeHover = host.querySelector<HTMLElement>('.usage-hover [data-account="claude:merged"]')!;
       const codexHover = host.querySelector<HTMLElement>('.usage-hover [data-account="codex:merged"]')!;
-      // Hover card matches button % and displays combined value summary instead of a single window's name.
+      // Hover card displays cycle name + empirical equivalent API values matching summary %.
       expect(claudeHover.textContent).toContain('2 accounts');
-      expect(claudeHover.textContent).toContain('25% used');
-      expect(claudeHover.textContent).toContain('$56.00 / $220');
-      expect(claudeHover.textContent).not.toContain('Weekly');
+      expect(claudeHover.textContent).toContain('21% used');
+      expect(claudeHover.textContent).toContain('Weekly');
+      expect(claudeHover.textContent).toContain('$450 / $2100');
       expect(codexHover.textContent).toContain('2 accounts');
-      expect(codexHover.textContent).toContain('22% used');
-      expect(codexHover.textContent).toContain('$20.00 / $90.00');
-      expect(codexHover.textContent).not.toContain('Session');
+      expect(codexHover.textContent).toContain('33% used');
+      expect(codexHover.textContent).toContain('5 hours');
+      expect(codexHover.textContent).toContain('$50.00 / $150');
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('aggregates only sub-quotas with expected full-cycle value estimates when accounts use disjoint sub-quota pools', async () => {
+    const todayStr = dayOf(new Date(now * 1000));
+    // Account 1 (nus-ws-1): Gemini untouched (0%), Claude and GPT models 62.22% used ($54.11 spent -> ~$86.97 full).
+    const accClaudeOnly = account('antigravity:u1', [], {
+      email: 'u1@example.com',
+      machines: ['nus-ws-1'],
+      windows: [
+        { kind: 'session', label: 'Gemini Models', usedPct: 0, resetsAt: now + 4 * 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 0, resetsAt: now + 6 * 86400, windowSec: 604800 },
+        { kind: 'session', label: 'Claude and GPT models', usedPct: 0, resetsAt: now + 4 * 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Claude and GPT models', usedPct: 62.22, resetsAt: now + 4 * 86400, windowSec: 604800 },
+      ],
+    });
+    // Account 2 (localhost, m920x): Gemini 28.28% used ($405 spent -> ~$1432.11 full), Claude and GPT untouched (0%).
+    const accGeminiOnly = account('antigravity:u2', [], {
+      email: 'u2@example.com',
+      machines: ['localhost', 'm920x'],
+      windows: [
+        { kind: 'session', label: 'Gemini Models', usedPct: 8.06, resetsAt: now + 4 * 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 28.28, resetsAt: now + 6 * 86400, windowSec: 604800 },
+        { kind: 'session', label: 'Claude and GPT models', usedPct: 0, resetsAt: now + 4 * 3600, windowSec: 18000 },
+        { kind: 'weekly', label: 'Claude and GPT models', usedPct: 0, resetsAt: now + 6 * 86400, windowSec: 604800 },
+      ],
+    });
+    const mixedCost: CostReport = {
+      generatedAt: now,
+      days: 90,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'claude-sonnet-4-6',
+          machine: 'nus-ws-1',
+          input: 50_000_000,
+          cached: 76_000_000,
+          cacheWrite: 0,
+          output: 300_000,
+          requests: 120,
+          cost: 54.11,
+          priced: true,
+        },
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'gemini-3-pro',
+          machine: 'localhost',
+          input: 200_000_000,
+          cached: 800_000_000,
+          cacheWrite: 0,
+          output: 5_000_000,
+          requests: 400,
+          cost: 405,
+          priced: true,
+        },
+      ],
+      recentSince: now - 8 * 86400,
+      recent: [
+        { at: now - 86400, provider: 'antigravity', machine: 'nus-ws-1', tokens: 126_300_000, requests: 120, cost: 54.11, priced: true },
+        { at: now - 1800, provider: 'antigravity', machine: 'localhost', tokens: 69_000_000, requests: 40, cost: 21.93, priced: true },
+        { at: now - 7200, provider: 'antigravity', machine: 'localhost', tokens: 931_000_000, requests: 360, cost: 383.07, priced: true },
+      ],
+    };
+
+    // Single-account headlines reflect each account's genuinely active sub-quota (62.22% and 28.28%).
+    expect(accountUsedPct(accClaudeOnly, now, mixedCost)).toBeCloseTo(62.22, 1);
+    expect(accountUsedPct(accGeminiOnly, now, mixedCost)).toBeCloseTo(28.28, 1);
+
+    // Merged weekly summary sums ONLY the valued sub-quotas: (54.11 + 405) / (86.97 + 1432.11) = 459.11 / 1519.07 = 30.22% used (~70% left).
+    // Untouched Gemini on Account 1 and untouched Claude/GPT on Account 2 are NOT imputed!
+    const merged = mergeProviderAccounts([accClaudeOnly, accGeminiOnly], 'antigravity', now, mixedCost)!;
+    expect(merged.summary.weighting).toBe('api');
+    expect(merged.summary.window?.kind).toBe('weekly');
+    expect(merged.summary.usedUsd).toBeCloseTo(459.11, 1);
+    expect(merged.summary.capacityUsd).toBeCloseTo(1519.07, 0);
+    expect(merged.summary.availableUsd).toBeCloseTo(1059.96, 0);
+    expect(merged.summary.usedPct).toBeCloseTo(30.22, 1);
+    expect(merged.summary.remainingPct).toBeCloseTo(69.78, 1);
+
+    // UI Remaining mode shows ~70% left (NOT 55% equal average and NOT 86% imputed Ultra Gemini),
+    // while per-account cards show 38% left and 72% left!
+    useUsage.setState({ snapshot: snapshot([accClaudeOnly, accGeminiOnly]), cost: mixedCost, remaining: true });
+    await act(async () => setView({ tab: 'antigravity', remaining: true }));
+    await act(async () => root.render(createElement(UsagePanel)));
+    const summaryBar = host.querySelector<HTMLElement>('.usage-summary-bar[data-merged-summary="antigravity"]')!;
+    expect(summaryBar.textContent).toContain('~70% left');
+    expect(summaryBar.textContent).toContain('$1060 / $1519');
+    const u1Card = host.querySelector<HTMLElement>('.usage-card[data-account="antigravity:u1"]')!;
+    const u2Card = host.querySelector<HTMLElement>('.usage-card[data-account="antigravity:u2"]')!;
+    expect(u1Card.querySelector('.usage-card-pct')?.textContent).toBe('38% left');
+    expect(u2Card.querySelector('.usage-card-pct')?.textContent).toBe('72% left');
+
+    // Same-machine account using BOTH Gemini and Claude/GPT splits CostReport.recent cleanly via CostReport.rows.
+    const bothUsed = account('antigravity:both', [], {
+      machines: ['m-both'],
+      windows: [
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 25, resetsAt: now + 5 * 86400, windowSec: 604800 },
+        { kind: 'weekly', label: 'Claude and GPT models', usedPct: 50, resetsAt: now + 5 * 86400, windowSec: 604800 },
+      ],
+    });
+    const bothCost: CostReport = {
+      generatedAt: now,
+      days: 90,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'gemini-3-pro',
+          machine: 'm-both',
+          input: 1000,
+          cached: 0,
+          cacheWrite: 0,
+          output: 100,
+          requests: 10,
+          cost: 200,
+          priced: true,
+        },
+        {
+          day: todayStr,
+          provider: 'antigravity',
+          model: 'claude-opus-4-6',
+          machine: 'm-both',
+          input: 500,
+          cached: 0,
+          cacheWrite: 0,
+          output: 100,
+          requests: 5,
+          cost: 50,
+          priced: true,
+        },
+      ],
+      recentSince: now - 8 * 86400,
+      recent: [{ at: now - 3600, provider: 'antigravity', machine: 'm-both', tokens: 1700, requests: 15, cost: 250, priced: true }],
+    };
+    const gSpend = windowSpend(bothCost, bothUsed, bothUsed.windows[0], now)!;
+    const cSpend = windowSpend(bothCost, bothUsed, bothUsed.windows[1], now)!;
+    expect(gSpend).toMatchObject({ cost: 200, full: { cost: 800 } });
+    expect(cSpend).toMatchObject({ cost: 50, full: { cost: 100 } });
   });
 });

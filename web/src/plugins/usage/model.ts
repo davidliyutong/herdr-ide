@@ -150,48 +150,61 @@ export type StatusBarWindowMode = 'auto' | '5h' | '7d' | 'both';
 /** The default provider the status bar shows when no agent pane is active. */
 export type StatusBarProvider = 'auto' | 'claude' | 'codex' | 'grok' | 'antigravity' | 'kimi';
 
-/** Monetary-value-based estimate of one account's quota capacity and
- * remaining availability (in USD when plan tier or explicit USD credits
- * are known). */
+/** Monetary-value and tier-weight estimate of one account's quota capacity and
+ * remaining availability. Subscription capacity is expressed in USD only when
+ * backed by observed local API-priced logs or explicit USD credits/balances. */
 export interface AccountValueEstimate {
-  /** Total estimated capacity in USD (subscription tier + enabled USD extra
-   * usage, or explicit credit limit); undefined when neither plan nor
-   * explicit USD limit is known. */
+  /** Total estimated capacity in USD for the current cycle (observed API-priced
+   * cycle capacity + enabled USD extra usage, or explicit credit limit);
+   * undefined when neither empirical API spend nor explicit USD limits exist. */
   capacityUsd?: number;
-  /** Subscription tier capacity in USD alone (used to weight rate-limit
-   * window buckets separately from extra pay-as-you-go credit limits). */
-  subscriptionUsd?: number;
+  /** Relative subscription tier multiplier (baseline paid plan = 1), or
+   * undefined when the account has no subscription windows or unknown plan. */
+  tierWeight?: number;
   /** Estimated available / remaining value in USD (also set for balance-only
    * accounts such as DeepSeek). */
   availableUsd?: number;
-  /** Estimated used value in USD (capacityUsd - availableUsd when bounded). */
+  /** Estimated used value in USD (capacityUsd - availableUsd when bounded, or
+   * observed cycle API spend so far when below the 5% extrapolation floor). */
   usedUsd?: number;
   /** Effective used percentage (0..100) of this account; undefined when the
    * account has neither active/replenished windows nor bounded credits. */
   usedPct?: number;
-  /** How capacity was estimated. */
-  basis: 'explicit' | 'plan' | 'hybrid' | 'unknown';
+  /** How capacity was determined. */
+  basis: 'api' | 'explicit' | 'hybrid' | 'tier' | 'unknown';
 }
 
-/** Combined approximate usage across 2+ accounts of one provider, weighted
- * by estimated total available monetary value (falling back to equal weight
- * when no account's monetary capacity is known). */
+/** Combined approximate usage across 2+ accounts of one provider. Percentages
+ * and current-cycle equivalent API amounts are computed over comparable window
+ * cycles using deduplicated local API-priced logs, true quota tier multipliers,
+ * and explicit USD credits/balances. */
 export interface MergedQuotaSummary {
   /** Overall merged used percentage (0..100); undefined when no member has
    * measurable quota or bounded credits. */
   usedPct?: number;
   /** Overall merged remaining percentage (100 - usedPct). */
   remainingPct?: number;
-  /** Sum of estimated available USD across accounts (or prepaid balances). */
+  /** Estimated remaining value in USD for the summarized cycle (or prepaid
+   * balances). Only set when backed by observed API logs or explicit money. */
   availableUsd?: number;
-  /** Sum of estimated capacity USD across accounts with bounded quota. */
+  /** Estimated total equivalent API capacity in USD for the summarized cycle
+   * (or explicit bounded credit limit). */
   capacityUsd?: number;
-  /** Sum of estimated used USD (capacityUsd - availableUsd). */
+  /** Estimated used equivalent API value in USD for the summarized cycle (or
+   * observed spend so far / explicit used credits). */
   usedUsd?: number;
-  /** Whether percentages were weighted by estimated monetary value or fell
-   * back to an equal-weight average across accounts. */
-  weighting: 'value' | 'equal';
-  /** Earliest upcoming reset among active windows contributing to the merge. */
+  /** How accounts were weighted:
+   *  - 'api': calibrated from observed current-cycle equivalent API spend
+   *  - 'explicit': weighted by explicit USD credit limits / balances
+   *  - 'tier': weighted by subscription quota tier multipliers (e.g. 1x vs 20x)
+   *  - 'equal': equal-weight fallback when neither tier nor monetary data exists */
+  weighting: 'api' | 'explicit' | 'tier' | 'equal';
+  /** Representative cycle window summarized (e.g. 5h session, 7d weekly, 30d
+   * monthly) when all subscription accounts share that cycle. */
+  window?: UsageWindow;
+  /** Whether every log entry counted in the API-value estimate was priced. */
+  priced?: boolean;
+  /** Earliest upcoming reset among active primary windows in the summarized cycle. */
   resetsAt?: number;
 }
 
@@ -216,17 +229,92 @@ export function pastReset(w: UsageWindow, now = Date.now() / 1000): boolean {
   return !!w.resetsAt && w.resetsAt <= now;
 }
 
-/** The window an account is closest to running out of, of those still in
- * the period they were read in. */
+const GEMINI_LABEL = /\bgemini\b/i;
+const ANTIGRAVITY_THIRD_PARTY_LABEL = /\b(claude|gpt|openai|anthropic|sonnet|opus|haiku)\b/i;
+
+type AntigravityPool = 'gemini' | 'third_party';
+
+function antigravityPoolOf(label?: string): AntigravityPool | undefined {
+  if (!label) return undefined;
+  if (ANTIGRAVITY_THIRD_PARTY_LABEL.test(label)) return 'third_party';
+  if (GEMINI_LABEL.test(label)) return 'gemini';
+  return undefined;
+}
+
+/** Filters an account's windows to its active/primary quota pool for single-account
+ * headline and non-log summaries. Antigravity exposes separate third-party quotas
+ * (Claude/GPT) that often sit at 100% when unentitled alongside Gemini quotas;
+ * unentitled 100% third-party walls are excluded when Gemini windows exist, while
+ * genuinely partially-used (0 < pct < 100) third-party sub-quotas stay visible. */
+export function primaryWindowsOf(a: Pick<UsageAccount, 'provider' | 'windows'>): UsageWindow[] {
+  const ws = a.windows ?? [];
+  if (a.provider !== 'antigravity' || ws.length === 0) return ws;
+  const gemini = ws.filter((w) => GEMINI_LABEL.test(w.label ?? ''));
+  if (gemini.length > 0) {
+    const partialThirdParty = ws.filter((w) => ANTIGRAVITY_THIRD_PARTY_LABEL.test(w.label ?? '') && w.usedPct > 0 && w.usedPct < 100);
+    return partialThirdParty.length > 0 ? [...gemini, ...partialThirdParty] : gemini;
+  }
+  const nonThirdParty = ws.filter((w) => !ANTIGRAVITY_THIRD_PARTY_LABEL.test(w.label ?? ''));
+  return nonThirdParty.length > 0 ? nonThirdParty : ws;
+}
+
+/** The window an account is closest to running out of, of its primary quota
+ * pool still in the period it was read in. */
 export function tightestWindow(a: UsageAccount, now = Date.now() / 1000): UsageWindow | undefined {
   let best: UsageWindow | undefined;
-  for (const w of a.windows ?? []) if (!pastReset(w, now) && (!best || w.usedPct > best.usedPct)) best = w;
+  for (const w of primaryWindowsOf(a)) if (!pastReset(w, now) && (!best || w.usedPct > best.usedPct)) best = w;
   return best;
 }
 
-/** Monthly subscription value estimates (USD) by provider and plan tier,
- * used as capacity weights when merging heterogeneous accounts of the same
- * provider. Free tiers carry a nominal $4 value (~1/5 of a $20 Pro plan). */
+/** Relative subscription quota capacity multipliers by provider and plan tier
+ * (baseline paid plan = 1). Reflects actual quota capacity ratios rather than
+ * monthly retail subscription prices (e.g. Claude Max 20x is 20x Pro, not 10x). */
+const PLAN_WEIGHT: Record<string, [RegExp, number][]> = {
+  claude: [
+    [/\bmax\b.*\b20x\b|\b20x\b/i, 20],
+    [/\bteam\b.*\bpremium\b/i, 5],
+    [/\bmax\b.*\b5x\b|\b5x\b|\bmax\b/i, 5],
+    [/\benterprise\b/i, 3],
+    [/\bteam\b/i, 1.5],
+    [/\bpro\b/i, 1],
+    [/\bfree\b/i, 0.2],
+  ],
+  codex: [
+    [/\bpro\b/i, 10],
+    [/\benterprise\b/i, 3],
+    [/\b(team|business)\b/i, 1.5],
+    [/\bedu\b/i, 1.25],
+    [/\bplus\b/i, 1],
+    [/\bgo\b/i, 0.4],
+    [/\bfree\b/i, 0.2],
+  ],
+  grok: [
+    [/\bheavy\b/i, 10],
+    [/premium\s*\+|premium\s+plus/i, 1.33],
+    [/\bsuper\s*grok\b|\bpro\b/i, 1],
+    [/\bpremium\b/i, 0.27],
+    [/\b(free|basic)\b/i, 0.13],
+  ],
+  antigravity: [
+    [/\bultra\b/i, 12.5],
+    [/\benterprise\b/i, 3],
+    [/\b(team|business)\b/i, 1.5],
+    [/\bpro\b/i, 1],
+    [/\b(free|standard|individual)\b/i, 0.2],
+  ],
+  kimi: [
+    [/\bvivace\b/i, 10],
+    [/\ballegro\b/i, 5],
+    [/\ballegretto\b/i, 2],
+    [/\b(moderato|pro|plus)\b/i, 1],
+    [/\b(andante|basic)\b/i, 0.5],
+    [/\bfree\b/i, 0.2],
+  ],
+};
+
+/** Monthly subscription retail prices (USD) by provider and plan tier; used
+ * only to parse/compare explicit `$N` tiers and as a last-resort scale when
+ * blending hybrid subscription + extra USD credits before local logs exist. */
 const PLAN_USD: Record<string, [RegExp, number][]> = {
   claude: [
     [/\bmax\b.*\b20x\b|\b20x\b/i, 200],
@@ -270,8 +358,7 @@ const PLAN_USD: Record<string, [RegExp, number][]> = {
   ],
 };
 
-/** Baseline monthly plan value (USD) used for an untagged sibling account
- * ONLY when another account of the same provider has a known monetary value. */
+/** Baseline paid plan monthly price (USD) per provider. */
 const PROVIDER_BASELINE_USD: Record<string, number> = {
   claude: 20,
   codex: 20,
@@ -296,8 +383,32 @@ const round2 = (v: number) => Math.round(v * 100) / 100;
 const clampPct = (v: number) => round2(Math.min(100, Math.max(0, v)));
 const finiteNonNeg = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
 
-/** Estimates the monthly USD value of a subscription plan tier, or undefined
- * when the plan is absent or unrecognized. */
+/** Estimates the relative quota capacity multiplier of a subscription plan
+ * tier (baseline paid tier = 1), or undefined when absent/unrecognized. */
+export function estimatePlanWeight(provider: string, plan?: string): number | undefined {
+  if (!plan) return undefined;
+  const norm = plan.trim().toLowerCase().replace(/[_-]+/g, ' ');
+  if (!norm) return undefined;
+  const rules = PLAN_WEIGHT[provider.toLowerCase()];
+  if (rules) {
+    for (const [re, w] of rules) if (re.test(norm)) return w;
+  }
+  const mult = /\b(\d+(?:\.\d+)?)\s*x\b/i.exec(norm);
+  if (mult) {
+    const n = Number(mult[1]);
+    if (Number.isFinite(n) && n > 0) return round2(n);
+  }
+  const explicit = /\$\s*(\d+(?:\.\d+)?)/.exec(norm);
+  if (explicit) {
+    const n = Number(explicit[1]);
+    const base = PROVIDER_BASELINE_USD[provider.toLowerCase()] ?? 20;
+    if (Number.isFinite(n) && n > 0) return round2(n / base);
+  }
+  return undefined;
+}
+
+/** Estimates the monthly retail USD price of a subscription plan tier, or
+ * undefined when the plan is absent or unrecognized. */
 export function estimatePlanUsd(provider: string, plan?: string): number | undefined {
   if (!plan) return undefined;
   const norm = plan.trim().toLowerCase().replace(/[_-]+/g, ' ');
@@ -382,42 +493,65 @@ function explicitMoneyOf(a: UsageAccount): ExplicitMoney {
  * USD credits; excluded from subscription windows to avoid double-counting. */
 const isExtraCreditWindow = (w: UsageWindow) => w.kind === 'monthly' && (w.label ?? '').trim().toLowerCase() === 'extra';
 
-/** Subscription windows of an account (excluding synthetic Extra credit window
- * when explicit USD credit limits already account for extra usage). */
+/** Subscription windows of an account's primary quota pool (excluding
+ * Antigravity third-party Claude/GPT windows when Gemini windows exist, and
+ * excluding synthetic Extra credit windows when explicit USD limits apply). */
 function subWindowsOf(a: UsageAccount, hasExplicitCreditCap: boolean): UsageWindow[] {
-  const ws = a.windows ?? [];
+  const ws = primaryWindowsOf(a);
   if (!hasExplicitCreditCap) return ws;
   const filtered = ws.filter((w) => !isExtraCreditWindow(w));
   return filtered.length ? filtered : [];
 }
 
-/** Estimates an account's monetary capacity, available value, and effective
- * used percentage from explicit USD credits/balances and/or its plan tier. */
+/** Estimates one account's current-cycle equivalent API capacity (when `cost`
+ * has observed spend for its tightest primary window), explicit USD credits /
+ * balances, tier weight, and effective used percentage. */
 export function estimateAccountValue(
   a: UsageAccount,
   now = Date.now() / 1000,
-  opts: { treatAllPastResetAsReplenished?: boolean; fallbackPlanUsd?: number } = {},
+  opts: { treatAllPastResetAsReplenished?: boolean; cost?: CostReport } = {},
 ): AccountValueEstimate {
   const moneyInfo = explicitMoneyOf(a);
   const hasExplicitCap = (moneyInfo.capacityUsd ?? 0) > 0;
   const subWindows = subWindowsOf(a, hasExplicitCap);
   const activeSub = subWindows.filter((w) => !pastReset(w, now));
+  let tightSub: UsageWindow | undefined;
   let subUsedPct: number | undefined;
   if (activeSub.length > 0) {
-    subUsedPct = clampPct(Math.max(...activeSub.map((w) => w.usedPct)));
+    for (const w of activeSub) if (!tightSub || w.usedPct > tightSub.usedPct) tightSub = w;
+    subUsedPct = clampPct(tightSub!.usedPct);
   } else if (subWindows.length > 0 && opts.treatAllPastResetAsReplenished) {
     subUsedPct = 0;
   }
+  const tierWeight = subUsedPct !== undefined ? estimatePlanWeight(a.provider, a.plan) : undefined;
 
-  const planUsd = subUsedPct !== undefined ? (estimatePlanUsd(a.provider, a.plan) ?? opts.fallbackPlanUsd) : undefined;
+  // Empirical current-cycle API capacity from local logs for the tightest window.
+  let apiCapUsd: number | undefined;
+  let apiUsedUsd: number | undefined;
+  let apiAvailUsd: number | undefined;
+  if (opts.cost && tightSub) {
+    const sp = windowSpend(opts.cost, a, tightSub, now);
+    if (sp && sp.cost > 0) {
+      const extraOverlap = subUsedPct !== undefined && subUsedPct >= 100 ? (moneyInfo.usedUsd ?? 0) : 0;
+      const subCost = Math.max(0, sp.cost - extraOverlap);
+      if (subCost > 0) {
+        apiUsedUsd = subCost;
+        if (tightSub.usedPct >= 5) {
+          apiCapUsd = (subCost * 100) / tightSub.usedPct;
+          apiAvailUsd = Math.max(0, apiCapUsd - subCost);
+        }
+      }
+    }
+  }
+
   let capacityUsd = 0;
   let availableUsd = 0;
   let hasCap = false;
   let hasAvail = false;
 
-  if (planUsd !== undefined && planUsd > 0 && subUsedPct !== undefined) {
-    capacityUsd += planUsd;
-    availableUsd += planUsd * (1 - subUsedPct / 100);
+  if (apiCapUsd !== undefined && apiCapUsd > 0 && apiAvailUsd !== undefined) {
+    capacityUsd += apiCapUsd;
+    availableUsd += apiAvailUsd;
     hasCap = true;
     hasAvail = true;
   }
@@ -431,25 +565,26 @@ export function estimateAccountValue(
 
   if (moneyInfo.prepaidUsd !== undefined) {
     if (hasCap) {
-      // An enabled prepaid balance/wallet beside a subscription or bounded
-      // credit limit adds remaining monetary capacity on top.
       if (moneyInfo.prepaidUsd > 0) {
         capacityUsd += moneyInfo.prepaidUsd;
         availableUsd += moneyInfo.prepaidUsd;
       }
-    } else {
+    } else if (subUsedPct === undefined) {
       availableUsd += moneyInfo.prepaidUsd;
       hasAvail = true;
     }
   }
 
-  if (hasCap && capacityUsd > 0) {
+  // Case 1: Pure explicit USD credits (no subscription windows) OR subscription
+  // backed by empirical current-cycle API capacity.
+  if (hasCap && capacityUsd > 0 && (subUsedPct === undefined || apiCapUsd !== undefined)) {
     const usedUsd = Math.max(0, capacityUsd - availableUsd);
     const usedPct = clampPct((usedUsd / capacityUsd) * 100);
-    const basis: AccountValueEstimate['basis'] = planUsd !== undefined && hasExplicitCap ? 'hybrid' : hasExplicitCap ? 'explicit' : 'plan';
+    const basis: AccountValueEstimate['basis'] =
+      apiCapUsd !== undefined && hasExplicitCap ? 'hybrid' : apiCapUsd !== undefined ? 'api' : 'explicit';
     return {
       capacityUsd: round2(capacityUsd),
-      subscriptionUsd: planUsd !== undefined ? round2(planUsd) : undefined,
+      tierWeight,
       availableUsd: round2(availableUsd),
       usedUsd: round2(usedUsd),
       usedPct,
@@ -457,11 +592,25 @@ export function estimateAccountValue(
     };
   }
 
+  // Case 2: Subscription windows without observed empirical API capacity yet.
   if (subUsedPct !== undefined) {
+    // If bounded USD extra credits exist alongside subscription windows, blend
+    // them into usedPct using the provider's baseline scale without fabricating
+    // a monthly retail fee as current-cycle API dollar capacity.
+    let usedPct = subUsedPct;
+    if (hasExplicitCap) {
+      const baseUsd = PROVIDER_BASELINE_USD[a.provider.toLowerCase()] ?? 20;
+      const subBlendCap = (tierWeight ?? 1) * baseUsd;
+      const blendCap = subBlendCap + moneyInfo.capacityUsd! + Math.max(0, moneyInfo.prepaidUsd ?? 0);
+      const blendAvail = subBlendCap * (1 - subUsedPct / 100) + moneyInfo.availableUsd! + Math.max(0, moneyInfo.prepaidUsd ?? 0);
+      usedPct = clampPct(((blendCap - blendAvail) / blendCap) * 100);
+    }
+    const spentSoFar = (apiUsedUsd ?? 0) + (moneyInfo.usedUsd ?? 0);
     return {
-      usedPct: subUsedPct,
-      availableUsd: hasAvail ? round2(availableUsd) : undefined,
-      basis: 'unknown',
+      tierWeight,
+      usedUsd: spentSoFar > 0 ? round2(spentSoFar) : undefined,
+      usedPct,
+      basis: hasExplicitCap ? 'hybrid' : tierWeight !== undefined ? 'tier' : 'unknown',
     };
   }
 
@@ -472,20 +621,21 @@ export function estimateAccountValue(
 }
 
 /** Headline used percentage (0..100) for an account or merged provider
- * summary: uses the value-weighted merged summary when merged, the tightest
- * active window for a single subscription account, else bounded USD credits. */
-export function accountUsedPct(a: UsageAccount | MergedUsageAccount, now = Date.now() / 1000): number | undefined {
+ * summary: uses the merged summary when merged, blended value when bounded USD
+ * credits exist, else the tightest primary active window. */
+export function accountUsedPct(a: UsageAccount | MergedUsageAccount, now = Date.now() / 1000, cost?: CostReport): number | undefined {
   if (isMergedAccount(a)) return a.summary.usedPct;
+  if ((explicitMoneyOf(a).capacityUsd ?? 0) > 0) return estimateAccountValue(a, now, { cost }).usedPct;
   const w = tightestWindow(a, now);
   if (w) return w.usedPct;
-  return estimateAccountValue(a, now).usedPct;
+  return estimateAccountValue(a, now, { cost }).usedPct;
 }
 
 /** Accounts, the tightest first; those without measurable usage last. */
-export function sortAccounts<T extends UsageAccount>(list: T[], now = Date.now() / 1000): T[] {
+export function sortAccounts<T extends UsageAccount>(list: T[], now = Date.now() / 1000, cost?: CostReport): T[] {
   return [...list].sort((a, b) => {
-    const wa = accountUsedPct(a, now) ?? -1;
-    const wb = accountUsedPct(b, now) ?? -1;
+    const wa = accountUsedPct(a, now, cost) ?? -1;
+    const wb = accountUsedPct(b, now, cost) ?? -1;
     if (wa !== wb) return wb - wa;
     return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
   });
@@ -493,88 +643,619 @@ export function sortAccounts<T extends UsageAccount>(list: T[], now = Date.now()
 
 const statusPriority: Record<UsageAccount['status'], number> = { ok: 0, stale: 1, error: 2, unauth: 3 };
 
-/** Merges 2+ accounts of a provider into one aggregated summary whose overall
- * usage percentage and per-window buckets are weighted by estimated total
- * available monetary value (falling back cleanly to equal-weight average when
- * no account has a known plan tier or explicit USD limit). Returns undefined
- * when fewer than 2 accounts of that provider are present. */
-export function mergeProviderAccounts(accounts: UsageAccount[], provider: string, now = Date.now() / 1000): MergedUsageAccount | undefined {
+/** Minimum component used fraction (5%) before extrapolating full-cycle API
+ * capacity from observed spend, matching single-account windowSpend. */
+const MIN_EXTRAPOLATE_FRACTION = 0.05;
+/** When plans are known across multiple disjoint machines, a per-tier-unit
+ * spend rate below this share of a sibling's rate signals incomplete local
+ * logs (e.g. usage on web or an untracked machine). */
+const INCOMPLETE_LOG_RATIO = 0.15;
+
+type CycleKey = '5h' | '7d' | '30d';
+
+interface MemberMeta {
+  account: UsageAccount;
+  explicit: ExplicitMoney;
+  subWindows: UsageWindow[];
+  allCycleWindows: UsageWindow[];
+  tierWeight?: number;
+  priorWeight: number;
+}
+
+interface CycleEntry {
+  meta: MemberMeta;
+  poolKey: string;
+  window?: UsageWindow;
+  usedPct: number;
+}
+
+interface CycleSpendResult {
+  covered: boolean;
+  cost: number;
+  priced: boolean;
+}
+
+/** Normalized sub-quota pool key within a cycle: separates Antigravity's
+ * Gemini pool from its Claude/GPT pool, and distinct labelled sub-quotas for
+ * other providers while merging standard unlabelled windows under ''. */
+function subQuotaPoolOf(provider: string, w: UsageWindow): string {
+  if (provider === 'antigravity') return antigravityPoolOf(w.label) ?? 'gemini';
+  return (w.label ?? '').trim().toLowerCase();
+}
+
+/** Computes the fraction of `provider` spend/tokens/requests on `machines`
+ * since `startDay` attributable to an Antigravity sub-quota pool ('gemini' vs
+ * 'third_party') from `CostReport.rows`. Returns `hasRows: false` when `rows`
+ * has no entries for those machines in the range. */
+function antigravityRowShare(
+  cost: CostReport,
+  machines: ReadonlySet<string>,
+  startDay: string,
+  pool: AntigravityPool,
+): { hasRows: boolean; costShare: number; tokenShare: number; reqShare: number; priced: boolean } {
+  let totalCost = 0;
+  let totalTokens = 0;
+  let totalReqs = 0;
+  let poolCost = 0;
+  let poolTokens = 0;
+  let poolReqs = 0;
+  let poolPriced = true;
+  let anyRow = false;
+  for (const r of cost.rows ?? []) {
+    if (r.provider !== 'antigravity' || !machines.has(r.machine) || r.day < startDay) continue;
+    anyRow = true;
+    const tok = rowTokens(r);
+    totalCost += r.cost;
+    totalTokens += tok;
+    totalReqs += r.requests;
+    const isThirdParty = ANTIGRAVITY_THIRD_PARTY_LABEL.test(r.model);
+    if ((pool === 'third_party') === isThirdParty) {
+      poolCost += r.cost;
+      poolTokens += tok;
+      poolReqs += r.requests;
+      poolPriced = poolPriced && r.priced;
+    }
+  }
+  if (!anyRow) return { hasRows: false, costShare: 0, tokenShare: 0, reqShare: 0, priced: true };
+  const costShare = totalCost > 0 ? poolCost / totalCost : totalTokens > 0 ? poolTokens / totalTokens : 0;
+  const tokenShare = totalTokens > 0 ? poolTokens / totalTokens : costShare;
+  const reqShare = totalReqs > 0 ? poolReqs / totalReqs : costShare;
+  return { hasRows: true, costShare, tokenShare, reqShare, priced: poolPriced };
+}
+
+/** Deduplicated local API-equivalent spend across the unique machines hosting
+ * a connected component of accounts for one sub-quota pool in one cycle.
+ * Uses exact 15-minute CostReport.recent slots when covered (partitioned by
+ * CostReport.rows model family for Antigravity multi-pool accounts), falling
+ * back to daily CostReport.rows for cycles longer than 8 days (e.g. monthly). */
+function componentCycleSpend(
+  cost: CostReport | undefined,
+  provider: string,
+  poolKey: string,
+  entries: CycleEntry[],
+  now: number,
+): CycleSpendResult {
+  if (!cost) return { covered: false, cost: 0, priced: true };
+  const machines = new Set<string>();
+  for (const e of entries) for (const m of e.meta.account.machines ?? []) machines.add(m);
+  if (machines.size === 0) return { covered: false, cost: 0, priced: true };
+
+  const agPool: AntigravityPool | undefined =
+    provider === 'antigravity' ? (poolKey === 'third_party' ? 'third_party' : 'gemini') : undefined;
+
+  let totalCost = 0;
+  let priced = true;
+  let anyMeasurable = false;
+
+  for (const m of machines) {
+    const usedHosting = entries.filter((e) => (e.meta.account.machines ?? []).includes(m) && e.usedPct > 0);
+    if (usedHosting.length === 0) continue;
+    let start = Infinity;
+    let maxWindowSec = 0;
+    for (const e of usedHosting) {
+      const w = e.window;
+      if (!w || pastReset(w, now) || !w.resetsAt || !w.windowSec || w.kind === 'model') {
+        return { covered: false, cost: 0, priced: true };
+      }
+      start = Math.min(start, w.resetsAt - w.windowSec);
+      maxWindowSec = Math.max(maxWindowSec, w.windowSec);
+    }
+    const startDay = dayOf(new Date(start * 1000));
+    let poolFactor = 1;
+    let poolPricedOverride: boolean | undefined;
+    if (agPool) {
+      const share = antigravityRowShare(cost, new Set([m]), startDay, agPool);
+      if (share.hasRows) {
+        poolFactor = share.costShare;
+        poolPricedOverride = share.priced;
+      } else if (agPool === 'third_party') {
+        // Without per-model rows, attribute recent slots to third-party only when
+        // no Gemini window in the same cycle on the hosting accounts was used.
+        const ck = cycleKeyOf(usedHosting[0]!.window!);
+        const geminiUsed = usedHosting.some((e) =>
+          e.meta.allCycleWindows.some(
+            (w) => cycleKeyOf(w) === ck && !pastReset(w, now) && GEMINI_LABEL.test(w.label ?? '') && w.usedPct > 0,
+          ),
+        );
+        if (geminiUsed) poolFactor = 0;
+      } else {
+        // agPool === 'gemini' without rows: if Gemini is 0% (filtered out above) or
+        // only third-party was used, factor stays 1 for used Gemini windows.
+        poolFactor = 1;
+      }
+    }
+
+    if (cost.recent && cost.recentSince !== undefined && start >= cost.recentSince) {
+      anyMeasurable = true;
+      let machineCost = 0;
+      let machinePriced = true;
+      for (const s of cost.recent) {
+        if (s.provider !== provider || s.machine !== m || s.at + SLOT_SEC / 2 <= start) continue;
+        machineCost += s.cost;
+        machinePriced = machinePriced && s.priced;
+      }
+      totalCost += machineCost * poolFactor;
+      if (poolFactor > 0) priced = priced && (poolPricedOverride ?? machinePriced);
+    } else if (maxWindowSec >= 8 * 86400 && cost.rows && cost.days > 0) {
+      const today = new Date(now * 1000);
+      const oldestDay = lastDays(cost.days, today)[0];
+      if (startDay < oldestDay) return { covered: false, cost: 0, priced: true };
+      anyMeasurable = true;
+      for (const r of cost.rows) {
+        if (r.provider !== provider || r.machine !== m || r.day < startDay) continue;
+        if (agPool && (agPool === 'third_party') !== ANTIGRAVITY_THIRD_PARTY_LABEL.test(r.model)) continue;
+        totalCost += r.cost;
+        priced = priced && r.priced;
+      }
+    } else {
+      return { covered: false, cost: 0, priced: true };
+    }
+  }
+  return { covered: anyMeasurable, cost: totalCost, priced };
+}
+
+/** Partitions subscription entries into connected components by shared machines
+ * so disjoint accounts measure their own API capacity directly while co-hosted
+ * accounts share deduplicated machine logs without double-counting. */
+function machineComponents(entries: CycleEntry[]): CycleEntry[][] {
+  const n = entries.length;
+  const visited = new Uint8Array(n);
+  const machineSets = entries.map((e) => new Set(e.meta.account.machines ?? []));
+  const sharesMachine = (i: number, j: number) => {
+    for (const m of machineSets[i]) if (machineSets[j].has(m)) return true;
+    return false;
+  };
+  const comps: CycleEntry[][] = [];
+  for (let i = 0; i < n; i++) {
+    if (visited[i]) continue;
+    visited[i] = 1;
+    const queue = [i];
+    const comp: CycleEntry[] = [];
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      comp.push(entries[cur]);
+      for (let j = 0; j < n; j++) {
+        if (!visited[j] && sharesMachine(cur, j)) {
+          visited[j] = 1;
+          queue.push(j);
+        }
+      }
+    }
+    comps.push(comp);
+  }
+  return comps;
+}
+
+interface CycleEvaluation {
+  summary: MergedQuotaSummary;
+  /** Subscription-only merged percentage (without hybrid extra USD credits),
+   * used to keep per-window status bar buckets consistent with empirical weights. */
+  subOnlyUsedPct?: number;
+}
+
+/** Evaluates one cycle (a comparable duration bucket such as 5h/7d, or a
+ * tightest-window fallback) across all members and sub-quota pools of a provider. */
+function evaluateCycle(
+  provider: string,
+  metas: MemberMeta[],
+  poolEntries: CycleEntry[],
+  primaryEntries: CycleEntry[],
+  hasKnownTier: boolean,
+  sampleWindow: UsageWindow | undefined,
+  includeExplicitCredits: boolean,
+  cost: CostReport | undefined,
+  now: number,
+): CycleEvaluation {
+  let explicitCap = 0;
+  let explicitAvail = 0;
+  let explicitUsed = 0;
+  let hasPrepaid = false;
+  let prepaidAvail = 0;
+  if (includeExplicitCredits) {
+    for (const m of metas) {
+      if ((m.explicit.capacityUsd ?? 0) > 0) {
+        explicitCap += m.explicit.capacityUsd!;
+        explicitAvail += m.explicit.availableUsd!;
+        explicitUsed += m.explicit.usedUsd!;
+      }
+      if (m.explicit.prepaidUsd !== undefined) {
+        hasPrepaid = true;
+        prepaidAvail += m.explicit.prepaidUsd;
+      }
+    }
+  }
+
+  // Case 1: Pure explicit USD credits / prepaid balances (no subscription windows).
+  if (poolEntries.length === 0 && primaryEntries.length === 0) {
+    if (explicitCap > 0) {
+      const totalCap = explicitCap + Math.max(0, prepaidAvail);
+      const totalAvail = explicitAvail + Math.max(0, prepaidAvail);
+      const totalUsed = Math.max(0, totalCap - totalAvail);
+      const usedPct = clampPct((totalUsed / totalCap) * 100);
+      return {
+        summary: {
+          usedPct,
+          remainingPct: clampPct(100 - usedPct),
+          capacityUsd: round2(totalCap),
+          availableUsd: round2(totalAvail),
+          usedUsd: round2(totalUsed),
+          weighting: 'explicit',
+        },
+      };
+    }
+    return {
+      summary: {
+        availableUsd: hasPrepaid ? round2(prepaidAvail) : undefined,
+        weighting: hasPrepaid ? 'explicit' : 'equal',
+      },
+    };
+  }
+
+  // Group candidate sub-quota entries by sub-quota pool (e.g. 'gemini' vs
+  // 'third_party' on Antigravity; '' on single-pool providers) and partition
+  // each pool by shared machines so logs are never double-counted.
+  const byPool = new Map<string, CycleEntry[]>();
+  for (const e of poolEntries) {
+    const list = byPool.get(e.poolKey);
+    if (list) list.push(e);
+    else byPool.set(e.poolKey, [e]);
+  }
+  const multiPool = byPool.size > 1;
+
+  interface EvaluatedComp {
+    poolKey: string;
+    entries: CycleEntry[];
+    totalWeight: number;
+    usedWeight: number;
+    usedFraction: number;
+    spend: CycleSpendResult;
+    subSpend: number;
+    reliable: boolean;
+    obsCap?: number;
+    obsUnit?: number;
+    allKnownPlan: boolean;
+  }
+
+  const poolComps = new Map<string, EvaluatedComp[]>();
+  for (const [poolKey, entries] of byPool) {
+    const comps: EvaluatedComp[] = machineComponents(entries).map((compEntries) => {
+      const totalWeight = compEntries.reduce((s, e) => s + e.meta.priorWeight, 0);
+      const usedWeight = compEntries.reduce((s, e) => s + e.meta.priorWeight * (e.usedPct / 100), 0);
+      const activeWeight = compEntries.reduce((s, e) => s + (e.usedPct > 0 ? e.meta.priorWeight : 0), 0);
+      const usedFraction = totalWeight > 0 ? usedWeight / totalWeight : 0;
+      const activeFraction = activeWeight > 0 ? usedWeight / activeWeight : 0;
+      const spend = componentCycleSpend(cost, provider, poolKey, compEntries, now);
+      const extraOverlap = includeExplicitCredits
+        ? compEntries.reduce((s, e) => s + (e.usedPct >= 100 ? (e.meta.explicit.usedUsd ?? 0) : 0), 0)
+        : 0;
+      const subSpend = spend.covered ? Math.max(0, spend.cost - extraOverlap) : 0;
+      const reliable = spend.covered && subSpend > 0 && activeFraction >= MIN_EXTRAPOLATE_FRACTION;
+      const obsCap = reliable && usedFraction > 0 ? subSpend / usedFraction : undefined;
+      const obsUnit = reliable && usedWeight > 0 ? subSpend / usedWeight : undefined;
+      const allKnownPlan = compEntries.every((e) => e.meta.tierWeight !== undefined);
+      return {
+        poolKey,
+        entries: compEntries,
+        totalWeight,
+        usedWeight,
+        usedFraction,
+        spend,
+        subSpend,
+        reliable,
+        obsCap,
+        obsUnit,
+        allKnownPlan,
+      };
+    });
+
+    // Incomplete-log guard within the same sub-quota pool across known-tier hosts.
+    if (hasKnownTier) {
+      const knownReliable = comps.filter((c) => c.reliable && c.allKnownPlan && c.obsUnit !== undefined);
+      if (knownReliable.length >= 2) {
+        const maxUnit = Math.max(...knownReliable.map((c) => c.obsUnit!));
+        for (const c of knownReliable) {
+          if (c.obsUnit! < INCOMPLETE_LOG_RATIO * maxUnit) c.reliable = false;
+        }
+      }
+    }
+    poolComps.set(poolKey, comps);
+  }
+
+  const allReliable = [...poolComps.values()].flat().filter((c) => c.reliable && c.obsCap !== undefined);
+
+  // Branch A: At least one sub-quota has a measured full-cycle API value (`用满本周期`)!
+  // Sum only the sub-quotas with expected full-cycle value estimates (and for
+  // single-pool providers, standby/off-host accounts not already valued via another
+  // sub-quota), never fabricating capacity for untouched sub-quotas!
+  if (allReliable.length > 0) {
+    const valuedAccounts = new Set<string>();
+    const contributedWindows: UsageWindow[] = [];
+    for (const c of allReliable) {
+      for (const e of c.entries) {
+        if (e.usedPct > 0 || !multiPool) valuedAccounts.add(e.meta.account.key);
+        if (e.window && e.usedPct > 0) contributedWindows.push(e.window);
+      }
+    }
+
+    let subCap = 0;
+    let subUsed = 0;
+    let subAvail = 0;
+    let allPriced = true;
+
+    for (const [, comps] of poolComps) {
+      const relInPool = comps.filter((c) => c.reliable && c.obsCap !== undefined);
+      const pooledUsedW = relInPool.reduce((s, c) => s + c.usedWeight, 0);
+      const pooledSpend = relInPool.reduce((s, c) => s + c.subSpend, 0);
+      const pooledUnit = pooledUsedW > 0 ? pooledSpend / pooledUsedW : 0;
+
+      for (const c of comps) {
+        if (c.reliable && c.obsCap !== undefined) {
+          // If this component sits on a single machine or shared machines within one
+          // pool: for multi-pool providers (e.g. Antigravity), exclude 0%-used sibling
+          // sub-quotas only when they are on disjoint components; within a reliable
+          // component, obsCap already reflects active subSpend / usedFraction (and on
+          // a single-account component, usedFraction === e.usedPct / 100, so obsCap is
+          // literally the sub-quota's own `windowSpend.full.cost`).
+          subCap += c.obsCap;
+          subUsed += c.subSpend;
+          subAvail += Math.max(0, c.obsCap - c.subSpend);
+          allPriced = allPriced && c.spend.priced;
+        } else if (pooledUnit > 0) {
+          // Only calibrate unvalued entries within the SAME pool when the account does
+          // not already have another valued sub-quota, and either the sub-quota itself
+          // is actively used (e.g. off-host / <5%) or this is a single-pool provider
+          // with known plan tiers (standby account). Untouched sub-quotas in multi-pool
+          // setups are never imputed.
+          const eligible = c.entries.filter(
+            (e) => !valuedAccounts.has(e.meta.account.key) && (e.usedPct > 0 || (!multiPool && hasKnownTier)),
+          );
+          if (eligible.length > 0) {
+            const eligWeight = eligible.reduce((s, e) => s + e.meta.priorWeight, 0);
+            const eligUsedW = eligible.reduce((s, e) => s + e.meta.priorWeight * (e.usedPct / 100), 0);
+            const cap = eligWeight * pooledUnit;
+            const used = eligUsedW * pooledUnit;
+            subCap += cap;
+            subUsed += used;
+            subAvail += Math.max(0, cap - used);
+            for (const e of eligible) {
+              valuedAccounts.add(e.meta.account.key);
+              if (e.window && e.usedPct > 0) contributedWindows.push(e.window);
+            }
+          }
+        }
+      }
+    }
+
+    const activeResets = (contributedWindows.length > 0 ? contributedWindows : primaryEntries.map((e) => e.window)).filter(
+      (w): w is UsageWindow => !!w && !pastReset(w, now) && !!w.resetsAt,
+    );
+    const resetsAt = activeResets.length ? Math.min(...activeResets.map((w) => w.resetsAt!)) : undefined;
+
+    const subOnlyUsedPct = subCap > 0 ? clampPct((subUsed / subCap) * 100) : 0;
+    const totalCap = subCap + explicitCap + Math.max(0, prepaidAvail);
+    const totalAvail = subAvail + explicitAvail + Math.max(0, prepaidAvail);
+    const totalUsed = Math.max(0, totalCap - totalAvail);
+    const usedPct = totalCap > 0 ? clampPct((totalUsed / totalCap) * 100) : subOnlyUsedPct;
+    return {
+      subOnlyUsedPct,
+      summary: {
+        usedPct,
+        remainingPct: clampPct(100 - usedPct),
+        capacityUsd: round2(totalCap),
+        availableUsd: round2(totalAvail),
+        usedUsd: round2(totalUsed),
+        weighting: 'api',
+        window: sampleWindow,
+        priced: allPriced,
+        resetsAt,
+      },
+    };
+  }
+
+  // Branch B: No reliable empirical cycle spend yet — weight primary entries by
+  // true quota tier multipliers (or equal weight) without fabricating monthly
+  // subscription retail fees as current-cycle equivalent API capacity.
+  const fallbackEntries = primaryEntries.length > 0 ? primaryEntries : poolEntries;
+  const activeResets = fallbackEntries.map((e) => e.window).filter((w): w is UsageWindow => !!w && !pastReset(w, now) && !!w.resetsAt);
+  const usedResets = activeResets.filter((w) => w.usedPct > 0);
+  const resetSource = usedResets.length ? usedResets : activeResets;
+  const resetsAt = resetSource.length ? Math.min(...resetSource.map((w) => w.resetsAt!)) : undefined;
+
+  const totalW = fallbackEntries.reduce((s, e) => s + e.meta.priorWeight, 0);
+  const usedW = fallbackEntries.reduce((s, e) => s + e.meta.priorWeight * e.usedPct, 0);
+  const subOnlyUsedPct = totalW > 0 ? clampPct(usedW / totalW) : 0;
+  const allComps = [...poolComps.values()].flat();
+  const observedSubSpend = allComps.reduce((s, c) => s + (c.spend.covered ? c.subSpend : 0), 0);
+  const observedPriced = allComps.every((c) => !c.spend.covered || c.spend.priced);
+
+  let usedPct = subOnlyUsedPct;
+  if (explicitCap > 0) {
+    const baseUsd = PROVIDER_BASELINE_USD[provider.toLowerCase()] ?? 20;
+    const subBlendCap = totalW * baseUsd;
+    const blendCap = subBlendCap + explicitCap + Math.max(0, prepaidAvail);
+    const blendAvail = subBlendCap * (1 - subOnlyUsedPct / 100) + explicitAvail + Math.max(0, prepaidAvail);
+    usedPct = clampPct(((blendCap - blendAvail) / blendCap) * 100);
+  }
+  const spentSoFar = observedSubSpend + explicitUsed;
+  return {
+    subOnlyUsedPct,
+    summary: {
+      usedPct,
+      remainingPct: clampPct(100 - usedPct),
+      usedUsd: spentSoFar > 0 ? round2(spentSoFar) : undefined,
+      weighting: hasKnownTier ? 'tier' : explicitCap > 0 ? 'explicit' : 'equal',
+      window: sampleWindow,
+      priced: observedSubSpend > 0 ? observedPriced : undefined,
+      resetsAt,
+    },
+  };
+}
+
+/** Matches a subscription window to a standard comparable cycle key (excluding
+ * per-model windows and synthetic Extra credit windows). */
+function cycleKeyOf(w: UsageWindow): CycleKey | undefined {
+  if (w.kind === 'model' || isExtraCreditWindow(w)) return undefined;
+  if (is5hWindow(w)) return '5h';
+  if (is7dWindow(w)) return '7d';
+  if (w.kind === 'monthly') return '30d';
+  return undefined;
+}
+
+/** Representative unlabelled cycle window metadata for UI labels (5 hours,
+ * Weekly, Monthly). */
+function cycleSampleWindow(ck: CycleKey, sample: UsageWindow): UsageWindow {
+  if (ck === '5h') return { kind: 'session', usedPct: 0, windowSec: sample.windowSec || 18000 };
+  if (ck === '7d') return { kind: 'weekly', usedPct: 0, windowSec: sample.windowSec || 604800 };
+  return { kind: 'monthly', usedPct: 0, windowSec: sample.windowSec || 30 * 86400 };
+}
+
+/** Merges 2+ accounts of a provider into one aggregated summary. Accounts are
+ * combined over comparable cycles (5h / 7d / 30d) using true quota tier
+ * multipliers and, when `cost` provides local API-priced logs, empirical
+ * current-cycle equivalent API capacity and used spend (deduplicated per
+ * machine). Returns undefined when fewer than 2 accounts are present. */
+export function mergeProviderAccounts(
+  accounts: UsageAccount[],
+  provider: string,
+  now = Date.now() / 1000,
+  cost?: CostReport,
+): MergedUsageAccount | undefined {
   const matching = accounts.filter((a) => a.provider === provider);
   if (matching.length < 2) return undefined;
   const members = sortAccounts(matching, now);
 
-  const anyActiveSubWindow = members.some((a) => {
-    const hasExplicitCap = (explicitMoneyOf(a).capacityUsd ?? 0) > 0;
-    return subWindowsOf(a, hasExplicitCap).some((w) => !pastReset(w, now));
+  const metas: MemberMeta[] = members.map((account) => {
+    const explicit = explicitMoneyOf(account);
+    const hasExplicitCap = (explicit.capacityUsd ?? 0) > 0;
+    const subWindows = subWindowsOf(account, hasExplicitCap);
+    const allCycleWindows = (account.windows ?? []).filter((w) => cycleKeyOf(w) !== undefined);
+    const tierWeight = subWindows.length > 0 || allCycleWindows.length > 0 ? estimatePlanWeight(account.provider, account.plan) : undefined;
+    return { account, explicit, subWindows, allCycleWindows, tierWeight, priorWeight: tierWeight ?? 1 };
   });
 
-  const rawEstimates = members.map((a) => estimateAccountValue(a, now, { treatAllPastResetAsReplenished: anyActiveSubWindow }));
-  const knownCaps = rawEstimates.map((e) => e.capacityUsd).filter((v): v is number => v !== undefined && v > 0);
-  const useMonetaryWeight = knownCaps.length > 0;
-  const fallbackPlanUsd = useMonetaryWeight
-    ? (PROVIDER_BASELINE_USD[provider.toLowerCase()] ?? knownCaps.reduce((s, v) => s + v, 0) / knownCaps.length)
-    : undefined;
-  const estimates = useMonetaryWeight
-    ? members.map((a, i) =>
-        rawEstimates[i].subscriptionUsd !== undefined
-          ? rawEstimates[i]
-          : estimateAccountValue(a, now, { treatAllPastResetAsReplenished: anyActiveSubWindow, fallbackPlanUsd }),
-      )
-    : rawEstimates;
+  const subMetas = metas.filter((m) => m.subWindows.length > 0 || m.allCycleWindows.length > 0);
+  const hasKnownTier = subMetas.some((m) => m.tierWeight !== undefined);
+  const hasLongerCycle = subMetas.some((m) => m.allCycleWindows.some((w) => cycleKeyOf(w) === '7d' || cycleKeyOf(w) === '30d'));
 
-  // Overall approximate merged summary weighted by estimated monetary value
-  // (or equal-weight fallback when plan values are unknown for all accounts).
-  let totalCap = 0;
-  let totalAvail = 0;
-  let hasPrepaidAvail = false;
-  let prepaidAvail = 0;
-  const equalPcts: number[] = [];
-  for (const e of estimates) {
-    if (useMonetaryWeight && e.capacityUsd !== undefined && e.capacityUsd > 0 && e.availableUsd !== undefined) {
-      totalCap += e.capacityUsd;
-      totalAvail += e.availableUsd;
-    } else if (!useMonetaryWeight && e.usedPct !== undefined) {
-      equalPcts.push(e.usedPct);
-    }
-    if (e.capacityUsd === undefined && e.availableUsd !== undefined) {
-      hasPrepaidAvail = true;
-      prepaidAvail += e.availableUsd;
+  // Evaluate comparable standard cycles (5h, 7d, 30d) shared by all subscription
+  // accounts so we compare apples to apples instead of mixing 5h with 7d.
+  const cycleResults = new Map<CycleKey, CycleEvaluation>();
+  if (subMetas.length > 0) {
+    const order: CycleKey[] = ['7d', '5h', '30d'];
+    for (const ck of order) {
+      const perMemberAll = subMetas.map((m) => m.allCycleWindows.filter((w) => cycleKeyOf(w) === ck));
+      if (!perMemberAll.every((ws) => ws.length > 0)) continue;
+      const anyActive = perMemberAll.some((ws) => ws.some((w) => !pastReset(w, now)));
+      if (!anyActive) continue;
+      let sample: UsageWindow | undefined;
+      const poolEntries: CycleEntry[] = [];
+      const primaryEntries: CycleEntry[] = [];
+
+      subMetas.forEach((m, i) => {
+        const wsAll = perMemberAll[i];
+        // Build one CycleEntry per distinct sub-quota pool on this member in cycle ck.
+        const byMemberPool = new Map<string, UsageWindow[]>();
+        for (const w of wsAll) {
+          const pk = subQuotaPoolOf(provider, w);
+          const list = byMemberPool.get(pk);
+          if (list) list.push(w);
+          else byMemberPool.set(pk, [w]);
+        }
+        for (const [pk, pws] of byMemberPool) {
+          const active = pws.filter((w) => !pastReset(w, now));
+          if (active.length > 0) {
+            const tight = active.reduce((b, w) => (w.usedPct > b.usedPct ? w : b));
+            if (!sample) sample = tight;
+            poolEntries.push({ meta: m, poolKey: pk, window: tight, usedPct: clampPct(tight.usedPct) });
+          } else {
+            if (!sample) sample = pws[0];
+            poolEntries.push({ meta: m, poolKey: pk, usedPct: 0 });
+          }
+        }
+
+        // Primary fallback entry per member for tier/equal weighting when no logs exist.
+        const wsPrimary = m.subWindows.filter((w) => cycleKeyOf(w) === ck);
+        const candPrimary = wsPrimary.length > 0 ? wsPrimary : wsAll;
+        const activePrimary = candPrimary.filter((w) => !pastReset(w, now));
+        if (activePrimary.length > 0) {
+          const tight = activePrimary.reduce((b, w) => (w.usedPct > b.usedPct ? w : b));
+          primaryEntries.push({ meta: m, poolKey: subQuotaPoolOf(provider, tight), window: tight, usedPct: clampPct(tight.usedPct) });
+        } else {
+          primaryEntries.push({ meta: m, poolKey: '', usedPct: 0 });
+        }
+      });
+
+      const anyAt100 = poolEntries.some((e) => e.usedPct >= 100);
+      const includeExplicit = ck !== '5h' || !hasLongerCycle || anyAt100;
+      cycleResults.set(
+        ck,
+        evaluateCycle(
+          provider,
+          metas,
+          poolEntries,
+          primaryEntries,
+          hasKnownTier,
+          cycleSampleWindow(ck, sample!),
+          includeExplicit,
+          cost,
+          now,
+        ),
+      );
     }
   }
 
-  let summaryUsedPct: number | undefined;
-  let summaryRemainingPct: number | undefined;
-  let summaryCapUsd: number | undefined;
-  let summaryAvailUsd: number | undefined;
-  let summaryUsedUsd: number | undefined;
-  const weighting: MergedQuotaSummary['weighting'] = useMonetaryWeight && totalCap > 0 ? 'value' : 'equal';
-
-  if (weighting === 'value') {
-    if (hasPrepaidAvail && prepaidAvail > 0) {
-      totalCap += prepaidAvail;
-      totalAvail += prepaidAvail;
+  // Pick the tightest comparable cycle; when accounts do not share a common
+  // standard cycle (e.g. Antigravity LS model-only windows or mixed LS/CLI),
+  // fall back to each account's tightest primary window.
+  let chosen: CycleEvaluation;
+  if (cycleResults.size > 0) {
+    let best: CycleEvaluation | undefined;
+    for (const ev of cycleResults.values()) {
+      if (!best || (ev.summary.usedPct ?? -1) > (best.summary.usedPct ?? -1)) best = ev;
     }
-    const used = Math.max(0, totalCap - totalAvail);
-    summaryCapUsd = round2(totalCap);
-    summaryAvailUsd = round2(totalAvail);
-    summaryUsedUsd = round2(used);
-    summaryUsedPct = clampPct((used / totalCap) * 100);
-    summaryRemainingPct = clampPct(100 - summaryUsedPct);
+    chosen = best!;
   } else {
-    if (equalPcts.length > 0) {
-      summaryUsedPct = clampPct(equalPcts.reduce((s, v) => s + v, 0) / equalPcts.length);
-      summaryRemainingPct = clampPct(100 - summaryUsedPct);
+    const anyActiveSub = subMetas.some((m) => m.subWindows.some((w) => !pastReset(w, now)));
+    const entries: CycleEntry[] = [];
+    for (const m of subMetas) {
+      const active = m.subWindows.filter((w) => !pastReset(w, now));
+      if (active.length > 0) {
+        const tight = active.reduce((b, w) => (w.usedPct > b.usedPct ? w : b));
+        entries.push({ meta: m, poolKey: subQuotaPoolOf(provider, tight), window: tight, usedPct: clampPct(tight.usedPct) });
+      } else if (anyActiveSub) {
+        entries.push({ meta: m, poolKey: '', usedPct: 0 });
+      }
     }
-    if (hasPrepaidAvail) summaryAvailUsd = round2(prepaidAvail);
+    chosen = evaluateCycle(provider, metas, entries, entries, hasKnownTier, undefined, true, cost, now);
   }
 
-  // Per-window buckets weighted by each account's subscription capacity (or
-  // total capacity / equal weight) for status bar 5h / 7d / model-specific views.
+  // Per-window buckets weighted by each account's subscription tier weight (or
+  // empirical cycle weight when all subscription accounts share a single bucket
+  // in that cycle) for status bar 5h / 7d / model-specific views.
   const buckets = new Map<string, { sample: UsageWindow; items: { w: UsageWindow; weight: number }[] }>();
-  members.forEach((a, idx) => {
-    const est = estimates[idx];
-    const weight = weighting === 'value' ? (est.subscriptionUsd ?? est.capacityUsd ?? fallbackPlanUsd ?? 1) : 1;
-    for (const w of a.windows ?? []) {
+  metas.forEach((m) => {
+    const weight = hasKnownTier ? m.priorWeight : 1;
+    for (const w of m.account.windows ?? []) {
       const k = `${w.kind}\0${w.label ?? ''}\0${w.windowSec ?? 0}`;
       const b = buckets.get(k);
       if (b) b.items.push({ w, weight });
@@ -582,14 +1263,23 @@ export function mergeProviderAccounts(accounts: UsageAccount[], provider: string
     }
   });
 
+  const cycleBucketCounts = new Map<CycleKey, number>();
+  for (const { sample } of buckets.values()) {
+    const ck = cycleKeyOf(sample);
+    if (ck) cycleBucketCounts.set(ck, (cycleBucketCounts.get(ck) ?? 0) + 1);
+  }
+
   const windows: UsageWindow[] = [];
   for (const { sample, items } of buckets.values()) {
     const active = items.filter(({ w }) => !pastReset(w, now));
     const totalW = items.reduce((s, x) => s + x.weight, 0);
     if (active.length > 0) {
+      const ck = cycleKeyOf(sample);
+      const cyclePct =
+        ck && cycleBucketCounts.get(ck) === 1 && items.length === subMetas.length ? cycleResults.get(ck)?.subOnlyUsedPct : undefined;
       // Past-reset entries have replenished (0% used) while active entries carry current usage.
       const weightedUsed = items.reduce((sum, { w, weight }) => sum + weight * (pastReset(w, now) ? 0 : w.usedPct), 0);
-      const usedPct = totalW > 0 ? clampPct(weightedUsed / totalW) : 0;
+      const usedPct = cyclePct !== undefined ? cyclePct : totalW > 0 ? clampPct(weightedUsed / totalW) : 0;
       const usedActive = active.filter(({ w }) => w.usedPct > 0 && w.resetsAt);
       const resetPool = usedActive.length ? usedActive : active.filter(({ w }) => w.resetsAt);
       const resetsAt = resetPool.length ? Math.min(...resetPool.map(({ w }) => w.resetsAt!)) : undefined;
@@ -616,11 +1306,6 @@ export function mergeProviderAccounts(accounts: UsageAccount[], provider: string
     }
   }
 
-  const activeAll = members.flatMap((a) => (a.windows ?? []).filter((w) => !pastReset(w, now) && w.resetsAt));
-  const usedResets = activeAll.filter((w) => w.usedPct > 0);
-  const resetSource = usedResets.length ? usedResets : activeAll;
-  const summaryResetsAt = resetSource.length ? Math.min(...resetSource.map((w) => w.resetsAt!)) : undefined;
-
   const status = members.reduce<UsageAccount['status']>(
     (best, a) => (statusPriority[a.status] < statusPriority[best] ? a.status : best),
     members[0].status,
@@ -639,22 +1324,18 @@ export function mergeProviderAccounts(accounts: UsageAccount[], provider: string
     seenAt,
     accountCount: members.length,
     members,
-    summary: {
-      usedPct: summaryUsedPct,
-      remainingPct: summaryRemainingPct,
-      availableUsd: summaryAvailUsd,
-      capacityUsd: summaryCapUsd,
-      usedUsd: summaryUsedUsd,
-      weighting,
-      resetsAt: summaryResetsAt,
-    },
+    summary: chosen.summary,
   };
 }
 
 /** Preview account list: replaces 2+ accounts of ANY provider with their
- * value-weighted merged summary so tiles, overview, status bar and hover
- * previews reflect combined capacity across all accounts of each provider. */
-export function previewAccounts(accounts: UsageAccount[], now = Date.now() / 1000): (UsageAccount | MergedUsageAccount)[] {
+ * merged summary so tiles, overview, status bar and hover previews reflect
+ * combined capacity across all accounts of each provider. */
+export function previewAccounts(
+  accounts: UsageAccount[],
+  now = Date.now() / 1000,
+  cost?: CostReport,
+): (UsageAccount | MergedUsageAccount)[] {
   const byProvider = new Map<string, UsageAccount[]>();
   for (const a of accounts) {
     const list = byProvider.get(a.provider);
@@ -663,11 +1344,11 @@ export function previewAccounts(accounts: UsageAccount[], now = Date.now() / 100
   }
   const out: (UsageAccount | MergedUsageAccount)[] = [];
   for (const [provider, list] of byProvider) {
-    const merged = list.length >= 2 ? mergeProviderAccounts(list, provider, now) : undefined;
+    const merged = list.length >= 2 ? mergeProviderAccounts(list, provider, now, cost) : undefined;
     if (merged) out.push(merged);
     else out.push(...list);
   }
-  return sortAccounts(out, now);
+  return sortAccounts(out, now, cost);
 }
 
 /** Whether w is a 5-hour / session rate-limit window. */
@@ -692,6 +1373,22 @@ export function windowApplies(w: UsageWindow, model?: string): boolean {
   return !!model && !!w.label && bare(model).includes(bare(w.label));
 }
 
+/** Whether an Antigravity window specifically applies to `model`: handles both
+ * per-model labels (including parenthetical variants like "Gemini 3 Pro (High)")
+ * and agy CLI group labels ("Gemini Models" vs "Claude and GPT"). */
+function antigravityWindowMatches(w: UsageWindow, model: string): boolean {
+  if (w.kind === 'model') {
+    if (!w.label) return false;
+    if (bare(model).includes(bare(w.label))) return true;
+    const stripped = w.label.replace(/\s*\([^)]*\)/g, '').trim();
+    return !!stripped && bare(model).includes(bare(stripped));
+  }
+  if (!w.label) return true;
+  if (ANTIGRAVITY_THIRD_PARTY_LABEL.test(model)) return ANTIGRAVITY_THIRD_PARTY_LABEL.test(w.label);
+  if (GEMINI_LABEL.test(model)) return GEMINI_LABEL.test(w.label);
+  return !ANTIGRAVITY_THIRD_PARTY_LABEL.test(w.label);
+}
+
 /** Formatted monetary value summary for a merged multi-account provider
  * (used in tiles, overview row, provider detail bar, and status bar hover). */
 export function mergedValueText(a: MergedUsageAccount, remaining: boolean): string | undefined {
@@ -700,6 +1397,9 @@ export function mergedValueText(a: MergedUsageAccount, remaining: boolean): stri
     return remaining
       ? t('usage.merged.valueLeft', { avail: money(summary.availableUsd), total: money(summary.capacityUsd) })
       : t('usage.merged.valueUsed', { used: money(summary.usedUsd ?? 0), total: money(summary.capacityUsd) });
+  }
+  if (summary.usedUsd !== undefined && summary.usedUsd > 0) {
+    return t('usage.merged.spentSoFar', { used: money(summary.usedUsd) });
   }
   if (summary.availableUsd !== undefined) return t('usage.merged.balance', { avail: money(summary.availableUsd) });
   return undefined;
@@ -711,9 +1411,11 @@ export const SUMMARY_WINDOW_ID = '__merged_summary__';
 /** Picks the primary (and for 'both', secondary) active window(s) of an
  * account according to mode and optional model. For merged multi-account
  * summaries in 'auto' mode (when not filtering to a focused agent's model),
- * reports the combined value-weighted summary so the status bar matches
- * tiles, overview, hover preview and detail summary bar; explicit 5h/7d/both
- * modes and model-filtered agent panes use the weighted per-window buckets. */
+ * reports the combined summary so the status bar matches tiles, overview,
+ * hover preview and detail summary bar; explicit 5h/7d/both modes and
+ * model-filtered agent panes use the weighted per-window buckets. For
+ * Antigravity, summary and unmatched lookups stay on the primary Gemini pool
+ * rather than third-party Claude/GPT quotas. */
 export function pickAccountWindows(
   a: UsageAccount,
   mode: StatusBarWindowMode = 'auto',
@@ -723,12 +1425,40 @@ export function pickAccountWindows(
 ): { primary: UsageWindow; secondary?: UsageWindow; matched: boolean } | undefined {
   if (isMergedAccount(a) && mode === 'auto' && !filterByModel && a.summary.usedPct !== undefined) {
     return {
-      primary: { id: SUMMARY_WINDOW_ID, kind: 'monthly', usedPct: a.summary.usedPct, resetsAt: a.summary.resetsAt },
+      primary: {
+        id: SUMMARY_WINDOW_ID,
+        kind: a.summary.window?.kind ?? 'monthly',
+        windowSec: a.summary.window?.windowSec,
+        usedPct: a.summary.usedPct,
+        resetsAt: a.summary.resetsAt,
+      },
       matched: true,
     };
   }
-  const active = (a.windows ?? []).filter((w) => !pastReset(w, now));
-  if (!active.length) {
+  const primaryActive = primaryWindowsOf(a).filter((w) => !pastReset(w, now));
+  const allActive = (a.windows ?? []).filter((w) => !pastReset(w, now));
+  let pool: UsageWindow[];
+  if (filterByModel && a.provider === 'antigravity') {
+    if (model) {
+      const exact = allActive.filter((w) => antigravityWindowMatches(w, model));
+      if (exact.length > 0) {
+        pool = exact;
+      } else if (ANTIGRAVITY_THIRD_PARTY_LABEL.test(model)) {
+        const third = allActive.filter((w) => ANTIGRAVITY_THIRD_PARTY_LABEL.test(w.label ?? ''));
+        pool = third.length ? third : primaryActive;
+      } else {
+        pool = primaryActive;
+      }
+    } else {
+      pool = primaryActive;
+    }
+  } else if (filterByModel) {
+    const filtered = allActive.filter((w) => windowApplies(w, model));
+    pool = filtered.length ? filtered : allActive;
+  } else {
+    pool = primaryActive;
+  }
+  if (!pool.length) {
     // Pure USD-credit accounts (or merged credit-only accounts) without rate-limit windows.
     const usedPct = accountUsedPct(a, now);
     if (usedPct === undefined) return undefined;
@@ -740,10 +1470,6 @@ export function pickAccountWindows(
     };
     return { primary: synthetic, matched: mode === 'auto' };
   }
-  const filtered = filterByModel ? active.filter((w) => windowApplies(w, model)) : active;
-  // Providers whose accounts report only per-model windows (e.g. Antigravity LS)
-  // fall back to all active windows when the active model is unknown or unmatched.
-  const pool = filtered.length ? filtered : active;
   const maxOf = (ws: UsageWindow[]) => ws.reduce<UsageWindow | undefined>((b, w) => (!b || w.usedPct > b.usedPct ? w : b), undefined);
   const tight = maxOf(pool)!;
   if (mode === 'auto') return { primary: tight, matched: true };
@@ -759,7 +1485,7 @@ export function pickAccountWindows(
 /** The tightest window that counts what the coding agent in the focused
  * pane does: of its service's accounts read on its machine (any of the
  * service's when none was), those of its model among the windows of
- * models (falling back to all windows when the service reports model
+ * models (falling back to primary windows when the service reports model
  * windows only); merges 2+ accounts of any provider. */
 export function tightestFor(
   s: UsageSnapshot | undefined,
@@ -767,11 +1493,12 @@ export function tightestFor(
   m: string,
   model?: string,
   now = Date.now() / 1000,
+  cost?: CostReport,
 ): { account: UsageAccount; window: UsageWindow } | undefined {
   const all = (s?.accounts ?? []).filter((a) => a.provider === provider);
   const here = all.filter((a) => (a.machines ?? []).includes(m));
   const raw = here.length ? here : all;
-  const merged = mergeProviderAccounts(raw, provider, now);
+  const merged = mergeProviderAccounts(raw, provider, now, cost);
   const pool = merged ? [merged] : raw;
   let best: { account: UsageAccount; window: UsageWindow } | undefined;
   for (const a of pool) {
@@ -792,6 +1519,7 @@ export function statusBarSelection(
     windowMode?: StatusBarWindowMode;
     machineId?: string;
     now?: number;
+    cost?: CostReport;
   } = {},
 ): { account: UsageAccount | MergedUsageAccount; primary: UsageWindow; secondary?: UsageWindow; showLogo: boolean } | undefined {
   const now = opts.now ?? Date.now() / 1000;
@@ -814,7 +1542,7 @@ export function statusBarSelection(
     const all = (s?.accounts ?? []).filter((a) => a.provider === provider);
     const here = machine ? all.filter((a) => (a.machines ?? []).includes(machine)) : [];
     const raw = here.length ? here : all;
-    const merged = mergeProviderAccounts(raw, provider, now);
+    const merged = mergeProviderAccounts(raw, provider, now, opts.cost);
     return merged ? [merged] : raw;
   };
   if (opts.agent) {
@@ -825,7 +1553,7 @@ export function statusBarSelection(
     const hit = pickFrom(poolFor(opts.defaultProvider, opts.machineId));
     if (hit) return { account: hit.account, primary: hit.primary, secondary: hit.secondary, showLogo: true };
   }
-  const hit = pickFrom(previewAccounts(s?.accounts ?? [], now));
+  const hit = pickFrom(previewAccounts(s?.accounts ?? [], now, opts.cost));
   return hit ? { account: hit.account, primary: hit.primary, secondary: hit.secondary, showLogo: false } : undefined;
 }
 
@@ -868,21 +1596,49 @@ export function windowSpend(
     out.requests += s.requests;
     out.priced = out.priced && s.priced;
   }
-  if (w.usedPct >= 5) out.full = { cost: (out.cost * 100) / w.usedPct, tokens: (out.tokens * 100) / w.usedPct };
+  const agPool = a.provider === 'antigravity' ? antigravityPoolOf(w.label) : undefined;
+  if (agPool) {
+    const startDay = dayOf(new Date(start * 1000));
+    const share = antigravityRowShare(rep, machines, startDay, agPool);
+    if (share.hasRows) {
+      out.cost *= share.costShare;
+      out.tokens = Math.round(out.tokens * share.tokenShare);
+      out.requests = Math.round(out.requests * share.reqShare);
+      out.priced = share.costShare > 0 ? share.priced : true;
+    } else if (agPool === 'third_party') {
+      const ck = cycleKeyOf(w);
+      const geminiUsed = (a.windows ?? []).some(
+        (x) => cycleKeyOf(x) === ck && !pastReset(x, now) && GEMINI_LABEL.test(x.label ?? '') && x.usedPct > 0,
+      );
+      if (geminiUsed) {
+        out.cost = 0;
+        out.tokens = 0;
+        out.requests = 0;
+      }
+    }
+  }
+  if (w.usedPct >= 5 && out.cost > 0) out.full = { cost: (out.cost * 100) / w.usedPct, tokens: (out.tokens * 100) / w.usedPct };
   return out;
 }
 
 /** The tightest window of all accounts (merging multi-account providers
- * using their value-weighted summary), for the status bar. */
+ * using their cycle-consistent summary), for the status bar. */
 export function tightest(
   s: UsageSnapshot | undefined,
   now = Date.now() / 1000,
+  cost?: CostReport,
 ): { account: UsageAccount; window: UsageWindow } | undefined {
-  for (const a of previewAccounts(s?.accounts ?? [], now)) {
+  for (const a of previewAccounts(s?.accounts ?? [], now, cost)) {
     if (isMergedAccount(a) && a.summary.usedPct !== undefined) {
       return {
         account: a,
-        window: { id: SUMMARY_WINDOW_ID, kind: 'monthly', usedPct: a.summary.usedPct, resetsAt: a.summary.resetsAt },
+        window: {
+          id: SUMMARY_WINDOW_ID,
+          kind: a.summary.window?.kind ?? 'monthly',
+          windowSec: a.summary.window?.windowSec,
+          usedPct: a.summary.usedPct,
+          resetsAt: a.summary.resetsAt,
+        },
       };
     }
     const w = tightestWindow(a, now);
@@ -912,6 +1668,15 @@ export function windowName(w: UsageWindow): string {
   // A labelled session or weekly window (a group of models) says which it is.
   if (w.label) return w.kind === 'model' ? w.label : `${w.label} · ${kind}`;
   return kind;
+}
+
+/** A window's human cycle/row label ("5 hours", "Weekly", "Monthly", or model
+ * name), shared by UsagePanel and StatusItem hover summaries. */
+export function cycleWindowLabel(w: UsageWindow, grouped = false): string {
+  if (w.kind === 'model') return w.label ?? t('usage.kind.model');
+  const hours = w.kind === 'session' && w.windowSec && w.windowSec % 3600 === 0 ? w.windowSec / 3600 : 0;
+  const kind = hours ? t('usage.kind.hours', { n: hours }) : t(`usage.kind.${w.kind}` as 'usage.kind.session');
+  return w.label && !grouped ? `${w.label} · ${kind}` : kind;
 }
 
 export function providerName(p: string): string {
