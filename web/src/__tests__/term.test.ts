@@ -454,4 +454,31 @@ describe('terminal connection', () => {
     vi.useRealTimers();
     expect(sockets.length).toBe(2);
   });
+
+  it('queues concurrent attaches beyond MAX_CONCURRENT_ATTACHES so reconnects do not burst into hub busy errors', async () => {
+    const socket = new FakeSocket();
+    const conn = new TermConnection(() => socket);
+    conn.start();
+    socket.onopen!();
+    const handler: StreamHandler = { output: () => {}, resized: () => {}, closed: () => {} };
+    const total = 20;
+    const promises = Array.from({ length: total }, (_, i) => conn.attach({ machine: 'x', terminal: `t${i}`, cols: 80, rows: 24 }, handler));
+    const sentAttaches = () => socket.sent.filter((m): m is Record<string, unknown> => !(m instanceof Uint8Array) && m.t === 'attach');
+    expect(sentAttaches()).toHaveLength(8);
+    // Complete attaches as they arrive until all 20 drain cleanly.
+    let replied = 0;
+    while (replied < total) {
+      const batch = sentAttaches().slice(replied);
+      expect(batch.length).toBeGreaterThan(0);
+      expect(batch.length).toBeLessThanOrEqual(8);
+      for (const msg of batch) {
+        replied++;
+        socket.text({ t: 'attached', rid: msg.rid, s: replied });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    expect(await Promise.all(promises)).toEqual(Array.from({ length: total }, (_, i) => i + 1));
+    conn.close();
+  });
 });

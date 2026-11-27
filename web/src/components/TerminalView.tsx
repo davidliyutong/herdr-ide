@@ -137,6 +137,10 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
         onRenderer: setRenderer,
         // A terminal that lost its agent with its core gets it back (restore.ts).
         onAttached: () => terms.resumeAgent(m, terminal, pane),
+        remoteSize: () => {
+          const r = useTerms.getState().machines[m]?.terminals[terminal];
+          return r && typeof r.cols === 'number' && typeof r.rows === 'number' ? { cols: r.cols, rows: r.rows } : undefined;
+        },
       },
       appearanceOf(getPrefs()),
     );

@@ -236,6 +236,11 @@ export function findLinks(text: string): FoundLink[] {
 export interface RowText {
   text: string;
   colOf: number[];
+  /** Soft-wrapped onto the next row by the terminal emulator. */
+  wrap?: boolean;
+  /** UTF-16 offset after the last written cell (distinguishes explicit spaces
+   * from unwritten trailing padding on soft-wrapped rows). */
+  writtenEnd?: number;
 }
 
 /** The cells [from, to) of row y. */
@@ -255,17 +260,107 @@ export interface WrappedLink {
 /** Rows a link may extend over above and below the row searched. */
 const WRAP_ROWS = 20;
 
-/** Whether a row's text reaches its last column. */
+/** Box-drawing vertical borders / quote gutters TUIs place around wrapped rows. */
+const LEFT_BORDER_RE = /^[ \t]*([│┃║▏▎▍▌┆┇┊┋])[ \t]*/;
+const RIGHT_BORDER_RE = /[ \t]*([│┃║▕┆┇┊┋])[ \t]*$/;
+const PATH_TAIL_RE = /[^\s"'`<>()[\]{}]+$/;
+const PATH_HEAD_RE = /^[^\s"'`<>()[\]{}]+/;
+const PATH_CHAR_END_RE = /[\w.@+\-~%/:?#&=]$/;
+const PATH_CHAR_START_RE = /^[\w.@+\-~%/:?#&=]/;
+const BREAK_END_RE = /[\/\-_.:?#&=]$/;
+const EXT_OR_LOC_HEAD_RE = /^(?:[\w@+\-~%]*\.[a-zA-Z0-9]{1,8}(?:$|[:#(])|:\d+(?::\d+)?(?:-L?\d+)?|#L\d+)/;
+const SLASH_PATH_RE = /^(?:https?:\/\/|\/|~\/|\.\.?\/|[^/\s]+\/)/;
+
+/** Whether a row's text reaches its last column (or was soft-wrapped). */
 export function reachesEnd(r: RowText): boolean {
+  if (r.wrap) return r.text.trim().length > 0;
   const n = r.text.replace(/\s+$/, '').length;
   return n > 0 && r.colOf[n] === r.colOf[r.colOf.length - 1];
 }
 
+interface RowContent {
+  /** Index of the first inner character (after indentation and optional box gutter). */
+  innerStart: number;
+  /** Index after the last non-space inner character (before optional right box border). */
+  innerEnd: number;
+  /** Index after the end used when joining a soft-wrapped row (preserves explicit space). */
+  wrapEnd: number;
+  /** Column immediately after innerEnd. */
+  endCol: number;
+  /** Right boundary column of the row's content area (before any right box border). */
+  contentRight: number;
+  hasLeftBorder: boolean;
+  hasRightBorder: boolean;
+}
+
+function rowContent(r: RowText): RowContent {
+  const t = r.text;
+  const totalCols = r.colOf[r.colOf.length - 1] ?? 0;
+  const lb = LEFT_BORDER_RE.exec(t);
+  const hasLeftBorder = !!lb;
+  const innerStart = lb ? lb[0].length : t.length - t.trimStart().length;
+
+  let hasRightBorder = false;
+  let contentRight = totalCols;
+  let innerEnd = t.trimEnd().length;
+  const rb = RIGHT_BORDER_RE.exec(t);
+  if (rb && rb.index >= innerStart) {
+    const borderIdx = t.lastIndexOf(rb[1]);
+    if (borderIdx >= innerStart) {
+      hasRightBorder = true;
+      contentRight = r.colOf[borderIdx] ?? totalCols;
+      innerEnd = t.slice(0, borderIdx).trimEnd().length;
+    }
+  }
+  const endCol = r.colOf[innerEnd] ?? 0;
+  let wrapEnd = innerEnd;
+  if (r.wrap && !hasRightBorder) {
+    if (r.writtenEnd !== undefined) wrapEnd = Math.min(t.length, Math.max(innerEnd, r.writtenEnd));
+    else if (endCol < totalCols - 2) wrapEnd = t.length;
+  }
+  return { innerStart, innerEnd, wrapEnd, endCol, contentRight, hasLeftBorder, hasRightBorder };
+}
+
+/** Whether a URL or path on row `prev` may continue onto `next` on narrow screens. */
+function continuesLink(prev: RowText, next: RowText): boolean {
+  const p = rowContent(prev);
+  const n = rowContent(next);
+  if (p.innerEnd <= p.innerStart || n.innerEnd <= n.innerStart) return false;
+  // Terminal soft-wrap: always continue, preserving any explicit trailing space.
+  if (prev.wrap) return true;
+  // Exact reach to the terminal edge (or 1-space inner padding before a right box border).
+  const gap = p.contentRight - p.endCol;
+  if (gap <= 0 || (p.hasRightBorder && gap <= 1)) return true;
+
+  const prevSlice = prev.text.slice(p.innerStart, p.innerEnd);
+  const nextSlice = next.text.slice(n.innerStart, n.innerEnd);
+  const tail = PATH_TAIL_RE.exec(prevSlice)?.[0];
+  const head = PATH_HEAD_RE.exec(nextSlice)?.[0];
+  if (!tail || !head) return false;
+  if (!PATH_CHAR_END_RE.test(tail) || !PATH_CHAR_START_RE.test(head)) return false;
+
+  // Path/URL broken at a slash on a narrow line because the next segment did not fit.
+  const firstSegLen = (head.match(/^[^/]+/)?.[0] ?? head).length;
+  if (tail.endsWith('/') && SLASH_PATH_RE.test(tail) && p.endCol + firstSegLen > p.contentRight) return true;
+
+  // TUI/padded narrow wrap (indented block or bordered box with symmetric right
+  // padding up to 3 cols) mid-path or mid-URL: only join when indented/bordered
+  // and the continuation clearly belongs to a path/URL so unpadded short lines
+  // or prose wrapped after a complete filename are not glued.
+  const paddedBlock = p.hasRightBorder || (p.innerStart >= 2 && n.innerStart >= 2);
+  if (paddedBlock && gap <= Math.min(4, Math.max(2, p.innerStart + 1))) {
+    if (BREAK_END_RE.test(tail) && (tail.includes('/') || tail.includes('://'))) return true;
+    if (head.includes('/')) return true;
+    if ((tail.includes('/') || tail.includes('://')) && EXT_OR_LOC_HEAD_RE.test(head)) return true;
+  }
+  return false;
+}
+
 /** URLs and paths on row y of a pane whose rows are top to bottom
- * (exclusive), with the cells they cover. A row whose text reaches the last
- * column goes on in the next row after that row's indentation: the
- * terminal, or a program that wraps its own text (Claude Code, Codex), split
- * a long path or URL there. */
+ * (exclusive), with the cells they cover. A row whose text wraps onto the
+ * next row (terminal soft-wrap, edge-reaching wrap, box-bordered wrap, or a
+ * narrow TUI wrap of a path/URL) goes on in the next row after that row's
+ * indentation and optional box gutter. */
 export function linksAround(y: number, top: number, bottom: number, row: (y: number) => RowText): WrappedLink[] {
   const rows = new Map<number, RowText>();
   const at = (r: number) => {
@@ -274,16 +369,19 @@ export function linksAround(y: number, top: number, bottom: number, row: (y: num
     return v;
   };
   let a = y;
-  while (a > top && y - a < WRAP_ROWS && reachesEnd(at(a - 1))) a--;
+  while (a > top && y - a < WRAP_ROWS && continuesLink(at(a - 1), at(a))) a--;
   let b = y;
-  while (b + 1 < bottom && b - y < WRAP_ROWS && reachesEnd(at(b))) b++;
+  while (b + 1 < bottom && b - y < WRAP_ROWS && continuesLink(at(b), at(b + 1))) b++;
   let text = '';
   const cellOf: Cells[] = [];
   for (let r = a; r <= b; r++) {
-    const { text: t, colOf } = at(r);
-    const start = r === a ? 0 : t.length - t.trimStart().length;
-    for (let i = start; i < t.length; i++) cellOf.push({ y: r, from: colOf[i], to: colOf[i + 1] });
-    text += t.slice(start);
+    const rt = at(r);
+    const { text: t, colOf } = rt;
+    const c = rowContent(rt);
+    const start = r === a ? 0 : c.innerStart;
+    const end = r < b ? (rt.wrap ? c.wrapEnd : c.innerEnd) : c.hasRightBorder ? c.innerEnd : t.length;
+    for (let i = start; i < end; i++) cellOf.push({ y: r, from: colOf[i], to: colOf[i + 1] });
+    text += t.slice(start, end);
   }
   const out: WrappedLink[] = [];
   for (const l of findLinks(text)) {

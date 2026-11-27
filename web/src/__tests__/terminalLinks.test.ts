@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import { safeUrl } from '../terminal/links';
+import { linksAround, safeUrl, type RowText } from '../terminal/links';
 import { openLink } from '../terminal/openLink';
 import * as L from '../term/layout';
 import { useStore } from '../state/store';
@@ -183,5 +183,64 @@ describe('openLink default file routing (File Explorer preview vs VS Code)', () 
     await settle();
     expect(L.codeViews(hub.model.layout('a')!.workspaces[0])).toHaveLength(1);
     expect(posts[0].body).toMatchObject({ cmd: 'openFile', path: '/home/u/proj/src/app.ts', line: 10 });
+  });
+});
+
+function mkRow(text: string, cols = text.length, opts: { wrap?: boolean; writtenEnd?: number } = {}): RowText {
+  const colOf: number[] = [];
+  let c = 0;
+  for (let i = 0; i < text.length; i++) {
+    colOf.push(c);
+    // Treat CJK ideographs as double-width cells for realistic column mapping.
+    c += text.charCodeAt(i) > 0x2e80 ? 2 : 1;
+  }
+  while (c < cols) {
+    colOf.push(c);
+    text += ' ';
+    c++;
+  }
+  colOf.push(cols);
+  return { text, colOf, ...opts };
+}
+
+describe('linksAround on narrow screens and wrapped rows', () => {
+  it('joins soft-wrapped paths with trailing unwritten padding before wide CJK chars', () => {
+    const line0 = '看 /Users/alice/Projects/webh';
+    const rows = [mkRow(line0, 32, { wrap: true, writtenEnd: line0.length }), mkRow('erdr/web/src/terminal/links.ts', 32)];
+    const links = linksAround(0, 0, rows.length, (y) => rows[y]);
+    expect(links.map((l) => l.text)).toEqual(['/Users/alice/Projects/webherdr/web/src/terminal/links.ts']);
+    expect(links[0].cells).toHaveLength(2);
+    // Hovering the second row finds the same full path.
+    expect(linksAround(1, 0, rows.length, (y) => rows[y]).map((l) => l.text)).toEqual([
+      '/Users/alice/Projects/webherdr/web/src/terminal/links.ts',
+    ]);
+  });
+
+  it('preserves explicit trailing spaces on soft-wrapped rows so separate words do not glue', () => {
+    const rows = [mkRow('open src/app.ts ', 16, { wrap: true, writtenEnd: 16 }), mkRow('then run tests', 16)];
+    const links = linksAround(0, 0, rows.length, (y) => rows[y]);
+    expect(links.map((l) => l.text)).toEqual(['src/app.ts']);
+  });
+
+  it('joins paths wrapped inside TUI box borders and right-padded narrow columns', () => {
+    const boxed = [mkRow('│ /Users/alice/Projects/web │', 29), mkRow('│ herdr/web/src/vt/pane.ts  │', 29)];
+    expect(linksAround(0, 0, boxed.length, (y) => boxed[y]).map((l) => l.text)).toEqual([
+      '/Users/alice/Projects/webherdr/web/src/vt/pane.ts',
+    ]);
+
+    const padded = [mkRow('  /Users/alice/Projects/web', 30), mkRow('  herdr/web/src/vt/pane.ts:42', 30)];
+    expect(linksAround(1, 0, padded.length, (y) => padded[y]).map((l) => l.text)).toEqual([
+      '/Users/alice/Projects/webherdr/web/src/vt/pane.ts:42',
+    ]);
+  });
+
+  it('joins narrow slash-wrapped paths without gluing prose after a complete filename', () => {
+    const slashWrap = [mkRow('  /Users/alice/Projects/', 28), mkRow('  webherdr/src/main.ts', 28)];
+    expect(linksAround(0, 0, slashWrap.length, (y) => slashWrap[y]).map((l) => l.text)).toEqual([
+      '/Users/alice/Projects/webherdr/src/main.ts',
+    ]);
+
+    const prose = [mkRow('  Please check src/app.ts', 28), mkRow('  and verify line 10', 28)];
+    expect(linksAround(0, 0, prose.length, (y) => prose[y]).map((l) => l.text)).toEqual(['src/app.ts']);
   });
 });

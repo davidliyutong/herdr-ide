@@ -826,7 +826,7 @@ describe('a terminal’s pane', () => {
       await loadEmulator();
       for (let i = 0; i < 6; i++) {
         link.refuse!();
-        await settle(1600);
+        await settle(10_000);
       }
       expect(link.attaches).toHaveLength(6);
       expect(p.attached).toBe(false);
@@ -857,13 +857,56 @@ describe('a terminal’s pane', () => {
       await settle(10);
       for (let i = 0; i < 6; i++) {
         link.refuse!();
-        await settle(1600);
+        await settle(10_000);
       }
       expect(p.attached).toBe(false);
       link.held = false;
       p.setShown(true);
       await settle(50);
       expect(p.attached).toBe(true);
+    });
+
+    it('sends the restored grid when resized during a slow remote attach, after zero-width collapse, or when remote size lags', async () => {
+      // 1. Slow remote attach started while narrow, then widened before attach resolves.
+      link.held = true;
+      let remote: { cols: number; rows: number } | undefined = { cols: 15, rows: 25 };
+      const { size, p } = pane(120, 400, { remoteSize: () => remote });
+      const setWidth = (w: number) => {
+        size.w = w;
+        for (const cb of observers) cb();
+      };
+      await loadEmulator();
+      expect(link.attaches).toHaveLength(1);
+      expect([link.attaches[0].cols, link.attaches[0].rows]).toEqual([15, 25]);
+      // Window widens before remote attach resolves: local term resizes, attach must still send resize on resolve.
+      setWidth(800); // 100 cols
+      expect(p.term!.cols).toBe(100);
+      expect(link.resized).toEqual([]);
+      link.release!();
+      await settle(20);
+      expect(link.resized).toContainEqual([100, 25]);
+
+      // 2. Collapsing to zero width and restoring to the exact same width forces a resize & redraw.
+      remote = { cols: 100, rows: 25 };
+      await settle(150);
+      link.resized.length = 0;
+      setWidth(0);
+      expect(link.resized).toEqual([]);
+      setWidth(800);
+      expect(link.resized).toContainEqual([100, 25]);
+
+      // 3. If remote core still reports a narrow size after resize settles, verify timer re-sends the current grid.
+      await settle(150);
+      link.resized.length = 0;
+      remote = { cols: 12, rows: 25 };
+      setWidth(960); // 120 cols
+      expect(link.resized).toEqual([[120, 25]]);
+      // Simulate remote still lagging at 12 cols when settle check fires.
+      await settle(150);
+      expect(link.resized).toEqual([
+        [120, 25],
+        [120, 25],
+      ]);
     });
   });
 });
