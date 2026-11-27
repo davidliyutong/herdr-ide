@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { TermConnection, type Socket, type StreamHandler } from '../term/connection';
+import { MAX_CONCURRENT_ATTACHES, TermConnection, type Socket, type StreamHandler } from '../term/connection';
 import {
   adoptDirectory,
   closePane,
@@ -479,6 +479,70 @@ describe('terminal connection', () => {
       await Promise.resolve();
     }
     expect(await Promise.all(promises)).toEqual(Array.from({ length: total }, (_, i) => i + 1));
+    conn.close();
+  });
+
+  it('never exceeds MAX_CONCURRENT_ATTACHES when new attaches interleave with dequeued microtasks', async () => {
+    const sockets: FakeSocket[] = [];
+    const conn = new TermConnection(() => {
+      const s = new FakeSocket();
+      sockets.push(s);
+      return s;
+    });
+    conn.start();
+    const socket = sockets[0];
+    socket.onopen!();
+    const handler: StreamHandler = { output: () => {}, resized: () => {}, closed: () => {} };
+    const sentAttaches = (s: FakeSocket) =>
+      s.sent.filter((m): m is Record<string, unknown> => !(m instanceof Uint8Array) && m.t === 'attach');
+
+    const promises = Array.from({ length: 12 }, (_, i) => conn.attach({ machine: 'x', terminal: `t${i}`, cols: 80, rows: 24 }, handler));
+    expect(sentAttaches(socket)).toHaveLength(MAX_CONCURRENT_ATTACHES);
+
+    // Complete 4 in-flight attaches and synchronously fire 4 new attaches BEFORE
+    // dequeued waiters resume their microtasks.
+    let replied = 0;
+    for (let i = 0; i < 4; i++) {
+      const msg = sentAttaches(socket)[replied++];
+      socket.text({ t: 'attached', rid: msg.rid, s: replied });
+    }
+    for (let i = 12; i < 16; i++) {
+      promises.push(conn.attach({ machine: 'x', terminal: `t${i}`, cols: 80, rows: 24 }, handler));
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sentAttaches(socket).length - replied).toBeLessThanOrEqual(MAX_CONCURRENT_ATTACHES);
+
+    // Drain remaining attaches verifying in-flight never exceeds the cap.
+    while (replied < promises.length) {
+      const batch = sentAttaches(socket).slice(replied);
+      expect(batch.length).toBeGreaterThan(0);
+      expect(batch.length).toBeLessThanOrEqual(MAX_CONCURRENT_ATTACHES);
+      for (const msg of batch) {
+        replied++;
+        socket.text({ t: 'attached', rid: msg.rid, s: replied });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    expect(await Promise.all(promises)).toHaveLength(16);
+
+    // If a socket drops right after transferring a slot to a waiter and reconnects
+    // before the waiter resumes, the stale waiter must reject cleanly without corrupting the new socket.
+    const burst = Array.from({ length: MAX_CONCURRENT_ATTACHES + 1 }, (_, i) =>
+      conn.attach({ machine: 'x', terminal: `drop${i}`, cols: 80, rows: 24 }, handler).catch((e: unknown) => e),
+    );
+    const firstMsg = sentAttaches(socket)[replied];
+    socket.text({ t: 'attached', rid: firstMsg.rid, s: 99 }); // transfers slot to waiter #9
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    socket.onclose!();
+    vi.advanceTimersByTime(10_000);
+    vi.useRealTimers();
+    sockets[1].onopen!();
+    const results = await Promise.all(burst);
+    expect(results[0]).toBe(99);
+    expect(results[MAX_CONCURRENT_ATTACHES]).toBeInstanceOf(TermError);
+    expect(sentAttaches(sockets[1])).toHaveLength(0);
     conn.close();
   });
 });

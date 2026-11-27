@@ -12,7 +12,7 @@ import { listDir, type RemoteStat } from '../../lib/files';
 import { loadPref, savePref } from '../../state/store';
 import { settingValue, useSettings } from '../../settings';
 import { selectAll, selectOnly, selectRange, selectToggle, type NavRow } from '../../components/tree/selection';
-import { filesApi, FilesError, type Entry, type FindMatch } from './api';
+import { errorText, filesApi, FilesError, type Entry, type FindMatch } from './api';
 
 /** A directory's listing; error is why the last listing failed (the
  * entries listed before are kept), failures how many failed in a row. */
@@ -338,6 +338,7 @@ export function treeRows(
   // filter, build a virtual tree containing all matched paths and their
   // ancestor directories auto-expanded.
   const searchKey = compiled.active ? filterSearchKey(s) : '';
+  if (compiled.active && s.filterSearch?.key === searchKey && s.filterSearch.errorCode === 'bad_regex') return [];
   if (compiled.active && s.filterSearch?.key === searchKey && s.filterSearch.matches) {
     const children = new Map<string, Map<string, RemoteStat>>();
     const ensure = (parent: string, name: string, isDir: boolean) => {
@@ -380,7 +381,7 @@ export function treeRows(
       if (!map) return;
       for (const e of sortEntries([...map.values()], s.sort)) {
         const path = join(dir, e.name);
-        const expanded = e.is_dir && (hasMatchDescendant.has(path) || !!s.expanded[path]);
+        const expanded = e.is_dir && (hasMatchDescendant.has(path) || (!!s.edit && s.edit.kind !== 'rename' && s.edit.path === path));
         const row: Row = {
           path,
           name: e.name,
@@ -569,7 +570,7 @@ export function scheduleFilterSearch(debounced = true) {
   }
   const key = filterSearchKey(s);
   if (compiled.error) {
-    set({ filterSearch: { key, error: compiled.error, errorCode: 'bad_regex' } });
+    set({ filterSearch: { key, error: errorText(new FilesError('bad_regex', compiled.error)), errorCode: 'bad_regex' } });
     return;
   }
   const prev = s.filterSearch;
@@ -609,10 +610,10 @@ export function scheduleFilterSearch(debounced = true) {
           set({ filterSearch: undefined });
           return;
         }
-        set({ filterSearch: { key, error: e.message, errorCode: e.code, loading: false } });
+        set({ filterSearch: { key, error: errorText(e), errorCode: e.code, loading: false } });
         return;
       }
-      set({ filterSearch: { key, error: e instanceof Error ? e.message : String(e), loading: false } });
+      set({ filterSearch: { key, error: errorText(e), loading: false } });
     } finally {
       if (filterAbort === ac) filterAbort = undefined;
     }

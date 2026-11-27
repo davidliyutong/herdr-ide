@@ -243,4 +243,26 @@ describe('linksAround on narrow screens and wrapped rows', () => {
     const prose = [mkRow('  Please check src/app.ts', 28), mkRow('  and verify line 10', 28)];
     expect(linksAround(0, 0, prose.length, (y) => prose[y]).map((l) => l.text)).toEqual(['src/app.ts']);
   });
+
+  it('preserves column-0 spaces on soft-wrapped continuation rows so following words do not glue onto links', () => {
+    const url = 'https://example.com/exact';
+    const rows = [mkRow(url, url.length, { wrap: true, writtenEnd: url.length }), mkRow(' nextword here', url.length)];
+    expect(linksAround(0, 0, rows.length, (y) => rows[y]).map((l) => l.text)).toEqual([url]);
+    expect(linksAround(1, 0, rows.length, (y) => rows[y])).toEqual([]);
+  });
+
+  it('does not bridge links across a blank TUI box-bordered row', () => {
+    const rows = [
+      mkRow('│ /Users/alice/Projects/app.ts │', 32),
+      mkRow('│                              │', 32),
+      mkRow('│ /Users/alice/Projects/other  │', 32),
+    ];
+    expect(linksAround(0, 0, rows.length, (y) => rows[y]).map((l) => l.text)).toEqual(['/Users/alice/Projects/app.ts']);
+    expect(linksAround(1, 0, rows.length, (y) => rows[y])).toEqual([]);
+    expect(linksAround(2, 0, rows.length, (y) => rows[y]).map((l) => l.text)).toEqual(['/Users/alice/Projects/other']);
+
+    const tight = [mkRow('│ src/a.ts│', 11), mkRow('│   │      ', 11), mkRow('│ src/b.ts│', 11)];
+    expect(linksAround(0, 0, tight.length, (y) => tight[y]).map((l) => l.text)).toEqual(['src/a.ts']);
+    expect(linksAround(2, 0, tight.length, (y) => tight[y]).map((l) => l.text)).toEqual(['src/b.ts']);
+  });
 });

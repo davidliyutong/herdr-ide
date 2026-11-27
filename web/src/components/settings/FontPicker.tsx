@@ -192,6 +192,7 @@ function FontList({
           setSel(0);
         }}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
           if (e.key === 'ArrowDown') setSel((v) => Math.min(v + 1, rows.length - 1));
           else if (e.key === 'ArrowUp') setSel((v) => Math.max(v - 1, 0));
           else if (e.key === 'Enter' && rows[sel]) onPick(rows[sel].value);

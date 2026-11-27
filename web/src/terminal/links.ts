@@ -304,7 +304,7 @@ function rowContent(r: RowText): RowContent {
   let contentRight = totalCols;
   let innerEnd = t.trimEnd().length;
   const rb = RIGHT_BORDER_RE.exec(t);
-  if (rb && rb.index >= innerStart) {
+  if (rb) {
     const borderIdx = t.lastIndexOf(rb[1]);
     if (borderIdx >= innerStart) {
       hasRightBorder = true;
@@ -378,7 +378,7 @@ export function linksAround(y: number, top: number, bottom: number, row: (y: num
     const rt = at(r);
     const { text: t, colOf } = rt;
     const c = rowContent(rt);
-    const start = r === a ? 0 : c.innerStart;
+    const start = r === a || (at(r - 1).wrap && !c.hasLeftBorder) ? 0 : c.innerStart;
     const end = r < b ? (rt.wrap ? c.wrapEnd : c.innerEnd) : c.hasRightBorder ? c.innerEnd : t.length;
     for (let i = start; i < end; i++) cellOf.push({ y: r, from: colOf[i], to: colOf[i + 1] });
     text += t.slice(start, end);

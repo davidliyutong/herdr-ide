@@ -908,5 +908,33 @@ describe('a terminal’s pane', () => {
         [120, 25],
       ]);
     });
+
+    it('extends wrapped OSC 8 hyperlinks across trailing WIDE_HEAD spacer cells left by wrapped CJK characters', async () => {
+      // 80px / 8px = 10 columns, 160px / 16px = 10 rows.
+      const { p } = pane(80, 160);
+      await loadEmulator();
+      // 9 ASCII chars + 2-col CJK '中' wraps leaving a WIDE_HEAD spacer at row 0 col 9.
+      link.handler!.output(enc('\x1b]8;;https://example.com/\x1b\\123456789中ab\x1b]8;;\x1b\\'));
+      await settle(700);
+      const internal = p as unknown as {
+        frame: { lines: Array<{ wide: Uint8Array; link: Uint8Array }> };
+        linkAt(col: number, row: number): { cells: Array<{ y: number; from: number; to: number }>; link: { text: string } } | undefined;
+      };
+      expect(internal.frame.lines[0].wide[9]).toBe(3);
+      // Simulate the WIDE_HEAD spacer cell without the hyperlink flag set.
+      internal.frame.lines[0].link[9] = 0;
+      const fromTop = internal.linkAt(2, 0);
+      const fromBottom = internal.linkAt(0, 1);
+      expect(fromTop?.link.text).toBe('https://example.com/');
+      expect(fromTop?.cells).toEqual([
+        { y: 0, from: 0, to: 9 },
+        { y: 1, from: 0, to: 4 },
+      ]);
+      expect(fromBottom?.link.text).toBe('https://example.com/');
+      expect(fromBottom?.cells).toEqual([
+        { y: 0, from: 0, to: 9 },
+        { y: 1, from: 0, to: 4 },
+      ]);
+    });
   });
 });

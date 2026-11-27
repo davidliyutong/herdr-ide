@@ -6,13 +6,19 @@
 // A line that is one formula between $$ and $$ (indented less than a code
 // block), and a fence of a code block.
 const ONE_LINE_MATH = /^( {0,3})\$\$(.+)\$\$[ \t\r]*$/;
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE = /^ {0,3}(`{3,}|~{3,})([^\r]*)\r?$/;
 
 // What opens a line's containers: a block quote's marker, a list item's,
 // indentation; one at a time.
 const CONTAINER = /^(?:[ \t]*>[ \t]?|[ \t]*(?:[-+*]|\d{1,9}[.)])(?:[ \t]+|$)|[ \t]+)/;
 // A fence of a code block once its containers are left out.
 const INNER_FENCE = /^(`{3,}|~{3,})([^\r]*)\r?$/;
+
+/** Returns the fence marker if a fence match opens a CommonMark fenced code
+ * block (backtick info strings may not contain backticks, §4.5). */
+function openingFence(m: RegExpExecArray | null): string | undefined {
+  return m && !(m[1][0] === '`' && m[2].includes('`')) ? m[1] : undefined;
+}
 
 /** The start of a line that opens its containers (CONTAINER). */
 function containerPrefix(line: string): string {
@@ -35,7 +41,7 @@ function continuation(prefix: string): string {
 
 /** The code spans of a line, [start, end) each: runs of backticks closed by
  * a run as long on the same line. */
-function codeSpans(line: string): [number, number][] {
+export function codeSpans(line: string): [number, number][] {
   const out: [number, number][] = [];
   if (!line.includes('`')) return out;
   // The lengths of runs that have no closing run further on.
@@ -75,7 +81,7 @@ function codeSpans(line: string): [number, number][] {
 
 /** The end of the code span (of spans in order) that has position i; -1
  * when none has it. */
-function spanEnd(spans: readonly [number, number][], i: number): number {
+export function spanEnd(spans: readonly [number, number][], i: number): number {
   let lo = 0;
   let hi = spans.length - 1;
   while (lo <= hi) {
@@ -161,8 +167,9 @@ export function latexMath(md: string): string {
       out.push(line);
       continue;
     }
-    if (f && !(f[1][0] === '`' && f[2].includes('`'))) {
-      fence = f[1];
+    const opened = openingFence(f);
+    if (opened) {
+      fence = opened;
       unclosed = false;
       out.push(line);
       continue;
@@ -184,7 +191,7 @@ export function latexMath(md: string): string {
       if (at >= 0) end = i;
       for (let j = i + 1; at < 0 && j < lines.length; j++) {
         const l = lines[j];
-        if (blankIn(l) || INNER_FENCE.test(l.slice(containerPrefix(l).length))) break;
+        if (blankIn(l) || openingFence(INNER_FENCE.exec(l.slice(containerPrefix(l).length)))) break;
         at = delimiter(l, ']', 0, codeSpans(l));
         if (at >= 0) end = j;
       }
@@ -244,11 +251,12 @@ export function displayMath(source: string): string {
     const f = FENCE.exec(line);
     if (fence !== undefined) {
       // A closing fence: the same character, at least as many, nothing after.
-      if (f && f[1][0] === fence[0] && f[1].length >= fence.length && line.trim() === f[1]) fence = undefined;
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length && !f[2].trim()) fence = undefined;
       continue;
     }
-    if (f) {
-      fence = f[1];
+    const opened = openingFence(f);
+    if (opened) {
+      fence = opened;
       continue;
     }
     const m = ONE_LINE_MATH.exec(line);

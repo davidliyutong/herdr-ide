@@ -229,14 +229,15 @@ export class TermConnection {
    * never overflows the hub's MAX_PENDING_ATTACHES limit. */
   async attach(o: AttachOptions, handler: StreamHandler): Promise<number> {
     if (!this.up) throw new TermError('unavailable');
+    const socket = this.socket;
     if (this.attachInFlight >= MAX_CONCURRENT_ATTACHES) {
       await new Promise<void>((resolve, reject) => {
         this.attachQueue.push({ resolve, reject });
       });
+      if (!this.up || this.socket !== socket) throw new TermError('unavailable');
+    } else {
+      this.attachInFlight++;
     }
-    if (!this.up) throw new TermError('unavailable');
-    const socket = this.socket;
-    this.attachInFlight++;
     try {
       const rid = this.rid; // the one request() takes next
       this.attaching.set(rid, handler);
@@ -254,8 +255,9 @@ export class TermConnection {
       return msg.s;
     } finally {
       if (this.socket === socket && this.attachInFlight > 0) {
-        this.attachInFlight--;
-        if (this.up) this.attachQueue.shift()?.resolve();
+        const next = this.up ? this.attachQueue.shift() : undefined;
+        if (next) next.resolve();
+        else this.attachInFlight--;
       }
     }
   }

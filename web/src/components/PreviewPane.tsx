@@ -176,7 +176,14 @@ export function PreviewPane({
           }
           if (!r.ok) throw new Error(await r.text());
           const buf = new Uint8Array(await r.arrayBuffer());
-          if (buf.subarray(0, 8000).includes(0)) throw new Error(t('preview.binary'));
+          if (buf.subarray(0, 8000).includes(0)) {
+            if (ac.signal.aborted) return;
+            shownLast.delete(key);
+            setText(undefined);
+            setDirEntries(undefined);
+            setError(t('preview.binary'));
+            return;
+          }
           if (ac.signal.aborted) return;
           const next = new TextDecoder().decode(buf);
           setDirEntries(undefined);

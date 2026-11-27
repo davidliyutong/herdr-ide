@@ -13,6 +13,7 @@ vi.mock('../terminal/mathRender', () => ({ renderMath: (tex: string, display: bo
 import { imageSource, isMarkdownPath, parseImageDimension, relativePath, safeLink } from '../markdown/links';
 import { Markdown, type MarkdownProps } from '../markdown/Markdown';
 import { parseFrontmatter } from '../markdown/MarkdownBody';
+import { displayMath } from '../markdown/math';
 import { StreamMarkdown } from '../markdown/StreamMarkdown';
 import { streamBlocks } from '../markdown/streaming';
 
@@ -651,5 +652,61 @@ describe('Markdown', () => {
     // Explicit hardBreaks=false overrides compact default.
     await show({ variant: 'compact', hardBreaks: false, text: 'line one\nline two' });
     expect(host.querySelectorAll('p br')).toHaveLength(0);
+  });
+
+  it('preserves checkboxes in loose and multi-paragraph GFM task lists while still stripping raw HTML inputs', async () => {
+    await show({
+      text: [
+        '- [x] Loose checked item',
+        '',
+        '- [ ] Loose unchecked item',
+        '',
+        '  Second paragraph under item',
+        '',
+        '  - [x] Nested checked item',
+        '',
+        '<li class="task-list-item"><p><input type="checkbox" disabled checked> Forged HTML checkbox</p></li>',
+      ].join('\n'),
+    });
+    const boxes = [...host.querySelectorAll<HTMLInputElement>('input[type=checkbox]')];
+    expect(boxes).toHaveLength(3);
+    expect(boxes.map((b) => [b.checked, b.disabled])).toEqual([
+      [true, true],
+      [false, true],
+      [true, true],
+    ]);
+    // Forged raw HTML checkbox was stripped even inside li.task-list-item > p.
+    expect(host.textContent).toContain('Forged HTML checkbox');
+    expect(host.querySelectorAll('input')).toHaveLength(3);
+  });
+
+  it('parses unindented YAML list items in frontmatter', () => {
+    const parsed = parseFrontmatter(['---', 'title: Guide', 'tags:', '- docs', '- "preview"', '---', '', '# Body'].join('\n'));
+    expect(parsed).toEqual({
+      entries: [
+        ['title', 'Guide'],
+        ['tags', 'docs, preview'],
+      ],
+      body: '\n# Body',
+    });
+  });
+
+  it('does not latch fences or streaming HTML state on inline backtick code spans', () => {
+    // CommonMark §4.5: backtick info strings may not contain backticks, so line-initial ```foo``` is inline code.
+    expect(streamBlocks('```foo```\n\nSecond paragraph')).toEqual(['```foo```', 'Second paragraph']);
+    expect(displayMath('```foo```\n\n$$a + b$$')).toBe('```foo```\n\n$$\na + b\n$$');
+
+    // Inline code spans containing <!-- or <details> do not latch comment/details state across blank lines.
+    expect(streamBlocks('Use `<!--` to start a comment.\n\nNext paragraph')).toEqual(['Use `<!--` to start a comment.', 'Next paragraph']);
+    expect(streamBlocks('Wrap with `<details>` tag.\n\nNext paragraph')).toEqual(['Wrap with `<details>` tag.', 'Next paragraph']);
+    expect(streamBlocks('```<!--```\n\nAfter triple tick')).toEqual(['```<!--```', 'After triple tick']);
+
+    // Real <details> flanked by inline code spans still stays grouped across blank lines.
+    expect(streamBlocks('`<!--` <details> `-->`\n\nBody\n\n</details>\n\nAfter')).toEqual([
+      '`<!--` <details> `-->`\n\nBody\n\n</details>',
+      'After',
+    ]);
+    // Real HTML comment containing a backticked `-->` still closes on that line.
+    expect(streamBlocks('<!-- a `-->` rest\n\nNext paragraph')).toEqual(['<!-- a `-->` rest', 'Next paragraph']);
   });
 });

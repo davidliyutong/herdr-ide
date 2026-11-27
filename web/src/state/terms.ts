@@ -358,6 +358,7 @@ export class TermModel {
     const writes = this.writes.get(m) ?? 0;
     this.call(m, 'doc.get', { name: L.LAYOUT_DOCUMENT }).then(
       (doc) => {
+        if (!this.connection.connected || !this.subscribed.has(m)) return;
         this.cancelLoadRetry(m);
         // A write of ours is on its way, or began since the read was asked
         // for: the read may be from before it (calls run at once on the
@@ -432,6 +433,7 @@ export class TermModel {
         done?.();
       },
       () => {
+        if (!this.connection.connected || !this.subscribed.has(m)) return;
         const phase = this.store.backends.get(m)?.phase;
         if (phase === 'error' || phase === 'starting') return;
         const cur = this.loadRetries.get(m);
@@ -442,6 +444,7 @@ export class TermModel {
         const timer = setTimeout(() => {
           const r = this.loadRetries.get(m);
           if (r) r.timer = undefined;
+          if (!this.connection.connected || !this.subscribed.has(m)) return;
           this.loadLayout(m, done);
         }, delay);
         this.loadRetries.set(m, { tries, timer });

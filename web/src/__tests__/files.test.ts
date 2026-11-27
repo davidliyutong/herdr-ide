@@ -1181,4 +1181,41 @@ describe('FilesPanel', () => {
       setFilterRegex(false);
     });
   });
+
+  it('localizes filter search errors and does not fall back to local rows when server rejects bad_regex', async () => {
+    // 1. Server returns a structured FilesError (offline): shows localized message, not raw English prose.
+    answers.find = () => ({ status: 503, json: { error: 'offline', message: 'raw server offline prose' } });
+    await act(async () => setFilter('main'));
+    await vi.waitFor(() => {
+      expect(host.querySelector('.files-note.error')?.textContent).toBe(t('files.error.offline'));
+    });
+    expect(host.textContent).not.toContain('raw server offline prose');
+
+    // 2. Pattern valid in JS RegExp (lookahead) but rejected by server RE2 as bad_regex:
+    // must NOT show local walk() rows above the error alert.
+    answers.find = () => ({ status: 400, json: { error: 'bad_regex', message: 'invalid or unsupported Perl syntax' } });
+    await act(async () => {
+      setFilterRegex(true);
+      setFilter('(?=main)');
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('.files-note.error')?.textContent).toBe(t('files.error.bad_regex'));
+    });
+    expect(rows()).toEqual([]);
+
+    // 3. Matched leaf directory in whole-project filter mode does not show an expanded chevron when previously expanded.
+    answers.find = () => ({ status: 200, json: { matches: [{ path: '/home/u/src/lib', rel: 'lib', name: 'lib', is_dir: true }] } });
+    await act(async () => {
+      useTree.setState((s) => ({ expanded: { ...s.expanded, '/home/u/src/lib': true } }));
+      setFilterRegex(false);
+      setFilter('lib');
+    });
+    await vi.waitFor(() => {
+      expect(rows()).toEqual(['/home/u/src/lib']);
+    });
+    const libRow = treeRows(useTree.getState()).find((r) => r.path === '/home/u/src/lib');
+    expect(libRow?.expanded).toBe(false);
+
+    await act(async () => setFilter(''));
+  });
 });

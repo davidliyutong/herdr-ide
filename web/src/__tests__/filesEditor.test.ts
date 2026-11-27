@@ -236,6 +236,8 @@ let fileStatus: number | undefined;
 let fileErrorBody: string | undefined;
 /** While set, reading the file's contents waits for it. */
 let hold: Promise<void> | undefined;
+/** While set, saving the file waits for it. */
+let holdWrite: Promise<void> | undefined;
 const writes: Array<{ q: URLSearchParams; body: string; raw: Uint8Array }> = [];
 const fileRequests: Array<{ method: string; path: string; maxSize: string | null }> = [];
 const statRequests: string[][] = [];
@@ -268,6 +270,7 @@ function stubFetch() {
       const raw = init!.body as Uint8Array;
       const body = new TextDecoder().decode(raw);
       writes.push({ q: url.searchParams, body, raw });
+      if (holdWrite) await holdWrite;
       const q = url.searchParams;
       const cur = file ? { path: q.get('path'), exists: true, size: file.size, mtime: file.mtime } : { path: q.get('path'), exists: false };
       const matches =
@@ -310,6 +313,7 @@ describe('EditorPane', () => {
     fileStatus = undefined;
     fileErrorBody = undefined;
     hold = undefined;
+    holdWrite = undefined;
     writes.length = 0;
     fileRequests.length = 0;
     statRequests.length = 0;
@@ -1301,6 +1305,209 @@ describe('EditorPane', () => {
       } finally {
         pauseSpy.mockRestore();
       }
+    });
+  });
+
+  describe('unsaved Markdown restore, Monaco creation race, and save/reload guards', () => {
+    const layoutWithV1 = (): Layout =>
+      ({
+        workspaces: [
+          { id: 'w', tabs: [{ root: { view: { id: 'v1', plugin: 'files', kind: 'editor' } }, focused: 'view:v1' }], selected: 0 },
+        ],
+        selected: 0,
+      }) as unknown as Layout;
+
+    afterEach(() => {
+      dropEdit('m', 'view:v1');
+      resetViewStates();
+    });
+
+    it('restores unsaved Markdown edits in Source mode so Save works, and disposes pendingKept on Revert', async () => {
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWithV1() } } });
+      file = { text: '# Original\n', size: 11, mtime: 7000 };
+      await render('/home/u/doc.md');
+      // Switch to Source, edit, then switch back to Preview before unmounting.
+      await act(async () => button(t('files.markdown.source'))!.click());
+      await flush();
+      await flush();
+      await act(async () => editor.model!.setValue('# Edited\n'));
+      await act(async () => button(t('files.markdown.preview'))!.click());
+      await flush();
+
+      // Unmount (tab switch away) and remount: unsaved edit prioritizes Source over saved 'preview'.
+      await act(async () => root.unmount());
+      root = createRoot(host);
+      await render('/home/u/doc.md');
+      expect(button(t('files.markdown.source'))?.getAttribute('aria-pressed')).toBe('true');
+      expect(editor.model?.getValue()).toBe('# Edited\n');
+      expect(host.querySelector('.files-dirty')).not.toBeNull();
+      // Save button works and writes the edited content.
+      await act(async () => button(t('files.save'))!.click());
+      await flush();
+      expect(file?.text).toBe('# Edited\n');
+      expect(host.querySelector('.files-dirty')).toBeNull();
+
+      // Now edit again, unmount, and hold createEditor while remounting so pendingKept is still pending;
+      // clicking Revert must dispose pendingKept so discarded edits never resurrect when Monaco loads.
+      await act(async () => editor.model!.setValue('# Discarded\n'));
+      await act(async () => root.unmount());
+      const { createEditor } = await import('../plugins/monaco');
+      const spy = vi.mocked(createEditor);
+      const orig = spy.getMockImplementation()!;
+      let releaseEditor!: () => void;
+      const editorGate = new Promise<void>((r) => (releaseEditor = r));
+      spy.mockImplementationOnce(async (el, o) => {
+        await editorGate;
+        return orig(el, o);
+      });
+
+      root = createRoot(host);
+      await act(async () =>
+        root.render(
+          createElement(EditorPane, {
+            m: 'm',
+            pane: 'view:v1',
+            view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/doc.md' },
+            focused: true,
+          }),
+        ),
+      );
+      await flush();
+      // Click Revert before Monaco finishes mounting.
+      await act(async () => button(t('files.revert'))!.click());
+      await flush();
+      releaseEditor();
+      await flush();
+      await flush();
+      expect(editor.model?.getValue()).toBe('# Edited\n');
+      expect(host.querySelector('.files-dirty')).toBeNull();
+      // Switching modes never resurrects the discarded edit.
+      await act(async () => button(t('files.markdown.preview'))!.click());
+      await act(async () => button(t('files.markdown.source'))!.click());
+      await flush();
+      expect(editor.model?.getValue()).toBe('# Edited\n');
+    });
+
+    it('does not create duplicate Monaco editors when showEditor toggles while createEditor is still pending', async () => {
+      const { createEditor } = await import('../plugins/monaco');
+      const spy = vi.mocked(createEditor);
+      const orig = spy.getMockImplementation()!;
+      spy.mockClear();
+      let releaseEditor!: () => void;
+      const editorGate = new Promise<void>((r) => (releaseEditor = r));
+      spy.mockImplementationOnce(async (el, o) => {
+        await editorGate;
+        return orig(el, o);
+      });
+
+      file = { text: '# Race\n', size: 7, mtime: 7000 };
+      await render('/home/u/race.md');
+      expect(spy).not.toHaveBeenCalled();
+
+      // Toggle source -> preview -> source while the first createEditor is still in flight.
+      await act(async () => button(t('files.markdown.source'))!.click());
+      await flush();
+      expect(spy).toHaveBeenCalledTimes(1);
+      await act(async () => button(t('files.markdown.preview'))!.click());
+      await act(async () => button(t('files.markdown.source'))!.click());
+      await flush();
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      releaseEditor();
+      await flush();
+      await flush();
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(editor.model?.getValue()).toBe('# Race\n');
+    });
+
+    it('protects edits started while a background reload from Preview mode is in flight', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+      try {
+        file = { text: '# Initial\n', size: 10, mtime: 7000 };
+        await act(async () =>
+          root.render(
+            createElement(EditorPane, {
+              m: 'm',
+              pane: 'view:v1',
+              view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/bg.md' },
+              focused: true,
+            }),
+          ),
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(0);
+        });
+
+        // Disk changes while still in Preview mode (ed.current is undefined); hold loadText.
+        file = { text: '# From Disk\n', size: 12, mtime: 8000 };
+        let releaseLoad!: () => void;
+        hold = new Promise<void>((r) => (releaseLoad = r));
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(CHECK_MS);
+        });
+
+        // User switches to Source and edits before the background loadText finishes.
+        await act(async () => button(t('files.markdown.source'))!.click());
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        await act(async () => editor.model!.setValue('# My Unsaved Edit\n'));
+
+        hold = undefined;
+        releaseLoad();
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+
+        // Background reload must NOT overwrite the user's edit and must surface the conflict bar.
+        expect(editor.model?.getValue()).toBe('# My Unsaved Edit\n');
+        expect(host.querySelector('.files-conflict')?.textContent).toContain(t('files.conflict.changed', { name: 'bg.md' }));
+      } finally {
+        hold = undefined;
+        vi.useRealTimers();
+      }
+    });
+
+    it('guards save() against concurrent double Cmd+S writes and stale completions after path switch', async () => {
+      file = { text: 'hello', size: 5, mtime: 7000 };
+      await render('/home/u/slow.txt');
+      await act(async () => editor.model!.setValue('first save'));
+
+      // Hold the first write and fire save twice back-to-back: only one write goes out, no false 409.
+      let releaseWrite!: () => void;
+      holdWrite = new Promise<void>((r) => (releaseWrite = r));
+      await act(async () => {
+        editor.save!();
+        editor.save!();
+      });
+      expect(writes).toHaveLength(1);
+      holdWrite = undefined;
+      releaseWrite();
+      await flush();
+      expect(host.querySelector('.files-conflict')).toBeNull();
+      expect(host.querySelector('.files-dirty')).toBeNull();
+      expect(file?.text).toBe('first save');
+
+      // Start another slow save, then switch the mounted pane to another file before it settles.
+      await act(async () => editor.model!.setValue('stale write'));
+      let releaseStale!: () => void;
+      holdWrite = new Promise<void>((r) => (releaseStale = r));
+      await act(async () => {
+        editor.save!();
+      });
+      file = { text: 'other file', size: 10, mtime: 9000 };
+      await render('/home/u/other.txt');
+      expect(editor.model?.getValue()).toBe('other file');
+
+      // Release the old write: must not overwrite /home/u/other.txt's state or show conflict.
+      holdWrite = undefined;
+      releaseStale();
+      await flush();
+      expect(editor.model?.getValue()).toBe('other file');
+      expect(host.querySelector('.files-conflict')).toBeNull();
+      expect(host.querySelector('.files-dirty')).toBeNull();
     });
   });
 });

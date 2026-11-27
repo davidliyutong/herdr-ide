@@ -14,6 +14,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { match, matchScore } from '../lib/match';
 import { Picker, pick, pickMany, pickerRows, placeList, selectionSummary, type PickerItem } from '../components/Picker';
+import { FontPicker } from '../components/settings/FontPicker';
 import { t } from '../i18n';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -375,5 +376,106 @@ describe('pickMany()', () => {
     await key(' ');
     await key('Escape');
     await expect(result!).resolves.toBeUndefined();
+  });
+});
+
+describe('IME composition and scroll self-filter', () => {
+  let host: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    host.remove();
+  });
+
+  it('ignores Enter, Escape and arrows during IME composition in Picker while still stopping propagation', async () => {
+    const onChange = vi.fn();
+    const outerKey = vi.fn();
+    host.addEventListener('keydown', outerKey);
+    await act(async () => root.render(createElement(Picker<string>, { items, value: 'main', onChange, 'aria-label': 'Branch' })));
+    await act(async () => host.querySelector<HTMLButtonElement>('.picker-button')!.click());
+    expect(popup()).not.toBeNull();
+    expect(active()).toContain('main');
+
+    await key('ArrowDown', { isComposing: true });
+    await key('Enter', { isComposing: true });
+    await key('Enter', { keyCode: 229 });
+    await key('Escape', { isComposing: true });
+    await key('Escape', { keyCode: 229 });
+    expect(popup()).not.toBeNull();
+    expect(active()).toContain('main');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(outerKey).not.toHaveBeenCalled();
+
+    // Non-composing Enter still chooses cleanly.
+    await key('ArrowDown');
+    await key('Enter');
+    expect(onChange).toHaveBeenCalledWith('dev');
+    expect(popup()).toBeNull();
+    host.removeEventListener('keydown', outerKey);
+  });
+
+  it('does not reposition PickerList when scrolling .picker-list itself', async () => {
+    await act(async () => root.render(createElement(Picker<string>, { items, value: 'main', onChange: () => {}, 'aria-label': 'Branch' })));
+    const btn = host.querySelector<HTMLButtonElement>('.picker-button')!;
+    await act(async () => btn.click());
+    const rectSpy = vi.spyOn(btn, 'getBoundingClientRect');
+    rectSpy.mockClear();
+
+    const listEl = popup()!.querySelector<HTMLElement>('.picker-list')!;
+    await act(async () => {
+      listEl.dispatchEvent(new Event('scroll', { bubbles: false }));
+    });
+    expect(rectSpy).not.toHaveBeenCalled();
+
+    // Scrolling an ancestor / window still triggers repositioning.
+    await act(async () => {
+      window.dispatchEvent(new Event('scroll'));
+    });
+    expect(rectSpy).toHaveBeenCalled();
+    rectSpy.mockRestore();
+  });
+
+  it('ignores Enter, Escape and arrows during IME composition in FontPicker', async () => {
+    const prevScroll = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = vi.fn();
+    try {
+      const onChange = vi.fn();
+      await act(async () => root.render(createElement(FontPicker, { value: '', disabled: false, kind: 'terminal-cjk', onChange })));
+      const btn = host.querySelector<HTMLButtonElement>('.font-picker-button')!;
+      await act(async () => btn.click());
+      const input = host.querySelector<HTMLInputElement>('.font-list input')!;
+      expect(input).not.toBeNull();
+
+      // Type a custom font query so selecting would trigger onChange.
+      await act(async () => {
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+        set.call(input, 'Noto Sans CJK');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const sendKey = (k: string, init: KeyboardEventInit = {}) =>
+        act(async () => {
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }));
+        });
+      await sendKey('ArrowDown', { isComposing: true });
+      await sendKey('Enter', { isComposing: true });
+      await sendKey('Enter', { keyCode: 229 });
+      await sendKey('Escape', { isComposing: true });
+      await sendKey('Escape', { keyCode: 229 });
+      expect(host.querySelector('.font-list')).not.toBeNull();
+      expect(onChange).not.toHaveBeenCalled();
+
+      // Non-composing Enter picks the custom font and closes.
+      await sendKey('Enter');
+      expect(onChange).toHaveBeenCalledWith('Noto Sans CJK');
+      expect(host.querySelector('.font-list')).toBeNull();
+    } finally {
+      Element.prototype.scrollIntoView = prevScroll;
+    }
   });
 });

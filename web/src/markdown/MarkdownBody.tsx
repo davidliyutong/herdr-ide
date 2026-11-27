@@ -115,9 +115,9 @@ export function parseFrontmatter(text: string): { entries: Array<[string, string
       entries.push(current);
       continue;
     }
-    if (/^\s+-\s+/.test(line) && current) {
+    if (/^\s*-\s+/.test(line) && current) {
       const item = line
-        .replace(/^\s+-\s+/, '')
+        .replace(/^\s*-\s+/, '')
         .trim()
         .replace(/^(['"])(.*)\1$/, '$2');
       current[1] = current[1] ? `${current[1]}, ${item}` : item;

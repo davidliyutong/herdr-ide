@@ -205,6 +205,7 @@ const GFM_CHECKBOX_NODE = 'gfmTaskCheckbox';
 interface HastNode {
   type: string;
   tagName?: string;
+  value?: string;
   properties?: Record<string, unknown>;
   children?: HastNode[];
   checked?: boolean;
@@ -245,21 +246,41 @@ function makeNonce(): string {
   return `gfmcb-${nonceSeq}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
 }
 
+function isGfmCheckbox(node: HastNode): boolean {
+  return node.type === 'element' && node.tagName === 'input' && node.properties?.type === 'checkbox' && node.properties?.disabled === true;
+}
+
+function isBlankText(node: HastNode): boolean {
+  return node.type === 'text' && typeof node.value === 'string' && node.value.trim() === '';
+}
+
 /** Pre-raw rehype plugin: isolates genuine GFM task-list checkboxes into a
- * non-HTML node type that raw HTML can never forge. */
+ * non-HTML node type that raw HTML can never forge. Handles both tight
+ * (`<li><input>`) and loose (`<li><p><input>`) GFM task lists. */
 function rehypePreserveGfmCheckboxes() {
   return (tree: HastNode) => {
-    walkChildren(tree, (child, parent) => {
+    walkChildren(tree, (child) => {
       if (
         child.type === 'element' &&
-        child.tagName === 'input' &&
-        parent.type === 'element' &&
-        parent.tagName === 'li' &&
-        classList(parent.properties).includes('task-list-item') &&
-        child.properties?.type === 'checkbox' &&
-        child.properties?.disabled === true
+        child.tagName === 'li' &&
+        classList(child.properties).includes('task-list-item') &&
+        Array.isArray(child.children)
       ) {
-        return { type: GFM_CHECKBOX_NODE, checked: Boolean(child.properties.checked) };
+        const idx = child.children.findIndex((c) => !isBlankText(c));
+        if (idx >= 0) {
+          const first = child.children[idx];
+          if (isGfmCheckbox(first)) {
+            child.children[idx] = { type: GFM_CHECKBOX_NODE, checked: Boolean(first.properties?.checked) };
+          } else if (first.type === 'element' && first.tagName === 'p' && Array.isArray(first.children)) {
+            const pIdx = first.children.findIndex((c) => !isBlankText(c));
+            if (pIdx >= 0 && isGfmCheckbox(first.children[pIdx])) {
+              first.children[pIdx] = {
+                type: GFM_CHECKBOX_NODE,
+                checked: Boolean(first.children[pIdx].properties?.checked),
+              };
+            }
+          }
+        }
       }
       return undefined;
     });

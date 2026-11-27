@@ -190,4 +190,98 @@ describe('FilePicker', () => {
     await settle();
     expect(listDir).toHaveBeenCalledTimes(3);
   });
+
+  it('ignores Escape during IME composition', async () => {
+    const { onClose } = await mount();
+    const input = q<HTMLInputElement>('.file-picker-filter')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'rm');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, bubbles: true, cancelable: true }));
+    });
+    expect(input.value).toBe('rm');
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Clear filter, then compose Escape again: dialog stays open.
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(input.value).toBe('');
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, bubbles: true, cancelable: true }));
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('shows empty state for a dotfile-only directory when hidden files are off, and renders subdirectory listing errors', async () => {
+    const customListDir = vi.fn(async (_m: string, path: string) => {
+      if (path === '/dotfiles') return { entries: [{ name: '.env', is_dir: false, size: 10 }] };
+      if (path === '/work/repo') return { entries: [{ name: 'secret', is_dir: true }] };
+      throw new Error('EACCES');
+    });
+
+    await mount({ rootDir: '/dotfiles', listDir: customListDir });
+    expect(q('.file-picker-note.muted')?.textContent).toBe(t('conversation.filePicker.empty'));
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await mount({ rootDir: '/work/repo', listDir: customListDir });
+    await click(q('.file-picker-row[data-path="/work/repo/secret"]'));
+    await settle();
+    expect(q('.file-picker-note.error')?.textContent).toContain('EACCES');
+  });
+
+  it('does not clear newer machine deduplication when an aborted listDir rejects after machine switch', async () => {
+    let rejectFirst!: (err: Error) => void;
+    let resolveSecond!: (res: { entries: FilePickerEntry[] }) => void;
+    const calls: Array<{ m: string; path: string }> = [];
+    const customListDir = vi.fn((m: string, path: string) => {
+      calls.push({ m, path });
+      if (calls.length === 1) {
+        return new Promise<{ entries: FilePickerEntry[] }>((_resolve, reject) => {
+          rejectFirst = reject;
+        });
+      }
+      if (calls.length === 2) {
+        return new Promise<{ entries: FilePickerEntry[] }>((resolve) => {
+          resolveSecond = resolve;
+        });
+      }
+      return Promise.resolve({ entries: [] });
+    });
+
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    await act(async () =>
+      root.render(createElement(FilePicker, { m: 'm1', rootDir: '/work/repo', onSelect, onClose, listDir: customListDir })),
+    );
+    expect(calls).toEqual([{ m: 'm1', path: '/work/repo' }]);
+
+    // Switch machine before m1's request settles; m2 starts its own request for /work/repo.
+    await act(async () =>
+      root.render(createElement(FilePicker, { m: 'm2', rootDir: '/work/repo', onSelect, onClose, listDir: customListDir })),
+    );
+    expect(calls).toEqual([
+      { m: 'm1', path: '/work/repo' },
+      { m: 'm2', path: '/work/repo' },
+    ]);
+
+    // Old aborted m1 request rejects: must NOT clear m2's requestedRef entry.
+    rejectFirst(new DOMException('aborted', 'AbortError'));
+    await settle();
+
+    // Resolve m2's request and verify no duplicate fetch occurred even after re-rendering.
+    resolveSecond({ entries: [{ name: 'ok.txt', is_dir: false, size: 4 }] });
+    await settle();
+    await act(async () =>
+      root.render(createElement(FilePicker, { m: 'm2', rootDir: '/work/repo', onSelect, onClose, listDir: customListDir })),
+    );
+    await settle();
+    expect(calls).toHaveLength(2);
+    expect(qa('.file-picker-row .tree-label').map((e) => e.textContent)).toEqual(['ok.txt']);
+  });
 });

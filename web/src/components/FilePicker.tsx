@@ -3,7 +3,7 @@
 // TreeRow, FileIcon and fuzzy match with self-contained React state so it
 // never touches the Files sidebar panel's singleton useTree store.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, Eye, EyeOff, FolderRoot, Search, X } from 'lucide-react';
 import type { FilePickerEntry, FilePickerProps, FileSuggestion } from '../conversation/source';
 import { FileIcon } from '../fileIcons';
@@ -132,8 +132,8 @@ export function FilePicker({ m, rootDir, selected = [], onSelect, onClose, listD
           setDirs((prev) => ({ ...prev, [clean]: { entries } }));
         },
         (e: unknown) => {
-          requestedRef.current.delete(clean);
           if (!live.current || ac?.signal.aborted) return;
+          requestedRef.current.delete(clean);
           const msg = e instanceof Error ? e.message : String(e);
           setDirs((prev) => ({ ...prev, [clean]: { error: msg } }));
         },
@@ -257,6 +257,7 @@ export function FilePicker({ m, rootDir, selected = [], onSelect, onClose, listD
       role="dialog"
       aria-label={t('conversation.filePicker.title')}
       onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
         if (e.key === 'Escape') {
           e.preventDefault();
           e.stopPropagation();
@@ -340,46 +341,52 @@ export function FilePicker({ m, rootDir, selected = [], onSelect, onClose, listD
         {rootCache?.error && (
           <div className="file-picker-note error">{t('conversation.filePicker.loadFailed', { dir, error: rootCache.error })}</div>
         )}
-        {rootCache?.entries && rootCache.entries.length === 0 && (
-          <div className="file-picker-note muted">{t('conversation.filePicker.empty')}</div>
-        )}
-        {rootCache?.entries && rootCache.entries.length > 0 && rows.length === 0 && (
-          <div className="file-picker-note muted">{t('conversation.filePicker.noMatch')}</div>
+        {rootCache?.entries && rows.length === 0 && (
+          <div className="file-picker-note muted">
+            {t(rootCache.entries.length === 0 || !filter.trim() ? 'conversation.filePicker.empty' : 'conversation.filePicker.noMatch')}
+          </div>
         )}
         {rows.map((r) => {
           const isChecked = checked.has(r.path);
+          const subError = r.isDir && r.expanded ? dirs[r.path]?.error : undefined;
           return (
-            <TreeRow
-              key={r.path}
-              depth={r.depth}
-              expanded={r.isDir ? r.expanded : undefined}
-              onToggle={r.isDir ? () => toggleExpand(r.path) : undefined}
-              selected={isChecked}
-              className="file-picker-row"
-              data-path={r.path}
-              icon={
-                <>
-                  {!r.isDir && (
-                    <input
-                      type="checkbox"
-                      className="file-picker-check"
-                      checked={isChecked}
-                      aria-label={r.name}
-                      tabIndex={-1}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={() => toggleCheck(r.path)}
-                    />
-                  )}
-                  <FileIcon name={r.name} kind={r.isDir ? 'dir' : 'file'} open={r.expanded} />
-                </>
-              }
-              label={r.name}
-              highlight={r.ranges}
-              description={!r.isDir && typeof r.size === 'number' ? formatSize(r.size) : undefined}
-              title={r.path}
-              onClick={() => (r.isDir ? toggleExpand(r.path) : toggleCheck(r.path))}
-              onDoubleClick={() => r.isDir && navigate(r.path)}
-            />
+            <Fragment key={r.path}>
+              <TreeRow
+                depth={r.depth}
+                expanded={r.isDir ? r.expanded : undefined}
+                onToggle={r.isDir ? () => toggleExpand(r.path) : undefined}
+                selected={isChecked}
+                className="file-picker-row"
+                data-path={r.path}
+                icon={
+                  <>
+                    {!r.isDir && (
+                      <input
+                        type="checkbox"
+                        className="file-picker-check"
+                        checked={isChecked}
+                        aria-label={r.name}
+                        tabIndex={-1}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleCheck(r.path)}
+                      />
+                    )}
+                    <FileIcon name={r.name} kind={r.isDir ? 'dir' : 'file'} open={r.expanded} />
+                  </>
+                }
+                label={r.name}
+                highlight={r.ranges}
+                description={!r.isDir && typeof r.size === 'number' ? formatSize(r.size) : undefined}
+                title={r.path}
+                onClick={() => (r.isDir ? toggleExpand(r.path) : toggleCheck(r.path))}
+                onDoubleClick={() => r.isDir && navigate(r.path)}
+              />
+              {subError && (
+                <div className="file-picker-note error" style={{ paddingLeft: `${(r.depth + 1) * 14 + 12}px` }}>
+                  {t('conversation.filePicker.loadFailed', { dir: r.path, error: subError })}
+                </div>
+              )}
+            </Fragment>
           );
         })}
       </div>

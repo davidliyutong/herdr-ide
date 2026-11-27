@@ -17,7 +17,7 @@ import { retryDelay } from '../lib/retry';
 import { displayColors, type Appearance } from '../appearance';
 import { isCjkText } from '../terminal/fonts';
 import { loadVt, type Vt } from './module';
-import { Terminal, newFrame, type Frame, type Row } from './terminal';
+import { Terminal, WIDE_HEAD, newFrame, type Frame, type Row } from './terminal';
 import { createRenderer, replaceCanvas, lookOf, hexColor, type Cells, type Look, type Overlay, type Renderer } from './renderer';
 import { measureCell, type Metrics } from './atlas';
 import { keyInput, isMac, modsOf, mouseButton, textInput, wheelLines } from './input';
@@ -1477,17 +1477,25 @@ export class TermPane {
           while (b < line.codes.length && line.link[b] && this.term?.hyperlinkAt(b, y) === target) b++;
           return { y, from: a, to: b };
         };
+        const rowLinkEnd = (line: Row | undefined): number => {
+          if (!line) return 0;
+          let end = line.codes.length;
+          while (end > 0 && line.wide[end - 1] === WIDE_HEAD) end--;
+          return end;
+        };
         const cur = spanOf(row, col)!;
         const cells: Cells[] = [cur];
-        // Extend wrapped OSC 8 hyperlinks upward and downward across rows.
+        // Extend wrapped OSC 8 hyperlinks upward and downward across rows
+        // (skipping trailing WIDE_HEAD spacer cells left when a wide char wraps).
         for (let y = row - 1; y >= 0 && cells[0].from === 0; y--) {
-          const prev = this.frame.lines[y];
-          const lastCol = prev ? prev.codes.length - 1 : -1;
+          const lastCol = rowLinkEnd(this.frame.lines[y]) - 1;
           const up = lastCol >= 0 ? spanOf(y, lastCol) : undefined;
           if (!up) break;
           cells.unshift(up);
         }
-        for (let y = row + 1; y < this.frame.rows && cells[cells.length - 1].to === this.frame.lines[y - 1]?.codes.length; y++) {
+        for (let y = row + 1; y < this.frame.rows; y++) {
+          const prevEnd = rowLinkEnd(this.frame.lines[y - 1]);
+          if (prevEnd <= 0 || cells[cells.length - 1].to < prevEnd) break;
           const down = spanOf(y, 0);
           if (!down) break;
           cells.push(down);

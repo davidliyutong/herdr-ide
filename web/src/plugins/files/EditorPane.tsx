@@ -530,8 +530,8 @@ export function resetViewStates() {
 function defaultMdMode(m: string, pane: string, path: string, hasLine: boolean, hasKept: boolean): MarkdownMode {
   if (hasLine) return 'source';
   const saved = keptMarkdownMode(m, pane, path);
-  if (saved) return saved;
-  return hasKept ? 'source' : 'preview';
+  if (hasKept) return saved === 'split' ? 'split' : 'source';
+  return saved ?? 'preview';
 }
 
 function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneViewProps) {
@@ -580,6 +580,11 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
   const currentKey = `${m}\n${pane}\n${path}`;
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const savingRef = useRef(false);
   /** The (m, pane, path) key whose text and mdMode are synced and ready for Effect 2. */
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const pendingKept = useRef<KeptText | undefined>(undefined);
@@ -606,6 +611,9 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
 
   const showText = useCallback(
     (text: string, v: Version | undefined) => {
+      const droppedKept = pendingKept.current;
+      pendingKept.current = undefined;
+      droppedKept?.dispose();
       version.current = v;
       bom.current = !!v?.bom;
       raw.current = text;
@@ -638,9 +646,20 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
       const r = await loadText(m, path).catch((e): Loaded => ({ kind: 'error', message: errorText(e) }));
       if (loadKeyRef.current !== currentKey) return r;
       noteLoaded(m, path, r);
-      if (background && model) {
-        if (ed.current?.editor.getModel() !== model) return r; // closed meanwhile
-        if (model.getVersionId() !== at) {
+      if (background) {
+        if (savingRef.current) return r;
+        const nowModel = ed.current?.editor.getModel();
+        let edited = false;
+        if (model) {
+          if (nowModel !== model) return r; // closed meanwhile
+          edited = model.getVersionId() !== at;
+        } else {
+          edited =
+            dirtyRef.current ||
+            (!!nowModel && nowModel.getAlternativeVersionId() !== savedAt.current) ||
+            (!!pendingKept.current && pendingKept.current.model.getAlternativeVersionId() !== pendingKept.current.savedAt);
+        }
+        if (edited) {
           if (r.kind === 'text' || r.kind === 'missing') {
             const disk = r.kind === 'text' ? diskKey({ exists: true, ...r.version }) : 'gone';
             if (disk !== dismissed.current) setStatus({ kind: 'conflict', removed: r.kind === 'missing', disk });
@@ -663,26 +682,41 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
 
   const save = useCallback(
     async (force = false) => {
+      if (savingRef.current || locked) return false;
       const e = ed.current?.editor;
-      if (!e || locked) return false;
-      const body = eolMode === 'keep' ? restoreEols(raw.current, e.getValue()) : e.getValue();
-      const text = (bom.current ? BOM : '') + body;
-      const at = e.getModel()?.getAlternativeVersionId() ?? 0;
+      const model = e?.getModel() ?? pendingKept.current?.model;
+      if (!model) return false;
+      const currentValue = model.getValue();
+      const body = eolMode === 'keep' ? restoreEols(raw.current, currentValue) : currentValue;
+      const wroteBom = bom.current;
+      const text = (wroteBom ? BOM : '') + body;
+      const at = model.getAlternativeVersionId();
+      savingRef.current = true;
       setSaving(true);
       try {
         const r = await filesApi.write(m, path, text, force ? 'force' : (version.current ?? 'new'));
         noteFile(m, path, true);
-        if (r.entry) version.current = { size: r.entry.size, mtime: r.entry.mtime, bom: bom.current };
+        const nextVersion = r.entry ? { size: r.entry.size, mtime: r.entry.mtime, bom: wroteBom } : undefined;
+        const now = Date.now();
+        if (nextVersion) putCachedFile(m, path, body, nextVersion, now);
+        if (loadKeyRef.current !== currentKey) return true;
+        if (nextVersion) version.current = nextVersion;
         raw.current = body;
-        lastChecked.current = Date.now();
-        if (version.current) putCachedFile(m, path, body, version.current, lastChecked.current);
+        lastChecked.current = now;
+        if (!nextVersion && version.current) putCachedFile(m, path, body, version.current, now);
         setMixed(isMixed(body));
         dismissed.current = undefined;
         savedAt.current = at;
-        setDirty((e.getModel()?.getAlternativeVersionId() ?? 0) !== at);
+        if (pendingKept.current?.model === model) {
+          pendingKept.current.savedAt = at;
+          pendingKept.current.version = version.current;
+          pendingKept.current.raw = body;
+        }
+        setDirty(model.getAlternativeVersionId() !== at);
         setStatus({ kind: 'ready' });
         return true;
       } catch (err) {
+        if (loadKeyRef.current !== currentKey) return false;
         if (err instanceof ConflictError) setStatus({ kind: 'conflict', removed: !err.current.exists, disk: diskKey(err.current) });
         else {
           // A write that stopped partway changed the file: saving again
@@ -695,10 +729,13 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
         }
         return false;
       } finally {
-        setSaving(false);
+        if (loadKeyRef.current === currentKey) {
+          savingRef.current = false;
+          setSaving(false);
+        }
       }
     },
-    [m, path, locked, eolMode],
+    [m, path, currentKey, locked, eolMode],
   );
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -709,13 +746,6 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
   }, [dirty, view.preview, m, pane]);
   // Closing the pane with changes not saved asks first (unsaved.ts).
   useUnsaved(m, pane, dirty, path.slice(path.lastIndexOf('/') + 1) || path, () => saveRef.current());
-
-  const statusRef = useRef(status);
-  statusRef.current = status;
-  const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
-  const savingRef = useRef(saving);
-  savingRef.current = saving;
 
   /** Lightweight stat check against disk: reloads silently if clean and changed,
    * shows conflict bar if dirty and changed, never flashes "Loading...". */
@@ -763,6 +793,8 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
   useEffect(() => {
     let disposed = false;
     loadKeyRef.current = currentKey;
+    savingRef.current = false;
+    setSaving(false);
     pendingViewState.current = undefined;
     pendingKept.current = undefined;
     shown.current = undefined;
@@ -830,6 +862,8 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
 
     return () => {
       disposed = true;
+      loadKeyRef.current = '';
+      savingRef.current = false;
       if (isMarkdown) {
         const scroll = previewRef.current ? previewRef.current.scrollTop : previewScrollTop.current;
         keepMarkdownState(m, pane, path, mdModeRef.current, scroll);
@@ -838,11 +872,12 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
       editorCleanup.current?.();
       editorCleanup.current = undefined;
       // If a kept edit was taken but Monaco had not mounted yet (e.g. quick unmount),
-      // put it back so unsaved text is never lost.
+      // put it back so unsaved text is never lost (or dispose if already saved clean).
       const unmountedKept = pendingKept.current;
       pendingKept.current = undefined;
       if (unmountedKept) {
-        keepEdit<KeptText>(m, pane, unmountedKept);
+        if (unmountedKept.model.getAlternativeVersionId() === unmountedKept.savedAt) unmountedKept.dispose();
+        else keepEdit<KeptText>(m, pane, unmountedKept);
       }
     };
     // hasLineTarget only affects the initial markdown mode when opening a path.
@@ -859,7 +894,7 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
   // Preview hides Monaco without disposing it so switching modes is instant and
   // keeps undo history and dirty state.
   useEffect(() => {
-    if (!isTextReady || !showEditor || ed.current) return;
+    if (!isTextReady || !showEditor || ed.current || editorCleanup.current) return;
     const el = host.current;
     if (!el) return;
     let cancelled = false;
@@ -913,10 +948,18 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
     editorCleanup.current = cleanup;
 
     (async () => {
-      created = await createEditor(el, {
-        readOnly: useStore.getState().readOnly,
-        wordWrap: wordWrapRef.current ? 'on' : 'off',
-      });
+      try {
+        created = await createEditor(el, {
+          readOnly: useStore.getState().readOnly,
+          wordWrap: wordWrapRef.current ? 'on' : 'off',
+        });
+      } catch (err) {
+        if (editorCleanup.current === cleanup) editorCleanup.current = undefined;
+        if (!cancelled && loadKeyRef.current === myKey) {
+          setStatus({ kind: 'error', message: errorText(err) });
+        }
+        return;
+      }
       if (cancelled || loadKeyRef.current !== myKey) {
         created.editor.dispose();
         return;

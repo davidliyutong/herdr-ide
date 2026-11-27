@@ -7,7 +7,8 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { FakeHub, settle } from './fakeTerms';
-import { useTerms } from '../state/terms';
+import { TermConnection, type Socket } from '../term/connection';
+import { TermModel, useTerms } from '../state/terms';
 import { useStore } from '../state/store';
 import { actions, attentionList } from '../actions';
 import { terminalOnScreen } from '../seen';
@@ -175,5 +176,94 @@ describe('TermModel', () => {
       ['r', 'working'],
       ['w', 'working'],
     ]);
+  });
+
+  it('does not schedule offline loadLayout retries after disconnect or resurrect forgotten machines', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      class ScriptedSocket implements Socket {
+        binaryType = '';
+        onopen: (() => void) | null = null;
+        onclose: (() => void) | null = null;
+        onmessage: ((ev: { data: unknown }) => void) | null = null;
+        sent: Array<Record<string, unknown>> = [];
+        send(data: string | Uint8Array) {
+          if (typeof data === 'string') this.sent.push(JSON.parse(data));
+        }
+        close() {
+          this.onclose?.();
+        }
+        deliver(msg: unknown) {
+          this.onmessage?.({ data: JSON.stringify(msg) });
+        }
+      }
+      const sockets: ScriptedSocket[] = [];
+      const conn = new TermConnection(() => {
+        const s = new ScriptedSocket();
+        sockets.push(s);
+        return s;
+      });
+      const model = new TermModel(conn);
+      useTerms.setState({ connected: false, machines: {} });
+      model.start();
+      const s1 = sockets[0];
+      s1.onopen!();
+
+      // 1. Subscribe to m1; doc.get stays in flight when socket drops.
+      model.subscribe('m1');
+      s1.deliver({ t: 'backend', m: 'm1', state: 'ready' });
+      s1.deliver({ t: 'snapshot', m: 'm1', terminals: [FakeHub.term('t1')] });
+      const docGetCalls = (s: ScriptedSocket, m: string) =>
+        s.sent.filter((msg) => msg.t === 'call' && msg.m === m && msg.method === 'doc.get');
+      expect(docGetCalls(s1, 'm1')).toHaveLength(1);
+
+      // Drop connection: dropped() rejects replies before onConnection(false).
+      // Rejection microtask must NOT schedule an offline loadLayout retry timer.
+      s1.onclose!();
+      await Promise.resolve();
+      await Promise.resolve();
+      // Keep reconnect socket unopened while advancing past retry backoff window.
+      vi.advanceTimersByTime(10_000);
+      expect(sockets.length).toBeGreaterThanOrEqual(2);
+      expect(docGetCalls(s1, 'm1')).toHaveLength(1);
+
+      // 2. Reconnect on s2, subscribe to m2 and m3, then forget both while their doc.get calls are in flight.
+      const s2 = sockets[sockets.length - 1];
+      s2.onopen!();
+      model.subscribe('m2');
+      model.subscribe('m3');
+      s2.deliver({ t: 'backend', m: 'm2', state: 'ready' });
+      s2.deliver({ t: 'snapshot', m: 'm2', terminals: [FakeHub.term('a')] });
+      s2.deliver({ t: 'backend', m: 'm3', state: 'ready' });
+      s2.deliver({ t: 'snapshot', m: 'm3', terminals: [FakeHub.term('b')] });
+      const ridM2 = docGetCalls(s2, 'm2')[0].rid;
+      const ridM3 = docGetCalls(s2, 'm3')[0].rid;
+
+      model.forget('m2');
+      model.forget('m3');
+
+      // Late resolve for forgotten m2 must NOT resurrect its layout or store entry.
+      s2.deliver({
+        t: 'res',
+        rid: ridM2,
+        result: {
+          name: 'layout',
+          version: 1,
+          value: { version: 2, workspaces: [{ id: 'w2', name: 'x', cwd: '', tabs: [tab('a')], selected: 0 }], selected: 0 },
+        },
+      });
+      // Late reject for forgotten m3 must NOT schedule retries.
+      s2.deliver({ t: 'res', rid: ridM3, error: { kind: 'unavailable', message: 'gone' } });
+      await Promise.resolve();
+      await Promise.resolve();
+      vi.advanceTimersByTime(10_000);
+
+      expect(model.layout('m2')).toBeUndefined();
+      expect(useTerms.getState().machines.m2).toBeUndefined();
+      expect(docGetCalls(s2, 'm3')).toHaveLength(1);
+      conn.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

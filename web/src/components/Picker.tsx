@@ -239,11 +239,14 @@ function PickerList<V extends string>(p: ListProps<V>) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const again = () => setTick((n) => n + 1);
+    const onScroll = (e: Event) => {
+      if (e.target !== list.current) again();
+    };
     window.addEventListener('resize', again);
-    window.addEventListener('scroll', again, true);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       window.removeEventListener('resize', again);
-      window.removeEventListener('scroll', again, true);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, []);
   useLayoutEffect(() => {
@@ -309,6 +312,7 @@ function PickerList<V extends string>(p: ListProps<V>) {
   const onKeyDown = (e: React.KeyboardEvent) => {
     // Keys stay in the list: no shortcuts of the page while it is open.
     e.stopPropagation();
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     const inField = e.target === input.current;
     const page = Math.max(1, Math.floor(listHeight / itemPx) - 1);
     const go = (i: number) => {

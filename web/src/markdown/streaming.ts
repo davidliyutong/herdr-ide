@@ -5,14 +5,18 @@
 // Once the text is whole it is drawn as one (a list's items or a link's
 // definition may span blocks).
 
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+import { codeSpans, spanEnd } from './math';
+
+const FENCE = /^ {0,3}(`{3,}|~{3,})([^\r]*)\r?$/;
 const DETAILS_OPEN = /<details(?:\s[^>]*)?>/gi;
 const DETAILS_CLOSE = /<\/details\s*>/gi;
 
-/** Updates the unclosed HTML comment state across a line. */
+/** Updates the unclosed HTML comment state across a line, ignoring `<!--`
+ * inside inline code spans when outside an already-open comment. */
 function trackComment(line: string, inComment: boolean): boolean {
   let pos = 0;
   let open = inComment;
+  let spans: readonly [number, number][] | undefined;
   while (pos < line.length) {
     if (open) {
       const end = line.indexOf('-->', pos);
@@ -22,6 +26,12 @@ function trackComment(line: string, inComment: boolean): boolean {
     } else {
       const start = line.indexOf('<!--', pos);
       if (start < 0) return false;
+      spans ??= codeSpans(line);
+      const end = spanEnd(spans, start);
+      if (end >= 0) {
+        pos = end;
+        continue;
+      }
       open = true;
       pos = start + 4;
     }
@@ -29,9 +39,38 @@ function trackComment(line: string, inComment: boolean): boolean {
   return open;
 }
 
-/** Counts net <details> nesting delta on a line outside HTML comments. */
+/** Strips inline code spans and inline HTML comments from a line so tags
+ * written inside them do not affect `<details>` nesting. */
+function proseOf(line: string): string {
+  const spans = codeSpans(line);
+  let out = '';
+  let pos = 0;
+  while (pos < line.length) {
+    const end = spanEnd(spans, pos);
+    if (end >= 0) {
+      pos = end;
+      continue;
+    }
+    if (line.startsWith('<!--', pos)) {
+      const close = line.indexOf('-->', pos + 4);
+      if (close < 0) break;
+      pos = close + 3;
+      continue;
+    }
+    const nextTick = line.indexOf('`', pos + 1);
+    const nextComment = line.indexOf('<!--', pos + 1);
+    let next = line.length;
+    if (nextTick >= 0 && nextTick < next) next = nextTick;
+    if (nextComment >= 0 && nextComment < next) next = nextComment;
+    out += line.slice(pos, next);
+    pos = next;
+  }
+  return out;
+}
+
+/** Counts net <details> nesting delta on a line outside inline code and HTML comments. */
 function detailsDelta(line: string): number {
-  const cleaned = line.replace(/<!--[\s\S]*?-->/g, '');
+  const cleaned = proseOf(line);
   const opens = cleaned.match(DETAILS_OPEN)?.length ?? 0;
   const closes = cleaned.match(DETAILS_CLOSE)?.length ?? 0;
   return opens - closes;
@@ -51,7 +90,7 @@ export function streamBlocks(md: string): string[] {
     if (fence !== undefined) {
       cur.push(line);
       const f = FENCE.exec(line);
-      if (f && f[1][0] === fence[0] && f[1].length >= fence.length && line.trim() === f[1]) fence = undefined;
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length && !f[2].trim()) fence = undefined;
       continue;
     }
     if (math) {
@@ -65,7 +104,7 @@ export function streamBlocks(md: string): string[] {
       continue;
     }
     const f = FENCE.exec(line);
-    if (f) {
+    if (f && !(f[1][0] === '`' && f[2].includes('`'))) {
       fence = f[1];
       cur.push(line);
       continue;
