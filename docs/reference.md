@@ -4,7 +4,7 @@ Single source for commands, flags, settings, keyboard shortcuts, endpoints, envi
 
 ## Commands
 
-On Linux and macOS the hub's executable is the machine build of its own platform too ([42](features/42-typescript-backend.md)): besides `serve`, `fetch-assets` and `version` it runs the machine's commands (`node`, `mcp`, `chat-host`), and each machine runs its platform's from `~/.veldr/agent/<build>/veldr`, downloaded from the release or uploaded by the hub. On Linux machines the GUI helper it carries (`veldr-gui`, [14](features/14-gui-windows.md)) has the display's commands.
+On Linux and macOS the hub's executable is the machine build of its own platform too ([42](features/42-typescript-backend.md)): besides `serve`, `fetch-assets` and `version` it runs the machine's commands (`node`, `mcp`, `chat-host`, `term-env`), and each machine runs its platform's from `~/.veldr/agent/<build>/veldr`, downloaded from the release or uploaded by the hub. On Linux machines the GUI helper it carries (`veldr-gui`, [14](features/14-gui-windows.md)) has the display's commands.
 
 | Command | Description |
 | --- | --- |
@@ -21,6 +21,7 @@ On Linux and macOS the hub's executable is the machine build of its own platform
 | `veldr-gui gui-keep --socket S --pid P --xauth F --hc-socket H --lock L --display D` | The GUI helper's display keeper: holds a machine's virtual display while the instance's terminal core runs; started by the agent. |
 | `veldr-gui gui-wl --device NODE [--nvidia]` | The GUI helper's compositor of a machine's GPU display: a Wayland server showing nothing, for the one Xwayland on file descriptor 3, drawing with the render node's GPU (`--nvidia`: NVIDIA's buffer layouts); started by the agent. |
 | `veldr chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)), serving `chat.sock` in `--run` with its journal and log in `--base`; started by the agent as a hidden terminal of the terminal core. Ends on SIGHUP/SIGTERM/SIGINT, when asked to make way, or a minute after going idle. Exit 2: bad command line; 1: socket taken, directories not the user's alone, a newer host's journal, or not stopped within 30 s. Linux and macOS; with the ACP, Codex and Claude Code adapters, Claude Code's on Anthropic's Agent SDK, which the hub has the machine fetch before such a chat starts (a chat whose agent starts without it fails `sdk_unavailable`, [42](features/42-typescript-backend.md#claude-code)). |
+| `veldr term-env <token>` | Internal trampoline started by herdr-core for a terminal with staged workspace vault preset variables ([30](features/30-variable-vault.md)): consumes the single-use 48-hex-character token over `<run>/env.sock` (5 s timeout), merges the variables and replaces itself in place via `execve` with the target shell or command. Exit 2: invalid token; 126: socket or token unavailable; 127: target command not found. Linux and macOS. |
 
 ## `serve` flags
 
@@ -353,7 +354,7 @@ In terminals ([26](features/26-web-terminals.md)):
 
 - Keys are encoded for the program's mode (legacy, application cursor and keypad, kitty keyboard protocol); the bytes are in [`vt-keys.json`](../web/src/__tests__/testdata/vt-keys.json). Shift+Enter is `CSI 13;2u` under the kitty protocol; Alt+Enter is `ESC CR`.
 - Drag selects (double click a word, triple click a line; Shift-drag where the program takes the mouse); `terminal.copyOnSelect` copies on release. The wheel scrolls the scrollback (arrow keys on the alternate screen).
-- ⌘/Ctrl-click opens paths (media in a preview pane, code in VS Code) and URLs.
+- ⌘/Ctrl-click opens paths (by default in the File Explorer's preview editor, `files.openLinks = "editor"`; media in a preview pane, or code in VS Code when `files.openLinks = "vscode"`) and URLs.
 - `find.open` searches the terminal and its scrollback (ASCII case-insensitive): Enter older, Shift+Enter newer, Escape closes.
 - Pasting or dropping files uploads them to the terminal's machine and pastes their paths (dropped files go to the terminal's directory); the right-click menu downloads paths and chosen files (folders as zips). The downloads panel is in the status bar.
 
@@ -445,7 +446,7 @@ Plugin routes answer `404 plugin_disabled` while their plugin is off; changes ar
 | `GET /api/p/usage/cost` | – | Log cost at API prices by day, provider, model, project and machine (`?days=` 1–90, `&tz=`), and each machine's quarters of an hour with spend since `recentSince` (8 days back) by provider; `ETag`. |
 | `POST /api/p/usage/refresh` | writes | Polls every machine now, at most every 30 s (`202 {queued, at}`). |
 | `PUT /api/m/{id}/p/usage/deepseek-key` | writes | Writes the machine's DeepSeek key (`{"key"}`, `""` removes); never read back. |
-| `GET /api/m/{id}/p/usage/session` | – | One agent session's use at API prices (`?kind=claude\|codex&session=`). |
+| `GET /api/m/{id}/p/usage/session` | – | One agent session's use at API prices (`?kind=claude\|codex\|grok\|kimi\|agy\|opencode`, `&session=` UUID or OpenCode `ses_*`, or unambiguous `&cwd=` and optional `&pid=`). |
 | `GET /api/m/{id}/p/agents/resolve` | – | Whether a session's transcript exists and ran in a directory (`?kind=&session=&cwd=`): `{ok}` or `{ok: false, code}` ([33](features/33-workspace-restore.md)). |
 | `GET /api/m/{id}/p/history` | – | The machine's terminal output snapshots and whether herdr-core restores screens itself ([36](features/36-terminal-history.md)). |
 | `GET /api/m/{id}/p/history/read` | – | One generation's bytes (`?terminal=&generation=current\|previous`), ≤ 2 MiB, as a sandboxed attachment. |
@@ -538,6 +539,7 @@ Semantics (sessions, proofs, unlock entries, approvals, exemptions) are in [30](
 | `DEEPSEEK_API_KEY` | agent (AI usage) | DeepSeek key for the balance: after the key file the panel writes, before Claude Code's settings. |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | agent (AI usage), hub (status pages) | Proxy for the AI providers' hosts (the language server on loopback goes through none). |
 | `SHELL` | chat host | Login shell run as `$SHELL -l -i -c env` for the chats' agents' environment; `/bin/sh -l` if not absolute ([37](features/37-agent-chats.md)). |
+| `VELDR_VERSION`, `VELDR_INSTALL_DIR`, `VELDR_GITHUB_REPO`, `VELDR_GITHUB_URL`, `VELDR_RELEASE_URL` | `scripts/install.sh` | CLI installer overrides: release tag (default latest), target bin directory (default `~/.local/bin`), GitHub repo, GitHub base URL, and direct release asset base URL (mirrors/tests). |
 
 Build scripts and tests:
 
@@ -586,7 +588,7 @@ On every machine (the agent's `$HOME`); `<data>` is `~/.veldr[-<instance>]`, `<h
 | `<data>/hosts/<host>/` (0700) | This host's own files of the namespace (below) | Touched at each agent start and every 24 h; another host's unused 30 days loses all but `hc/`, and goes whole after 180 days. |
 | `<data>/hosts/<host>/hc/herdr-core` (0700 directory) | Terminal core executable, accepted only with its SHA-256 | Replaced by the next build. |
 | `~/.local/state/herdr-core/veldr[-<instance>]-<host id>/` (`$XDG_STATE_HOME`) | herdr-core's own state (records, saved screens, logs) | Until the user removes it. |
-| `<run>/` (0700, the user's, never a link) | Sockets (0600): `node.sock` (with its lock `node.lock`), `hc.sock` and its holders', `cs.sock`, `bridge.sock`, `vault.sock`, `chat.sock`; `cs.pid`; display files `gui.json`, `xauth`, `xauth.server` (0600), `gui.lock`, `gui-keep.lock` | Sockets while their owner runs; display files kept so terminals keep a valid environment; in `/run/user/<uid>` until the user's last session ends (kept while lingering). |
+| `<run>/` (0700, the user's, never a link) | Sockets (0600): `node.sock` (with its lock `node.lock`), `hc.sock` and its holders', `cs.sock`, `bridge.sock`, `vault.sock`, `env.sock`, `chat.sock`; `cs.pid`; display files `gui.json`, `xauth`, `xauth.server` (0600), `gui.lock`, `gui-keep.lock` | Sockets while their owner runs; display files kept so terminals keep a valid environment; in `/run/user/<uid>` until the user's last session ends (kept while lingering). |
 | `<data>/hosts/<host>/xvfb.log`, `xwayland.log`, `gui-keep.log` | Output of the last display, compositor and keeper | Replaced at each start. |
 | `<data>/hosts/<host>/node.log`, `node.old.log` (0600) | The nodes' log | Moved to `node.old.log` past 1 MiB when a node starts. |
 | `<data>/hosts/<host>/code-server.log` | Output of the last code-server | Replaced at each start. |
@@ -613,7 +615,7 @@ Also on the hub host: ssh control sockets in `/tmp/veldr-<uid>/s` (`s-<instance>
 
 A release directory holds the hub, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `licenses.md` and `licenses/` (`herdr-core/`, `herdr-detect/`, `encoder/`). These are not copied to SSH machines.
 
-In the browser, `localStorage` under `veldr.*` holds only that browser's state: the sidebar's state and width (`sidebarOpen`, `sidebarWidth`), the selected machine (`machine`), and the last 50 uploads and downloads (`uploads`, `downloads`; names and paths, no contents). Settings and layouts are the hub's.
+In the browser, `localStorage` under `veldr.*` holds only that browser's state: the sidebar's state and width (`sidebarOpen`, `sidebarWidth`), right-rail panel order and hidden icons (`railOrder`, `hiddenRailPanels`), the selected machine (`machine`), collapsed AI usage account cards (`usage.collapsedAccounts`), per-browser editor word-wrap override (`files.wordWrap`), and the last 50 uploads and downloads (`uploads`, `downloads`; names and paths, no contents). Settings and layouts are the hub's.
 
 Desktop artifacts in `dist/desktop/` (`make desktop-app` unpacked, `make desktop-dist` installers):
 

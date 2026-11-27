@@ -2,7 +2,7 @@
 
 ## Context
 
-A machine's terminals live in its terminal core ([21](21-terminal-core.md)), which outlives the browser, the app and the agent, but not a reboot, a logout that ends the user's processes, or **Stop terminal core…**. The layout document ([22](22-terminal-protocol.md)) survives on disk, but it names terminals by address, and a page drops terminals that no longer run ([04](04-layout-and-keyboard.md)). Without restore, the workspaces came back empty and the coding agents' conversations out of view, although Claude Code and Codex keep them on disk and can continue them.
+A machine's terminals live in its terminal core ([21](21-terminal-core.md)), which outlives the browser, the app and the agent, but not a reboot, a logout that ends the user's processes, or **Stop terminal core…**. The layout document ([22](22-terminal-protocol.md)) survives on disk, but it names terminals by address, and a page drops terminals that no longer run ([04](04-layout-and-keyboard.md)). Without restore, the workspaces came back empty and the coding agents' conversations out of view, although Claude Code, Codex and Antigravity (`agy`) keep them on disk and can continue them.
 
 herdr-core gives the building blocks:
 
@@ -39,6 +39,7 @@ A page whose layout no longer names the old terminal by then (another page won) 
 | -------- | ---------------------- | --------------------- |
 | `claude` | `claude --resume <id>` | `claude --continue`   |
 | `codex`  | `codex resume <id>`    | `codex resume --last` |
+| `agy`    | `agy --resume <id>`    | `agy --continue`      |
 
 - While a terminal runs one of these agents ([25](25-agent-detection.md)), its leaf remembers `agent`, `pid` and, when the machine found the agent's session from its own process (never a guess from the directory's newest transcript), `session` (`rememberAgents`, `rememberedSession`).
 - An agent no longer seen is forgotten after 30 s (`AGENT_FORGET_MS`): a quit agent is not resumed, while a machine going down, whose programs end before its connection does, keeps the memory.

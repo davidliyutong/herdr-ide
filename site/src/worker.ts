@@ -6,6 +6,8 @@ export interface SiteEnv {
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
+  'Content-Security-Policy':
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'X-Frame-Options': 'DENY',
@@ -38,7 +40,7 @@ export async function handleSiteRequest(request: Request, env: SiteEnv, installS
 
   if (url.hostname === `www.${DOMAIN}`) {
     url.hostname = DOMAIN;
-    return Response.redirect(url.toString(), 308);
+    return withSecurityHeaders(Response.redirect(url.toString(), 308));
   }
 
   if (url.pathname === INSTALL_ROUTE) {

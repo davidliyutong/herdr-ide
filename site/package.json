@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Cloudflare Workers + Static Assets project for veldr.app (/cli/install.sh and landing page)",
   "license": "MIT",
+  "packageManager": "pnpm@12.8.1",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",

@@ -171,6 +171,86 @@ sha256_file() {
   fi
 }
 
+check_wget_redirects() {
+  hdr="$1"
+  want_scheme="$2"
+  src_url="$3"
+  [ "$want_scheme" = "https" ] || return 0
+  awk '
+    {
+      sub(/\r$/, "")
+      if (match($0, /^[[:space:]]*[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]:[[:space:]]*/)) {
+        val = substr($0, RLENGTH + 1)
+        sub(/[[:space:]].*$/, "", val)
+        if (match(val, /^[A-Za-z][A-Za-z0-9+.-]*:/)) {
+          s = tolower(substr(val, 1, RLENGTH - 1))
+          if (s != "https") exit 1
+        }
+      }
+    }
+  ' "$hdr" || err "refused non-HTTPS redirect while downloading $src_url"
+}
+
+wget_last_location() {
+  awk '
+    {
+      sub(/\r$/, "")
+      if (match($0, /^[[:space:]]*[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]:[[:space:]]*/)) {
+        val = substr($0, RLENGTH + 1)
+        sub(/[[:space:]].*$/, "", val)
+        loc = val
+      }
+    }
+    END { if (loc != "") print loc }
+  ' "$1"
+}
+
+resolve_redirect_url() {
+  base="$1"
+  loc="$2"
+  want_scheme="$3"
+  case "$loc" in
+    https://*)
+      [ "$want_scheme" = "https" ] || [ "$want_scheme" = "http" ] || err "refused redirect to unsupported scheme: $loc"
+      printf '%s\n' "$loc"
+      ;;
+    http://*)
+      [ "$want_scheme" = "http" ] || err "refused non-HTTPS redirect to $loc"
+      printf '%s\n' "$loc"
+      ;;
+    //*)
+      printf '%s:%s\n' "$want_scheme" "$loc"
+      ;;
+    /*)
+      origin=$(printf '%s\n' "$base" | sed -n 's#^\([A-Za-z][A-Za-z0-9+.-]*://[^/]*\).*#\1#p')
+      [ -n "$origin" ] || err "cannot resolve relative redirect: $loc"
+      printf '%s%s\n' "$origin" "$loc"
+      ;;
+    *:*)
+      err "refused redirect to unsupported scheme: $loc"
+      ;;
+    *)
+      base_no_q="${base%%\?*}"
+      printf '%s/%s\n' "${base_no_q%/*}" "$loc"
+      ;;
+  esac
+}
+
+run_wget_capped() {
+  out_file="$1"
+  cap_bytes="$2"
+  rc_out="$3"
+  hdr_out="$4"
+  rc_empty="$5"
+  shift 5
+  rm -f "$rc_out" "$hdr_out"
+  (
+    set +e
+    WGETRC="$rc_empty" "$@" 2>"$hdr_out"
+    printf '%s\n' "$?" > "$rc_out"
+  ) | head -c "$((cap_bytes + 1))" > "$out_file"
+}
+
 fetch_file() {
   url="$1"
   out="$2"
@@ -187,16 +267,55 @@ fetch_file() {
       -o "$out" "$url" || err "failed to download $url"
   elif command -v wget >/dev/null 2>&1; then
     rc_empty="$TMP_DIR/.wgetrc"
+    rc_file="$TMP_DIR/.wget.rc"
+    hdr_file="$TMP_DIR/.wget.hdr"
     : > "$rc_empty"
+    wget_help=$(LC_ALL=C wget --help 2>&1 || true)
     if wget --version 2>/dev/null | grep -q 'GNU Wget'; then
-      if LC_ALL=C wget --help 2>&1 | grep -q -- --no-config; then
-        WGETRC="$rc_empty" wget -q --no-config -t 1 --max-redirect=5 -T 15 -O - "$url" | head -c "$((cap + 1))" > "$out" || err "failed to download $url"
-      else
-        WGETRC="$rc_empty" wget -q -t 1 --max-redirect=5 -T 15 -O - "$url" | head -c "$((cap + 1))" > "$out" || err "failed to download $url"
-      fi
+      cur_url="$url"
+      hops=0
+      while :; do
+        case "$wget_help" in
+          *--no-config*)
+            run_wget_capped "$out" "$cap" "$rc_file" "$hdr_file" "$rc_empty" \
+              wget -q -S --no-config -t 1 --max-redirect=0 -T 15 -O - "$cur_url"
+            ;;
+          *)
+            run_wget_capped "$out" "$cap" "$rc_file" "$hdr_file" "$rc_empty" \
+              wget -q -S -t 1 --max-redirect=0 -T 15 -O - "$cur_url"
+            ;;
+        esac
+        wget_rc=$(cat "$rc_file" 2>/dev/null || echo 1)
+        loc=$(wget_last_location "$hdr_file")
+        if [ -n "$loc" ] && grep -qiE '^[[:space:]]*HTTP/[0-9.]+[[:space:]]+30[12378]\b' "$hdr_file"; then
+          hops=$((hops + 1))
+          [ "$hops" -le 5 ] || err "too many redirects while downloading $url"
+          cur_url=$(resolve_redirect_url "$cur_url" "$loc" "$scheme")
+          continue
+        fi
+        break
+      done
+      check_wget_redirects "$hdr_file" "$scheme" "$url"
     else
-      WGETRC="$rc_empty" wget -q -T 15 -O - "$url" | head -c "$((cap + 1))" > "$out" || err "failed to download $url"
+      case "$wget_help" in
+        *-S*)
+          run_wget_capped "$out" "$cap" "$rc_file" "$hdr_file" "$rc_empty" \
+            wget -q -S -T 15 -O - "$url"
+          ;;
+        *)
+          [ "$scheme" != "https" ] || err "wget lacks -S to verify HTTPS-only redirects; install curl"
+          run_wget_capped "$out" "$cap" "$rc_file" "$hdr_file" "$rc_empty" \
+            wget -q -T 15 -O - "$url"
+          ;;
+      esac
+      wget_rc=$(cat "$rc_file" 2>/dev/null || echo 1)
+      check_wget_redirects "$hdr_file" "$scheme" "$url"
     fi
+    size=$(wc -c < "$out" | tr -d ' ')
+    [ "$size" -le "$cap" ] || err "$url exceeds maximum size ($cap bytes)"
+    [ "$wget_rc" = "0" ] || err "failed to download $url"
+    [ "$size" -gt 0 ] || err "empty response from $url"
+    return 0
   else
     err "curl or wget is required to download ${SLUG}"
   fi
@@ -274,8 +393,8 @@ GOT_EXE=$(sha256_file "$EXTRACTED_BIN")
 [ "$GOT_EXE" = "$WANT_EXE" ] || err "extracted ${SLUG} SHA-256 mismatch: got ${GOT_EXE}, expected ${WANT_EXE}"
 
 mkdir -p "$INSTALL_DIR"
-STAGED_DEST="$INSTALL_DIR/.${SLUG}.tmp.$$"
-cp "$EXTRACTED_BIN" "$STAGED_DEST"
+STAGED_DEST=$(mktemp "$INSTALL_DIR/.${SLUG}.XXXXXX")
+cat "$EXTRACTED_BIN" > "$STAGED_DEST"
 chmod 755 "$STAGED_DEST"
 mv -f "$STAGED_DEST" "$INSTALL_DIR/$SLUG"
 STAGED_DEST=""

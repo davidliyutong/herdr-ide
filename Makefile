@@ -37,6 +37,7 @@ test-extended:
 	cd backend && EXTENDED_TESTS=1 bun test
 	EXTENDED_TESTS=1 pnpm -C web test
 	EXTENDED_TESTS=1 pnpm -C desktop test
+	pnpm -C site test
 
 check:
 	scripts/check.sh

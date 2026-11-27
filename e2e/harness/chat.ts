@@ -15,9 +15,9 @@ export async function newChat(page: Page): Promise<Locator> {
   return pane;
 }
 
-/** The chat pane shown in the focused pane. */
+/** The focused pane showing a chat (enclosing `.pane`, including `.pane-header` and `.chat-pane`). */
 export function chatPane(page: Page): Locator {
-  return page.locator('.pane:has(> .pane-header.focused) .chat-pane');
+  return page.locator('.pane:has(> .pane-header.focused):has(.chat-pane)');
 }
 
 /** Sends a message from the composer. */

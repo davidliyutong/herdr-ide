@@ -14,14 +14,14 @@
 - **浏览器里的终端**：编译成 WebAssembly 的 Ghostty 终端库模拟每个终端，并用 WebGL 绘制。
   按键按窗格里程序的模式编码（包括 kitty 键盘协议），支持鼠标、中文输入法、滚动回看和 OSC 52 复制。
 - **工作区、标签页和分屏**：保存在每台机器上的布局文档，所有浏览器和桌面应用看到的都一样。
-  用鼠标即可拖动、重命名、固定、分屏和排序；右键任何东西都能打开它的命令菜单。
+  用鼠标即可拖动、重命名、固定、分屏和排序，也可将标签页拖出或移至独立窗口并在不中断会话的情况下移回主窗口；右键任何东西都能打开它的命令菜单。
   固定的标签页排在最前，`cmd+w` 也不会关闭它。
 - **按键留给程序**：默认快捷键很少，几乎不占用终端里程序要用的按键；`ctrl+b` 把键盘焦点从编辑器移到窗格标题栏，再按一次移回；在终端里它仍归程序（如 tmux）。
   所有快捷键都可以重新绑定或取消，包括组合键。
 - **自带终端核心**：第一次显示某台机器的终端时自动把 herdr-core 装到那台机器上；机器上不需要预先安装任何东西，也不需要外网。
   关闭浏览器或停止 hub（控制端）后，程序继续运行。
 - **工作区自动恢复**：机器重启后，标签页恢复为各自文件夹里的 shell。
-  Claude Code 和 Codex 经机器确认后回到各自原来的会话（`claude --resume <id>`、`codex resume <id>`），否则接着该文件夹里最近的一次对话继续（[33](docs/features/33-workspace-restore.md)）。
+  Claude Code、Codex 和 Antigravity 经机器确认后回到各自原来的会话（`claude --resume <id>`、`codex resume <id>`、`agy --resume <id>`），否则接着该文件夹里最近的一次对话继续（[33](docs/features/33-workspace-restore.md)）。
 - **多机器**：可以添加 `~/.ssh/config` 里的任意主机或任意 ssh 目标。
   每台机器只开一条 ssh 连接，在上面运行一个静态 agent，所有通信都在这条连接里多路复用；机器上不监听任何端口。
   共用同一个主目录（NFS）的集群节点仍是各自独立的机器，各有自己的 socket、终端核心和文件（[40](docs/features/40-shared-homes.md)）。
@@ -35,7 +35,7 @@
   会话可以在终端和对话之间双向切换（[37](docs/features/37-agent-chats.md)）。
 - **终端历史**：为某台机器打开后（终端输出里可能有机密，默认关闭），机器会保存有上限的终端输出快照。
   终端核心重启后，每个终端会在新 shell 上方显示原来的输出（[36](docs/features/36-terminal-history.md)）。
-- **按需打开 VS Code**：每台机器一个 code-server，由 hub 所在主机安装、机器无需外网，作为窗格显示在终端旁边；终端里的 `path:line` 会在其中打开。
+- **按需打开 VS Code**：每台机器一个 code-server，由 hub 所在主机安装、机器无需外网，作为窗格显示在终端旁边；终端里的 `path:line` 链接默认在文件资源管理器的预览编辑器中打开，将 `files.openLinks` 设为 `vscode` 时在 VS Code 中打开。
   默认关闭，因为它的扩展与界面使用同一个源。
 - **程序窗口**：远端 Linux 机器上程序打开的窗口（matplotlib、MuJoCo、Isaac Sim）会在浏览器窗口里显示；有 GPU 时用 GPU 绘制，画面变化时以视频传输。
 - **快速查看**：在终端里 ⌘/Ctrl+点击或右键路径，即可预览图片、视频、音频、PDF、代码（约 125 种语言）、Markdown 或目录。
@@ -44,20 +44,20 @@
 - **与机器互传文件**：把文件粘贴或拖到窗格里即可上传并粘贴路径；任何路径都可以下载，文件夹打包成 zip。
   状态栏显示传输进度。
 - **多浏览器同时使用**：所有浏览器和桌面应用看到同样的终端，都可以输入。
-- **插件与右侧栏**：以插件形式提供的功能会添加面板、窗格、命令和状态栏项目；每个插件都可以在“设置 › 插件”中关闭。
-- **文件资源管理器**：机器上文件的树，跟随当前终端，用法与 VS Code 的资源管理器一样；编辑器保存时绝不会覆盖在机器上发生的修改（[28](docs/features/28-file-explorer.md)）。
+- **插件与右侧栏**：以插件形式提供的功能会添加面板、窗格、命令和状态栏项目；每个插件都可以在“设置 › 插件”中关闭，右侧栏图标也支持按浏览器拖拽排序或隐藏。
+- **文件资源管理器**：机器上文件的树，跟随当前终端，支持全项目文件名筛选（含正则表达式）；编辑器内置 Markdown 预览/分栏/源码模式，保存时绝不会覆盖在机器上发生的修改（[28](docs/features/28-file-explorer.md)）。
 - **浏览器**：标签页可以通过端口转发显示机器 `localhost` 上的服务，效果与 `ssh -L` 相同；转发只在你自己打开时建立（[32](docs/features/32-browser-and-ports.md)）。
 - **Git**：不用 VS Code 也有 VS Code 的源代码管理和 Git Graph，作用于当前窗格所在的仓库，任何机器都可以：暂存所选范围、提交、分支、拉取和推送（[31](docs/features/31-git.md)）。
 - **系统监控与任务管理器**：每台机器的 CPU、内存、GPU、网络和磁盘，硬件温度与风扇转速，以及带确认的进程树（[34](docs/features/34-system-monitor.md)）。
 - **项目搜索**：搜索面板像 VS Code 的搜索视图一样，在任一机器上某个文件夹的文件中查找文本，支持区分大小写、全字匹配、正则表达式以及包含和排除的文件，点击即在匹配处打开；机器上有 ripgrep 时使用 ripgrep，否则使用自带的有限搜索（[41](docs/features/41-project-search.md)）。
-- **变量库**：API 密钥用你的主口令加密，保存在 hub 所在电脑上，各机器上的编程 agent 通过 MCP 服务器读取；每次读取都按机器预先允许或由你用主口令、触控 ID、Windows Hello 或 WebAuthn 凭据批准（[30](docs/features/30-variable-vault.md)）。
-- **AI 用量**：显示各机器上已登录的 AI 订阅还剩多少（Claude、Codex、Grok、Antigravity、Kimi Code、DeepSeek）并发出提醒，按 API 价格折算本地日志的费用，并显示当前窗格里 Claude Code 或 Codex 会话到目前为止的费用（[29](docs/features/29-ai-usage.md)）。
+- **变量库**：API 密钥用你的主口令加密，保存在 hub 所在电脑上，可按分组和可复用预设管理；各机器上的编程 agent 可通过 MCP 服务器按机器授权或经你用主口令、触控 ID、Windows Hello 或 WebAuthn 凭据批准后读取，也可在解锁时按需注入已关联工作区的新建终端与对话（[30](docs/features/30-variable-vault.md)）。
+- **AI 用量**：显示各机器上已登录的 AI 订阅还剩多少（Claude、Codex、Grok、Antigravity、Kimi Code、DeepSeek），支持按价值加权的多账号合并与提醒，按 API 价格折算本地日志的费用，并显示当前窗格里各编程智能体会话到目前为止的费用（[29](docs/features/29-ai-usage.md)）。
 - **设置**：界面语言（中文、英文）、主题、终端字体和配色、通知以及所有快捷键，集中在一个与 VS Code 布局相同、可搜索的对话框里。
   保存在 hub 所在主机上的两个 JSON 文件里，也可以直接手改（[13](docs/features/13-settings-and-appearance.md)）。
 
 ## 截图
 
-**VS Code 就在终端旁边**：agent 输出里的 `路径:行号` 会在窗格所在机器的 VS Code 里打开；
+**VS Code 就在终端旁边**：将 `files.openLinks` 设为 `vscode` 时，agent 输出里的 `路径:行号` 会在窗格所在机器的 VS Code 里打开；
 窗格标题栏上的按钮可以打开它的文件夹、diff 或 Git Graph。
 
 ![固定的 nanoGPT 项目，VS Code 窗格中打开了 train.py](docs/images/vscode.zh-CN.png)

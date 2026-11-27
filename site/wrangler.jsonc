@@ -4,7 +4,7 @@
   "account_id": "6dcf4c92a4c4d0252663ce501ad5dcf3",
   "main": "src/index.ts",
   "compatibility_date": "2025-09-01",
-  "workers_dev": true,
+  "workers_dev": false,
   "routes": [
     { "pattern": "veldr.app", "custom_domain": true },
     { "pattern": "www.veldr.app", "custom_domain": true },
@@ -12,7 +12,7 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/cli/*"],
+    "run_worker_first": true,
   },
   "rules": [
     {
