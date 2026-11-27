@@ -150,4 +150,39 @@ describe('findFiles', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test('exclude globs and .gitignore patterns match in linear time without ReDoS and handle bracket escapes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'find-glob-redos-'));
+    dirs.push(root);
+    const evilFile = `${'a'.repeat(48)}c`;
+    const evilGlob = `${'*a'.repeat(20)}*b`;
+    const evilDoubleStar = `${'**a'.repeat(20)}**b`;
+    writeFileSync(join(root, evilFile), '');
+    writeFileSync(join(root, '.gitignore'), `${evilGlob}\n${evilDoubleStar}\n`);
+
+    // Linear-time matching for both malicious .gitignore (fuzzy mode) and ?exclude= (name mode).
+    const t0 = performance.now();
+    const fuzzy = await findFiles({ dir: root, query: 'aaa' });
+    expect(performance.now() - t0).toBeLessThan(1000);
+    expect(fuzzy.matches.map((m) => m.name)).toContain(evilFile);
+
+    const t1 = performance.now();
+    const named = await findFiles({ dir: root, query: 'aaa', match: 'name', exclude: [evilGlob] });
+    expect(performance.now() - t1).toBeLessThan(1000);
+    expect(named.matches.map((m) => m.name)).toContain(evilFile);
+
+    // Bracket escapes inside files.exclude: [\]] matches literal ], [a\-z] matches a, -, z (not b), [\\] matches \.
+    writeFileSync(join(root, 'x]y'), '');
+    writeFileSync(join(root, 'x-y'), '');
+    writeFileSync(join(root, 'xby'), '');
+    writeFileSync(join(root, 'xay'), '');
+    writeFileSync(join(root, 'x\\y'), '');
+    const res = await findFiles({
+      dir: root,
+      query: 'x',
+      match: 'name',
+      exclude: ['x[\\]]y', 'x[a\\-z]y', 'x[\\\\]y'],
+    });
+    expect(res.matches.map((m) => m.name)).toEqual(['xby']);
+  });
 });

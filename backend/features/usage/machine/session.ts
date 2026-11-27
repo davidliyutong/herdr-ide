@@ -39,6 +39,7 @@ import {
   readAntigravitySummaries,
   readAntigravityTrajectory,
   readOpenCodeSession,
+  type AntigravitySummary,
   type DBLimits,
   type DBRead,
 } from './databases.ts';
@@ -195,10 +196,36 @@ export function cutModel(m: string): string {
   return b.subarray(0, i).toString('utf8');
 }
 
+/** Idle lifetime for pooled SQLite workers kept between session polls. */
+const IDLE_WORKER_MS = 30_000;
+const MAX_AG_SUM_MEMO = 16;
+const MAX_AG_TRAJ_MEMO = 64;
+
+type AgSessionResult = Awaited<ReturnType<typeof readAntigravitySession>>;
+type OcSessionResult = Awaited<ReturnType<typeof readOpenCodeSession>>;
+
+interface DBMemoEntry {
+  stamp: string;
+  cutoff: number;
+  bytes: number;
+  use: number;
+  value: AgSessionResult | OcSessionResult;
+}
+
 /** The sessions' reads of an agent and what they keep. */
 export class SessionReader {
   private readonly memo = new Map<string, Read>();
   private memoBytes = 0;
+  private readonly dbMemo = new Map<string, DBMemoEntry>();
+  private dbMemoBytes = 0;
+  private readonly agSumMemo = new Map<string, { stamp: string; summaries: AntigravitySummary[]; use: number }>();
+  private readonly agTrajMemo = new Map<
+    string,
+    { stamp: string; traj: { workspace: string; project: string; ts: number } | null; use: number }
+  >();
+  private readonly idleWorkers: Array<{ w: SQLiteWorker; ms: number; timer: ReturnType<typeof setTimeout> }> = [];
+  private closed = false;
+  private dbReadCount = 0;
   private use = 0;
   private running = 0;
   private readonly waiting: (() => void)[] = [];
@@ -208,6 +235,119 @@ export class SessionReader {
   constructor(scanner: CostScanner, l: SessionLimits = SESSION_LIMITS) {
     this.scanner = scanner;
     this.l = l;
+  }
+
+  /** Borrows an idle SQLiteWorker for ms or creates a fresh one. */
+  borrowWorker(ms: number): SQLiteWorker {
+    const idx = this.idleWorkers.findIndex((e) => e.ms === ms && e.w.running);
+    if (idx >= 0) {
+      const [entry] = this.idleWorkers.splice(idx, 1);
+      clearTimeout(entry!.timer);
+      return entry!.w;
+    }
+    return new SQLiteWorker(ms);
+  }
+
+  /** Returns a healthy worker to the bounded idle pool, or terminates it. */
+  returnWorker(w: SQLiteWorker, ms: number): void {
+    if (this.closed || !w.running || this.idleWorkers.length >= this.l.parallel) {
+      w.close();
+      return;
+    }
+    const entry = {
+      w,
+      ms,
+      timer: setTimeout(() => {
+        const i = this.idleWorkers.indexOf(entry);
+        if (i >= 0) this.idleWorkers.splice(i, 1);
+        w.close();
+      }, IDLE_WORKER_MS),
+    };
+    entry.timer.unref?.();
+    this.idleWorkers.push(entry);
+  }
+
+  /** Terminates any pooled idle SQLite workers (called on agent shutdown). */
+  close(): void {
+    this.closed = true;
+    for (const e of this.idleWorkers.splice(0)) {
+      clearTimeout(e.timer);
+      e.w.close();
+    }
+  }
+
+  /** Number of uncached SQLite session reads performed (tests). */
+  get dbReads(): number {
+    return this.dbReadCount;
+  }
+
+  noteDbRead(): void {
+    this.dbReadCount++;
+  }
+
+  getAgSummaries(path: string, stamp: string): AntigravitySummary[] | undefined {
+    const hit = this.agSumMemo.get(path);
+    if (!hit || hit.stamp !== stamp) return undefined;
+    hit.use = ++this.use;
+    return hit.summaries;
+  }
+
+  putAgSummaries(path: string, stamp: string, summaries: AntigravitySummary[]): void {
+    this.agSumMemo.set(path, { stamp, summaries, use: ++this.use });
+    while (this.agSumMemo.size > MAX_AG_SUM_MEMO) {
+      let oldest: string | undefined;
+      for (const [k, v] of this.agSumMemo) if (oldest === undefined || v.use < this.agSumMemo.get(oldest)!.use) oldest = k;
+      this.agSumMemo.delete(oldest!);
+    }
+  }
+
+  getAgTrajectory(
+    path: string,
+    stamp: string,
+  ): { hit: true; traj: { workspace: string; project: string; ts: number } | null } | { hit: false } {
+    const hit = this.agTrajMemo.get(path);
+    if (!hit || hit.stamp !== stamp) return { hit: false };
+    hit.use = ++this.use;
+    return { hit: true, traj: hit.traj };
+  }
+
+  putAgTrajectory(path: string, stamp: string, traj: { workspace: string; project: string; ts: number } | null): void {
+    this.agTrajMemo.set(path, { stamp, traj, use: ++this.use });
+    while (this.agTrajMemo.size > MAX_AG_TRAJ_MEMO) {
+      let oldest: string | undefined;
+      for (const [k, v] of this.agTrajMemo) if (oldest === undefined || v.use < this.agTrajMemo.get(oldest)!.use) oldest = k;
+      this.agTrajMemo.delete(oldest!);
+    }
+  }
+
+  getDbSession<T extends AgSessionResult | OcSessionResult>(
+    key: string,
+    stamp: string,
+    cutoff: number,
+  ): { hit: true; value: T } | { hit: false } {
+    const e = this.dbMemo.get(key);
+    if (!e || e.stamp !== stamp || cutoff < e.cutoff) return { hit: false };
+    e.use = ++this.use;
+    return { hit: true, value: e.value as T };
+  }
+
+  putDbSession(key: string, stamp: string, cutoff: number, value: AgSessionResult | OcSessionResult): void {
+    const old = this.dbMemo.get(key);
+    if (old) {
+      this.dbMemoBytes -= old.bytes;
+      this.dbMemo.delete(key);
+    }
+    const recs = value ? value.records : [];
+    const bytes = recs.reduce((n, x) => n + recordBytes(x), 64);
+    if (bytes > this.l.memoBytes) return;
+    this.dbMemo.set(key, { stamp, cutoff, bytes, use: ++this.use, value });
+    this.dbMemoBytes += bytes;
+    while (this.dbMemo.size > this.l.memoFiles || this.dbMemoBytes > this.l.memoBytes) {
+      let oldest: string | undefined;
+      for (const [k, v] of this.dbMemo) if (oldest === undefined || v.use < this.dbMemo.get(oldest)!.use) oldest = k;
+      this.dbMemoBytes -= this.dbMemo.get(oldest!)!.bytes;
+      this.dbMemo.delete(oldest!);
+    }
   }
 
   /** What a session of provider used: files are its transcripts, its own
@@ -604,6 +744,9 @@ function parse(line: string): Record<string, unknown> | undefined {
 
 const MAX_SCAN_DIRS = 256;
 const MAX_SCAN_SESSIONS = 1024;
+/** Global ceiling on Kimi session directories inspected across all workspaces
+ * in one cwd lookup so many workspaces cannot fan out to 256×1024 scans. */
+export const MAX_KIMI_TOTAL_SESSIONS = 2048;
 const MAX_AG_CANDIDATES = 16;
 
 /** Cleaned cwd plus its realpath (when resolvable and distinct) so symlinked
@@ -617,6 +760,34 @@ async function cwdVariants(cwd: string): Promise<string[]> {
   } catch {
     return [c];
   }
+}
+
+/** Memoized matcher against a set of cleaned cwd variants: checks exact
+ * cleaned string equality first before calling realpath(2) at most once per
+ * distinct directory path. */
+function makeCwdMatcher(wants: ReadonlySet<string>): {
+  matches: (dir: string) => Promise<boolean>;
+  variants: (dir: string) => Promise<string[]>;
+} {
+  const cache = new Map<string, string[]>();
+  const variants = async (dir: string): Promise<string[]> => {
+    const c = clean(dir);
+    if (!c) return [];
+    let vs = cache.get(c);
+    if (!vs) {
+      vs = await cwdVariants(c);
+      cache.set(c, vs);
+    }
+    return vs;
+  };
+  const matches = async (dir: string): Promise<boolean> => {
+    const c = clean(dir);
+    if (!c) return false;
+    if (wants.has(c)) return true;
+    const vs = await variants(c);
+    return vs.some((v) => wants.has(v));
+  };
+  return { matches, variants };
 }
 
 async function resolvedDir(p: string): Promise<string | null> {
@@ -750,7 +921,13 @@ async function kimiSessionCwd(root: string, sessionDir: string, uid: number): Pr
 
 /** Locates a Kimi Code session's wire logs by UUID or cwd (preferring
  * sessions modified since sinceMs, falling back to newest matching cwd). */
-export async function locateKimiSession(e: UsageEnv, session: string, cwd: string, sinceMs?: number): Promise<Transcript[]> {
+export async function locateKimiSession(
+  e: UsageEnv,
+  session: string,
+  cwd: string,
+  sinceMs?: number,
+  maxTotalSessions = MAX_KIMI_TOTAL_SESSIONS,
+): Promise<Transcript[]> {
   const root = await resolvedDir(posix.join(kimiHome(e), 'sessions'));
   if (!root) throw notFound();
   let workspaces;
@@ -760,9 +937,11 @@ export async function locateKimiSession(e: UsageEnv, session: string, cwd: strin
     throw notFound();
   }
   const wants = new Set(await cwdVariants(cwd));
+  const matcher = makeCwdMatcher(wants);
   let bestFresh: { paths: string[]; mtimeMs: number } | null = null;
   let bestAny: { paths: string[]; mtimeMs: number } | null = null;
   let nWs = 0;
+  let totalSessions = 0;
   for (const ws of workspaces) {
     e.signal.throwIfAborted();
     if (!ws.isDirectory()) continue;
@@ -775,6 +954,7 @@ export async function locateKimiSession(e: UsageEnv, session: string, cwd: strin
       }
       continue;
     }
+    if (totalSessions >= maxTotalSessions) break;
     let subs;
     try {
       subs = await readdir(wsDir, { withFileTypes: true });
@@ -785,7 +965,7 @@ export async function locateKimiSession(e: UsageEnv, session: string, cwd: strin
     for (const s of subs) {
       e.signal.throwIfAborted();
       if (!s.isDirectory()) continue;
-      if (++nSess > MAX_SCAN_SESSIONS) break;
+      if (++nSess > MAX_SCAN_SESSIONS || ++totalSessions > maxTotalSessions) break;
       const sDir = posix.join(wsDir, s.name);
       const found = await kimiWireLogs(root, sDir, e.uid);
       if (!found) continue;
@@ -793,9 +973,7 @@ export async function locateKimiSession(e: UsageEnv, session: string, cwd: strin
       if (isFresh && bestFresh && found.mtimeMs <= bestFresh.mtimeMs) continue;
       if (!isFresh && (bestFresh || (bestAny && found.mtimeMs <= bestAny.mtimeMs))) continue;
       const dir = await kimiSessionCwd(root, sDir, e.uid);
-      if (!dir) continue;
-      const dirVariants = await cwdVariants(dir);
-      if (!dirVariants.some((v) => wants.has(v))) continue;
+      if (!dir || !(await matcher.matches(dir))) continue;
       if (isFresh) bestFresh = found;
       if (!bestAny || found.mtimeMs > bestAny.mtimeMs) bestAny = found;
     }
@@ -920,10 +1098,15 @@ export async function readAntigravitySessionUsage(
     const dbs = await antigravityDBs(e);
     if (!dbs.length) throw notFound();
     const limits = opts.dbLimits ?? DB_LIMITS;
-    const worker = new SQLiteWorker(limits.requestMs);
-    const db: DBRead = { signal: e.signal, limits, uid: e.uid, worker };
+    let worker: SQLiteWorker | null = null;
+    const dbRead = (): DBRead => ({
+      signal: e.signal,
+      limits,
+      uid: e.uid,
+      worker: (worker ??= reader.borrowWorker(limits.requestMs)),
+    });
     try {
-      let target: { path: string; mtimeSec: number } | null = null;
+      let target: { path: string; mtimeSec: number; stamp: string } | null = null;
       if (opts.session) {
         const want = `${opts.session}.db`;
         let bestMtime = -1;
@@ -933,7 +1116,7 @@ export async function readAntigravitySessionUsage(
             const st = await dbFiles(p, e.uid);
             if (st.mtime > bestMtime) {
               bestMtime = st.mtime;
-              target = { path: p, mtimeSec: Math.floor(st.mtime / 1e9) };
+              target = { path: p, mtimeSec: Math.floor(st.mtime / 1e9), stamp: st.stamp };
             }
           } catch {
             // unreadable or link
@@ -941,6 +1124,7 @@ export async function readAntigravitySessionUsage(
         }
       } else if (opts.cwd) {
         const wants = new Set(await cwdVariants(opts.cwd));
+        const matcher = makeCwdMatcher(wants);
         const dbByPath = new Set(dbs);
         const dbsById = new Map<string, string[]>();
         for (const p of dbs) {
@@ -953,15 +1137,22 @@ export async function readAntigravitySessionUsage(
         }
         // Primary lookup: conversation_summaries.db (reliable for agy CLI
         // conversations whose trajectory_metadata_blob may be empty).
-        let bestSumFresh: { path: string; mtimeMs: number; mtimeSec: number; active: boolean } | null = null;
-        let bestSumAny: { path: string; mtimeMs: number; mtimeSec: number; active: boolean } | null = null;
+        let bestSumFresh: { path: string; mtimeMs: number; mtimeSec: number; stamp: string; active: boolean } | null = null;
+        let bestSumAny: { path: string; mtimeMs: number; mtimeSec: number; stamp: string; active: boolean } | null = null;
         for (const sub of ANTIGRAVITY_DIRS) {
           e.signal.throwIfAborted();
           const dir = posix.join(e.home, sub);
           const sumPath = posix.join(dir, 'conversation_summaries.db');
-          let summaries;
+          let summaries: AntigravitySummary[];
           try {
-            summaries = await readAntigravitySummaries(sumPath, db);
+            const sumInfo = await dbFiles(sumPath, e.uid);
+            const cached = reader.getAgSummaries(sumPath, sumInfo.stamp);
+            if (cached) {
+              summaries = cached;
+            } else {
+              summaries = await readAntigravitySummaries(sumPath, dbRead());
+              reader.putAgSummaries(sumPath, sumInfo.stamp, summaries);
+            }
           } catch {
             continue;
           }
@@ -969,8 +1160,7 @@ export async function readAntigravitySessionUsage(
             e.signal.throwIfAborted();
             let matched = false;
             for (const ws of s.workspaces) {
-              const wsVariants = await cwdVariants(ws);
-              if (wsVariants.some((v) => wants.has(v))) {
+              if (await matcher.matches(ws)) {
                 matched = true;
                 break;
               }
@@ -983,7 +1173,7 @@ export async function readAntigravitySessionUsage(
                 const st = await dbFiles(p, e.uid);
                 const fileMs = st.mtime / 1e6;
                 const mtimeMs = Math.max(fileMs, s.modifiedMs);
-                const cand = { path: p, mtimeMs, mtimeSec: Math.floor(st.mtime / 1e9), active: s.active };
+                const cand = { path: p, mtimeMs, mtimeSec: Math.floor(st.mtime / 1e9), stamp: st.stamp, active: s.active };
                 const better = (a: typeof cand, b: typeof cand | null) => !b || (a.active !== b.active ? a.active : a.mtimeMs > b.mtimeMs);
                 if (opts.sinceMs === undefined || mtimeMs >= opts.sinceMs || s.active) {
                   if (better(cand, bestSumFresh)) bestSumFresh = cand;
@@ -997,16 +1187,16 @@ export async function readAntigravitySessionUsage(
         }
         const sumChosen = bestSumFresh ?? bestSumAny;
         if (sumChosen) {
-          target = { path: sumChosen.path, mtimeSec: sumChosen.mtimeSec };
+          target = { path: sumChosen.path, mtimeSec: sumChosen.mtimeSec, stamp: sumChosen.stamp };
         } else {
           // Fallback: scan trajectory_metadata_blob (two-pass: prefer >= sinceMs,
           // then fall back to the newest matching cwd conversation).
-          const allCands: { path: string; mtimeMs: number; mtimeSec: number }[] = [];
+          const allCands: { path: string; mtimeMs: number; mtimeSec: number; stamp: string }[] = [];
           for (const p of dbs) {
             e.signal.throwIfAborted();
             try {
               const st = await dbFiles(p, e.uid);
-              allCands.push({ path: p, mtimeMs: st.mtime / 1e6, mtimeSec: Math.floor(st.mtime / 1e9) });
+              allCands.push({ path: p, mtimeMs: st.mtime / 1e6, mtimeSec: Math.floor(st.mtime / 1e9), stamp: st.stamp });
             } catch {
               // skip
             }
@@ -1016,11 +1206,12 @@ export async function readAntigravitySessionUsage(
             for (const c of list.slice(0, MAX_AG_CANDIDATES)) {
               e.signal.throwIfAborted();
               try {
-                const traj = await readAntigravityTrajectory(c.path, db);
+                const cached = reader.getAgTrajectory(c.path, c.stamp);
+                const traj = cached.hit ? cached.traj : await readAntigravityTrajectory(c.path, dbRead());
+                if (!cached.hit) reader.putAgTrajectory(c.path, c.stamp, traj);
                 if (!traj?.workspace) continue;
-                const wsVariants = await cwdVariants(traj.workspace);
-                if (wsVariants.some((v) => wants.has(v))) {
-                  return { path: c.path, mtimeSec: c.mtimeSec };
+                if (await matcher.matches(traj.workspace)) {
+                  return { path: c.path, mtimeSec: c.mtimeSec, stamp: c.stamp };
                 }
               } catch {
                 // skip damaged/busy candidate
@@ -1038,13 +1229,22 @@ export async function readAntigravitySessionUsage(
       }
       if (!target) throw notFound();
       const cutoff = Math.floor(e.now() / 1000) - RETENTION;
-      const res = await readAntigravitySession(target.path, cutoff, target.mtimeSec, db);
+      const memoKey = `ag\0${target.path}`;
+      const hit = reader.getDbSession<AgSessionResult>(memoKey, target.stamp, cutoff);
+      let res: AgSessionResult;
+      if (hit.hit) {
+        res = hit.value;
+      } else {
+        reader.noteDbRead();
+        res = await readAntigravitySession(target.path, cutoff, target.mtimeSec, dbRead());
+        reader.putDbSession(memoKey, target.stamp, cutoff, res);
+      }
       return reader.priceRecords(e, 'antigravity', res.records, { model: res.model, used: res.contextUsed }, opts.own);
     } catch (err) {
       if (err instanceof DBError && err.code === 'too_large') throw tooLarge();
       throw err;
     } finally {
-      worker.close();
+      if (worker) reader.returnWorker(worker, limits.requestMs);
     }
   });
 }
@@ -1060,25 +1260,53 @@ export async function readOpenCodeSessionUsage(
     const dbs = await openCodeDBs(e);
     if (!dbs.length) throw notFound();
     const limits = opts.dbLimits ?? DB_LIMITS;
-    const worker = new SQLiteWorker(limits.requestMs);
-    const db: DBRead = { signal: e.signal, limits, uid: e.uid, worker };
+    let worker: SQLiteWorker | null = null;
+    const dbRead = (): DBRead => ({
+      signal: e.signal,
+      limits,
+      uid: e.uid,
+      worker: (worker ??= reader.borrowWorker(limits.requestMs)),
+    });
     const cwds = opts.cwd ? await cwdVariants(opts.cwd) : [];
+    const matcher = makeCwdMatcher(new Set(cwds));
     const cutoff = Math.floor(e.now() / 1000) - RETENTION;
     try {
-      let best: Awaited<ReturnType<typeof readOpenCodeSession>> = null;
+      let best: OcSessionResult = null;
       for (const p of dbs) {
         e.signal.throwIfAborted();
+        let st;
         try {
-          const res = await readOpenCodeSession(
-            p,
-            { session: opts.session || undefined, cwds, sinceMs: opts.sinceMs, sinceSec: cutoff },
-            db,
-          );
-          if (res && (!best || res.updatedAt > best.updatedAt)) best = res;
-        } catch (err) {
-          if (err instanceof DBError && err.code === 'too_large') throw tooLarge();
-          // skip unreadable/busy channel db and try the rest
+          st = await dbFiles(p, e.uid);
+        } catch {
+          continue;
         }
+        const memoKey = `oc\0${JSON.stringify([p, opts.session, cwds, opts.sinceMs ?? null])}`;
+        const hit = reader.getDbSession<OcSessionResult>(memoKey, st.stamp, cutoff);
+        let res: OcSessionResult;
+        if (hit.hit) {
+          res = hit.value;
+        } else {
+          try {
+            reader.noteDbRead();
+            res = await readOpenCodeSession(
+              p,
+              {
+                session: opts.session || undefined,
+                cwds,
+                sinceMs: opts.sinceMs,
+                sinceSec: cutoff,
+                resolveDir: matcher.variants,
+              },
+              dbRead(),
+            );
+            reader.putDbSession(memoKey, st.stamp, cutoff, res);
+          } catch (err) {
+            if (err instanceof DBError && err.code === 'too_large') throw tooLarge();
+            // skip unreadable/busy channel db and try the rest
+            continue;
+          }
+        }
+        if (res && (!best || res.updatedAt > best.updatedAt)) best = res;
       }
       if (!best) throw notFound();
       return reader.priceRecords(
@@ -1089,7 +1317,7 @@ export async function readOpenCodeSessionUsage(
         opts.own,
       );
     } finally {
-      worker.close();
+      if (worker) reader.returnWorker(worker, limits.requestMs);
     }
   });
 }

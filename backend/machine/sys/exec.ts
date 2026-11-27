@@ -11,12 +11,18 @@ function ptrArray(bufs: readonly Buffer[]): BigUint64Array {
   return out;
 }
 
+/** Module-level root pinning backing Buffers across execve(2) FFI calls so GC
+ * cannot collect or move memory referenced by raw pointer arrays. */
+let pinnedExecBuffers: readonly unknown[] | null = null;
+
 /** Replaces the calling process with argv and env, searching PATH when
  * argv[0] contains no "/" and falling back to /bin/sh on ENOEXEC as POSIX
  * execvp(3) specifies. Always throws on failure; never returns on success. */
 export function execReplace(argv: readonly string[], env: Record<string, string>): never {
   if (argv.length === 0 || argv[0] === '') throw new SysError(E('ENOENT'), 'execve', argv[0] ?? '');
   for (const a of argv) if (a.includes('\0')) throw new SysError(E('EINVAL'), 'execve', argv[0]);
+  const argBufs = argv.map(cstr);
+  const argPtrs = ptrArray(argBufs);
   const envBufs: Buffer[] = [];
   for (const [k, v] of Object.entries(env)) {
     if (k === '' || k.includes('=') || k.includes('\0') || v.includes('\0')) throw new SysError(E('EINVAL'), 'execve', k);
@@ -25,16 +31,16 @@ export function execReplace(argv: readonly string[], env: Record<string, string>
   const envPtrs = ptrArray(envBufs);
   const l = libc();
 
-  const tryExec = (file: string, args: readonly string[]): number => {
+  const tryExec = (file: string): number => {
     const fileBuf = cstr(file);
-    const argBufs = args.map(cstr);
-    const argPtrs = ptrArray(argBufs);
+    pinnedExecBuffers = [fileBuf, argBufs, argPtrs, envBufs, envPtrs];
     l.execve(fileBuf, argPtrs, envPtrs);
     const err = errno();
     if (err === E('ENOEXEC')) {
       const shBuf = cstr('/bin/sh');
       const shArgBufs = [shBuf, fileBuf, ...argBufs.slice(1)];
       const shArgPtrs = ptrArray(shArgBufs);
+      pinnedExecBuffers = [shBuf, fileBuf, argBufs, shArgBufs, shArgPtrs, envBufs, envPtrs];
       l.execve(shBuf, shArgPtrs, envPtrs);
       const shErr = errno();
       return shErr === E('ENOENT') ? err : shErr;
@@ -42,20 +48,25 @@ export function execReplace(argv: readonly string[], env: Record<string, string>
     return err;
   };
 
-  const prog = argv[0];
-  if (prog.includes('/')) throw new SysError(tryExec(prog, argv), 'execve', prog);
+  try {
+    pinnedExecBuffers = [argBufs, argPtrs, envBufs, envPtrs];
+    const prog = argv[0];
+    if (prog.includes('/')) throw new SysError(tryExec(prog), 'execve', prog);
 
-  const pathVar = env.PATH ?? process.env.PATH ?? '/usr/bin:/bin';
-  let denied = false;
-  for (const rawDir of pathVar.split(':')) {
-    const cand = posix.join(rawDir || '.', prog);
-    const err = tryExec(cand, argv);
-    if (err === E('EACCES')) {
-      denied = true;
-      continue;
+    const pathVar = env.PATH ?? process.env.PATH ?? '/usr/bin:/bin';
+    let denied = false;
+    for (const rawDir of pathVar.split(':')) {
+      const cand = posix.join(rawDir || '.', prog);
+      const err = tryExec(cand);
+      if (err === E('EACCES')) {
+        denied = true;
+        continue;
+      }
+      if (err === E('ENOENT') || err === E('ENOTDIR') || err === E('ELOOP') || err === E('ENAMETOOLONG')) continue;
+      throw new SysError(err, 'execve', prog);
     }
-    if (err === E('ENOENT') || err === E('ENOTDIR') || err === E('ELOOP') || err === E('ENAMETOOLONG')) continue;
-    throw new SysError(err, 'execve', prog);
+    throw new SysError(denied ? E('EACCES') : E('ENOENT'), 'execve', prog);
+  } finally {
+    if (pinnedExecBuffers) pinnedExecBuffers = null;
   }
-  throw new SysError(denied ? E('EACCES') : E('ENOENT'), 'execve', prog);
 }

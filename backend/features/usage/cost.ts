@@ -129,6 +129,9 @@ export class Spend {
   private loaded = false;
   private loading?: Promise<void>;
   private readOnly = false;
+  /** Bumped on invalidate()/forget() so an in-flight report() cannot write
+   * stale pre-invalidation state back into this.cache after finishing. */
+  private epoch = 0;
   /** The scans under way, by machine. */
   readonly flights = new Map<string, { key: string; done: Promise<CostReport> }>();
 
@@ -141,6 +144,7 @@ export class Spend {
    * which is not served to others. */
   async report(days: number, tz: number, signal: AbortSignal): Promise<{ rep: Report; etag: string }> {
     await this.load();
+    const ep = this.epoch;
     const prices = this.d.prices();
     const o = this.d.options();
     const key = [days, tz, [...o.providers].sort().join(','), [...o.codexHomes].sort().join('\0'), prices.key].join('|');
@@ -216,7 +220,7 @@ export class Spend {
     );
     rep.recent.sort((a, b) => cmp(a.machine, b.machine) || a.at - b.at || cmp(a.provider, b.provider));
     const out = { rep, etag: jsonETag('c', { ...rep, generatedAt: 0 }) };
-    if (signal.aborted) return out;
+    if (signal.aborted || this.epoch !== ep) return out;
     // Fresh from when the scans ended, however long they took.
     this.cache.set(key, { at: this.d.now(), ...out });
     while (this.cache.size > COST_KEEP) {
@@ -342,12 +346,14 @@ export class Spend {
 
   /** Invalidates cached assembled reports (e.g. when a host is disabled). */
   invalidate(): void {
+    this.epoch++;
     this.cache.clear();
   }
 
   /** Drops what is kept of a removed machine. */
   forget(m: string): void {
     for (const [k, e] of this.entries) if (e.machine === m) this.entries.delete(k);
+    this.epoch++;
     this.cache.clear();
     if (!this.readOnly) void this.d.store.deleteMachineCosts(m);
   }

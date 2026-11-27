@@ -7,7 +7,7 @@
 // every agyEveryMs (the polls in between get its last answer), not again
 // for agyBackoffMs after it failed, in a process group of its own killed
 // after agyMs and once it exited (run.ts).
-import { open, readdir, readFile, readlink, stat } from 'node:fs/promises';
+import { readdir, readFile, readlink, stat } from 'node:fs/promises';
 import { posix } from 'node:path';
 import {
   MODEL,
@@ -32,10 +32,14 @@ import {
   type UsageEnv,
 } from './env.ts';
 import { HttpError, localPost } from './http.ts';
+import { openRegular } from './logs.ts';
 import { run } from './run.ts';
 
 /** How long the language server gets to answer. */
 const LOCAL_MS = 5000;
+/** How long discovered language server endpoints are reused before re-running
+ * ps/lsof so newly started Antigravity instances are picked up promptly. */
+export const LS_MEMO_MS = 60_000;
 
 const STATUS_PATH = '/exa.language_server_pb.LanguageServerService/GetUserStatus';
 
@@ -49,8 +53,11 @@ export interface LSProcess {
 const ANTIGRAVITY_STATE_FILES = [
   '.gemini/antigravity-cli/cli.log',
   '.gemini/antigravity/cli.log',
+  '.gemini/antigravity-ide/cli.log',
   '.gemini/antigravity/antigravity_state.pbtxt',
+  '.gemini/antigravity-ide/antigravity_state.pbtxt',
   '.gemini/antigravity-cli/jetski_state.pbtxt',
+  '.gemini/antigravity-ide/jetski_state.pbtxt',
 ];
 
 /** A cheap fingerprint of Antigravity's auth/state files so account
@@ -74,11 +81,10 @@ async function antigravityAuthStamp(e: UsageEnv): Promise<string> {
  * hash, known once the server answered) or skipLocal is answered skipped. */
 export async function antigravityAccounts(e: UsageEnv, o: LimitsOptions): Promise<Account[]> {
   e.signal.throwIfAborted();
-  if (skips(o, 'antigravity')) return [skipped({ provider: 'antigravity', status: 'skipped' })];
   const answered = (m: Record<string, unknown>): Account | null => {
     const a: Account = { provider: 'antigravity', source: 'ls', status: '' };
     if (!parseAntigravity(a, m)) return null;
-    if (a.id && skips(o, 'antigravity', a.id)) return skipped(a);
+    if (a.id ? skips(o, 'antigravity', a.id) : skips(o, 'antigravity')) return skipped(a);
     return { ...a, status: 'ok', asOf: nowSec(e) };
   };
   const dedupeAccounts = (list: Account[]): Account[] => {
@@ -94,7 +100,8 @@ export async function antigravityAccounts(e: UsageEnv, o: LimitsOptions): Promis
   };
   const stamp = await antigravityAuthStamp(e);
   const memo = e.memo.antigravityLS;
-  if (memo && !o.force && memo.stamp === stamp && e.now() - memo.at < e.t.agyEveryMs && memo.endpoints.length > 0) {
+  const lsTtl = Math.min(e.t.agyEveryMs, LS_MEMO_MS);
+  if (memo && !o.force && memo.stamp === stamp && e.now() >= memo.at && e.now() - memo.at < lsTtl && memo.endpoints.length > 0) {
     const accs: Account[] = [];
     let allOk = true;
     for (const ep of memo.endpoints) {
@@ -135,6 +142,9 @@ export async function antigravityAccounts(e: UsageEnv, o: LimitsOptions): Promis
   }
   e.memo.antigravityLS = null;
   e.signal.throwIfAborted();
+  // skipLocal only suppresses the anonymous CLI fallback so a backed-off
+  // anonymous entry never hides named language-server accounts above.
+  if (skips(o, 'antigravity')) return [skipped({ provider: 'antigravity', status: 'skipped' })];
   const a = await agyUsage(e, o, stamp);
   if (a) return [a.id && skips(o, 'antigravity', a.id) ? skipped(a) : a];
   if (procs.length) return [{ provider: 'antigravity', status: 'error', code: 'no_answer' }];
@@ -389,9 +399,10 @@ const AGY_ACCOUNT = /(?:authenticated successfully as|applyAuthResult: email=)\s
 async function agyEmail(e: UsageEnv): Promise<string> {
   const TAIL = 256 << 10;
   try {
-    const fh = await open(posix.join(e.home, AGY_LOG), 'r');
+    const fh = await openRegular(posix.join(e.home, AGY_LOG), { noFollow: true, uid: e.uid });
     try {
       const st = await fh.stat();
+      if (!st.isFile() || (e.uid >= 0 && st.uid !== e.uid)) return '';
       const from = Math.max(st.size - TAIL, 0);
       const b = Buffer.alloc(Math.min(st.size, TAIL));
       const { bytesRead } = await fh.read(b, 0, b.length, from);

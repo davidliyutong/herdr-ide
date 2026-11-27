@@ -841,4 +841,124 @@ describe('bounds and errors', () => {
       contextSize: 1000000,
     });
   });
+
+  test('OpenCode SQL directory filter finds sessions older than the 64 globally newest and memoizes unchanged DBs', async () => {
+    const { home, e, reader } = setup();
+    const targetCwd = '/work/target-proj';
+    const ocPath = join(home, '.local/share/opencode/opencode.db');
+    write(ocPath, '');
+    const oc = new DatabaseSync(ocPath);
+    oc.exec('CREATE TABLE session (id text PRIMARY KEY, parent_id text, directory text, time_created integer, time_updated integer)');
+    oc.exec('CREATE TABLE message (id text PRIMARY KEY, session_id text, time_created integer, time_updated integer, data text)');
+    const insertSess = oc.prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?)');
+    const insertMsg = oc.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)');
+    // Target project session is older than 80 newer sessions in other directories.
+    insertSess.run('ses_target', null, targetCwd, (testNowSec - 500) * 1000, (testNowSec - 500) * 1000);
+    insertMsg.run(
+      'm_target',
+      'ses_target',
+      (testNowSec - 500) * 1000,
+      (testNowSec - 500) * 1000,
+      JSON.stringify({
+        role: 'assistant',
+        time: { created: (testNowSec - 500) * 1000 },
+        modelID: 'deepseek-v4-flash',
+        providerID: 'deepseek',
+        cost: 0.15,
+        tokens: { input: 300, output: 30, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+    );
+    for (let i = 0; i < 80; i++) {
+      insertSess.run(`ses_other_${i}`, null, `/work/other-${i}`, (testNowSec - 100 + i) * 1000, (testNowSec - 100 + i) * 1000);
+    }
+    oc.close();
+
+    const u1 = await readOpenCodeSessionUsage(e, reader, { session: '', cwd: targetCwd });
+    expect(u1).toMatchObject({ model: 'deepseek-v4-flash', input: 300, requests: 1 });
+    expect(reader.dbReads).toBe(1);
+
+    // Unchanged DB hits stamp memo with zero additional SQLite reads.
+    const u2 = await readOpenCodeSessionUsage(e, reader, { session: '', cwd: targetCwd });
+    expect(u2).toEqual(u1);
+    expect(reader.dbReads).toBe(1);
+
+    // Modifying the DB updates its stamp and triggers a fresh read.
+    const oc2 = new DatabaseSync(ocPath);
+    oc2.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)').run(
+      'm_target2',
+      'ses_target',
+      (testNowSec - 10) * 1000,
+      (testNowSec - 10) * 1000,
+      JSON.stringify({
+        role: 'assistant',
+        time: { created: (testNowSec - 10) * 1000 },
+        modelID: 'deepseek-v4-flash',
+        providerID: 'deepseek',
+        cost: 0.25,
+        tokens: { input: 400, output: 40, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+    );
+    oc2.close();
+    const bump = new Date(Date.now() + 60_000);
+    utimesSync(ocPath, bump, bump);
+    const u3 = await readOpenCodeSessionUsage(e, reader, { session: '', cwd: targetCwd });
+    expect(u3).toMatchObject({ input: 700, requests: 2 });
+    expect(reader.dbReads).toBe(2);
+    reader.close();
+  });
+
+  test('Antigravity session reads memoize unchanged DBs and locateKimiSession respects the global session scan cap', async () => {
+    const { home, e, reader } = setup();
+    const sid = 'c3cdc860-1055-488f-9ed2-8b8019061bb9';
+    const cwd = '/work/ag-memo';
+    const varint = (v: number): number[] => {
+      const out: number[] = [];
+      for (;;) {
+        const b = v % 128;
+        v = Math.floor(v / 128);
+        if (v) out.push(b | 0x80);
+        else return [...out, b];
+      }
+    };
+    const field = (num: number, wt: 0 | 2, val: number | Uint8Array | string): Uint8Array => {
+      const tag = varint(num * 8 + wt);
+      if (wt === 0) return Uint8Array.from([...tag, ...varint(val as number)]);
+      const b = typeof val === 'string' ? Buffer.from(val) : (val as Uint8Array);
+      return Uint8Array.from([...tag, ...varint(b.length), ...b]);
+    };
+    const cat = (...parts: Uint8Array[]) => Uint8Array.from(parts.flatMap((p) => [...p]));
+    const agPath = join(home, '.gemini/antigravity/conversations', `${sid}.db`);
+    write(agPath, '');
+    const ag = new DatabaseSync(agPath);
+    ag.exec(`
+      CREATE TABLE trajectory_metadata_blob (id text DEFAULT 'main', data blob, PRIMARY KEY (id));
+      CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, metadata blob, step_payload blob, PRIMARY KEY (idx));
+      CREATE TABLE gen_metadata (idx integer, data blob, size integer NOT NULL DEFAULT 0, PRIMARY KEY (idx));
+    `);
+    ag.prepare("INSERT INTO trajectory_metadata_blob VALUES ('main', ?)").run(
+      cat(field(1, 2, field(1, 2, `file://${cwd}`)), field(2, 2, cat(field(1, 0, testNowSec - 30))), field(7, 2, `file://${cwd}`)),
+    );
+    const f4 = cat(field(2, 0, 500), field(3, 0, 50), field(5, 0, 200));
+    const gen = cat(field(1, 2, cat(field(4, 2, f4), field(19, 2, 'claude-opus-4-6'))));
+    ag.prepare('INSERT INTO gen_metadata VALUES (1, ?, ?)').run(gen, gen.length);
+    ag.close();
+
+    const r1 = await readAntigravitySessionUsage(e, reader, { session: '', cwd });
+    expect(r1).toMatchObject({ input: 500, output: 50, requests: 1 });
+    expect(reader.dbReads).toBe(1);
+    const r2 = await readAntigravitySessionUsage(e, reader, { session: '', cwd });
+    expect(r2).toEqual(r1);
+    expect(reader.dbReads).toBe(1);
+    reader.close();
+
+    // Kimi global scan budget caps total session directories inspected across workspaces.
+    for (let w = 0; w < 5; w++) {
+      for (let s = 0; s < 4; s++) {
+        const dir = join(home, '.kimi-code/sessions', `ws-${w}`, `session_${s}`);
+        write(join(dir, 'state.json'), JSON.stringify({ cwd: '/work/never-matches' }));
+        write(join(dir, 'wire.jsonl'), '\n');
+      }
+    }
+    await expect(locateKimiSession(e, '', '/work/target-kimi', undefined, 6)).rejects.toMatchObject({ code: 'not_found' });
+  });
 });

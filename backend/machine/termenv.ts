@@ -23,7 +23,7 @@ import {
 } from '#shared/proto/agentproto/index.ts';
 import type { Agent } from './agent.ts';
 import { compiled, selfCommand } from './self.ts';
-import { serveSocket } from './sockets.ts';
+import { inode, serveSocket } from './sockets.ts';
 import type { Conn } from './stream.ts';
 import { peerCred, socketFd } from './sys/proc.ts';
 
@@ -80,6 +80,10 @@ export class TermEnvStore {
   private readonly ttlMs: number;
   private readonly maxEntries: number;
   private listening = false;
+  /** Bound socket path and its inode so staging detects node takeover
+   * immediately instead of issuing tokens for an env.sock owned by another node. */
+  private sockPath?: string;
+  private sockIno: bigint | null = null;
   private waiters: Array<() => void> = [];
 
   constructor(opts: { ttlMs?: number; maxEntries?: number } = {}) {
@@ -87,29 +91,67 @@ export class TermEnvStore {
     this.maxEntries = opts.maxEntries ?? MAX_STAGED_ENVS;
   }
 
-  markReady(): void {
+  markReady(sockPath?: string): void {
+    this.sockPath = sockPath;
+    this.sockIno = sockPath ? inode(sockPath) : null;
     this.listening = true;
     for (const w of this.waiters.splice(0)) w();
   }
 
+  markNotReady(): void {
+    this.listening = false;
+  }
+
+  /** Whether this store currently owns the bound env.sock. If another node
+   * replaced the socket path, marks the store not-ready and returns false. */
+  ownsSocket(): boolean {
+    if (!this.listening) return false;
+    if (this.sockPath !== undefined) {
+      const cur = inode(this.sockPath);
+      if (cur === null || cur !== this.sockIno) {
+        this.listening = false;
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** True after env.sock was previously bound by this node and later taken
+   * over or removed, so staging fails over immediately instead of waiting. */
+  lostOwnership(): boolean {
+    return this.sockPath !== undefined && !this.ownsSocket();
+  }
+
   waitReady(signal?: AbortSignal, timeoutMs = READY_TIMEOUT_MS): Promise<void> {
-    if (this.listening) return Promise.resolve();
+    if (this.ownsSocket()) return Promise.resolve();
     if (signal?.aborted) return Promise.reject(new Error('aborted'));
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const wake = () => done();
       const done = (err?: Error) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(t);
         signal?.removeEventListener('abort', onAbort);
+        const idx = this.waiters.indexOf(wake);
+        if (idx >= 0) this.waiters.splice(idx, 1);
         if (err) reject(err);
         else resolve();
       };
       const t = setTimeout(() => done(new Error('env.sock did not start in time')), timeoutMs);
       const onAbort = () => done(new Error('aborted'));
       signal?.addEventListener('abort', onAbort, { once: true });
-      this.waiters.push(() => done());
+      this.waiters.push(wake);
     });
   }
 
+  /** Pending waitReady callers (tests). */
+  get waiterCount(): number {
+    return this.waiters.length;
+  }
+
   stage(data: TermEnvStageParams): TermEnvStaged {
+    if (this.sockPath !== undefined && !this.ownsSocket()) throw new Fail('unavailable', 503, 'term-env socket taken over');
     const now = Date.now();
     for (const [tok, e] of this.entries) if (now >= e.expiresAt) this.drop(tok);
     if (this.entries.size >= this.maxEntries) throw new Fail('busy', 429, 'too many pending terminal launches');
@@ -165,10 +207,11 @@ export function serveTermEnv(
   o: { signal: AbortSignal; everyMs?: number; peerCred?: (c: Socket) => { pid: number; uid: number } },
 ): Promise<void> {
   if (!existsSync(agent.dirs.run)) mkdirSync(agent.dirs.run, { recursive: true, mode: 0o700 });
+  const sockPath = posix.join(agent.dirs.run, TERM_ENV_SOCK);
   let active = 0;
   return serveSocket(
     'term-env',
-    posix.join(agent.dirs.run, TERM_ENV_SOCK),
+    sockPath,
     (c: Socket) => {
       c.on('error', () => {});
       if (active >= MAX_CONNS) {
@@ -218,8 +261,8 @@ export function serveTermEnv(
         }
       })();
     },
-    { signal: o.signal, logger: agent.logger, everyMs: o.everyMs, listening: () => store.markReady() },
-  );
+    { signal: o.signal, logger: agent.logger, everyMs: o.everyMs, listening: () => store.markReady(sockPath) },
+  ).finally(() => store.markNotReady());
 }
 
 /** Handles Op.TermEnv on a hub stream. */
@@ -229,6 +272,10 @@ export async function serveTermEnvOp(conn: Conn, h: Header, store: TermEnvStore,
   if (h.action === 'stage') {
     if (!validStageParams(raw)) {
       await writeLine(conn.stream, { ok: false, code: 'bad_params', error: 'invalid term.env stage params' } satisfies Reply);
+      return;
+    }
+    if (store.lostOwnership()) {
+      await writeLine(conn.stream, { ok: false, code: 'unavailable', error: 'term-env socket taken over' } satisfies Reply);
       return;
     }
     await store.waitReady(signal);

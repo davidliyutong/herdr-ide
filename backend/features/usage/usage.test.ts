@@ -818,4 +818,86 @@ test('unnamed stale or unauth poll does not evict a cached named account', async
   t.clock.now += HOUR;
   await t.poll();
   expect(find(t.snap(), 'claude:uuid-1')?.windows[0]?.usedPct).toBe(42);
+
+  // Same for unnamed skipped (e.g. anonymous skipLocal fallback for Antigravity).
+  let agResp: Account[] = [
+    acc({
+      provider: 'antigravity',
+      id: 'ag-1',
+      email: 'ag@example.com',
+      status: 'ok',
+      asOf: t.sec(),
+      windows: [win('weekly', 35)],
+    }),
+  ];
+  t.f.limits = () => agResp;
+  t.clock.now += HOUR;
+  await t.poll();
+  expect(find(t.snap(), 'antigravity:ag-1')?.windows[0]?.usedPct).toBe(35);
+
+  agResp = [acc({ provider: 'antigravity', id: '', status: 'skipped' })];
+  t.clock.now += HOUR;
+  await t.poll();
+  expect(find(t.snap(), 'antigravity:ag-1')?.windows[0]?.usedPct).toBe(35);
+});
+
+test('snapshot filters stale alerts for accounts removed while usage.alerts was disabled', async () => {
+  const t = testUsage({ ready: ['local'] });
+  let pct = 50;
+  let signedIn = true;
+  t.f.limits = () =>
+    signedIn
+      ? [acc({ provider: 'claude', id: 'c1', status: 'ok', asOf: t.sec(), windows: [win('weekly', pct)] })]
+      : [acc({ provider: 'claude', status: 'missing', code: 'no_credentials' })];
+  await t.poll();
+  // Cross the 80% alert threshold to populate this.recent.
+  pct = 85;
+  t.clock.now += 10 * MIN;
+  await t.poll();
+  expect(t.snap().alerts?.some((a) => a.key === 'claude:c1')).toBe(true);
+
+  // Turn alerts off, remove account on next poll, then turn alerts back on within ALERT_KEEP.
+  t.st.set('usage.alerts', '', false);
+  signedIn = false;
+  t.clock.now += 10 * MIN;
+  await t.poll();
+  expect(find(t.snap(), 'claude:c1')).toBeUndefined();
+  t.st.set('usage.alerts', '', true);
+  expect(t.snap().alerts).toBeUndefined();
+});
+
+test('Spend.report does not cache stale pre-disable state when invalidated mid-flight', async () => {
+  const t = testUsage({ ready: ['local', 'box'], known: ['local', 'box'], now: Date.UTC(2026, 10, 16, 12) });
+  let releaseBox!: () => void;
+  const boxGate = new Promise<void>((r) => (releaseBox = r));
+  let localCalls = 0;
+  t.f.cost = async (m) => {
+    if (m === 'local') {
+      localCalls++;
+      return report({
+        etag: `local-${localCalls}`,
+        files: 1,
+        failed: ['claude:read'],
+        rows: [{ day: '2026-11-16', provider: 'claude', model: 'claude-opus-4-6', cost: 1, requests: 1, priced: true }],
+      });
+    }
+    await boxGate;
+    return report({
+      etag: 'box-1',
+      files: 1,
+      rows: [{ day: '2026-11-16', provider: 'claude', model: 'claude-opus-4-6', cost: 2, requests: 1, priced: true }],
+    });
+  };
+  const inflight = t.report(30, 0);
+  // Let local finish its scan before disabling it while box is still scanning.
+  await Bun.sleep(15);
+  t.env.ready = ['box'];
+  t.env.disabled = ['local'];
+  t.u.onMachine({ id: 'local', status: 'disabled', label: 'Local', kind: 'local', enabled: false, updated_at: t.sec() } as never);
+  releaseBox();
+  await inflight;
+
+  // Next report must not serve the stale pre-disable report from Spend's cache.
+  const fresh = (await t.report(30, 0)).rep;
+  expect(fresh.machines.local).toEqual({ files: 1, disabled: true });
 });

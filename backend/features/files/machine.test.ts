@@ -373,6 +373,42 @@ describe('stat', () => {
   });
 });
 
+describe('find concurrency gate', () => {
+  test('caps concurrent files.find walks, returns busy when wait expires, and frees slots after completion', async () => {
+    let active = 0;
+    let peak = 0;
+    const releases: Array<() => void> = [];
+    const f = await files({
+      maxFinding: 2,
+      findSlotWaitMs: 60,
+      find: async () => {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise<void>((r) => releases.push(r));
+        active--;
+        return { matches: [] };
+      },
+    });
+    const p1 = f.act('find', { dir: '~', query: 'a' });
+    const p2 = f.act('find', { dir: '~', query: 'b' });
+    await until(() => releases.length === 2, 'two finds active');
+    expect(peak).toBe(2);
+
+    // A third concurrent find waits findSlotWaitMs and then fails with busy.
+    expect(await f.code('find', { dir: '~', query: 'c' })).toBe('busy');
+    expect(peak).toBe(2);
+
+    // Releasing active walks allows subsequent finds to run cleanly.
+    for (const r of releases.splice(0)) r();
+    await Promise.all([p1, p2]);
+    const p4 = f.act('find', { dir: '~', query: 'd' });
+    await until(() => releases.length === 1, 'fourth find active');
+    releases.shift()!();
+    await p4;
+    expect(active).toBe(0);
+  });
+});
+
 describe('saving', () => {
   test('the precondition: a conflict says how the file is now; new files must not exist; force writes; links lead to their target', async () => {
     const f = await files();

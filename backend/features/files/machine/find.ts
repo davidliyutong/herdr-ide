@@ -10,8 +10,8 @@
 //   visit/time caps,
 //   and two-priority traversal so project files are searched before heavy
 //   dependency/build directories when not explicitly excluded.
-import { constants, statSync, type Dirent } from 'node:fs';
-import { lstat, open, readdir } from 'node:fs/promises';
+import { constants, type Dirent } from 'node:fs';
+import { lstat, open, readdir, stat } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { RE2JS } from 're2js';
 import { Fail } from '#shared/lib/fail.ts';
@@ -47,8 +47,9 @@ const DEFAULT_SKIP = new Set([
  * directories in explorer filename search (unless already excluded). */
 const DEFERRED_DIRS = new Set(['node_modules', 'target', '__pycache__', '.venv', 'venv', '.next', '.nuxt', '.cache']);
 
-/** Compiles one files.exclude glob pattern (same syntax as web/src/plugins/files/tree.ts). */
-function excludeGlobRe(pattern: string): RegExp | undefined {
+/** Compiles one files.exclude glob pattern into a linear-time RE2JS matcher
+ * (Go path.Match syntax, plus [!...] negation, matching web/src/plugins/files/tree.ts). */
+function excludeGlobRe(pattern: string): RE2JS | undefined {
   const p = pattern.replace(/^(\*\*\/)+/, '');
   if (!p) return undefined;
   let re = '';
@@ -57,43 +58,73 @@ function excludeGlobRe(pattern: string): RegExp | undefined {
     if (c === '\\' && i + 1 < p.length) {
       re += p[++i]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     } else if (c === '*') {
+      while (p[i + 1] === '*') i++;
       re += '.*';
     } else if (c === '?') {
       re += '.';
     } else if (c === '[') {
-      const end = p.indexOf(']', i + 2);
-      if (end < 0) re += '\\[';
-      else {
-        let body = p.slice(i + 1, end).replace(/\\/g, '\\\\');
-        if (body.startsWith('!')) body = '^' + body.slice(1);
-        re += `[${body}]`;
-        i = end;
+      let j = i + 1;
+      let neg = false;
+      if (j < p.length && (p[j] === '^' || p[j] === '!')) {
+        neg = true;
+        j++;
+      }
+      const classStart = j;
+      let body = '';
+      let closed = false;
+      while (j < p.length) {
+        const ch = p[j]!;
+        if (ch === ']' && j > classStart) {
+          closed = true;
+          break;
+        }
+        if (ch === '\\' && j + 1 < p.length) {
+          const esc = p[++j]!;
+          body += esc === '\\' || esc === ']' || esc === '-' || esc === '^' ? `\\${esc}` : esc;
+          j++;
+        } else if (ch === '\\') {
+          body += '\\\\';
+          j++;
+        } else if (ch === ']') {
+          body += '\\]';
+          j++;
+        } else {
+          body += ch;
+          j++;
+        }
+      }
+      if (!closed) {
+        re += '\\[';
+      } else {
+        re += `[${neg ? '^' : ''}${body}]`;
+        i = j;
       }
     } else {
       re += c.replace(/[.+^${}()|\\\]]/g, '\\$&');
     }
   }
   try {
-    return new RegExp(`^${re}$`);
+    return RE2JS.compile(`^${re}$`);
   } catch {
     return undefined;
   }
 }
 
 function compileExclude(patterns: readonly string[]): (name: string) => boolean {
-  const res = patterns.map(excludeGlobRe).filter((r): r is RegExp => !!r);
+  const res = patterns.map(excludeGlobRe).filter((r): r is RE2JS => !!r);
   if (!res.length) return () => false;
-  return (name: string) => res.some((r) => r.test(name));
+  return (name: string) => res.some((r) => r.matcher(name).matches());
 }
 
 interface IgnoreRule {
   base: string;
-  re: RegExp;
+  re: RE2JS;
   dirOnly: boolean;
   anchored: boolean;
 }
 
-/** Compiles a single .gitignore line into a rule; null for blank/comment/negation. */
+/** Compiles a single .gitignore line into a linear-time RE2JS rule; null for
+ * blank/comment/negation. */
 function compileIgnore(raw: string, base: string): IgnoreRule | null {
   const line = raw.trim();
   if (!line || line.startsWith('#') || line.startsWith('!')) return null;
@@ -102,17 +133,17 @@ function compileIgnore(raw: string, base: string): IgnoreRule | null {
   if (!pat) return null;
   const anchored = pat.startsWith('/') || pat.includes('/');
   if (pat.startsWith('/')) pat = pat.slice(1);
-  // Convert glob syntax (*, **, ?) to RegExp safely.
+  // Convert glob syntax (*, **, ?) to RE2 safely in linear time.
   let rx = '^';
   for (let i = 0; i < pat.length; i++) {
     const ch = pat[i]!;
     if (ch === '*' && pat[i + 1] === '*') {
-      if (pat[i + 2] === '/') {
+      while (pat[i + 1] === '*') i++;
+      if (pat[i + 1] === '/') {
         rx += '(?:.*/)?';
-        i += 2;
+        i++;
       } else {
         rx += '.*';
-        i++;
       }
     } else if (ch === '*') {
       rx += '[^/]*';
@@ -126,7 +157,7 @@ function compileIgnore(raw: string, base: string): IgnoreRule | null {
   }
   rx += '$';
   try {
-    return { base, re: new RegExp(rx), dirOnly, anchored };
+    return { base, re: RE2JS.compile(rx), dirOnly, anchored };
   } catch {
     return null;
   }
@@ -166,9 +197,9 @@ function isIgnored(rel: string, name: string, isDir: boolean, rules: readonly Ig
       target = rel.slice(r.base.length + 1);
     }
     if (r.anchored) {
-      if (r.re.test(target)) return true;
+      if (r.re.matcher(target).matches()) return true;
     } else {
-      if (r.re.test(name) || r.re.test(target)) return true;
+      if (r.re.matcher(name).matches() || r.re.matcher(target).matches()) return true;
     }
   }
   return false;
@@ -250,7 +281,7 @@ export async function findFiles(o: FindOptions): Promise<FindResult> {
   if (!o.dir || o.dir.includes('\0')) throw new Fail('bad_params', 400, 'dir required');
   let isDir: boolean;
   try {
-    isDir = statSync(o.dir).isDirectory();
+    isDir = (await stat(o.dir)).isDirectory();
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     const msg = `${o.dir}: ${(e as Error).message}`;
@@ -295,17 +326,26 @@ export async function findFiles(o: FindOptions): Promise<FindResult> {
 
   const rootRules = isNameMode ? [] : await readGitignore(o.dir, '');
   const queue: QueueItem[] = [{ abs: o.dir, rel: '', rules: rootRules }];
+  let qHead = 0;
   const deferred: QueueItem[] = [];
+  let dHead = 0;
   const hits: Array<{ match: FindMatch; score: number }> = [];
   let visited = 0;
   let truncated = false;
 
-  while (queue.length > 0 || deferred.length > 0) {
+  while (qHead < queue.length || dHead < deferred.length) {
     if (o.signal?.aborted || Date.now() >= deadline) {
       truncated = true;
       break;
     }
-    const cur = queue.length > 0 ? queue.shift()! : deferred.shift()!;
+    let cur: QueueItem;
+    if (qHead < queue.length) {
+      cur = queue[qHead]!;
+      queue[qHead++] = undefined as unknown as QueueItem;
+    } else {
+      cur = deferred[dHead]!;
+      deferred[dHead++] = undefined as unknown as QueueItem;
+    }
     let entries: Dirent[];
     try {
       entries = await readdir(cur.abs, { withFileTypes: true });

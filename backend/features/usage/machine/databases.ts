@@ -318,7 +318,13 @@ export function readOpenCode(p: string, since: number, o: DBRead): Promise<Rec[]
  * process start time is known), including child subagent sessions. */
 export function readOpenCodeSession(
   p: string,
-  opts: { session?: string; cwds?: readonly string[]; sinceMs?: number; sinceSec: number },
+  opts: {
+    session?: string;
+    cwds?: readonly string[];
+    sinceMs?: number;
+    sinceSec: number;
+    resolveDir?: (dir: string) => Promise<string[]>;
+  },
   o: DBRead,
 ): Promise<{ sessionId: string; updatedAt: number; records: Rec[]; mainModel: string; mainProvider: string; contextUsed: number } | null> {
   const limits = o.limits ?? DB_LIMITS;
@@ -334,17 +340,13 @@ export function readOpenCodeSession(
     const hasSession = sessCols.includes('id');
     const hasParent = sessCols.includes('parent_id');
     if (!rootId) {
-      if (!hasSession || !sessCols.includes('directory')) return null;
+      if (!hasSession || !sessCols.includes('directory') || wants.size === 0) return null;
       const timeCol = sessCols.includes('time_updated') ? 'time_updated' : sessCols.includes('time_created') ? 'time_created' : '0';
-      const whereParent = hasParent ? `WHERE parent_id IS NULL OR parent_id = ''` : '';
+      const whereParent = hasParent ? `(parent_id IS NULL OR parent_id = '')` : '1 = 1';
       let fallbackId = '';
       let fallbackAt = 0;
-      await r.rows(`SELECT id, directory, ${timeCol} AS t FROM session ${whereParent} ORDER BY ${timeCol} DESC LIMIT 64`, [], (row) => {
+      const consider = (sid: string, tsMs: number) => {
         if (rootId) return;
-        const sid = typeof row.id === 'string' ? row.id : '';
-        const dir = typeof row.directory === 'string' ? row.directory : '';
-        if (!sid || !dir || !wants.has(cleanDir(dir))) return;
-        const tsMs = normMs(int(row.t));
         if (!fallbackId) {
           fallbackId = sid;
           fallbackAt = tsMs;
@@ -352,7 +354,52 @@ export function readOpenCodeSession(
         if (opts.sinceMs && tsMs > 0 && tsMs < opts.sinceMs) return;
         rootId = sid;
         updatedAt = tsMs;
-      });
+      };
+      // Filter directory directly in SQL (including trailing-slash forms) so
+      // projects outside the globally newest 64 sessions are found reliably.
+      const sqlDirs: string[] = [];
+      for (const c of wants) {
+        sqlDirs.push(c);
+        if (c !== '/') sqlDirs.push(`${c}/`);
+      }
+      await r.rows(
+        `SELECT id, ${timeCol} AS t FROM session WHERE ${whereParent} AND directory IN (${sqlDirs.map(() => '?').join(',')}) ORDER BY ${timeCol} DESC LIMIT 16`,
+        sqlDirs,
+        (row) => {
+          const sid = typeof row.id === 'string' ? row.id : '';
+          if (sid) consider(sid, normMs(int(row.t)));
+        },
+      );
+      if (!rootId && !fallbackId) {
+        // Fallback for non-canonical directory paths (e.g. alternate symlinks or
+        // repeated slashes) among recent root sessions.
+        const recent: Array<{ sid: string; dir: string; tsMs: number }> = [];
+        await r.rows(
+          `SELECT id, directory, ${timeCol} AS t FROM session WHERE ${whereParent} ORDER BY ${timeCol} DESC LIMIT 64`,
+          [],
+          (row) => {
+            const sid = typeof row.id === 'string' ? row.id : '';
+            const dir = typeof row.directory === 'string' ? row.directory : '';
+            if (sid && dir) recent.push({ sid, dir, tsMs: normMs(int(row.t)) });
+          },
+        );
+        const resolved = new Map<string, string[]>();
+        for (const row of recent) {
+          if (rootId) break;
+          const cleaned = cleanDir(row.dir);
+          let hit = wants.has(cleaned);
+          if (!hit && opts.resolveDir) {
+            o.signal.throwIfAborted();
+            let vs = resolved.get(cleaned);
+            if (!vs) {
+              vs = await opts.resolveDir(cleaned);
+              resolved.set(cleaned, vs);
+            }
+            hit = vs.some((v) => wants.has(cleanDir(v)));
+          }
+          if (hit) consider(row.sid, row.tsMs);
+        }
+      }
       if (!rootId && fallbackId) {
         rootId = fallbackId;
         updatedAt = fallbackAt;

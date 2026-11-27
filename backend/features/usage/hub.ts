@@ -186,7 +186,7 @@ export const usageFeature = (o: UsageOptions = {}) =>
         const m = c.var.machine;
         const prices = usage.prices();
         const codexHomes = provider === 'codex' && opts.codexHomes.length ? opts.codexHomes : undefined;
-        const cacheKey = [m.id, kind, session, cwd, pid ?? '', codexHomes?.join('\0') ?? '', prices.key].join('\0');
+        const cacheKey = `${m.id}\0${JSON.stringify([kind, session, cwd, pid ?? null, codexHomes ?? null, prices.key])}`;
         const res = await sessionCache.get(cacheKey, { signal: c.req.raw.signal }, async (signal) => {
           const n = reads.get(m.id) ?? 0;
           if (n >= MAX_SESSION_READS) throw new Fail('busy', 429, "too many reads of the machine's sessions at once");

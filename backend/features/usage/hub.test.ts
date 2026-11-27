@@ -300,3 +300,16 @@ test('a machine busy reading sessions', async () => {
   // A fresh distinct session succeeds once slots free up.
   expect((await session(request, 'claude', sid(MAX_SESSION_READS + 1))).status).toBe(200);
 });
+
+test('session cache key is injective across codexHomes and prices', async () => {
+  let calls = 0;
+  const { request, st } = await withHub((action, p) => {
+    if (action !== 'session') return answers(action, p);
+    return usageOf(`model-${++calls}`);
+  });
+  st.set('usage.codexHomes', '', ['/a', '/b']);
+  const r1 = (await (await request('GET', '/api/m/box/p/usage/session?kind=codex&cwd=/work')).json()) as { model: string };
+  st.set('usage.codexHomes', '', ['/a']);
+  const r2 = (await (await request('GET', '/api/m/box/p/usage/session?kind=codex&cwd=/work')).json()) as { model: string };
+  expect([r1.model, r2.model]).toEqual(['model-1', 'model-2']);
+});

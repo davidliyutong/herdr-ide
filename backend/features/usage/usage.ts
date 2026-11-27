@@ -487,7 +487,7 @@ export class Usage {
             if (a.code !== 'not_running' && a.code !== 'keychain') provs.add(a.provider);
             continue;
           }
-          if (a.status === 'error' || (!a.id && (a.status === 'stale' || a.status === 'unauth'))) {
+          if (a.status === 'error' || (!a.id && (a.status === 'stale' || a.status === 'unauth' || a.status === 'skipped'))) {
             ambiguous.add(a.provider);
           } else {
             provs.add(a.provider);
@@ -636,7 +636,9 @@ export class Usage {
         }));
         return { ...keptJSON(a), windows };
       });
-    const alerts = this.alertsOn() ? this.recent.filter((a) => now - a.at <= ALERT_KEEP && on.includes(a.provider)) : [];
+    const alerts = this.alertsOn()
+      ? this.recent.filter((a) => now - a.at <= ALERT_KEEP && on.includes(a.provider) && this.accounts.has(a.key))
+      : [];
     return {
       updatedAt: this.updatedAt ? Math.floor(this.updatedAt / 1000) : 0,
       refresh: this.mode(),

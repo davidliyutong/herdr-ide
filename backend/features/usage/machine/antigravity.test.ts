@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { FakeAPI, TEST_NOW, removeHomes, script, tempHome, testEnv, testNowSec, write } from '../testdata/machine.ts';
 import { hashId, type Account, type UsageEnv } from './env.ts';
-import { parseAgy, parsePS, procPorts } from './antigravity.ts';
+import { LS_MEMO_MS, parseAgy, parsePS, procPorts } from './antigravity.ts';
 import { limits } from './limits.ts';
 import { run } from './run.ts';
 
@@ -211,6 +211,41 @@ esac`,
     write(state, `tok-1 ${ls1.port}`);
     expect((await one(e, { force: true })).email).toBe('first@example.com');
     expect(count(`${runs}.ps`)).toBe(3);
+
+    // .gemini/antigravity-ide state file changes also invalidate the LS memo.
+    write(state, `tok-2 ${ls2.port}`);
+    write(join(home, '.gemini/antigravity-ide/antigravity_state.pbtxt'), 'account: "second@example.com"\n');
+    expect((await one(e)).email).toBe('second@example.com');
+    expect(count(`${runs}.ps`)).toBe(4);
+  });
+
+  test('LS memo expires after LS_MEMO_MS and skipLocal does not skip named LS discovery', async () => {
+    const home = tempHome();
+    const state = join(home, 'state');
+    const runs = join(home, 'runs');
+    let now = TEST_NOW;
+    const e = testEnv(home, { platform: 'darwin', uid: 501, now: () => now });
+    e.programs.ps = script(
+      join(home, 'bin/ps'),
+      `echo ps >> ${runs}.ps\nprintf '  501   345 /x/language_server_macos_arm --csrf_token %s antigravity\\n' "$(cut -d' ' -f1 ${state})"`,
+    );
+    e.programs.lsof = script(join(home, 'bin/lsof'), `printf 'n127.0.0.1:%s\\n' "$(cut -d' ' -f2 ${state})"`);
+    const body = (email: string) =>
+      `{"userStatus":{"email":"${email}","cascadeModelConfigData":{"clientModelConfigs":[{"label":"M","quotaInfo":{"remainingFraction":0.5}}]}}}`;
+    const ls1 = languageServer('tok-1', body('named@example.com'));
+    const ls2 = languageServer('tok-2', body('fresh@example.com'));
+    write(state, `tok-1 ${ls1.port}`);
+
+    // skipLocal: ['antigravity'] must NOT hide named LS accounts.
+    const a = await one(e, { skipLocal: ['antigravity'] });
+    expect(a).toMatchObject({ status: 'ok', email: 'named@example.com', id: hashId('named@example.com') });
+    expect(count(`${runs}.ps`)).toBe(1);
+
+    // Advancing clock by LS_MEMO_MS (60s, well under 10m agyEveryMs) re-discovers newly started LS.
+    write(state, `tok-2 ${ls2.port}`);
+    now += LS_MEMO_MS;
+    expect((await one(e)).email).toBe('fresh@example.com');
+    expect(count(`${runs}.ps`)).toBe(2);
   });
 });
 
@@ -325,6 +360,31 @@ describe('agy', () => {
     h.at(TEST_NOW + 20_000);
     expect((await one(h.e, { force: true })).email).toBe('second@example.com');
     expect(h.runs()).toBe(3);
+  });
+
+  test('agyEmail refuses symlinked, wrong-uid, and FIFO cli.log files', async () => {
+    // Symlink at cli.log must not be followed (O_NOFOLLOW).
+    const hLink = agyHome(agyOut);
+    const outside = join(hLink.home, 'outside.log');
+    write(outside, 'OAuth: authenticated successfully as leaked@example.com\n');
+    mkdirSync(join(hLink.home, '.gemini/antigravity-cli'), { recursive: true });
+    symlinkSync(outside, join(hLink.home, '.gemini/antigravity-cli/cli.log'));
+    expect((await one(hLink.e)).email).toBeUndefined();
+
+    // Wrong-uid cli.log must be ignored.
+    const hUid = agyHome(agyOut);
+    write(join(hUid.home, '.gemini/antigravity-cli/cli.log'), 'OAuth: authenticated successfully as other@example.com\n');
+    const otherUidEnv = { ...hUid.e, uid: (process.getuid?.() ?? 0) + 999 };
+    expect((await one(otherUidEnv)).email).toBeUndefined();
+
+    // FIFO at cli.log must not block (O_NONBLOCK + isFile check).
+    const hFifo = agyHome(agyOut);
+    mkdirSync(join(hFifo.home, '.gemini/antigravity-cli'), { recursive: true });
+    if (Bun.spawnSync(['mkfifo', join(hFifo.home, '.gemini/antigravity-cli/cli.log')]).exitCode === 0) {
+      const a = await one(hFifo.e);
+      expect(a.status).toBe('ok');
+      expect(a.email).toBeUndefined();
+    }
   });
 });
 

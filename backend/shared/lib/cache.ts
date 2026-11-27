@@ -63,6 +63,9 @@ function waitWithSignal<T>(p: Promise<T>, signal: AbortSignal, onCancel: () => v
 export class CoalesceCache<T> {
   private readonly entries = new Map<string, Entry<T>>();
   private readonly inflight = new Map<string, InFlight<T>>();
+  /** All active flights per key, including refresh: true probes so
+   * invalidations and superseding refreshes mark/abort every in-flight call. */
+  private readonly active = new Map<string, Set<InFlight<T>>>();
   private readonly ttlMs: number;
   private readonly maxEntries: number;
   private readonly now: () => number;
@@ -96,6 +99,12 @@ export class CoalesceCache<T> {
         pending.waiters++;
         return waitWithSignal(pending.promise, o.signal, () => this.dropWaiter(key, pending));
       }
+    } else {
+      // A forced refresh supersedes any older in-flight probe for this key so
+      // an earlier probe finishing afterward cannot overwrite newer data.
+      const prior = this.active.get(key);
+      if (prior) for (const f of prior) f.stale = true;
+      this.inflight.delete(key);
     }
 
     const ac = new AbortController();
@@ -106,26 +115,47 @@ export class CoalesceCache<T> {
       ac,
       stale: false,
     };
-    flight.promise = fetch(sharedSignal).then(
+    let set = this.active.get(key);
+    if (!set) this.active.set(key, (set = new Set()));
+    set.add(flight);
+
+    let raw: Promise<T>;
+    try {
+      raw = fetch(sharedSignal);
+    } catch (err) {
+      this.detach(key, flight);
+      throw err;
+    }
+    flight.promise = raw.then(
       (value) => {
         if (!flight.stale && ttl > 0) this.put(key, value);
-        if (this.inflight.get(key) === flight) this.inflight.delete(key);
+        this.detach(key, flight);
         return value;
       },
       (err) => {
-        if (this.inflight.get(key) === flight) this.inflight.delete(key);
+        this.detach(key, flight);
         throw err;
       },
     );
     flight.promise.catch(() => {});
-    if (!o.refresh) this.inflight.set(key, flight);
+    if (!flight.stale) this.inflight.set(key, flight);
     return waitWithSignal(flight.promise, o.signal, () => this.dropWaiter(key, flight));
+  }
+
+  private detach(key: string, flight: InFlight<T>): void {
+    if (this.inflight.get(key) === flight) this.inflight.delete(key);
+    const set = this.active.get(key);
+    if (set) {
+      set.delete(flight);
+      if (set.size === 0) this.active.delete(key);
+    }
   }
 
   private dropWaiter(key: string, flight: InFlight<T>): void {
     flight.waiters--;
     if (flight.waiters <= 0) {
-      if (this.inflight.get(key) === flight) this.inflight.delete(key);
+      flight.stale = true;
+      this.detach(key, flight);
       flight.ac.abort();
     }
   }
@@ -145,11 +175,14 @@ export class CoalesceCache<T> {
    * repopulate stale data when it resolves. */
   invalidate(key: string, o: { abort?: boolean } = {}): void {
     this.entries.delete(key);
-    const f = this.inflight.get(key);
-    if (f) {
-      f.stale = true;
-      this.inflight.delete(key);
-      if (o.abort) f.ac.abort();
+    this.inflight.delete(key);
+    const set = this.active.get(key);
+    if (set) {
+      this.active.delete(key);
+      for (const f of set) {
+        f.stale = true;
+        if (o.abort) f.ac.abort();
+      }
     }
   }
 
@@ -159,21 +192,30 @@ export class CoalesceCache<T> {
     for (const k of [...this.entries.keys()]) {
       if (k.startsWith(prefix)) this.entries.delete(k);
     }
-    for (const [k, f] of [...this.inflight.entries()]) {
+    for (const k of [...this.inflight.keys()]) {
+      if (k.startsWith(prefix)) this.inflight.delete(k);
+    }
+    for (const [k, set] of [...this.active.entries()]) {
       if (k.startsWith(prefix)) {
-        f.stale = true;
-        this.inflight.delete(k);
-        if (o.abort) f.ac.abort();
+        this.active.delete(k);
+        for (const f of set) {
+          f.stale = true;
+          if (o.abort) f.ac.abort();
+        }
       }
     }
   }
 
   clear(o: { abort?: boolean } = {}): void {
     this.entries.clear();
-    for (const f of this.inflight.values()) {
-      f.stale = true;
-      if (o.abort) f.ac.abort();
-    }
     this.inflight.clear();
+    const sets = [...this.active.values()];
+    this.active.clear();
+    for (const set of sets) {
+      for (const f of set) {
+        f.stale = true;
+        if (o.abort) f.ac.abort();
+      }
+    }
   }
 }

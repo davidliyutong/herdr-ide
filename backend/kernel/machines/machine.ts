@@ -33,6 +33,9 @@ export interface Timing {
   drainGraceMs: number;
   /** How long an agent may take to send the header of a stream it opened. */
   headerTimeoutMs: number;
+  /** How long a previously ready SSH machine auto-retries on SSHTimeoutError
+   * (e.g. while a remote host reboots) before parking for manual Retry. */
+  rebootRetryMs: number;
 }
 
 export const DEFAULT_TIMING: Timing = {
@@ -43,6 +46,7 @@ export const DEFAULT_TIMING: Timing = {
   helloTimeoutMs: 30_000,
   drainGraceMs: 2000,
   headerTimeoutMs: 15_000,
+  rebootRetryMs: 180_000,
 };
 
 const STABLE_SESSION_MS = 30_000;
@@ -235,6 +239,7 @@ export class Machine {
   /** Ends a backoff wait at once (after an interactive authentication); a
    * connected machine is not affected. */
   wake(): void {
+    if (this.connected) return;
     this.retry.wake();
   }
 
@@ -325,6 +330,21 @@ export class Machine {
   private async connect(signal: AbortSignal): Promise<void> {
     const t = this.timing;
     let backoff = t.backoffMinMs;
+    let recoverUntil: number | undefined;
+    const waitAfterTimeout = async (e: SSHTimeoutError): Promise<void> => {
+      const remaining = recoverUntil !== undefined ? recoverUntil - performance.now() : 0;
+      if (remaining > 0) {
+        const wait = Math.min(retryDelay(backoff), remaining);
+        backoff = Math.min(backoff * 2, t.backoffMaxMs);
+        this.deps.logger(`machine ${this.label}: ${errorText(e)} (retry in ${wait / 1000}s)`);
+        if ((await this.retry.until(wait, signal)) === 'woken') backoff = t.backoffMinMs;
+        return;
+      }
+      recoverUntil = undefined;
+      this.deps.logger(`machine ${this.label}: ${errorText(e)} (waiting for retry)`);
+      await this.retry.until(Infinity, signal);
+      backoff = t.backoffMinMs;
+    };
     while (!signal.aborted) {
       this.retry.clear();
       this.readyAt = undefined;
@@ -338,9 +358,7 @@ export class Machine {
         if (signal.aborted) return;
         if (e instanceof SSHTimeoutError) {
           this.setStatus('error', e);
-          this.deps.logger(`machine ${this.label}: ${errorText(e)} (waiting for retry)`);
-          await this.retry.until(Infinity, signal);
-          backoff = t.backoffMinMs;
+          await waitAfterTimeout(e);
           continue;
         }
         let wait = backoff;
@@ -368,19 +386,20 @@ export class Machine {
       } catch (e) {
         err = e;
       }
-      this.session?.close();
+      const wasReady = this.readyAt !== undefined;
+      if (this.session && this.session !== dialed.session) this.session.close();
       this.session = null;
-      dialed.session.close();
+      if (!signal.aborted && err instanceof SSHTimeoutError) void dialed.session.finish(err);
+      else dialed.session.close();
       if (signal.aborted) return;
+      if (wasReady) recoverUntil = performance.now() + t.rebootRetryMs;
       this.setStatus('error', err ?? new Error('session ended'));
-      if (err instanceof SSHTimeoutError && this.readyAt === undefined) {
-        this.deps.logger(`machine ${this.label}: ${errorText(err)} (waiting for retry)`);
-        await this.retry.until(Infinity, signal);
-        backoff = t.backoffMinMs;
+      if (err instanceof SSHTimeoutError && !wasReady) {
+        await waitAfterTimeout(err);
         continue;
       }
       this.deps.logger(`machine ${this.label}: session ended: ${errorText(err)}`);
-      const stable = this.readyAt !== undefined && performance.now() - this.readyAt >= STABLE_SESSION_MS;
+      const stable = wasReady && performance.now() - this.readyAt! >= STABLE_SESSION_MS;
       const delay = stable ? t.sessionRetryMs : Math.max(t.sessionRetryMs, backoff);
       backoff = stable ? t.backoffMinMs : Math.min(delay * 2, t.backoffMaxMs);
       if ((await this.retry.until(retryDelay(delay), signal)) === 'woken') backoff = t.backoffMinMs;
@@ -414,7 +433,8 @@ export class Machine {
       try {
         await this.hello(next.session, next.platform, signal);
       } catch (e) {
-        next.session.close();
+        if (!signal.aborted && e instanceof SSHTimeoutError) void next.session.finish(e);
+        else next.session.close();
         this.deps.logger(`machine ${this.label}: its node drains; the new one did not answer: ${errorText(e)}`);
         drained = new Promise(() => {});
         continue;

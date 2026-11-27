@@ -100,3 +100,63 @@ test('invalidatePrefix prevents an in-flight pre-write read from repopulating st
   expect(await p1).toBe('stale');
   expect(await cache.get('m1\0status', { signal: sig }, async () => 'unexpected')).toBe('fresh');
 });
+
+test('refresh: true flights are tracked by invalidate/invalidatePrefix/clear and supersede older in-flight probes', async () => {
+  const cache = new CoalesceCache<string>({ ttlMs: 5000, maxEntries: 8 });
+  const sig = new AbortController().signal;
+
+  // (a) invalidate / invalidatePrefix / clear mark and optionally abort refresh: true flights.
+  for (const mode of ['invalidate', 'invalidatePrefix', 'clear'] as const) {
+    let finish!: (v: string) => void;
+    let seenSignal!: AbortSignal;
+    const p = cache.get('m1\0k', { signal: sig, refresh: true }, (s) => {
+      seenSignal = s;
+      return new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+    });
+    if (mode === 'invalidate') cache.invalidate('m1\0k', { abort: true });
+    else if (mode === 'invalidatePrefix') cache.invalidatePrefix('m1\0', { abort: true });
+    else cache.clear({ abort: true });
+    expect(seenSignal.aborted).toBe(true);
+    finish('stale-refresh');
+    expect(await p).toBe('stale-refresh');
+    // Stale refresh must not have repopulated the cache.
+    expect(await cache.get('m1\0k', { signal: sig }, async () => `after-${mode}`)).toBe(`after-${mode}`);
+  }
+
+  // (b) Starting a refresh: true probe marks an older normal probe stale so the
+  // older probe cannot overwrite the newer refresh value when it finishes later.
+  cache.clear();
+  let finishOld!: (v: string) => void;
+  let finishNew!: (v: string) => void;
+  const oldP = cache.get(
+    'k',
+    { signal: sig },
+    () =>
+      new Promise<string>((resolve) => {
+        finishOld = resolve;
+      }),
+  );
+  const newP = cache.get(
+    'k',
+    { signal: sig, refresh: true },
+    () =>
+      new Promise<string>((resolve) => {
+        finishNew = resolve;
+      }),
+  );
+  // A subsequent normal caller coalesces onto the fresh probe, not the stale one.
+  let thirdCalls = 0;
+  const thirdP = cache.get('k', { signal: sig }, async () => `unexpected-${++thirdCalls}`);
+  expect(thirdCalls).toBe(0);
+
+  finishNew('fresh-v2');
+  expect(await newP).toBe('fresh-v2');
+  expect(await thirdP).toBe('fresh-v2');
+
+  // Older probe resolves last: its caller still gets its result, but cache keeps fresh-v2.
+  finishOld('older-v1');
+  expect(await oldP).toBe('older-v1');
+  expect(await cache.get('k', { signal: sig }, async () => 'unexpected')).toBe('fresh-v2');
+});

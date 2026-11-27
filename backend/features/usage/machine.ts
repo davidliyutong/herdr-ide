@@ -245,7 +245,10 @@ export function usageMachine(o: UsageMachineOptions = {}) {
       /** The cost cache of a data directory no scan saved for the
        * retention (the feature off there) goes. */
       housekeep: (when) => scanner.housekeep(when.getTime()),
-      close: () => cache.close(),
+      close: () => {
+        sessions.close();
+        cache.close();
+      },
     };
   });
 }

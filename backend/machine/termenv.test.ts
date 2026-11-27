@@ -153,4 +153,49 @@ describe('ephemeral terminal environment staging', () => {
     expect(cfgCode).toBe(0);
     expect(cfgOut).toBe('cfg:from-toml-shell');
   });
+
+  test('waitReady removes timed-out and aborted waiters without leaking', async () => {
+    const store = new TermEnvStore();
+    await expect(store.waitReady(undefined, 15)).rejects.toThrow('did not start in time');
+    expect(store.waiterCount).toBe(0);
+
+    const ac = new AbortController();
+    const p = store.waitReady(ac.signal, 5000);
+    expect(store.waiterCount).toBe(1);
+    ac.abort();
+    await expect(p).rejects.toThrow('aborted');
+    expect(store.waiterCount).toBe(0);
+  });
+
+  test('fails staging cleanly when another node takes over env.sock', async () => {
+    r = await rig();
+    const sock = join(r.dirs.run, TERM_ENV_SOCK);
+    await until(() => existsSync(sock), 'env.sock');
+
+    // Initial staging works while this node owns env.sock.
+    const okStage = await r.session.request({
+      op: Op.TermEnv,
+      action: 'stage',
+      params: { env: { A: '1' } },
+    });
+    expect(okStage.ok).toBe(true);
+    await r.session.request({ op: Op.TermEnv, action: 'drop', params: { token: okStage.termenv!.token } });
+
+    // Simulate a newer node taking over env.sock by replacing the socket inode.
+    const replacement = join(r.dirs.run, '.replacement-env');
+    writeFileSync(replacement, '');
+    const { renameSync } = await import('node:fs');
+    renameSync(replacement, sock);
+
+    // Draining node refuses staging immediately with unavailable rather than
+    // staging a token that term-env would fail to fetch from the new node.
+    const err = await r.session
+      .request({
+        op: Op.TermEnv,
+        action: 'stage',
+        params: { env: { A: '2' } },
+      })
+      .catch((e) => e);
+    expect(err.reply?.code).toBe('unavailable');
+  });
 });

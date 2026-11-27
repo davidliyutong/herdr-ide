@@ -317,13 +317,16 @@ describe('machines', () => {
     const { duplexPair } = await import('node:stream');
     const { Session } = await import('./transport/session.ts');
     let dials = 0;
+    let lastSession: InstanceType<typeof Session> | undefined;
     const m = new Machine(sshSpec('x'), {
       dial: async () => {
         dials++;
         const [a, b] = duplexPair();
         // Peer never replies to Op.Hello.
         b.resume();
-        return { session: new Session(a, () => b.destroy()), platform: 'linux/amd64' };
+        const session = new Session(a, () => b.destroy());
+        lastSession = session;
+        return { session, platform: 'linux/amd64' };
       },
       logger: () => {},
       publish: () => {},
@@ -336,10 +339,92 @@ describe('machines', () => {
     await waitFor('the hello timeout error', () => m.state().status === 'error');
     expect(dials).toBe(1);
     expect(m.state().error).toContain('no reply in time');
+    // Session ends with SSHTimeoutError so dialSSH's closer can stop a dead ControlMaster.
+    expect(lastSession?.err).toBeInstanceOf(SSHTimeoutError);
     await sleep(80);
     expect(dials).toBe(1);
     m.wake();
     await waitFor('the manual retry', () => dials === 2 && m.state().status === 'error');
+    ac.abort();
+    await done;
+  });
+
+  // A previously ready SSH machine auto-retries on SSHTimeoutError during a
+  // bounded reboot recovery window, then parks for manual retry once the window expires.
+  test('a previously ready SSH machine auto-recovers across SSH timeouts during a reboot window, then parks', async () => {
+    const agent = agentDialer();
+    let mode: 'ok' | 'timeout' = 'ok';
+    let timeoutDials = 0;
+    const m = new Machine(sshSpec('x'), {
+      dial: async (spec, signal, progress) => {
+        if (mode === 'timeout') {
+          timeoutDials++;
+          throw new SSHTimeoutError('ssh: connect to host x port 22: Operation timed out');
+        }
+        return agent(spec, signal, progress);
+      },
+      logger: () => {},
+      publish: () => {},
+      streams: () => undefined,
+      localSupported: true,
+      timing: { sessionRetryMs: 10, backoffMinMs: 15, backoffMaxMs: 25, rebootRetryMs: 300 },
+    });
+    const ac = new AbortController();
+    const done = m.run(ac.signal);
+    await waitFor('initial ready', () => m.ready);
+
+    // Simulate remote host reboot: session drops and subsequent SSH connects time out briefly, then succeed.
+    mode = 'timeout';
+    agent.agents[0].kill();
+    await waitFor('auto-retry during reboot window', () => timeoutDials >= 2);
+    mode = 'ok';
+    await waitFor('recovered after reboot', () => m.ready && agent.agents.length === 2);
+
+    // If timeouts outlast the reboot recovery window, the machine parks for manual Retry.
+    timeoutDials = 0;
+    mode = 'timeout';
+    agent.agents[1].kill();
+    await waitFor('bounded retries during window', () => timeoutDials >= 2);
+    await sleep(360);
+    const parkedCount = timeoutDials;
+    await sleep(80);
+    expect(timeoutDials).toBe(parkedCount);
+    expect(m.state().status).toBe('error');
+
+    // Manual Retry wakes it immediately.
+    mode = 'ok';
+    m.wake();
+    await waitFor('recovered on manual retry', () => m.ready && agent.agents.length === 3);
+    ac.abort();
+    await done;
+  });
+
+  // wake() while connected is a no-op and does not shorten the next session drop's retry wait.
+  test('wake while connected does not skip the next sessionRetryMs wait', async () => {
+    const agent = agentDialer();
+    let secondDialAt = 0;
+    let dials = 0;
+    const m = new Machine(sshSpec('x'), {
+      dial: async (spec, signal, progress) => {
+        dials++;
+        if (dials === 2) secondDialAt = performance.now();
+        return agent(spec, signal, progress);
+      },
+      logger: () => {},
+      publish: () => {},
+      streams: () => undefined,
+      localSupported: true,
+      timing: { sessionRetryMs: 120, backoffMinMs: 10 },
+    });
+    const ac = new AbortController();
+    const done = m.run(ac.signal);
+    await waitFor('ready', () => m.ready);
+    m.wake();
+    const droppedAt = performance.now();
+    agent.agents[0].kill();
+    await waitFor('second dial', () => dials === 2);
+    // retryDelay applies ±20% jitter, so 120ms waits at least ~90ms; a leaked wake() would redial in <10ms.
+    expect(secondDialAt - droppedAt).toBeGreaterThanOrEqual(70);
     ac.abort();
     await done;
   });
