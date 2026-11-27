@@ -36,6 +36,8 @@ export const settings = defineModule({
     /** Where Cmd/Ctrl+click on a file path in a terminal opens it by default:
      * the explorer's preview editor ('editor') or VS Code ('vscode'). */
     'files.openLinks': enumOf(['editor', 'vscode'], { default: 'editor', section, order: 60 }),
+    /** Wrap long lines in the file explorer's text editor by default. */
+    'files.wordWrap': bool({ default: false, section, order: 70 }),
   },
 });
 

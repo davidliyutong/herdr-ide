@@ -7,7 +7,7 @@
 // double click (or Enter) opens it in the editor pane.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChevronsDownUp, Ellipsis, Eye, EyeOff, FilePlus, FolderPlus, LocateFixed, RefreshCw } from 'lucide-react';
+import { ChevronsDownUp, Ellipsis, Eye, EyeOff, FilePlus, FolderPlus, LocateFixed, RefreshCw, Regex } from 'lucide-react';
 import { current, paneDirectory } from '../../actions';
 import { recentSpots } from '../../paneHistory';
 import { useStore } from '../../state/store';
@@ -29,7 +29,10 @@ import { decorationsOf, useDecorationVersion, useShownDirs } from './decorations
 import {
   baseName,
   collapseAll,
+  compileFilter,
   crumbs,
+  filterHighlight,
+  filterSearchKey,
   getLastAutoRevealed,
   getScrollMemory,
   navRows,
@@ -44,6 +47,7 @@ import {
   setEdit,
   setExpanded,
   setFilter,
+  setFilterRegex,
   setFollow,
   setHidden,
   setLastAutoRevealed,
@@ -243,7 +247,10 @@ export function FilesPanel() {
 
   // Rows are --h-row high, which scales with the UI font size.
   const ROW_HEIGHT = useSize('row');
-  const rows = useMemo(() => treeRows(s), [s.root, s.dirs, s.expanded, s.hidden, s.filter, s.edit, s.exclude, s.sort]);
+  const rows = useMemo(
+    () => treeRows(s),
+    [s.m, s.root, s.dirs, s.expanded, s.hidden, s.filter, s.filterRegex, s.filterSearch, s.edit, s.exclude, s.sort],
+  );
   const kinds = useMemo(() => new Map(rows.map((r) => [r.path, r.dir])), [rows]);
   const isDir = (p: string) => kinds.get(p) ?? p === s.root;
 
@@ -518,12 +525,18 @@ export function FilesPanel() {
     return decorations.get(dir)![row.name];
   };
   const selected = new Set(s.selection);
-  // The filter's text in each name, marked.
-  const needle = s.filter.trim().toLowerCase();
-  const matched = (name: string): Array<[number, number]> | undefined => {
-    const at = needle ? name.toLowerCase().indexOf(needle) : -1;
-    return at < 0 ? undefined : [[at, at + needle.length]];
-  };
+  const compiledFilter = compileFilter(s.filter, s.filterRegex);
+  const activeSearchKey = compiledFilter.active ? filterSearchKey(s) : '';
+  const activeSearch = compiledFilter.active && s.filterSearch?.key === activeSearchKey ? s.filterSearch : undefined;
+  const filterError = compiledFilter.error
+    ? t('files.error.bad_regex')
+    : activeSearch?.errorCode === 'bad_regex'
+      ? t('files.error.bad_regex')
+      : activeSearch?.error;
+  const filterLoading = !!activeSearch?.loading;
+  const filterTruncated = !filterError && !filterLoading && !!activeSearch?.truncated && (activeSearch?.matches?.length ?? 0) > 0;
+  // The filter's text or regular expression in each name, marked.
+  const matched = (name: string): Array<[number, number]> | undefined => filterHighlight(name, s.filter, s.filterRegex);
   const cut = new Set(s.clipboard?.cut && s.clipboard.m === m ? s.clipboard.paths : []);
 
   const drawRow = (row: Row, index: number) => {
@@ -683,27 +696,40 @@ export function FilesPanel() {
           <Ellipsis />
         </button>
       </div>
-      <input
-        className="files-filter"
-        type="search"
-        placeholder={t('files.filter')}
-        aria-label={t('files.filter')}
-        value={s.filter}
-        spellCheck={false}
-        onChange={(e) => setFilter(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') setFilter('');
-          else if (e.key === 'ArrowDown' || e.key === 'Enter') {
-            e.preventDefault();
-            treeRef.current?.focus();
-            const st = useTree.getState();
-            if (!st.cursor || !rows.some((r) => r.path === st.cursor)) {
-              const p = stepId(rowIds(rows), undefined, 1);
-              if (p) select(p);
+      <div className={`files-filter-field${filterError ? ' error' : ''}`}>
+        <input
+          className="files-filter"
+          type="search"
+          placeholder={t('files.filter')}
+          aria-label={t('files.filter')}
+          aria-invalid={!!filterError || undefined}
+          value={s.filter}
+          spellCheck={false}
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setFilter('');
+            else if (e.key === 'ArrowDown' || e.key === 'Enter') {
+              e.preventDefault();
+              treeRef.current?.focus();
+              const st = useTree.getState();
+              if (!st.cursor || !rows.some((r) => r.path === st.cursor)) {
+                const p = stepId(rowIds(rows), undefined, 1);
+                if (p) select(p);
+              }
             }
-          }
-        }}
-      />
+          }}
+        />
+        <button
+          type="button"
+          className={`icon files-filter-regex ${s.filterRegex ? 'on' : ''}`}
+          title={t('files.regex')}
+          aria-label={t('files.regex')}
+          aria-pressed={s.filterRegex}
+          onClick={() => setFilterRegex(!s.filterRegex)}
+        >
+          <Regex />
+        </button>
+      </div>
       <div
         ref={setTreeEl}
         className={`tree files-tree ${drop === root ? 'drop' : ''}`}
@@ -738,8 +764,17 @@ export function FilesPanel() {
           {rows.slice(first, last).map((r, i) => drawRow(r, first + i))}
         </div>
         {rootError && <div className="files-note error small">{rootError}</div>}
-        {rootDir?.entries && !rows.length && (
-          <div className="files-note muted small">{t(s.filter ? 'files.noMatch' : 'files.emptyDir')}</div>
+        {filterError && (
+          <div className="files-note error small" role="alert">
+            {filterError}
+          </div>
+        )}
+        {!filterError && filterLoading && !rows.length && <div className="files-note muted small">{t('files.searching')}</div>}
+        {!filterError && !filterLoading && !rows.length && (compiledFilter.active || rootDir?.entries) && (
+          <div className="files-note muted small">{t(compiledFilter.active ? 'files.noMatch' : 'files.emptyDir')}</div>
+        )}
+        {filterTruncated && (
+          <div className="files-note muted small">{t('files.filterTruncated', { n: activeSearch!.matches!.length })}</div>
         )}
       </div>
     </div>

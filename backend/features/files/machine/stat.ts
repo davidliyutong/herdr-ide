@@ -15,6 +15,10 @@ export interface StatOptions {
   waitMs: number;
   /** The stats running at once. */
   max: number;
+  /** How long a caller waits for a free slot before failing with busy
+   * (defaults to min(1000, waitMs / 2) so transient bursts drain while dead
+   * mounts still fail promptly). */
+  slotWaitMs?: number;
   stat: (p: string) => Promise<Stats>;
 }
 
@@ -22,6 +26,7 @@ const busy = () => new Fail('busy', 429, 'too many stats running');
 
 export class Stater {
   private readonly flights = new Map<string, Promise<Stats>>();
+  private readonly waiters: Array<() => void> = [];
   private readonly o: StatOptions;
 
   constructor(o: StatOptions) {
@@ -33,17 +38,58 @@ export class Stater {
     return this.flights.size;
   }
 
-  /** p's stat, or the one of p already running, until signal ends. */
-  private shared(p: string, signal: AbortSignal): Promise<Stats> {
+  private wakeNext(): void {
+    const next = this.waiters.shift();
+    if (next) next();
+  }
+
+  private waitForSlot(signal: AbortSignal): Promise<void> {
     if (signal.aborted) return Promise.reject(signal.reason);
-    let f = this.flights.get(p);
-    if (!f) {
-      if (this.flights.size >= this.o.max) return Promise.reject(busy());
-      f = this.o.stat(p).finally(() => this.flights.delete(p));
-      f.catch(() => {});
-      this.flights.set(p, f);
+    const waitMs = this.o.slotWaitMs ?? Math.min(1000, Math.max(1, Math.floor(this.o.waitMs / 2)));
+    return new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+      };
+      const wake = () => {
+        cleanup();
+        resolve();
+      };
+      const drop = () => {
+        const i = this.waiters.indexOf(wake);
+        if (i >= 0) this.waiters.splice(i, 1);
+        cleanup();
+      };
+      const timer = setTimeout(() => {
+        drop();
+        reject(busy());
+      }, waitMs);
+      const onAbort = () => {
+        drop();
+        reject(signal.reason);
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.waiters.push(wake);
+    });
+  }
+
+  /** p's stat, or the one of p already running, until signal ends. */
+  private async shared(p: string, signal: AbortSignal): Promise<Stats> {
+    for (;;) {
+      if (signal.aborted) throw signal.reason;
+      const existing = this.flights.get(p);
+      if (existing) return waitForResult(existing, signal);
+      if (this.flights.size < this.o.max) {
+        const f = this.o.stat(p).finally(() => {
+          this.flights.delete(p);
+          this.wakeNext();
+        });
+        f.catch(() => {});
+        this.flights.set(p, f);
+        return waitForResult(f, signal);
+      }
+      await this.waitForSlot(signal);
     }
-    return waitForResult(f, signal);
   }
 
   /** The entries of paths, in their order, each as given; expand makes a

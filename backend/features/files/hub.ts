@@ -35,6 +35,7 @@ import { Downloads, DownloadCode, type Download } from './downloads.ts';
 import { archiveName, baseName, downloadPaths, uploadTarget } from './names.ts';
 import {
   CHANGES,
+  MAX_FIND_LIMIT,
   MAX_STAT,
   MAX_UPLOAD,
   MAX_WRITE,
@@ -46,7 +47,7 @@ import {
   type Result,
 } from './protocol.ts';
 import { FILE_CSP, TransferFail, attachment, failCode, serveFile, serveFileDirect } from './serve.ts';
-import { settings } from './settings.ts';
+import { excludeProblem, settings } from './settings.ts';
 
 /** How long a stat or a listing may take (a machine that does not answer). */
 const STAT_MS = 20_000;
@@ -394,7 +395,8 @@ export const filesFeature = (o: FilesOptions = {}) =>
       });
 
       // Bounded recursive file/dir search under ?dir= for @ path completion
-      // (read-only safe, .gitignore-aware, capped on the machine).
+      // (match=fuzzy, .gitignore-aware) and the file explorer's whole-project
+      // filename filter (match=name, optional regex/hidden/exclude).
       api.get('/find', async (c) => {
         const q = queryOf(c);
         const dir = q.get('dir') ?? '';
@@ -406,14 +408,44 @@ export const filesFeature = (o: FilesOptions = {}) =>
         if (limitRaw !== null && limitRaw !== '') {
           if (!/^\d+$/.test(limitRaw)) throw new Fail('bad_request', 400, 'limit must be an integer');
           const n = Number(limitRaw);
-          if (n < 1 || n > 200) throw new Fail('bad_request', 400, 'limit must be between 1 and 200');
+          if (n < 1 || n > MAX_FIND_LIMIT) throw new Fail('bad_request', 400, `limit must be between 1 and ${MAX_FIND_LIMIT}`);
           limit = n;
+        }
+        const matchRaw = q.get('match');
+        let match: 'fuzzy' | 'name' | undefined;
+        if (matchRaw !== null && matchRaw !== '') {
+          if (matchRaw !== 'fuzzy' && matchRaw !== 'name') throw new Fail('bad_request', 400, 'match must be fuzzy or name');
+          match = matchRaw;
+        }
+        const parseFlag = (key: string): boolean | undefined => {
+          const v = q.get(key);
+          if (v === null || v === '') return undefined;
+          if (v === '1' || v === 'true') return true;
+          if (v === '0' || v === 'false') return false;
+          throw new Fail('bad_request', 400, `${key} must be 1 or 0`);
+        };
+        const regex = parseFlag('regex');
+        const hidden = parseFlag('hidden');
+        let exclude: string[] | undefined;
+        if (q.has('exclude')) {
+          const raw = q.getAll('exclude');
+          exclude = raw.length === 1 && raw[0] === '' ? [] : raw;
+          const problem = excludeProblem(exclude);
+          if (problem) throw new Fail('bad_request', 400, problem);
         }
         const res = await ctx.call(
           c.var.machine,
           filesProtocol,
           'find',
-          { dir, ...(query ? { query } : {}), ...(limit !== undefined ? { limit } : {}) },
+          {
+            dir,
+            ...(query ? { query } : {}),
+            ...(limit !== undefined ? { limit } : {}),
+            ...(match !== undefined ? { match } : {}),
+            ...(regex !== undefined ? { regex } : {}),
+            ...(hidden !== undefined ? { hidden } : {}),
+            ...(exclude !== undefined ? { exclude } : {}),
+          },
           { signal: c.req.raw.signal },
         );
         noStore(c);

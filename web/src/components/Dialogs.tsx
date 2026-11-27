@@ -247,24 +247,24 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
 
   // Subdirectories matching what is typed, listed on the machine.
   useEffect(() => {
-    let cancelled = false;
+    const ac = new AbortController();
     const id = window.setTimeout(async () => {
       const [dir, prefix] = completionParts(cwd);
       try {
-        const list = dir ? await listDir(req.m, dir) : undefined;
-        if (cancelled) return;
+        const list = dir ? await listDir(req.m, dir, ac.signal) : undefined;
+        if (ac.signal.aborted) return;
         const names = (list?.entries ?? [])
           .filter((e) => e.is_dir && e.name.startsWith(prefix) && (prefix.startsWith('.') || !e.name.startsWith('.')))
           .map((e) => e.name)
           .sort();
         setDirs(names.length === 1 && names[0] === prefix ? [] : names.slice(0, 8));
       } catch {
-        if (!cancelled) setDirs([]);
+        if (!ac.signal.aborted) setDirs([]);
       }
-      setSel(-1);
+      if (!ac.signal.aborted) setSel(-1);
     }, 120);
     return () => {
-      cancelled = true;
+      ac.abort();
       window.clearTimeout(id);
     };
   }, [cwd, req.m]);
@@ -273,19 +273,19 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
   useEffect(() => {
     setCheck(undefined);
     if (!typed) return;
-    let cancelled = false;
+    const ac = new AbortController();
     const id = window.setTimeout(async () => {
       try {
-        const d = await listDir(req.m, typed);
-        if (cancelled) return;
+        const d = await listDir(req.m, typed, ac.signal);
+        if (ac.signal.aborted) return;
         setCheck(d.dir.is_dir ? { path: typed, resolved: d.dir.path || expandPath(typed, home) } : { path: typed, problem: 'file' });
       } catch (err) {
         const problem = folderProblem(err);
-        if (!cancelled && problem) setCheck({ path: typed, problem });
+        if (!ac.signal.aborted && problem) setCheck({ path: typed, problem });
       }
     }, 250);
     return () => {
-      cancelled = true;
+      ac.abort();
       window.clearTimeout(id);
     };
   }, [typed, req.m, home]);
@@ -445,17 +445,17 @@ function DownloadDialog({ req }: { req: Extract<DialogRequest, { kind: 'download
   const anchor = useRef<string>(undefined);
 
   useEffect(() => {
-    let cancelled = false;
+    const ac = new AbortController();
     setList(undefined);
     setError('');
     setChecked(new Set());
     setQuery('');
     anchor.current = undefined;
-    listDir(req.m, dir)
-      .then((d) => !cancelled && setList({ path: d.dir.path ?? dir, entries: d.entries }))
-      .catch((e: Error) => !cancelled && setError(t('download.listFailed', { dir, error: e.message })));
+    listDir(req.m, dir, ac.signal)
+      .then((d) => !ac.signal.aborted && setList({ path: d.dir.path ?? dir, entries: d.entries }))
+      .catch((e: Error) => !ac.signal.aborted && setError(t('download.listFailed', { dir, error: e.message })));
     return () => {
-      cancelled = true;
+      ac.abort();
     };
   }, [dir, req.m]);
 
@@ -488,6 +488,7 @@ function DownloadDialog({ req }: { req: Extract<DialogRequest, { kind: 'download
       return next;
     });
   const all = shown.length > 0 && shown.every((x) => checked.has(x.e.name));
+  const some = shown.some((x) => checked.has(x.e.name));
   const setShown = (on: boolean) =>
     setChecked((c) => {
       const next = new Set(c);
@@ -544,7 +545,14 @@ function DownloadDialog({ req }: { req: Extract<DialogRequest, { kind: 'download
         <div className="download-list" role="listbox" aria-multiselectable="true" aria-label={path}>
           {shown.length > 0 && (
             <label className="download-row download-all">
-              <input type="checkbox" checked={all} onChange={() => setShown(!all)} />
+              <input
+                type="checkbox"
+                checked={all}
+                ref={(el) => {
+                  if (el) el.indeterminate = some && !all;
+                }}
+                onChange={() => setShown(!all)}
+              />
               <span>{t(query ? 'download.selectShown' : 'download.selectAll')}</span>
             </label>
           )}
@@ -586,6 +594,11 @@ function DownloadDialog({ req }: { req: Extract<DialogRequest, { kind: 'download
       </div>
       <div className="dialog-actions">
         <span className="muted small spacer">{checked.size > 0 && t('download.selected', { n: checked.size })}</span>
+        {checked.size > 0 && (
+          <button type="button" className="ghost" onClick={() => setChecked(new Set())}>
+            {t('download.clear')}
+          </button>
+        )}
         <button onClick={done}>{t('dialog.cancel')}</button>
         <button className="primary" disabled={checked.size === 0} onClick={download}>
           {t('download.button')}

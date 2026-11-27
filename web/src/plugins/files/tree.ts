@@ -12,7 +12,7 @@ import { listDir, type RemoteStat } from '../../lib/files';
 import { loadPref, savePref } from '../../state/store';
 import { settingValue, useSettings } from '../../settings';
 import { selectAll, selectOnly, selectRange, selectToggle, type NavRow } from '../../components/tree/selection';
-import { filesApi, type Entry } from './api';
+import { filesApi, FilesError, type Entry, type FindMatch } from './api';
 
 /** A directory's listing; error is why the last listing failed (the
  * entries listed before are kept), failures how many failed in a row. */
@@ -45,6 +45,16 @@ export interface Clipboard {
   cut: boolean;
 }
 
+/** Result of the whole-project recursive filename search for the active filter. */
+export interface FilterSearch {
+  key: string;
+  matches?: FindMatch[];
+  truncated?: boolean;
+  loading?: boolean;
+  error?: string;
+  errorCode?: string;
+}
+
 export interface TreeState {
   m?: string;
   /** The workspace (of machine m) the root was taken for. */
@@ -61,6 +71,10 @@ export interface TreeState {
   /** How a folder's entries are ordered (the setting files.sortOrder). */
   sort?: SortOrder;
   filter: string;
+  /** Interpret filter as a case-insensitive regular expression. */
+  filterRegex: boolean;
+  /** Whole-project recursive matches for the current filter, fetched from the machine. */
+  filterSearch?: FilterSearch;
   /** Expanded directories, by path (also outside the root, so going back
    * shows a directory as it was; at most MAX_EXPANDED). */
   expanded: Record<string, true>;
@@ -100,6 +114,7 @@ export function fromSettings(): Pick<TreeState, 'follow' | 'hidden' | 'exclude' 
 export const useTree = create<TreeState>(() => ({
   ...fromSettings(),
   filter: '',
+  filterRegex: false,
   expanded: {},
   dirs: {},
   mtimes: {},
@@ -109,7 +124,11 @@ export const useTree = create<TreeState>(() => ({
 const set = (p: Partial<TreeState> | ((s: TreeState) => Partial<TreeState>)) => useTree.setState(p);
 
 useSettings.subscribe((st, prev) => {
-  if (st.values !== prev.values) set(fromSettings());
+  if (st.values !== prev.values) {
+    set(fromSettings());
+    const cur = useTree.getState();
+    if (compileFilter(cur.filter, cur.filterRegex).active) scheduleFilterSearch(false);
+  }
 });
 
 // ---- paths (POSIX, as on machines) ----
@@ -230,15 +249,155 @@ export function excluded(patterns: readonly string[] | undefined, name: string):
   return test(name);
 }
 
+/** Compiled form of the explorer's filename filter (plain substring or JS RegExp). */
+export interface CompiledFilter {
+  active: boolean;
+  query: string;
+  needle: string;
+  re?: RegExp;
+  matchPath: boolean;
+  error?: string;
+}
+
+export function compileFilter(filter: string, regex = false): CompiledFilter {
+  const query = regex ? filter : filter.trim();
+  if (!query) return { active: false, query: '', needle: '', matchPath: false };
+  const matchPath = query.includes('/');
+  if (!regex) {
+    const needle = query.replace(/^\.\//, '').toLowerCase();
+    return { active: needle !== '', query, needle, matchPath: needle.includes('/') };
+  }
+  try {
+    return { active: true, query, needle: '', re: new RegExp(query, 'i'), matchPath };
+  } catch (e) {
+    return { active: true, query, needle: '', matchPath, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Whether a single file/folder matches the compiled filter. */
+function filterMatches(c: CompiledFilter, name: string, rel: string): boolean {
+  if (!c.active) return true;
+  if (c.error) return false;
+  if (c.re) return c.re.test(name) || (c.matchPath && c.re.test(rel));
+  if (c.matchPath) return rel.toLowerCase().includes(c.needle);
+  return name.toLowerCase().includes(c.needle);
+}
+
+/** Character ranges in name matched by the active filter (for highlighting). */
+export function filterHighlight(name: string, filter: string, regex = false): Array<[number, number]> | undefined {
+  const c = compileFilter(filter, regex);
+  if (!c.active || c.error) return undefined;
+  if (!regex) {
+    const lower = name.toLowerCase();
+    const target = c.matchPath ? (c.needle.split('/').filter(Boolean).pop() ?? '') : c.needle;
+    if (!target) return undefined;
+    const at = lower.indexOf(target);
+    return at < 0 ? undefined : [[at, at + target.length]];
+  }
+  const ranges: Array<[number, number]> = [];
+  let g: RegExp;
+  try {
+    g = new RegExp(c.query, 'gi');
+  } catch {
+    return undefined;
+  }
+  let m: RegExpExecArray | null;
+  while ((m = g.exec(name)) !== null && ranges.length < 64) {
+    if (m[0].length === 0) {
+      if (g.lastIndex >= name.length) break;
+      g.lastIndex++;
+      continue;
+    }
+    ranges.push([m.index, m.index + m[0].length]);
+  }
+  return ranges.length ? ranges : undefined;
+}
+
+/** Stable cache key for whole-project recursive filter results. */
+export function filterSearchKey(
+  s: Pick<TreeState, 'root' | 'filter' | 'hidden' | 'exclude'> & Partial<Pick<TreeState, 'm' | 'filterRegex'>>,
+): string {
+  return `${s.m ?? ''}\0${s.root ?? ''}\0${s.filterRegex ? '1' : '0'}\0${s.hidden ? '1' : '0'}\0${(s.exclude ?? []).join('\x1f')}\0${s.filter}`;
+}
+
 /** The tree's rows: the root's entries and those of the expanded
  * directories below it, in the order set, without hidden files unless
- * shown and without the names excluded. A filter keeps the entries whose
- * names hold it, and the directories (listed before) that lead to one,
- * opened. */
-export function treeRows(s: Pick<TreeState, 'root' | 'dirs' | 'expanded' | 'hidden' | 'filter' | 'edit' | 'exclude' | 'sort'>): Row[] {
+ * shown and without the names excluded. A filter searches across the whole
+ * project (when recursive matches are loaded) or falls back to listed
+ * folders, keeping matching files/folders and auto-expanding their ancestors. */
+export function treeRows(
+  s: Pick<TreeState, 'root' | 'dirs' | 'expanded' | 'hidden' | 'filter' | 'edit' | 'exclude' | 'sort'> &
+    Partial<Pick<TreeState, 'm' | 'filterRegex' | 'filterSearch'>>,
+): Row[] {
   if (!s.root) return [];
-  const needle = s.filter.trim().toLowerCase();
-  const match = (name: string) => name.toLowerCase().includes(needle);
+  const root = s.root;
+  const compiled = compileFilter(s.filter, !!s.filterRegex);
+  if (compiled.error) return [];
+
+  // When whole-project recursive search results are available for the active
+  // filter, build a virtual tree containing all matched paths and their
+  // ancestor directories auto-expanded.
+  const searchKey = compiled.active ? filterSearchKey(s) : '';
+  if (compiled.active && s.filterSearch?.key === searchKey && s.filterSearch.matches) {
+    const children = new Map<string, Map<string, RemoteStat>>();
+    const ensure = (parent: string, name: string, isDir: boolean) => {
+      let map = children.get(parent);
+      if (!map) {
+        map = new Map();
+        children.set(parent, map);
+      }
+      const existing = map.get(name);
+      if (existing) {
+        if (isDir && !existing.is_dir) existing.is_dir = true;
+        return;
+      }
+      const loaded = s.dirs[parent]?.entries?.find((e) => e.name === name);
+      map.set(name, loaded ? { ...loaded, is_dir: loaded.is_dir || isDir } : { name, is_dir: isDir, size: 0, mode: 0, mtime: 0 });
+    };
+    const hasMatchDescendant = new Set<string>();
+    for (const m of s.filterSearch.matches) {
+      if (!within(m.path, root) || m.path === root) continue;
+      const rel = relativePath(root, m.path);
+      const segs = rel.split('/').filter(Boolean);
+      if (!segs.length) continue;
+      if (segs.some((seg) => (!s.hidden && seg.startsWith('.')) || excluded(s.exclude, seg))) continue;
+      let dir = root;
+      for (let i = 0; i < segs.length; i++) {
+        const seg = segs[i];
+        const isLast = i === segs.length - 1;
+        const isDir = isLast ? !!m.is_dir : true;
+        ensure(dir, seg, isDir);
+        const next = join(dir, seg);
+        if (!isLast) hasMatchDescendant.add(next);
+        dir = next;
+      }
+    }
+    const walkSearch = (dir: string, depth: number, out: Row[]) => {
+      if (s.edit && s.edit.kind !== 'rename' && s.edit.path === dir) {
+        out.push({ path: dir, name: '', depth, dir: s.edit.kind === 'folder', expanded: false, creating: s.edit.kind });
+      }
+      const map = children.get(dir);
+      if (!map) return;
+      for (const e of sortEntries([...map.values()], s.sort)) {
+        const path = join(dir, e.name);
+        const expanded = e.is_dir && (hasMatchDescendant.has(path) || !!s.expanded[path]);
+        const row: Row = {
+          path,
+          name: e.name,
+          depth,
+          dir: e.is_dir,
+          expanded,
+          link: (e as { is_link?: boolean }).is_link,
+        };
+        out.push(row);
+        if (e.is_dir && expanded) walkSearch(path, depth + 1, out);
+      }
+    };
+    const out: Row[] = [];
+    walkSearch(root, 0, out);
+    return out;
+  }
+
   const walk = (dir: string, depth: number, out: Row[]) => {
     if (s.edit && s.edit.kind !== 'rename' && s.edit.path === dir) {
       out.push({ path: dir, name: '', depth, dir: s.edit.kind === 'folder', expanded: false, creating: s.edit.kind });
@@ -248,6 +407,7 @@ export function treeRows(s: Pick<TreeState, 'root' | 'dirs' | 'expanded' | 'hidd
     for (const e of sortEntries(entries, s.sort)) {
       if ((!s.hidden && e.name.startsWith('.')) || excluded(s.exclude, e.name)) continue;
       const path = join(dir, e.name);
+      const rel = relativePath(root, path);
       const row: Row = {
         path,
         name: e.name,
@@ -257,24 +417,24 @@ export function treeRows(s: Pick<TreeState, 'root' | 'dirs' | 'expanded' | 'hidd
         link: (e as { is_link?: boolean }).is_link,
       };
       if (!e.is_dir) {
-        if (!needle || match(e.name)) out.push(row);
+        if (!compiled.active || filterMatches(compiled, e.name, rel)) out.push(row);
         continue;
       }
-      if (!needle) {
+      if (!compiled.active) {
         out.push(row);
         if (row.expanded) walk(path, depth + 1, out);
         continue;
       }
       const kids: Row[] = [];
       walk(path, depth + 1, kids);
-      if (kids.length || match(e.name)) {
+      if (kids.length || filterMatches(compiled, e.name, rel)) {
         row.expanded = kids.length > 0;
         out.push(row, ...kids);
       }
     }
   };
   const out: Row[] = [];
-  walk(s.root, 0, out);
+  walk(root, 0, out);
   return out;
 }
 
@@ -318,6 +478,7 @@ export interface TreeMemory {
   cursor?: string;
   anchor?: string;
   filter: string;
+  filterRegex?: boolean;
   scrollTop: number;
 }
 
@@ -353,6 +514,7 @@ function saveTreeMemory(s: TreeState) {
     cursor: s.cursor,
     anchor: s.anchor,
     filter: s.filter,
+    filterRegex: s.filterRegex,
     scrollTop: prevScroll,
   });
 }
@@ -371,11 +533,96 @@ export function setScrollMemory(m: string, root: string, scrollTop: number) {
     cursor: same ? s.cursor : prev?.cursor,
     anchor: same ? s.anchor : prev?.anchor,
     filter: same ? s.filter : (prev?.filter ?? ''),
+    filterRegex: same ? s.filterRegex : prev?.filterRegex,
     scrollTop,
   });
 }
 
+/** Debounce delay before querying the machine for whole-project filename matches. */
+export const FILTER_SEARCH_MS = 150;
+/** Maximum matches fetched for the explorer's whole-project filename filter. */
+export const FILTER_FIND_LIMIT = 500;
+
+let filterTimer: ReturnType<typeof setTimeout> | undefined;
+let filterAbort: AbortController | undefined;
+
+function cancelFilterSearch() {
+  if (filterTimer !== undefined) {
+    clearTimeout(filterTimer);
+    filterTimer = undefined;
+  }
+  if (filterAbort) {
+    filterAbort.abort();
+    filterAbort = undefined;
+  }
+}
+
+/** Queries the machine recursively for files and directories matching the
+ * active explorer filter across the whole project. */
+export function scheduleFilterSearch(debounced = true) {
+  cancelFilterSearch();
+  const s = useTree.getState();
+  const compiled = compileFilter(s.filter, s.filterRegex);
+  if (!s.m || !s.root || !compiled.active) {
+    if (s.filterSearch !== undefined) set({ filterSearch: undefined });
+    return;
+  }
+  const key = filterSearchKey(s);
+  if (compiled.error) {
+    set({ filterSearch: { key, error: compiled.error, errorCode: 'bad_regex' } });
+    return;
+  }
+  const prev = s.filterSearch;
+  set({
+    filterSearch: prev && prev.key === key ? { ...prev, loading: true, error: undefined, errorCode: undefined } : { key, loading: true },
+  });
+  const m = s.m;
+  const root = s.root;
+  const gen = generation;
+  const run = async () => {
+    filterTimer = undefined;
+    const ac = new AbortController();
+    filterAbort = ac;
+    try {
+      const res = await filesApi.find(
+        m,
+        {
+          dir: root,
+          query: compiled.query,
+          match: 'name',
+          regex: s.filterRegex,
+          hidden: s.hidden,
+          exclude: s.exclude,
+          limit: FILTER_FIND_LIMIT,
+        },
+        ac.signal,
+      );
+      if (ac.signal.aborted || gen !== generation) return;
+      if (filterSearchKey(useTree.getState()) !== key) return;
+      set({ filterSearch: { key, matches: res.matches, truncated: res.truncated, loading: false } });
+    } catch (e) {
+      if (ac.signal.aborted || gen !== generation) return;
+      if (filterSearchKey(useTree.getState()) !== key) return;
+      if (e instanceof FilesError) {
+        // Older agents without /find fall back silently to already-listed folders.
+        if (e.code === 'unknown_plugin' || e.code === 'plugin_disabled' || e.code === 'http_404') {
+          set({ filterSearch: undefined });
+          return;
+        }
+        set({ filterSearch: { key, error: e.message, errorCode: e.code, loading: false } });
+        return;
+      }
+      set({ filterSearch: { key, error: e instanceof Error ? e.message : String(e), loading: false } });
+    } finally {
+      if (filterAbort === ac) filterAbort = undefined;
+    }
+  };
+  if (debounced) filterTimer = setTimeout(() => void run(), FILTER_SEARCH_MS);
+  else void run();
+}
+
 export function resetTreeMemory() {
+  cancelFilterSearch();
   treeMemory.clear();
   lastAutoRevealed = undefined;
   useReveal.setState({ path: undefined, seq: 0 });
@@ -453,6 +700,8 @@ export function showRoot(m: string, root: string, ws?: string) {
       cursor: mem?.cursor,
       anchor: mem?.anchor,
       filter: mem?.filter ?? '',
+      filterRegex: mem?.filterRegex ?? false,
+      filterSearch: undefined,
       edit: undefined,
     });
   } else {
@@ -469,12 +718,16 @@ export function showRoot(m: string, root: string, ws?: string) {
         cursor: mem?.cursor,
         anchor: mem?.anchor,
         filter: mem ? mem.filter : '',
+        filterRegex: mem?.filterRegex ?? false,
+        filterSearch: undefined,
         edit: undefined,
       };
     });
   }
   const st = useTree.getState();
   for (const p of shownDirs(st)) if (!st.dirs[p]?.entries && !st.dirs[p]?.loading) void loadDir(p);
+  if (compileFilter(st.filter, st.filterRegex).active) scheduleFilterSearch(false);
+  else cancelFilterSearch();
 }
 
 /** Expands all ancestor folders of path within the current root, loads any
@@ -534,13 +787,16 @@ export async function loadDir(path: string, mtime?: number) {
 
 /** Lists the directories again whose entries a change touched. */
 export function reloadDirs(paths: Iterable<string>) {
-  const { dirs } = useTree.getState();
-  for (const p of new Set(paths)) if (dirs[p]) void loadDir(p);
+  const s = useTree.getState();
+  for (const p of new Set(paths)) if (s.dirs[p]) void loadDir(p);
+  if (compileFilter(s.filter, s.filterRegex).active) scheduleFilterSearch(false);
 }
 
 /** Lists the shown directories again (Refresh). */
 export function refresh() {
-  for (const p of shownDirs(useTree.getState())) void loadDir(p);
+  const s = useTree.getState();
+  for (const p of shownDirs(s)) void loadDir(p);
+  if (compileFilter(s.filter, s.filterRegex).active) scheduleFilterSearch(false);
 }
 
 export function setExpanded(path: string, open: boolean) {
@@ -566,10 +822,18 @@ export function setFollow(follow: boolean) {
 export function setHidden(hidden: boolean) {
   savePref('files.hidden', hidden);
   set({ hidden });
+  const s = useTree.getState();
+  if (compileFilter(s.filter, s.filterRegex).active) scheduleFilterSearch(false);
 }
 
 export function setFilter(filter: string) {
   set({ filter });
+  scheduleFilterSearch(true);
+}
+
+export function setFilterRegex(filterRegex: boolean) {
+  set({ filterRegex });
+  scheduleFilterSearch(false);
 }
 
 /** Selects path alone (or adds it, or a range from the anchor). */

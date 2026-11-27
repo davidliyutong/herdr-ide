@@ -48,19 +48,38 @@
   color: var(--fg);
   text-decoration: underline;
 }
-.files-filter {
+.files-filter-field {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   margin: 0 8px 4px;
-  font: inherit;
-  color: var(--fg);
+  padding: 0 2px 0 6px;
+  height: var(--ctl);
   background: var(--bg);
   border: 1px solid var(--line-2);
   border-radius: var(--radius-sm);
-  height: var(--ctl);
-  padding: 0 6px;
+}
+.files-filter-field:focus-within {
+  border-color: var(--accent);
+}
+.files-filter-field.error {
+  border-color: var(--danger);
+}
+.files-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  height: 100%;
+  padding: 0;
   outline: none;
 }
-.files-filter:focus {
-  border-color: var(--accent);
+.files-filter-regex {
+  flex: none;
+  width: calc(var(--ctl) - 4px);
+  height: calc(var(--ctl) - 4px);
 }
 .files-tree {
   flex: 1;

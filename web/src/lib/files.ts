@@ -24,8 +24,8 @@ export interface RemoteStat {
   is_dir: boolean;
 }
 
-export async function listDir(m: string, path: string): Promise<{ dir: RemoteStat; entries: RemoteStat[] }> {
-  const r = await fetch(`/api/m/${encodeURIComponent(m)}/list?${new URLSearchParams({ path })}`);
+export async function listDir(m: string, path: string, signal?: AbortSignal): Promise<{ dir: RemoteStat; entries: RemoteStat[] }> {
+  const r = await fetch(`/api/m/${encodeURIComponent(m)}/list?${new URLSearchParams({ path })}`, signal ? { signal } : undefined);
   const j = await r.json();
   if (!r.ok) throw new Error(j.error ?? r.statusText);
   return j;

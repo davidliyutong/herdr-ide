@@ -17,18 +17,38 @@
 // flashes "Loading..." and only revalidates silently in the background.
 
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { create as createStore } from 'zustand';
 import { saveHandlers } from '../saveKey';
-import { Code as CodeIcon, Columns2, Download, Eye, FileDiff, FolderTree, Pin, RotateCcw, Save } from 'lucide-react';
+import {
+  Code as CodeIcon,
+  Columns2,
+  Copy,
+  Download,
+  ExternalLink,
+  Eye,
+  FileDiff,
+  FolderTree,
+  Link,
+  Pin,
+  RotateCcw,
+  Save,
+  WrapText,
+} from 'lucide-react';
 import { fileUrl } from '../../lib/files';
-import { useStore } from '../../state/store';
+import { APP_SLUG } from '../../brand';
+import { loadPref, savePref, useStore } from '../../state/store';
 import { terms, useTerms } from '../../state/terms';
 import * as L from '../../term/layout';
 import { t } from '../../i18n';
+import { keyLabel } from '../../keys';
+import { openMenu, type MenuEntry } from '../../contextMenu';
+import { useSettings } from '../../settings';
+import { openWebLink } from '../../terminal/openLink';
 import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../unsaved';
 import type { PaneViewProps } from '../api';
 import { createEditor, setLanguage, type CodeEditor, type EditorViewState, type Monaco, type TextModel } from '../monaco';
 import { ConflictError, errorText, FilesError, filesApi, type Entry } from './api';
-import { keepEditor, loadRevealable, openEditor, reveal } from './ops';
+import { copyText, keepEditor, loadRevealable, openEditor, reveal, revealEntries } from './ops';
 import { lineChanges, quickDiff, type LineChange } from './quickDiff';
 import { useDecorationVersion } from './decorations';
 import { noteFile } from './gone';
@@ -45,12 +65,35 @@ import {
   touchCachedFile,
 } from './fileCache';
 import { isMediaPath, MediaView } from '../../components/PreviewPane';
-import { isMarkdownPath } from '../../markdown/links';
+import { isMarkdownPath, safeLink } from '../../markdown/links';
 import { Markdown } from '../../markdown/Markdown';
 import { isMixed, restoreEols, useMixedLineEndings } from '../../eol';
 import './files.css';
 
 export { isMarkdownPath, resetFileCache };
+
+/** Browser-local override for soft-wrapping in the file explorer's Monaco editor;
+ * null falls back to the `files.wordWrap` hub setting. */
+const useWordWrapPref = createStore<{ override: boolean | null }>(() => ({
+  override: loadPref<boolean | null>('files.wordWrap', null),
+}));
+
+/** Toggles soft-wrap in every open editor pane and remembers it in this browser. */
+export function setWordWrap(on: boolean) {
+  savePref('files.wordWrap', on);
+  useWordWrapPref.setState({ override: on });
+}
+
+/** Clears the in-memory word-wrap override (for tests). */
+export function resetWordWrapPref() {
+  useWordWrapPref.setState({ override: null });
+}
+
+function useWordWrap(): boolean {
+  const override = useWordWrapPref((s) => s.override);
+  const setting = useSettings((s) => s.values['files.wordWrap']?.value === true);
+  return override ?? setting;
+}
 
 /** The largest file the editor opens (the hub's limit for a save). */
 export const MAX_SIZE = 8 << 20;
@@ -496,6 +539,9 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
   const isMarkdown = isMarkdownPath(path);
   const hasLineTarget = typeof view.line === 'number' && view.line > 0;
   const readOnly = useStore((s) => s.readOnly);
+  const wordWrap = useWordWrap();
+  const wordWrapRef = useRef(wordWrap);
+  wordWrapRef.current = wordWrap;
   // A file that mixes line endings (eol.ts): Monaco shows one kind; a
   // save keeps each line's own (keep), writes Monaco's (unify), or the
   // file is not edited (readOnly).
@@ -820,6 +866,7 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
     let created: { editor: CodeEditor; monaco: Monaco } | undefined;
     let sub: { dispose(): void } | undefined;
     let keys: { dispose(): void } | undefined;
+    let wrapAction: { dispose(): void } | undefined;
     const myKey = currentKey;
 
     const cleanup = () => {
@@ -828,6 +875,7 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
       ed.current = undefined;
       sub?.dispose();
       keys?.dispose();
+      wrapAction?.dispose();
       const viewState = pendingViewState.current ?? c?.editor.saveViewState?.() ?? null;
       pendingViewState.current = undefined;
       if (c) {
@@ -865,7 +913,10 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
     editorCleanup.current = cleanup;
 
     (async () => {
-      created = await createEditor(el, { readOnly: useStore.getState().readOnly });
+      created = await createEditor(el, {
+        readOnly: useStore.getState().readOnly,
+        wordWrap: wordWrapRef.current ? 'on' : 'off',
+      });
       if (cancelled || loadKeyRef.current !== myKey) {
         created.editor.dispose();
         return;
@@ -896,6 +947,14 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
         }
       }
       keys = editor.onKeyDown((e) => saveKeys.editor(e, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS));
+      if (monaco.KeyMod?.Alt && monaco.KeyCode?.KeyZ) {
+        wrapAction = editor.addAction?.({
+          id: `${APP_SLUG}.toggleWordWrap`,
+          label: t('files.wordWrap'),
+          keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyZ],
+          run: () => setWordWrap(!wordWrapRef.current),
+        });
+      }
       sub = model.onDidChangeContent(() => {
         setDirty(model.getAlternativeVersionId() !== savedAt.current);
         if (isMarkdown) setContent(model.getValue());
@@ -926,8 +985,8 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
   }, [showPreview, paneShown, m, pane, path]);
 
   useEffect(() => {
-    ed.current?.editor.updateOptions({ readOnly: locked });
-  }, [locked, editorTick]);
+    ed.current?.editor.updateOptions({ readOnly: locked, wordWrap: wordWrap ? 'on' : 'off' });
+  }, [locked, wordWrap, editorTick]);
 
   // When a kept hidden tab becomes visible again, silently check disk if stale.
   const wasShown = useRef(paneShown);
@@ -1123,6 +1182,18 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
           </div>
         )}
         {changes}
+        {isTextReady && showEditor && (
+          <button
+            type="button"
+            className={`icon ${wordWrap ? 'on' : ''}`}
+            title={`${t('files.wordWrap')} (${keyLabel('alt+z')})`}
+            aria-label={t('files.wordWrap')}
+            aria-pressed={wordWrap}
+            onClick={() => setWordWrap(!wordWrap)}
+          >
+            <WrapText />
+          </button>
+        )}
         <button className="icon" title={t('files.revert')} aria-label={t('files.revert')} onClick={() => void reload()}>
           <RotateCcw />
         </button>
@@ -1187,6 +1258,46 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
             className="files-md-preview"
             onScroll={(e) => {
               previewScrollTop.current = e.currentTarget.scrollTop;
+            }}
+            onContextMenu={(e) => {
+              const sel = window.getSelection()?.toString() ?? '';
+              const anchor = (e.target as HTMLElement | null)?.closest<HTMLAnchorElement>('a[href]');
+              const rawHref = anchor?.getAttribute('href') ?? undefined;
+              const webHref = rawHref ? safeLink(rawHref) : undefined;
+              const entries: MenuEntry[] = [
+                {
+                  label: t('surface.copy'),
+                  icon: <Copy />,
+                  disabled: !sel,
+                  run: () => void copyText(sel),
+                },
+              ];
+              if (webHref) {
+                entries.push(
+                  'sep',
+                  {
+                    label: t('link.menuOpenUrl', { url: webHref }),
+                    icon: <ExternalLink />,
+                    run: () => openWebLink(webHref, m, { ask: true }),
+                  },
+                  { label: t('link.menuCopyUrl'), icon: <Link />, run: () => void copyText(webHref) },
+                );
+              }
+              entries.push('sep');
+              if (mdMode !== 'preview') {
+                entries.push({ label: t('files.markdown.preview'), icon: <Eye />, run: () => switchMdMode('preview') });
+              }
+              if (mdMode !== 'split') {
+                entries.push({ label: t('files.markdown.split'), icon: <Columns2 />, run: () => switchMdMode('split') });
+              }
+              entries.push({ label: t('files.markdown.source'), icon: <CodeIcon />, run: () => switchMdMode('source') });
+              entries.push(
+                'sep',
+                { label: t('files.copyPath'), icon: <Copy />, run: () => void copyText(path) },
+                { label: t('files.reveal'), icon: <FolderTree />, run: () => reveal(m, path) },
+                ...revealEntries(m, path),
+              );
+              openMenu(e, entries);
             }}
           >
             <Markdown text={deferredContent} variant="document" base={mdBase} onOpenPath={openRelative} />

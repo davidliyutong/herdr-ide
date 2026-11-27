@@ -140,7 +140,17 @@ export const filesMachine = (o: FilesOptions = {}) =>
       actions: {
         stat: (p, ctx) => stater.stat(p.paths, (x) => ctx.expand(x), ctx.signal),
 
-        find: (p, ctx) => findFiles({ dir: ctx.expand(p.dir), query: p.query, limit: p.limit, signal: ctx.signal }),
+        find: (p, ctx) =>
+          findFiles({
+            dir: ctx.expand(p.dir),
+            query: p.query,
+            limit: p.limit,
+            match: p.match,
+            regex: p.regex,
+            hidden: p.hidden,
+            exclude: p.exclude,
+            signal: ctx.signal,
+          }),
 
         mkdir: (p, ctx) => {
           // A taken name fails, or with unique the folder gets the first

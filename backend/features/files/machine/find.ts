@@ -1,16 +1,30 @@
-// Bounded recursive file & directory finder for @ path completion on a machine:
-// read-only BFS walk (never follows symlinks), .gitignore-aware, capped at
-// MAX_VISITED entries and TIMEOUT_MS so huge repositories stay snappy.
+// Bounded recursive file & directory finder on a machine:
+// - match: "fuzzy" (default, for @ path completion): read-only BFS walk (never
+//   follows symlinks), .gitignore-aware, capped at MAX_VISITED entries and
+//   FIND_TIMEOUT_MS so huge repositories stay snappy.
+// - match: "name" (for the File Explorer's whole-project filename filter):
+//   read-only BFS walk (never follows symlinks), honoring the explorer's hidden
+//   and exclude settings, optional regular expressions (RE2's syntax, matched
+//   in linear time: a pattern from the client cannot stall the node by
+//   backtracking, which no deadline between entries would stop), higher
+//   visit/time caps,
+//   and two-priority traversal so project files are searched before heavy
+//   dependency/build directories when not explicitly excluded.
 import { constants, statSync, type Dirent } from 'node:fs';
 import { lstat, open, readdir } from 'node:fs/promises';
 import { posix } from 'node:path';
+import { RE2JS } from 're2js';
 import { Fail } from '#shared/lib/fail.ts';
-import type { FindMatch, FindResult } from '../protocol.ts';
+import { MAX_FIND_LIMIT, type FindMatch, type FindResult } from '../protocol.ts';
+import { DEFAULT_EXCLUDE } from '../settings.ts';
 
 export const DEFAULT_FIND_LIMIT = 50;
-export const MAX_FIND_LIMIT = 200;
+export { MAX_FIND_LIMIT };
 export const MAX_VISITED = 2000;
 export const FIND_TIMEOUT_MS = 2000;
+export const EXPLORER_MAX_VISITED = 50_000;
+export const EXPLORER_TIMEOUT_MS = 5_000;
+const MAX_HITS = 5_000;
 const MAX_GITIGNORE = 128 << 10;
 
 const DEFAULT_SKIP = new Set([
@@ -28,6 +42,49 @@ const DEFAULT_SKIP = new Set([
   '.venv',
   'venv',
 ]);
+
+/** Heavy dependency/cache directories searched only after regular project
+ * directories in explorer filename search (unless already excluded). */
+const DEFERRED_DIRS = new Set(['node_modules', 'target', '__pycache__', '.venv', 'venv', '.next', '.nuxt', '.cache']);
+
+/** Compiles one files.exclude glob pattern (same syntax as web/src/plugins/files/tree.ts). */
+function excludeGlobRe(pattern: string): RegExp | undefined {
+  const p = pattern.replace(/^(\*\*\/)+/, '');
+  if (!p) return undefined;
+  let re = '';
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i]!;
+    if (c === '\\' && i + 1 < p.length) {
+      re += p[++i]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    } else if (c === '*') {
+      re += '.*';
+    } else if (c === '?') {
+      re += '.';
+    } else if (c === '[') {
+      const end = p.indexOf(']', i + 2);
+      if (end < 0) re += '\\[';
+      else {
+        let body = p.slice(i + 1, end).replace(/\\/g, '\\\\');
+        if (body.startsWith('!')) body = '^' + body.slice(1);
+        re += `[${body}]`;
+        i = end;
+      }
+    } else {
+      re += c.replace(/[.+^${}()|\\\]]/g, '\\$&');
+    }
+  }
+  try {
+    return new RegExp(`^${re}$`);
+  } catch {
+    return undefined;
+  }
+}
+
+function compileExclude(patterns: readonly string[]): (name: string) => boolean {
+  const res = patterns.map(excludeGlobRe).filter((r): r is RegExp => !!r);
+  if (!res.length) return () => false;
+  return (name: string) => res.some((r) => r.test(name));
+}
 
 interface IgnoreRule {
   base: string;
@@ -148,9 +205,43 @@ export interface FindOptions {
   dir: string;
   query?: string;
   limit?: number;
+  match?: 'fuzzy' | 'name';
+  regex?: boolean;
+  hidden?: boolean;
+  exclude?: readonly string[];
   maxVisited?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
+}
+
+/** Scores a filename/path substring match for explorer search (-1 = no match). */
+function scoreName(rel: string, name: string, q: string, matchPath: boolean): number {
+  const ln = name.toLowerCase();
+  if (!matchPath) {
+    if (ln === q) return 0;
+    if (ln.startsWith(q)) return 1;
+    const ni = ln.indexOf(q);
+    return ni >= 0 ? 2 + Math.min(ni, 50) * 0.01 : -1;
+  }
+  const lr = rel.toLowerCase();
+  if (lr === q) return 0;
+  if (lr.startsWith(q)) return 1;
+  const ri = lr.indexOf(q);
+  return ri >= 0 ? 2 + Math.min(ri, 100) * 0.005 : -1;
+}
+
+/** Scores a regular-expression match against name (or rel when pattern includes /). */
+function scoreRegex(rel: string, name: string, re: RE2JS, matchPath: boolean): number {
+  const m = re.matcher(name);
+  if (m.find()) {
+    if (m.start() === 0 && m.end() === name.length) return 0;
+    if (m.start() === 0) return 1;
+    return 2 + Math.min(m.start(), 50) * 0.01;
+  }
+  if (!matchPath) return -1;
+  const rm = re.matcher(rel);
+  if (!rm.find()) return -1;
+  return 3 + Math.min(rm.start(), 100) * 0.005;
 }
 
 /** Walks dir breadth-first (without following symlinks), returning matching
@@ -169,14 +260,32 @@ export async function findFiles(o: FindOptions): Promise<FindResult> {
   }
   if (!isDir) throw new Fail('not_dir', 400, `${o.dir} is not a directory`);
 
-  const rawQuery = (o.query ?? '').trim();
-  if (Buffer.byteLength(rawQuery) > 256 || /[\0\r\n]/.test(rawQuery)) throw new Fail('bad_params', 400, 'invalid query');
-  const q = rawQuery.replace(/^\.\//, '').toLowerCase();
+  const mode = o.match ?? 'fuzzy';
+  const isNameMode = mode === 'name';
+  const useRegex = o.regex === true;
+  const rawInput = o.query ?? '';
+  if (Buffer.byteLength(rawInput) > 256 || /[\0\r\n]/.test(rawInput)) throw new Fail('bad_params', 400, 'invalid query');
+  const rawQuery = useRegex ? rawInput : rawInput.trim();
+  const q = useRegex ? rawQuery : rawQuery.replace(/^\.\//, '').toLowerCase();
+
+  let regex: RE2JS | undefined;
+  if (useRegex && rawQuery !== '') {
+    try {
+      regex = RE2JS.compile(rawQuery, RE2JS.CASE_INSENSITIVE);
+    } catch (e) {
+      throw new Fail('bad_regex', 400, (e as Error).message);
+    }
+  }
+
+  if (isNameMode && !q) return { matches: [] };
+
   const limit = Math.max(1, Math.min(o.limit ?? DEFAULT_FIND_LIMIT, MAX_FIND_LIMIT));
-  const maxVisited = o.maxVisited ?? MAX_VISITED;
-  const deadline = Date.now() + (o.timeoutMs ?? FIND_TIMEOUT_MS);
+  const maxVisited = o.maxVisited ?? (isNameMode ? EXPLORER_MAX_VISITED : MAX_VISITED);
+  const deadline = Date.now() + (o.timeoutMs ?? (isNameMode ? EXPLORER_TIMEOUT_MS : FIND_TIMEOUT_MS));
+  const matchPath = q.includes('/');
   const firstSeg = q.split('/')[0] ?? '';
-  const allowHidden = q.startsWith('.') || q.includes('/.');
+  const allowHidden = o.hidden ?? (!isNameMode && (q.startsWith('.') || q.includes('/.')));
+  const isExcluded = isNameMode ? compileExclude(o.exclude ?? DEFAULT_EXCLUDE) : o.exclude ? compileExclude(o.exclude) : () => false;
 
   interface QueueItem {
     abs: string;
@@ -184,18 +293,19 @@ export async function findFiles(o: FindOptions): Promise<FindResult> {
     rules: IgnoreRule[];
   }
 
-  const rootRules = await readGitignore(o.dir, '');
+  const rootRules = isNameMode ? [] : await readGitignore(o.dir, '');
   const queue: QueueItem[] = [{ abs: o.dir, rel: '', rules: rootRules }];
+  const deferred: QueueItem[] = [];
   const hits: Array<{ match: FindMatch; score: number }> = [];
   let visited = 0;
   let truncated = false;
 
-  while (queue.length > 0) {
+  while (queue.length > 0 || deferred.length > 0) {
     if (o.signal?.aborted || Date.now() >= deadline) {
       truncated = true;
       break;
     }
-    const cur = queue.shift()!;
+    const cur = queue.length > 0 ? queue.shift()! : deferred.shift()!;
     let entries: Dirent[];
     try {
       entries = await readdir(cur.abs, { withFileTypes: true });
@@ -216,9 +326,14 @@ export async function findFiles(o: FindOptions): Promise<FindResult> {
       if (!entIsDir && !ent.isFile()) continue;
       const rel = cur.rel ? `${cur.rel}/${name}` : name;
 
-      if (entIsDir && DEFAULT_SKIP.has(name) && firstSeg !== name.toLowerCase()) continue;
-      if (name.startsWith('.') && !allowHidden && name !== '.env.example') continue;
-      if (isIgnored(rel, name, entIsDir, cur.rules)) continue;
+      if (isNameMode) {
+        if ((!allowHidden && name.startsWith('.')) || isExcluded(name)) continue;
+      } else {
+        if (entIsDir && DEFAULT_SKIP.has(name) && firstSeg !== name.toLowerCase()) continue;
+        if (name.startsWith('.') && !allowHidden && name !== '.env.example') continue;
+        if (isExcluded(name)) continue;
+        if (isIgnored(rel, name, entIsDir, cur.rules)) continue;
+      }
 
       visited++;
       if (visited > maxVisited) {
@@ -227,7 +342,11 @@ export async function findFiles(o: FindOptions): Promise<FindResult> {
       }
 
       const abs = posix.join(cur.abs, name);
-      const score = scoreMatch(rel, name, q);
+      const score = regex
+        ? scoreRegex(rel, name, regex, matchPath)
+        : isNameMode
+          ? scoreName(rel, name, q, matchPath)
+          : scoreMatch(rel, name, q);
       if (score >= 0) {
         hits.push({
           score,
@@ -238,11 +357,21 @@ export async function findFiles(o: FindOptions): Promise<FindResult> {
             ...(entIsDir ? { is_dir: true } : {}),
           },
         });
+        if (hits.length >= MAX_HITS) {
+          truncated = true;
+          break;
+        }
       }
 
       if (entIsDir) {
-        const sub = await readGitignore(abs, rel);
-        queue.push({ abs, rel, rules: sub.length ? [...cur.rules, ...sub] : cur.rules });
+        if (isNameMode) {
+          const item: QueueItem = { abs, rel, rules: cur.rules };
+          if (DEFERRED_DIRS.has(name)) deferred.push(item);
+          else queue.push(item);
+        } else {
+          const sub = await readGitignore(abs, rel);
+          queue.push({ abs, rel, rules: sub.length ? [...cur.rules, ...sub] : cur.rules });
+        }
       }
 
       // Without a query, stop once we have collected enough shallow entries.

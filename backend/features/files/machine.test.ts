@@ -356,6 +356,21 @@ describe('stat', () => {
       return es[0].exists && es[0].size === 3;
     }, 'the stats to end');
   });
+
+  test('briefly queues transient stat bursts beyond max slots instead of returning busy immediately', async () => {
+    const real = (p: string) => import('node:fs/promises').then((m) => m.stat(p));
+    const f = await files({
+      statWaitMs: 2000,
+      maxStatting: 2,
+      stat: async (p) => {
+        await Bun.sleep(15);
+        return real(p);
+      },
+    });
+    for (let i = 0; i < 6; i++) write(`${f.home}/q${i}`, `v${i}`);
+    const results = await Promise.all(Array.from({ length: 6 }, (_, i) => f.act('stat', { paths: [`~/q${i}`] }) as Promise<Entry[]>));
+    expect(results.every((es) => es[0].exists && !es[0].error)).toBe(true);
+  });
 });
 
 describe('saving', () => {

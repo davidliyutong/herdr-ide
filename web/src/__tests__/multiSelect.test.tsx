@@ -272,6 +272,23 @@ describe('workspaces and machines selected together', () => {
     ]);
   });
 
+  it('disables several already-offline machines directly without asking', async () => {
+    await act(async () =>
+      useStore.getState().setMachines([machine('m', 'local'), machine('gpu', 'ssh', 'error'), machine('db', 'ssh', 'auth_required')]),
+    );
+    await render(() => <Sidebar />);
+    await act(async () => heads()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })));
+    await act(async () => heads()[2].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })));
+    const items = await menuOf(heads()[1]);
+    item(items, 'Disable 2 Machines…').run!();
+    await vi.waitFor(() => expect(fetchMock.mock.calls).toHaveLength(2));
+    expect(useDialog.getState().current).toBeUndefined();
+    expect(fetchMock.mock.calls.map(([u, i]) => [u, i?.body])).toEqual([
+      ['/api/m/gpu/enabled', '{"enabled":false}'],
+      ['/api/m/db/enabled', '{"enabled":false}'],
+    ]);
+  });
+
   it('moves through the rows with the keyboard, folds machines and selects workspaces', async () => {
     await render(() => <Sidebar />);
     const list = host.querySelector<HTMLElement>('.sidebar-scroll')!;

@@ -149,8 +149,45 @@ describe('FilePicker', () => {
     expect(onSelect).toHaveBeenCalledWith([{ path: '/work/repo/README.md', label: 'README.md' }]);
   });
 
+  it('supports Select all and Deselect all for visible files', async () => {
+    const { onSelect } = await mount();
+    await click(q('.file-picker-select-all'));
+    expect(q('.file-picker-count')?.textContent).toBe(t('conversation.filePicker.selected', { n: 2 }));
+    expect(q('.file-picker-select-all')).toBeNull();
+    expect(q('.file-picker-clear')).not.toBeNull();
+    await click(q('.file-picker-clear'));
+    expect(q('.file-picker-count')?.textContent).toBe('');
+    expect(q<HTMLButtonElement>('.file-picker-foot .primary')!.disabled).toBe(true);
+    await click(q('.file-picker-select-all'));
+    await click(q('.file-picker-foot .primary'));
+    expect(onSelect).toHaveBeenCalledWith([
+      { path: '/work/repo/my notes.txt', label: 'my notes.txt' },
+      { path: '/work/repo/README.md', label: 'README.md' },
+    ]);
+  });
+
   it('shows an error note when directory listing fails', async () => {
     await mount({ rootDir: '/missing' });
     expect(q('.file-picker-note.error')?.textContent).toContain('ENOENT');
+  });
+
+  it('does not re-fetch directories that are already cached when re-expanding or navigating back', async () => {
+    const { listDir } = await mount();
+    expect(listDir).toHaveBeenCalledTimes(1);
+    // Expand, collapse, and re-expand src -> listed only once.
+    await click(q('.file-picker-row[data-path="/work/repo/src"]'));
+    await settle();
+    expect(listDir).toHaveBeenCalledTimes(2);
+    await click(q('.file-picker-row[data-path="/work/repo/src"]'));
+    await click(q('.file-picker-row[data-path="/work/repo/src"]'));
+    await settle();
+    expect(listDir).toHaveBeenCalledTimes(2);
+    // Navigate up to /work and back home to /work/repo -> /work/repo stays cached.
+    await click(q(`[aria-label="${t('conversation.filePicker.up')}"]`));
+    await settle();
+    expect(listDir).toHaveBeenCalledTimes(3);
+    await click(q(`[aria-label="${t('conversation.filePicker.home')}"]`));
+    await settle();
+    expect(listDir).toHaveBeenCalledTimes(3);
   });
 });

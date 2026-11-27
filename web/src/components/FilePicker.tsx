@@ -99,29 +99,41 @@ export function FilePicker({ m, rootDir, selected = [], onSelect, onClose, listD
   const live = useRef(true);
   const listDirRef = useRef(listDir);
   listDirRef.current = listDir;
+  /** Directories already loaded or currently loading for the active machine;
+   * checked synchronously outside setDirs so listDir is never fired twice. */
+  const requestedRef = useRef<Set<string>>(new Set());
+  const abortRef = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => {
     live.current = true;
+    const ac = new AbortController();
+    abortRef.current = ac;
+    requestedRef.current.clear();
+    setDirs({});
     return () => {
       live.current = false;
+      ac.abort();
+      if (abortRef.current === ac) abortRef.current = undefined;
     };
-  }, []);
+  }, [m]);
 
   const loadDir = useCallback(
     (target: string) => {
       const clean = normalizeDir(target);
-      setDirs((prev) => {
-        if (prev[clean]?.loading || prev[clean]?.entries) return prev;
-        return { ...prev, [clean]: { loading: true } };
-      });
-      listDirRef.current(m, clean).then(
+      if (requestedRef.current.has(clean)) return;
+      requestedRef.current.add(clean);
+      setDirs((prev) => ({ ...prev, [clean]: { loading: true } }));
+      const ac = abortRef.current;
+      const req = listDirRef.current === defaultListDir ? defaultListDir(m, clean, ac?.signal) : listDirRef.current(m, clean);
+      req.then(
         (res) => {
-          if (!live.current) return;
+          if (!live.current || ac?.signal.aborted) return;
           const entries = Array.isArray(res?.entries) ? sortPickerEntries(res.entries) : [];
           setDirs((prev) => ({ ...prev, [clean]: { entries } }));
         },
         (e: unknown) => {
-          if (!live.current) return;
+          requestedRef.current.delete(clean);
+          if (!live.current || ac?.signal.aborted) return;
           const msg = e instanceof Error ? e.message : String(e);
           setDirs((prev) => ({ ...prev, [clean]: { error: msg } }));
         },
@@ -138,17 +150,21 @@ export function FilePicker({ m, rootDir, selected = [], onSelect, onClose, listD
     filterRef.current?.focus({ preventScroll: true });
   }, []);
 
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+
   const toggleExpand = useCallback(
     (path: string) => {
+      const opening = !expandedRef.current[path];
       setExpanded((prev) => {
         if (prev[path]) {
           const next = { ...prev };
           delete next[path];
           return next;
         }
-        loadDir(path);
         return { ...prev, [path]: true };
       });
+      if (opening) loadDir(path);
     },
     [loadDir],
   );
@@ -221,6 +237,15 @@ export function FilePicker({ m, rootDir, selected = [], onSelect, onClose, listD
 
   const rootCache = dirs[dir];
   const crumbs = useMemo(() => crumbsPosix(baseRoot, dir), [baseRoot, dir]);
+  const visibleFiles = useMemo(() => rows.filter((r) => !r.isDir), [rows]);
+  const allVisibleChecked = visibleFiles.length > 0 && visibleFiles.every((r) => checked.has(r.path));
+  const selectAllVisible = () =>
+    setChecked((prev) => {
+      const next = new Map(prev);
+      for (const f of visibleFiles) next.set(f.path, { path: f.path, label: relativePosix(baseRoot, f.path) });
+      return next;
+    });
+  const clearChecked = () => setChecked(new Map());
   const confirm = () => {
     onSelect([...checked.values()]);
     onClose();
@@ -362,6 +387,16 @@ export function FilePicker({ m, rootDir, selected = [], onSelect, onClose, listD
         <span className="muted small file-picker-count">
           {checked.size > 0 ? t('conversation.filePicker.selected', { n: checked.size }) : ''}
         </span>
+        {visibleFiles.length > 0 && !allVisibleChecked && (
+          <button type="button" className="ghost sm file-picker-select-all" onClick={selectAllVisible}>
+            {t('conversation.filePicker.selectAll')}
+          </button>
+        )}
+        {checked.size > 0 && (
+          <button type="button" className="ghost sm file-picker-clear" onClick={clearChecked}>
+            {t('conversation.filePicker.deselectAll')}
+          </button>
+        )}
         <button type="button" className="ghost sm" onClick={onClose}>
           {t('conversation.filePicker.cancel')}
         </button>

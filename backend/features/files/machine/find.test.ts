@@ -83,4 +83,71 @@ describe('findFiles', () => {
     await expect(findFiles({ dir: join(root, 'README.md') })).rejects.toMatchObject({ code: 'not_dir', status: 400 });
     await expect(findFiles({ dir: root, query: 'bad\nquery' })).rejects.toMatchObject({ code: 'bad_params', status: 400 });
   });
+
+  test('explorer name search traverses the whole project, honors regex/hidden/exclude, and rejects invalid regex', async () => {
+    const root = makeTree();
+    mkdirSync(join(root, 'a/b/c/deep'), { recursive: true });
+    writeFileSync(join(root, 'a/b/c/deep/Widget12.tsx'), '');
+    writeFileSync(join(root, 'a/b/c/deep/.env.local'), '');
+
+    // Whole-project substring filename search finds unexpanded deeply nested files,
+    // including gitignored files not excluded by files.exclude, while skipping .git and hidden files by default.
+    const sub = await findFiles({ dir: root, query: 'widget', match: 'name' });
+    expect(sub.matches.map((m) => m.rel)).toEqual(['a/b/c/deep/Widget12.tsx']);
+
+    const gitignored = await findFiles({ dir: root, query: 'debug.log', match: 'name' });
+    expect(gitignored.matches.map((m) => m.rel)).toEqual(['debug.log']);
+
+    // Regex matching on filenames (case-insensitive) and path patterns (when containing /).
+    const rx = await findFiles({ dir: root, query: '^(button.*|widget\\d+)\\.tsx$', match: 'name', regex: true });
+    expect(rx.matches.map((m) => m.rel).sort()).toEqual([
+      'a/b/c/deep/Widget12.tsx',
+      'src/components/Button.tsx',
+      'src/components/ButtonGroup.tsx',
+    ]);
+
+    const pathRx = await findFiles({ dir: root, query: 'components/.*\\.tsx$', match: 'name', regex: true });
+    expect(pathRx.matches.map((m) => m.rel).sort()).toEqual(['src/components/Button.tsx', 'src/components/ButtonGroup.tsx']);
+
+    // Hidden files are skipped unless hidden: true, and exclude globs filter both files and folders.
+    const noHidden = await findFiles({ dir: root, query: '^\\.env', match: 'name', regex: true, hidden: false });
+    expect(noHidden.matches).toEqual([]);
+    const withHidden = await findFiles({ dir: root, query: '^\\.env', match: 'name', regex: true, hidden: true });
+    expect(withHidden.matches.map((m) => m.rel)).toEqual(['a/b/c/deep/.env.local']);
+
+    const excludedRes = await findFiles({
+      dir: root,
+      query: '\\.tsx$',
+      match: 'name',
+      regex: true,
+      exclude: ['.git', 'components'],
+    });
+    expect(excludedRes.matches.map((m) => m.rel)).toEqual(['a/b/c/deep/Widget12.tsx']);
+
+    // Symlinks are never followed even in name mode.
+    const links = await findFiles({ dir: root, query: 'link.md', match: 'name' });
+    expect(links.matches).toEqual([]);
+
+    // Invalid regex fails with 400 bad_regex.
+    await expect(findFiles({ dir: root, query: '[unclosed', match: 'name', regex: true })).rejects.toMatchObject({
+      code: 'bad_regex',
+      status: 400,
+    });
+  });
+
+  test('a backtracking pattern matches in linear time, and syntax RE2 lacks is bad_regex', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'find-redos-'));
+    try {
+      writeFileSync(join(root, `${'a'.repeat(64)}b`), '');
+      const started = performance.now();
+      const res = await findFiles({ dir: root, query: '(a+)+$', match: 'name', regex: true });
+      expect(performance.now() - started).toBeLessThan(1000);
+      expect(res.matches).toEqual([]);
+      await expect(findFiles({ dir: root, query: '(?<=a)b', match: 'name', regex: true })).rejects.toMatchObject({
+        code: 'bad_regex',
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

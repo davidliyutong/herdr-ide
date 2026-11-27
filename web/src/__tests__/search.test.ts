@@ -3,8 +3,8 @@
 // Project Search (plugins/search): the rows of a result (files, then
 // their lines unless collapsed), the panel's search of the focused
 // terminal's folder with the matches marked, a new search cancelling the
-// one in flight, and a line opening the file explorer's editor at its line
-// and column while VS Code is off.
+// one in flight, and a line opening the file explorer's preview editor at
+// its line and column, whether or not VS Code is on.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -19,12 +19,15 @@ import { FakeHub, settle } from './fakeTerms';
 import { definePlugins } from '../plugins/registry';
 import { filesPlugin } from '../plugins/files';
 import { searchPlugin } from '../plugins/search';
+import { vscodePlugin } from '../plugins/vscode';
+import { useSettings } from '../settings';
+import { vscodeOn } from './fakeSettings';
 import { SearchPanel, DEBOUNCE_MS } from '../plugins/search/SearchPanel';
 import { joinPath, matchesOf, resultRows, shortDir, splitPath, stepRow } from '../plugins/search/model';
 import { openMatch, paramsFor, runSearch, setSearch, useSearch } from '../plugins/search/state';
 import type { SearchParams, SearchResult } from '../plugins/search/api';
 
-definePlugins([filesPlugin, searchPlugin]);
+definePlugins([filesPlugin, searchPlugin, vscodePlugin]);
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -192,5 +195,21 @@ describe('the panel', () => {
     await act(async () => openMatch('a', '/home/u/w1/src/a.go', 3, 6));
     await settle();
     expect(L.pluginViews(ws(), 'files', 'editor')[0].view.reveal).not.toBe(first);
+  });
+
+  it('opens a line in the file explorer preview while VS Code is on too', async () => {
+    vscodeOn();
+    try {
+      await act(async () => openMatch('a', '/home/u/w1/src/b.go', 9, 1));
+      await settle();
+      const v = L.pluginViews(ws(), 'files', 'editor')[0].view;
+      expect([v.path, v.line, v.col, v.preview]).toEqual(['/home/u/w1/src/b.go', 9, 1, true]);
+      expect(L.codeViews(ws())).toHaveLength(0);
+    } finally {
+      useSettings.setState((s) => {
+        const { ['plugins.vscode.browser']: _, ...values } = s.values;
+        return { values };
+      });
+    }
   });
 });
