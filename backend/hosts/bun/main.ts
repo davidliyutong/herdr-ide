@@ -63,6 +63,10 @@ async function main(argv: string[]): Promise<void> {
       const { chatHostCommand } = await import('#hosts/machine/chathost.ts');
       process.exit(await chatHostCommand(argv));
     }
+    case 'term-env': {
+      const { termEnvCommand } = await import('#hosts/machine/termenv.ts');
+      process.exit(await termEnvCommand(argv));
+    }
     case 'fetch-assets': {
       const { fetchAssets } = await import('#features/vscode/fetchassets.ts');
       process.exit(await fetchAssets(argv, { logger: stderrLogger(`${HUB_BIN}: `) }));

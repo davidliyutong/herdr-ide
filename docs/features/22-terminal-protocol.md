@@ -30,7 +30,7 @@ A failing backend reports `backend {state: error, code}` and retries with backof
 - reading: `terminal.list`, `terminal.get`, `terminal.read`, `doc.get`, `templates.list`;
 - writing (refused in read-only mode): `terminal.run`, `terminal.kill`, `terminal.rm`, `terminal.keep`, `terminal.label`, `terminal.interrupt`, `doc.set`.
 
-Anything else, and any call with the parameter `on` (herdr-core's remote machine routing), is refused and audited as `denied.term`. `terminal.run`, `kill`, `rm`, `interrupt` and `keep` are audited; `terminal.run` with its argv, cwd and the variable names (not values) of its `env`. The hub adds to `terminal.run`'s `env` the virtual display's variables ([14](14-gui-windows.md)) and, on ssh machines, `SSH_CONNECTION`/ `SSH_CLIENT` ([21](21-terminal-core.md)). A read-only client's `terminal.read` reaches herdr-core without `lines` (`readScreenOnly`): with history lines herdr-core scrolls a program on the alternate screen, which every viewer would see.
+Anything else, and any call with the parameter `on` (herdr-core's remote machine routing), is refused and audited as `denied.term`. `terminal.run`, `kill`, `rm`, `interrupt` and `keep` are audited; `terminal.run` with its argv, cwd and the variable names (not values) of its `env`. The hub adds to `terminal.run`'s `env` the virtual display's variables ([14](14-gui-windows.md)) and, on ssh machines, `SSH_CONNECTION`/ `SSH_CLIENT` ([21](21-terminal-core.md)); workspace-linked vault preset variables ([30](30-variable-vault.md)) are never placed in `terminal.run`'s `env` (which `herdr-core` persists to `terminals.json` and reuses on kept-terminal recovery), and instead go through a single-use in-memory `term.env` token consumed via `<run>/env.sock` before an in-place `execve`, with internal `term-env` argv stripped from terminal records and events. A read-only client's `terminal.read` reaches herdr-core without `lines` (`readScreenOnly`): with history lines herdr-core scrolls a program on the alternate screen, which every viewer would see.
 
 **Terminals kept from clients.** Two kinds of terminals are in no snapshot, event or `terminal.list` result:
 
@@ -75,7 +75,10 @@ Observers' streams and all but the last viewer are closed normally. Why the size
           "root": {
             "split": "horizontal",
             "ratio": 0.5,
-            "children": [{ "terminal": "t1" }, { "code": { "id": "q2m8x0vb", "folder": "/srv/api" } }]
+            "children": [
+              { "terminal": "t1" },
+              { "code": { "id": "q2m8x0vb", "folder": "/srv/api" } }
+            ]
           },
           "focused": "t1"
         }
@@ -95,6 +98,7 @@ Observers' streams and all but the last viewer are closed normally. Why the size
   - a preview `{"preview": {"id", "path"}}`, named `preview:<id>` ([06](06-quick-look-and-files.md)).
 
   A view keeps its `id` wherever it moves, so every client finds it again.
+
 - **Compatibility.** A version 1 document (`tabs` at the top) reads as one workspace `default`. Invalid parts are dropped or clamped. Unknown fields and node kinds are kept and written back, so a newer client's additions survive an older client's edit. Clients write version 2.
 - **Operations** (create, rename, close, move and select workspaces and tabs; split, close, swap and move panes; set ratios; prune ended terminals) give the same result in every client. Closing a workspace or tab ends no program; the client does. The contract is the vectors in `spec/vectors/layout/*.json`, run by the web tests.
 
@@ -102,14 +106,14 @@ Observers' streams and all but the last viewer are closed normally. Why the size
 
 ## Alternatives considered
 
-| Option | Why not |
-| --- | --- |
-| New message types on `/ws` | Shares one send queue and compression with machine, settings and agent messages; busy terminal output would delay them and be compressed needlessly. |
-| Passing herdr-core's protocol through | Clients could call `machine.exec`, `file.*` and `server.stop`, and would need a connection per machine. |
-| Acknowledging herdr-core on read | A slow client's backlog would queue in the hub. |
-| A `terminal.list` snapshot per subscriber | Without a sequence number, events between list and subscription would be lost or doubled. |
-| One backend connection per client | Each would count as a viewer; one per machine keeps event order identical for all clients. |
-| Starting terminal cores when machines connect | Machines nobody uses terminals on would get a long-lived process. |
+| Option                                        | Why not                                                                                                                                              |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New message types on `/ws`                    | Shares one send queue and compression with machine, settings and agent messages; busy terminal output would delay them and be compressed needlessly. |
+| Passing herdr-core's protocol through         | Clients could call `machine.exec`, `file.*` and `server.stop`, and would need a connection per machine.                                              |
+| Acknowledging herdr-core on read              | A slow client's backlog would queue in the hub.                                                                                                      |
+| A `terminal.list` snapshot per subscriber     | Without a sequence number, events between list and subscription would be lost or doubled.                                                            |
+| One backend connection per client             | Each would count as a viewer; one per machine keeps event order identical for all clients.                                                           |
+| Starting terminal cores when machines connect | Machines nobody uses terminals on would get a long-lived process.                                                                                    |
 
 ## Failure modes
 
@@ -129,4 +133,4 @@ Clients get only the allowlisted methods above, never herdr-core's exec, file or
 
 - `backend/features/terminals/terminals.test.ts`, with a scripted core behind a simulated agent (`testing.ts`): lifecycle, snapshots and events, allowed and refused calls with audit entries, credit capping, display facts, detected agents, read-only, and `the last viewer`; `hidden.test.ts` hidden and other machines' terminals (also before their label and after a `missed`); `units.test.ts` (`terminal.read`) a read-only `terminal.read`; `sessions.test.ts` the agent session in records and events.
 - `web/src/__tests__/term.test.ts`: the TypeScript client against a scripted socket and every layout vector; `terms.test.ts` the UI's model; `restore.test.ts` restoring after a terminal core restart; `agentLeaves.test.ts` with `spec/vectors/layout/agent-leaves.json` a leaf's `session` and `before`.
-- `make it`: `backend/features/terminals/integration.test.ts` (`a shell, typed into and read, watched, killed`, `agent detection`, `shells`, `hidden terminals`) against a real herdr-core.
+- `make it`: `backend/features/terminals/integration.test.ts` (`a shell, typed into and read, watched, killed`, `agent detection`, `shells`, `hidden terminals`, `ephemeral vault env`) against a real herdr-core.

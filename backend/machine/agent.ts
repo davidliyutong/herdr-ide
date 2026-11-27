@@ -32,6 +32,7 @@ import { serveHC, pipeUnix } from './hcop.ts';
 import { killHidden, runHidden } from './hidden.ts';
 import { housekeep } from './housekeeping.ts';
 import { privacyStatus } from './privacy.ts';
+import { TermEnvStore, serveTermEnv, serveTermEnvOp } from './termenv.ts';
 import { linkMCP, serveVault } from './vault.ts';
 import type { Conn } from './stream.ts';
 
@@ -158,6 +159,7 @@ export class Agent {
   private seq = 0;
   private privacyOp: Promise<unknown> = Promise.resolve();
   private readonly fs: FsCalls;
+  private readonly termEnvs = new TermEnvStore();
 
   constructor(o: AgentOptions) {
     this.instance = o.instance;
@@ -183,6 +185,7 @@ export class Agent {
       }),
     );
     this.spawn(serveVault(this, { signal, everyMs: o.socketWatchMs, peerCred: o.peerCred }));
+    this.spawn(serveTermEnv(this, this.termEnvs, { signal, everyMs: o.socketWatchMs, peerCred: o.peerCred }));
     if (o.mcpExe) this.spawn(this.linkMCP(o.mcpExe));
   }
 
@@ -205,6 +208,7 @@ export class Agent {
    * features own (Served.close). */
   async close(): Promise<void> {
     this.stop.abort();
+    this.termEnvs.clear();
     for (const s of this.sessions) s.ys.close();
     await Promise.race([Promise.allSettled([...this.running]), new Promise((r) => setTimeout(r, DRAIN_MS))]);
     for (const [id, f] of this.features)
@@ -393,6 +397,9 @@ export class Agent {
           await writeLine(stream, { ok: true, privacy: await p } satisfies Reply);
           break;
         }
+        case Op.TermEnv:
+          await serveTermEnvOp(conn, h, this.termEnvs, signal);
+          break;
         case Op.Plugin:
           close = false;
           await servePlugin(conn, h, this.features, (sig) => this.ctx(s, sig), signal, this.logger);

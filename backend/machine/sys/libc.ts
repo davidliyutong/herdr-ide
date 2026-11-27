@@ -44,6 +44,7 @@ const common = {
   flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
   unlinkat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
   socketpair: { args: [FFIType.i32, FFIType.i32, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
+  execve: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
 } as const;
 
 const linuxOnly = {

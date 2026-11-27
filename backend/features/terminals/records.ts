@@ -26,6 +26,42 @@ export function hiddenRecord(rec: unknown): boolean {
   return hidden(name, typeof value === 'string' ? value : '');
 }
 
+/** Strips the internal `term-env <token>` trampoline prefix from argv when
+ * present, leaving any explicit target argv that followed it. */
+export function stripTermEnvArgv(argv: unknown): string[] | undefined {
+  if (!Array.isArray(argv)) return undefined;
+  for (let i = 1; i + 1 < argv.length; i++) {
+    if (argv[i] === 'term-env' && typeof argv[i + 1] === 'string' && /^[0-9a-f]{48}$/.test(argv[i + 1])) {
+      return argv.slice(i + 2).filter((x): x is string => typeof x === 'string');
+    }
+  }
+  return undefined;
+}
+
+/** Sanitizes a foreground process snapshot if sampled before `term-env`
+ * execve'd its target: null drops a default-shell trampoline snapshot;
+ * undefined means unchanged. */
+export function cleanForeground(fg: unknown): Record<string, unknown> | null | undefined {
+  if (!isObject(fg)) return undefined;
+  const stripped = stripTermEnvArgv(fg.argv);
+  if (stripped === undefined) return undefined;
+  if (stripped.length === 0) return null;
+  const prog = stripped[0];
+  return { ...fg, name: prog.split('/').pop() || prog, argv: stripped };
+}
+
+/** Removes internal `term-env` trampoline details from a terminal record. */
+export function cleanRecord(rec: Rec): Rec {
+  const argv = stripTermEnvArgv(rec.argv);
+  const fg = cleanForeground(rec.foreground);
+  if (argv === undefined && fg === undefined) return rec;
+  const out: Rec = { ...rec };
+  if (argv !== undefined) out.argv = argv;
+  if (fg === null) delete out.foreground;
+  else if (fg !== undefined) out.foreground = fg;
+  return out;
+}
+
 /** Sorts the core's terminals into those the clients are told of, by
  * address, and the addresses of the hidden ones. Other machines'
  * terminals are in neither. */
@@ -37,7 +73,7 @@ export function indexTerminals(list: readonly unknown[]): { terms: Map<string, R
     const addr = typeof rec.address === 'string' ? rec.address : '';
     if (addr === '' || otherMachine(addr)) continue;
     if (hiddenRecord(rec)) hiddenSet.add(addr);
-    else terms.set(addr, rec);
+    else terms.set(addr, cleanRecord(rec));
   }
   return { terms, hidden: hiddenSet };
 }
@@ -65,14 +101,19 @@ export function visibleList(result: unknown, hiddenAddr: (addr: string) => boole
   if (list !== null && !Array.isArray(list)) return undefined;
   const all = list ?? [];
   const kept: unknown[] = [];
+  let sanitized = false;
   for (const rec of all) {
     if (rec !== null && !isObject(rec)) return undefined;
     const addr = typeof rec?.address === 'string' ? rec.address : '';
-    if (!hiddenAddr(addr) && !hiddenRecord(rec) && !otherMachine(addr)) kept.push(rec);
+    if (!hiddenAddr(addr) && !hiddenRecord(rec) && !otherMachine(addr)) {
+      const cleaned = rec ? cleanRecord(rec) : rec;
+      if (cleaned !== rec) sanitized = true;
+      kept.push(cleaned);
+    }
   }
   const machines = result.machines;
   const dropMachines = 'machines' in result && machines !== null && (!Array.isArray(machines) || machines.length > 0);
-  if (!dropMachines && kept.length === all.length) return result;
+  if (!dropMachines && !sanitized && kept.length === all.length) return result;
   const out: Record<string, unknown> = { ...result, terminals: kept };
   if (dropMachines) out.machines = [];
   return out;

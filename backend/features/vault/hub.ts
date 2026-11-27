@@ -19,7 +19,6 @@ import { PROOF_TTL, type Purpose } from './gate.ts';
 import { settings } from './settings.ts';
 import {
   ALL_MACHINES,
-  allows,
   checkApp,
   checkImport,
   KIND_DESKTOP,
@@ -84,10 +83,6 @@ async function body<S extends z.ZodType>(c: Ctx, schema: S, limit: number, optio
 
 const bad = (message: string) => new Fail('bad_request', 400, message);
 const notFound = (message: string) => new Fail('not_found', 404, message);
-
-/** Whether a change lets a value go where it did not: to a machine that
- * had to ask, or to the model's reach when it was inject-only. */
-const widens = (cur: Info, u: Update) => (u.injectOnly === false && cur.injectOnly) || !!u.machines?.some((m) => !allows(cur, m));
 
 export interface VaultFeature extends FeatureDef {
   /** Resolves environment variables of presets linked to (machine, workspace)
@@ -165,26 +160,22 @@ export function vaultFeature(opts: VaultOptions = {}): VaultFeature {
           value: opt(b.value),
         };
         const from = c.req.param('name');
-        // Where every Allow is verified, letting more read a variable is an
-        // Allow: it needs the user's word for it.
-        const cur = s.get(from);
-        const widensAccess = !!cur && widens(cur, u);
-        const widensLinkedGroup = !!u.group && u.group !== cur?.group && s.groupInLinkedPreset(u.group);
-        const widensLinkedVar = (!cur && s.variableInLinkedPreset(from)) || (!!u.to && u.to !== from && s.variableInLinkedPreset(u.to));
-        if ((widensAccess || widensLinkedGroup || widensLinkedVar) && (await v.strict(s))) {
-          const verified = cur
-            ? await v.verified(c, s, b, { for: For.Change, request: from })
-            : await v.verified(c, s, { passphrase: opt(b.passphrase) }, { for: '' });
-          if (!verified) v.needFresh(c);
-        }
+        let i: Info;
         try {
-          await s.set(from, u);
+          // Widening and strict-mode verification run atomically inside Store's
+          // write lock so concurrent link/group/variable edits cannot bypass it.
+          i = await s.set(from, u, async (sv, existing) => {
+            if (!v.sessionKind(c, false).open) v.refuseSession(c);
+            const verified = existing
+              ? await v.verifiedWith(c, sv, b, { for: For.Change, request: from })
+              : await v.verifiedWith(c, sv, { passphrase: opt(b.passphrase) }, { for: '' });
+            if (!verified) v.needFresh(c);
+          });
         } catch (e) {
           if (isCode(e, 'vault_locked')) v.changed(); // pages that took it for unlocked learn otherwise
           throw e;
         }
         v.changed();
-        const i = s.get(u.to ?? from)!;
         // What changed, never the value.
         v.audit(c, 'vault.saved', {
           name: i.name,
@@ -241,11 +232,10 @@ export function vaultFeature(opts: VaultOptions = {}): VaultFeature {
           z.object({ names: z.array(z.string()).default([]), group: z.string().default(''), passphrase: str }),
           64 << 10,
         );
-        if (b.group && s.groupInLinkedPreset(b.group) && (await v.strict(s))) {
-          const addsMember = b.names.some((n) => s.get(n)?.group !== b.group);
-          if (addsMember && !(await v.verified(c, s, { passphrase: opt(b.passphrase) }, { for: '' }))) v.needFresh(c);
-        }
-        await s.assignGroup(b.names, b.group);
+        await s.assignGroup(b.names, b.group, async (sv) => {
+          if (!v.sessionKind(c, false).open) v.refuseSession(c);
+          if (!(await v.verifiedWith(c, sv, { passphrase: opt(b.passphrase) }, { for: '' }))) v.needFresh(c);
+        });
         v.audit(c, 'vault.group_assigned', { names: b.names, group: b.group });
         v.changed();
         return c.json({ ok: true });
@@ -277,17 +267,19 @@ export function vaultFeature(opts: VaultOptions = {}): VaultFeature {
         const s = open();
         const id = c.req.param('id');
         const b = await body(c, presetBody, 128 << 10);
-        const cur = s.getPreset(id);
-        if (cur && s.presetLinked(id) && (await v.strict(s))) {
-          const widensPreset = !!b.variables?.some((n) => !cur.variables.includes(n)) || !!b.groups?.some((g) => !cur.groups.includes(g));
-          if (widensPreset && !(await v.verified(c, s, { passphrase: opt(b.passphrase) }, { for: '' }))) v.needFresh(c);
-        }
-        const p = await s.updatePreset(id, {
-          name: opt(b.name),
-          description: opt(b.description),
-          variables: opt(b.variables),
-          groups: opt(b.groups),
-        });
+        const p = await s.updatePreset(
+          id,
+          {
+            name: opt(b.name),
+            description: opt(b.description),
+            variables: opt(b.variables),
+            groups: opt(b.groups),
+          },
+          async (sv) => {
+            if (!v.sessionKind(c, false).open) v.refuseSession(c);
+            if (!(await v.verifiedWith(c, sv, { passphrase: opt(b.passphrase) }, { for: '' }))) v.needFresh(c);
+          },
+        );
         v.audit(c, 'vault.preset_saved', { id: p.id, name: p.name, variables: p.variables, groups: p.groups });
         v.changed();
         return c.json(p);
@@ -310,10 +302,10 @@ export function vaultFeature(opts: VaultOptions = {}): VaultFeature {
         const b = await body(c, z.object({ presets: z.array(z.string()).default([]), passphrase: str }), 16 << 10);
         if (b.presets.length > 0 && (machine === ALL_MACHINES || !ctx.machines.get(machine)))
           throw new Fail('unknown_machine', 400, `no machine ${clip(machine, 64)}`);
-        const cur = s.getWorkspaceLink(machine, workspace);
-        const addsPreset = b.presets.some((pid) => !cur?.presets.includes(pid));
-        if (addsPreset && (await v.strict(s)) && !(await v.verified(c, s, { passphrase: opt(b.passphrase) }, { for: '' }))) v.needFresh(c);
-        const link = await s.setWorkspacePresets(machine, workspace, b.presets);
+        const link = await s.setWorkspacePresets(machine, workspace, b.presets, async (sv) => {
+          if (!v.sessionKind(c, false).open) v.refuseSession(c);
+          if (!(await v.verifiedWith(c, sv, { passphrase: opt(b.passphrase) }, { for: '' }))) v.needFresh(c);
+        });
         v.audit(c, 'vault.workspace_linked', { machine, workspace, presets: b.presets });
         v.changed();
         return c.json({ link });
@@ -324,11 +316,11 @@ export function vaultFeature(opts: VaultOptions = {}): VaultFeature {
       api.post('/vars/:name/reveal', ctx.mutating('reveal'), gated, async (c) => {
         const s = open();
         const name = c.req.param('name');
-        if (await v.strict(s)) {
-          const f: Fresh = await body(c, z.object(fresh), 64 << 10, true);
-          if (!(await v.verified(c, s, f, { for: For.Reveal, request: name }))) v.needFresh(c);
-        }
-        const value = await s.value(name);
+        const f: Fresh = await body(c, z.object(fresh), 64 << 10, true);
+        const value = await s.value(name, async (sv) => {
+          if (!v.sessionKind(c, false).open) v.refuseSession(c);
+          if (!(await v.verifiedWith(c, sv, f, { for: For.Reveal, request: name }))) v.needFresh(c);
+        });
         if (!(await v.record(c, 'vault.revealed', v.pageAccess(c, 'reveal', [name], Result.Revealed)))) v.failLog();
         return c.json({ value });
       });
@@ -714,11 +706,17 @@ export function vaultFeature(opts: VaultOptions = {}): VaultFeature {
         const b = await body(c, z.object({ verifyEachAllow: z.boolean().nullish(), passphrase: str }), 64 << 10);
         if (typeof b.verifyEachAllow !== 'boolean') throw bad('verifyEachAllow is true or false');
         c.var.audit.verifyEachAllow = b.verifyEachAllow;
-        if (!b.verifyEachAllow && (await v.strict(s)) && !(await v.verified(c, s, { passphrase: opt(b.passphrase) }, { for: '' })))
-          throw new Fail('wrong_passphrase', 403, "the vault's passphrase is needed to end the rule");
-        await s.updateGuard((g) => {
-          g.verifyEachAllow = b.verifyEachAllow!;
-        });
+        await s.updateGuard(
+          (g) => {
+            g.verifyEachAllow = b.verifyEachAllow!;
+          },
+          async (sv, strict) => {
+            const { open: sessOpen, byProof } = v.sessionKind(c, false);
+            if (!sessOpen || byProof) v.refusePassphraseSession(c, sessOpen);
+            if (!b.verifyEachAllow && strict && !(await v.verifiedWith(c, sv, { passphrase: opt(b.passphrase) }, { for: '' })))
+              throw new Fail('wrong_passphrase', 403, "the vault's passphrase is needed to end the rule");
+          },
+        );
         v.changed();
         return c.json({ guard: await v.guardState(c, s, true) });
       });
@@ -775,14 +773,21 @@ export function vaultFeature(opts: VaultOptions = {}): VaultFeature {
       api.post('/requests/:id', ctx.mutating('answer'), async (c) => {
         const b = await body(c, z.object({ answer: z.string().default(''), ...fresh }), 64 << 10);
         const id = c.req.param('id');
+        let req;
         if (b.answer === Answer.Once || b.answer === Answer.Always) {
           const s = open();
-          if (!(await v.verified(c, s, b, { for: For.Answer, request: id, answer: b.answer }))) {
-            if (await v.strict(s)) v.needFresh(c);
-            if (!v.sessionKind(c, true).open) v.refuseSession(c);
-          }
-        } else if (b.answer !== Answer.Deny) throw bad('answer is once, always or deny');
-        const req = v.answerRequest(id, b.answer);
+          req = await s.authorizeAllow(async (sv) => {
+            if (!(await v.verifiedWith(c, sv, b, { for: For.Answer, request: id, answer: b.answer }))) {
+              if (await sv.strict()) v.needFresh(c);
+              if (!v.sessionKind(c, true).open) v.refuseSession(c);
+            }
+            return v.answerRequest(id, b.answer);
+          });
+        } else if (b.answer === Answer.Deny) {
+          req = v.answerRequest(id, b.answer);
+        } else {
+          throw bad('answer is once, always or deny');
+        }
         if (!req) throw notFound('no such request (answered or expired)');
         v.audit(c, 'vault.answered', { id: req.id, machine: req.m, tool: req.tool, names: req.names, answer: b.answer });
         return c.json({ ok: true });

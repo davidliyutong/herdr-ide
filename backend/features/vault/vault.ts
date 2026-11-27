@@ -46,6 +46,7 @@ import {
   type Authenticator,
   type Guard,
   type StoreOptions,
+  type StoreVerifier,
   type Window,
 } from './store.ts';
 import {
@@ -338,6 +339,18 @@ export class Vault {
     if (e) throw e;
   }
 
+  async passphraseCheckedWith(c: Ctx, sv: StoreVerifier, passphrase: string): Promise<void> {
+    this.slowDown(c);
+    let e: unknown = null;
+    try {
+      await sv.verifyPassphrase(passphrase, this.window(this.autoLockAfter()));
+    } catch (x) {
+      e = x;
+    }
+    this.tried(e);
+    if (e) throw e;
+  }
+
   /** Whether every Allow is verified: the guard's rule, or a guard that
    * does not open (which cannot say the rule is off). */
   async strict(s: Store): Promise<boolean> {
@@ -383,6 +396,29 @@ export class Vault {
     return false;
   }
 
+  /** Lock-held variant of verified() for atomic policy checks inside Store.#mu. */
+  async verifiedWith(c: Ctx, sv: StoreVerifier, f: Fresh, want: Purpose): Promise<boolean> {
+    if (f.proof) {
+      let kind: string;
+      try {
+        kind = await this.checkProofWith(c, sv, f.proof, want);
+      } catch (e) {
+        this.refuseProof(c, e, want);
+      }
+      this.audit(c, 'vault.proved', { ok: true, for: want.for, kind });
+      this.touch();
+      return true;
+    }
+    if (f.passphrase) {
+      const st = sv.status();
+      if (st.mode !== MODE_PASSPHRASE || st.locked) throw new VaultError('vault_locked', 'the vault is locked');
+      await this.passphraseCheckedWith(c, sv, f.passphrase);
+      this.touch();
+      return true;
+    }
+    return false;
+  }
+
   /** The passphrase again with a request that lets more out than a session
    * decides alone: none is 403 passphrase_required. */
   async passphraseAgain(c: Ctx, s: Store, passphrase: string | null | undefined): Promise<void> {
@@ -414,15 +450,44 @@ export class Vault {
    * that made it; ProofError when it does not hold. A proof marks its
    * authenticator used. */
   async checkProof(c: Ctx, s: Store, pb: ProofBody, want: Purpose): Promise<string> {
+    return this.checkProofCore(
+      c,
+      pb,
+      want,
+      () => s.guard(),
+      (id, count) => this.used(s, id, count),
+    );
+  }
+
+  async checkProofWith(c: Ctx, sv: StoreVerifier, pb: ProofBody, want: Purpose): Promise<string> {
+    return this.checkProofCore(
+      c,
+      pb,
+      want,
+      () => sv.guard(),
+      (id, count) =>
+        sv.recordProof(id, this.now(), count).catch((e) => {
+          throw isCode(e, 'not_found') ? proofError() : e;
+        }),
+    );
+  }
+
+  private async checkProofCore(
+    c: Ctx,
+    pb: ProofBody,
+    want: Purpose,
+    readGuard: () => Promise<Guard>,
+    markUsed: (id: string, count?: number) => Promise<void>,
+  ): Promise<string> {
     const n = this.gate.take(pb.nonce, want, false);
     if (!n) throw proofError();
-    const g = await s.guard();
+    const g = await readGuard();
     if (pb.mac) {
       const mac = /^[0-9a-fA-F]*$/.test(pb.mac) && pb.mac.length % 2 === 0 ? Buffer.from(pb.mac, 'hex') : null;
       if (!mac || !this.desktopCan(c) || !this.desktop!.proof(proofMessage(pb.nonce, want), mac)) throw proofError();
       const a = g.authenticators?.findLast((x) => x.kind === KIND_DESKTOP);
       if (!a) throw proofError();
-      await this.used(s, a.id);
+      await markUsed(a.id);
       return KIND_DESKTOP;
     }
     const { origin, rpId } = this.originOf(c);
@@ -433,7 +498,7 @@ export class Vault {
       (x) => x.kind === KIND_WEBAUTHN && x.origin === origin && x.rpId === rpId && unb64(x.credential).equals(cred),
     );
     if (!a) throw proofError();
-    await this.used(s, a.id, await assertionCount(a, pb, n.challenge));
+    await markUsed(a.id, await assertionCount(a, pb, n.challenge));
     return KIND_WEBAUTHN;
   }
 

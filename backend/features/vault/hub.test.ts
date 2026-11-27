@@ -71,7 +71,12 @@ async function vault(o: VaultOptions = {}, setup = true, specs: Spec[] = [sshSpe
   dirs.push(dir);
   const dial = agentDialer();
   const machines = testMachines(specs, { dial });
-  const opts: VaultOptions = { path: join(dir, 'vault.json'), store: { kdf: FAST }, approvalTimeoutMs: 2000, ...o };
+  const opts: VaultOptions = {
+    path: join(dir, 'vault.json'),
+    approvalTimeoutMs: 2000,
+    ...o,
+    store: { kdf: FAST, ...o.store },
+  };
   const t = testHub({
     features: [vaultFeature(opts)],
     machines,
@@ -955,6 +960,109 @@ describe('groups, presets and workspace env injection routes', () => {
 
     // Audit log never leaks secret values.
     expect(v.t.audit.text()).not.toContain('super-secret');
+  });
+
+  test('concurrent modifications cannot bypass verifyEachAllow across presets, links, groups, vars or guard', async () => {
+    let hook: ((op: string) => void | Promise<void>) | undefined;
+    const v = await vault({ store: { beforeLock: (op) => hook?.(op) } });
+
+    const gid = (await v.call('POST', '/groups', { name: 'Backend' })).json.id as string;
+    await v.call('PUT', '/vars/SAFE_KEY', { value: 'safe-1' });
+    await v.call('PUT', '/vars/RACE_SECRET', { value: 'race-secret-val' });
+    await v.call('PUT', '/vars/GROUP_MEMBER', { value: 'member-val', group: gid });
+    const pid = (await v.call('POST', '/presets', { name: 'Prod', variables: ['SAFE_KEY'] })).json.id as string;
+    expect((await v.call('POST', '/guard', { verifyEachAllow: true })).status).toBe(200);
+
+    // 1. Unverified preset widening racing with a verified workspace link:
+    // preset is unlinked when PUT /presets/:id enters the route, then linked before #mu.
+    hook = async (op) => {
+      if (op !== 'updatePreset') return;
+      hook = undefined;
+      expect((await v.call('PUT', '/workspaces/m1/ws-race', { presets: [pid], passphrase: PASS })).status).toBe(200);
+    };
+    const presetRace = await v.call('PUT', `/presets/${pid}`, { variables: ['SAFE_KEY', 'RACE_SECRET'] });
+    expect([presetRace.status, presetRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('GET', '')).json.presets.find((p: any) => p.id === pid).variables).toEqual(['SAFE_KEY']);
+
+    // 2. Unverified workspace link racing with concurrent unlink:
+    // ws-race is linked when unverified PUT /workspaces enters the route, then unlinked before #mu.
+    hook = async (op) => {
+      if (op !== 'setWorkspacePresets') return;
+      hook = undefined;
+      expect((await v.call('PUT', '/workspaces/m1/ws-race', { presets: [] })).status).toBe(200);
+    };
+    const relinkRace = await v.call('PUT', '/workspaces/m1/ws-race', { presets: [pid] });
+    expect([relinkRace.status, relinkRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('GET', '')).json.workspaceLinks).toEqual([]);
+
+    // Re-link ws-race with passphrase for group & variable races.
+    expect((await v.call('PUT', '/workspaces/m1/ws-race', { presets: [pid], passphrase: PASS })).status).toBe(200);
+
+    // 3. Unverified group assignment racing with linking that group into the active preset.
+    hook = async (op) => {
+      if (op !== 'assignGroup') return;
+      hook = undefined;
+      expect((await v.call('PUT', `/presets/${pid}`, { variables: ['SAFE_KEY'], groups: [gid], passphrase: PASS })).status).toBe(200);
+    };
+    const assignRace = await v.call('POST', '/groups/assign', { names: ['RACE_SECRET'], group: gid });
+    expect([assignRace.status, assignRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('GET', '')).json.variables.find((x: any) => x.name === 'RACE_SECRET').group).toBeUndefined();
+
+    // 4. Unverified no-op group assignment racing with concurrent removal from the linked group.
+    hook = async (op) => {
+      if (op !== 'assignGroup') return;
+      hook = undefined;
+      expect((await v.call('POST', '/groups/assign', { names: ['GROUP_MEMBER'], group: '' })).status).toBe(200);
+    };
+    const reassignRace = await v.call('POST', '/groups/assign', { names: ['GROUP_MEMBER'], group: gid });
+    expect([reassignRace.status, reassignRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('GET', '')).json.variables.find((x: any) => x.name === 'GROUP_MEMBER').group).toBeUndefined();
+
+    // 5. Unverified PUT /vars/CREATED_LATE { machines: ['m1'] } (started before CREATED_LATE existed)
+    // racing with creation of CREATED_LATE (machines: []).
+    hook = async (op) => {
+      if (op !== 'set') return;
+      hook = undefined;
+      expect((await v.call('PUT', '/vars/CREATED_LATE', { value: 'late-secret', machines: [] })).status).toBe(200);
+    };
+    const createWidenRace = await v.call('PUT', '/vars/CREATED_LATE', { machines: ['m1'] });
+    expect([createWidenRace.status, createWidenRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('GET', '')).json.variables.find((x: any) => x.name === 'CREATED_LATE').machines).toEqual([]);
+
+    // 6. Unverified reveal and MCP request approval racing with enabling verifyEachAllow.
+    expect((await v.call('POST', '/guard', { verifyEachAllow: false, passphrase: PASS })).status).toBe(200);
+    hook = async (op) => {
+      if (op !== 'value') return;
+      hook = undefined;
+      expect((await v.call('POST', '/guard', { verifyEachAllow: true })).status).toBe(200);
+    };
+    const revealRace = await v.call('POST', '/vars/RACE_SECRET/reveal');
+    expect([revealRace.status, revealRace.json.error]).toEqual([401, 'vault_proof']);
+
+    expect((await v.call('POST', '/guard', { verifyEachAllow: false, passphrase: PASS })).status).toBe(200);
+    const pendingAsk = v.ask({ tool: 'get', names: ['RACE_SECRET'] });
+    const reqId = await firstRequest(v);
+    hook = async (op) => {
+      if (op !== 'authorizeAllow') return;
+      hook = undefined;
+      expect((await v.call('POST', '/guard', { verifyEachAllow: true })).status).toBe(200);
+    };
+    const allowRace = await v.call('POST', `/requests/${reqId}`, { answer: 'always' });
+    expect([allowRace.status, allowRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('POST', `/requests/${reqId}`, { answer: 'deny' })).status).toBe(200);
+    expect((await pendingAsk).ok).toBe(false);
+
+    // 7. Parallel Promise.all burst: unlinking + unverified preset widening + unverified group assign.
+    hook = undefined;
+    const p2 = (await v.call('POST', '/presets', { name: 'Burst', variables: ['SAFE_KEY'] })).json.id as string;
+    const [rLink, rEdit] = await Promise.all([
+      v.call('PUT', '/workspaces/m1/ws-burst', { presets: [p2], passphrase: PASS }),
+      v.call('PUT', `/presets/${p2}`, { variables: ['SAFE_KEY', 'RACE_SECRET'] }),
+    ]);
+    expect(rLink.status).toBe(200);
+    // Either rEdit ran before p2 was linked (so rLink's passphrase authorized linking p2 as-is),
+    // or rLink acquired #mu first and rEdit was rejected with 401 vault_proof while Argon2id ran!
+    if (rEdit.status !== 200) expect(rEdit.json.error).toBe('vault_proof');
   });
 
   test('workspaceEnv: injects when unlocked, records access log, refuses when locked, disabled, or log fails', async () => {

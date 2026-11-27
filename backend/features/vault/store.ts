@@ -18,6 +18,7 @@ import {
   ecdhEphemeral,
   goJSON,
   goSort,
+  isCode,
   kekKey,
   Mutex,
   open,
@@ -453,6 +454,19 @@ export interface StoreOptions {
   /** New passphrases' derivation (tests lower it). */
   kdf?: { time: number; memory: number; threads: number };
   now?: () => Date;
+  /** Test hook run right before acquiring the store mutex for an operation. */
+  beforeLock?: (op: string) => void | Promise<void>;
+}
+
+/** Lock-held verification helpers exposed to authorize callbacks running
+ * inside Store's write mutex so policy checks, fresh proof/passphrase
+ * verification and commits happen atomically without re-entering #mu. */
+export interface StoreVerifier {
+  status(): Status;
+  guard(): Promise<Guard>;
+  strict(): Promise<boolean>;
+  recordProof(id: string, at: Date, count?: number): Promise<void>;
+  verifyPassphrase(passphrase: string, w?: Window): Promise<void>;
 }
 
 /** Why a file does not open: version (of another version), invalid
@@ -469,6 +483,7 @@ export class Store {
   readonly path: string;
   kdf: { time: number; memory: number; threads: number };
   now: () => Date;
+  #beforeLock?: (op: string) => void | Promise<void>;
   #f: FileState;
   #key: Key | null = null;
   readonly #mu = new Mutex();
@@ -478,6 +493,7 @@ export class Store {
     this.#f = f;
     this.kdf = o.kdf ?? DEFAULT_KDF;
     this.now = o.now ?? (() => new Date());
+    this.#beforeLock = o.beforeLock;
   }
 
   /** Reads the vault at path (none yet: an empty vault without a
@@ -599,9 +615,14 @@ export class Store {
     throw this.#f.mode === '' ? err.noPassphrase() : err.locked();
   }
 
-  /** A variable's value. */
-  value(name: string): Promise<string> {
+  /** A variable's value; when authorize is supplied (page reveal), strict-mode
+   * verification runs atomically inside #mu before decryption. */
+  async value(name: string, authorize?: (v: StoreVerifier) => Promise<void>): Promise<string> {
+    if (authorize) await this.#beforeLock?.('value');
     return this.#mu.run(async () => {
+      if (authorize && this.#key && (await this.#strictWith(this.#key))) {
+        await authorize(this.#verifier(this.#key));
+      }
       const e = this.#find(name);
       if (!e) throw err.notFound();
       if (!this.#key) throw err.locked();
@@ -614,8 +635,10 @@ export class Store {
 
   /** Creates or changes a variable: a new one needs a value, and to
    * renames one (a taken name is refused), in one write. The value is
-   * sealed again with the name, machines and flag, which needs the key. */
-  async set(name: string, u: Update): Promise<void> {
+   * sealed again with the name, machines and flag, which needs the key.
+   * When authorize is supplied, widening checks and verification execute
+   * atomically inside #mu against the live policy and entry state. */
+  async set(name: string, u: Update, authorize?: (v: StoreVerifier, existing: boolean) => Promise<void>): Promise<Info> {
     if (!validName(name)) throw err.invalidName();
     const to = u.to ?? name;
     if (!validName(to)) throw err.invalidName();
@@ -624,6 +647,7 @@ export class Store {
     if (u.value !== undefined && Buffer.byteLength(u.value) > MAX_VALUE) throw err.invalid(`value longer than ${MAX_VALUE} bytes`);
     if (u.machines && !validMachines(u.machines)) throw err.invalid('machines');
     if (u.group !== undefined && u.group !== '' && !validEntityId(u.group)) throw err.invalid('group');
+    await this.#beforeLock?.('set');
     return this.#mu.run(async () => {
       let e = this.#find(name);
       if (!e && to !== name) throw err.notFound();
@@ -633,6 +657,15 @@ export class Store {
       if (u.group !== undefined && u.group !== '' && !this.#findGroup(u.group)) throw err.groupNotFound();
       const k = this.#need();
       await this.#verifyPolicy(k);
+      if (authorize) {
+        const cur = e && info(e, this.#f.forgotten);
+        const widensAccess = !!cur && ((u.injectOnly === false && cur.injectOnly) || !!u.machines?.some((m) => !allows(cur, m)));
+        const widensLinkedGroup = !!u.group && u.group !== cur?.group && this.groupInLinkedPreset(u.group);
+        const widensLinkedVar = (!cur && this.variableInLinkedPreset(name)) || (to !== name && this.variableInLinkedPreset(to));
+        if ((widensAccess || widensLinkedGroup || widensLinkedVar) && (await this.#strictWith(k))) {
+          await authorize(this.#verifier(k), !!cur);
+        }
+      }
       await this.#applyForgotten(k);
       e = this.#find(name);
       const plain = u.value !== undefined ? Buffer.from(u.value, 'utf8') : await open(k, e!.value, adOf(e!));
@@ -655,6 +688,7 @@ export class Store {
             : this.#f.presets;
         const policy = await sealPolicy(k, entries, presets, this.#f.workspaceLinks);
         this.#commit({ entries, presets, policy });
+        return info(n, this.#f.forgotten);
       } finally {
         plain.fill(0);
       }
@@ -854,15 +888,20 @@ export class Store {
   }
 
   /** Assigns variables to groupId ("" for ungrouped) in one atomic write. */
-  async assignGroup(names: readonly string[], groupId: string): Promise<void> {
+  async assignGroup(names: readonly string[], groupId: string, authorize?: (v: StoreVerifier) => Promise<void>): Promise<void> {
     const uniq = dedupe(names);
     if (!uniq.length || uniq.length > MAX_ENTRIES || !uniq.every(validName)) throw err.invalid('names');
     if (groupId !== '' && !validEntityId(groupId)) throw err.invalid('group');
+    await this.#beforeLock?.('assignGroup');
     return this.#mu.run(async () => {
       const k = this.#need();
       if (groupId !== '' && !this.#findGroup(groupId)) throw err.groupNotFound();
       for (const n of uniq) if (!this.#find(n)) throw err.notFound(n);
       await this.#verifyPolicy(k);
+      if (authorize && groupId !== '' && this.groupInLinkedPreset(groupId)) {
+        const addsMember = uniq.some((n) => this.#find(n)?.group !== groupId);
+        if (addsMember && (await this.#strictWith(k))) await authorize(this.#verifier(k));
+      }
       await this.#applyForgotten(k);
       const set = new Set(uniq);
       const now = formatRFC3339(this.now());
@@ -928,7 +967,7 @@ export class Store {
   }
 
   /** Updates a preset's name, description, variables or groups. */
-  async updatePreset(id: string, u: PresetUpdate): Promise<Preset> {
+  async updatePreset(id: string, u: PresetUpdate, authorize?: (v: StoreVerifier) => Promise<void>): Promise<Preset> {
     if (!validEntityId(id)) throw err.presetNotFound();
     const name = u.name !== undefined ? u.name.trim() : undefined;
     const description = u.description !== undefined ? u.description.trim() : undefined;
@@ -939,6 +978,7 @@ export class Store {
       throw err.invalid(`description longer than ${MAX_DESCRIPTION} bytes`);
     if (variables !== undefined && (variables.length > MAX_ENTRIES || !variables.every(validName))) throw err.invalid('variables');
     if (groups !== undefined && (groups.length > MAX_GROUPS || !groups.every(validEntityId))) throw err.invalid('groups');
+    await this.#beforeLock?.('updatePreset');
     return this.#mu.run(async () => {
       const k = this.#need();
       const cur = this.#findPreset(id);
@@ -947,6 +987,10 @@ export class Store {
         throw err.presetExists();
       if (groups !== undefined) for (const gid of groups) if (!this.#findGroup(gid)) throw err.groupNotFound();
       await this.#verifyPolicy(k);
+      if (authorize && this.presetLinked(id)) {
+        const widensPreset = !!variables?.some((n) => !cur.variables.includes(n)) || !!groups?.some((g) => !cur.groups.includes(g));
+        if (widensPreset && (await this.#strictWith(k))) await authorize(this.#verifier(k));
+      }
       await this.#applyForgotten(k);
       const next: Preset = {
         ...cur,
@@ -1028,15 +1072,26 @@ export class Store {
   }
 
   /** Links presetIds (empty removes the link) to a workspace on machine. */
-  async setWorkspacePresets(machine: string, workspace: string, presetIds: readonly string[]): Promise<WorkspaceLink | null> {
+  async setWorkspacePresets(
+    machine: string,
+    workspace: string,
+    presetIds: readonly string[],
+    authorize?: (v: StoreVerifier) => Promise<void>,
+  ): Promise<WorkspaceLink | null> {
     if (!validMachineID(machine) || machine === ALL_MACHINES) throw err.invalid('machine');
     if (!validWorkspaceId(workspace)) throw err.invalid('workspace');
     const presets = dedupe(presetIds);
     if (presets.length > MAX_PRESETS_PER_WORKSPACE || !presets.every(validEntityId)) throw err.invalid('presets');
+    await this.#beforeLock?.('setWorkspacePresets');
     return this.#mu.run(async () => {
       const k = this.#need();
       for (const pid of presets) if (!this.#findPreset(pid)) throw err.presetNotFound();
       await this.#verifyPolicy(k);
+      if (authorize) {
+        const cur = this.getWorkspaceLink(machine, workspace);
+        const addsPreset = presets.some((pid) => !cur?.presets.includes(pid));
+        if (addsPreset && (await this.#strictWith(k))) await authorize(this.#verifier(k));
+      }
       await this.#applyForgotten(k);
       const rest = this.#f.workspaceLinks.filter((l) => !(l.machine === machine && l.workspace === workspace));
       if (presets.length > 0 && rest.length >= MAX_WORKSPACE_LINKS) throw err.tooManyLinks();
@@ -1109,6 +1164,48 @@ export class Store {
     }
   }
 
+  async #strictWith(k: Key): Promise<boolean> {
+    try {
+      return !!(await this.#guardWith(k)).verifyEachAllow;
+    } catch (e) {
+      return !isCode(e, 'vault_locked') && !isCode(e, 'no_passphrase');
+    }
+  }
+
+  #verifier(k: Key): StoreVerifier {
+    return {
+      status: () => this.status(),
+      guard: () => this.#guardWith(k),
+      strict: () => this.#strictWith(k),
+      recordProof: async (id, at, count) => {
+        await this.#recordProof(k, await this.#guardWith(k), id, at, count);
+      },
+      verifyPassphrase: async (passphrase, w) => {
+        await this.#checked(passphrase);
+        if (w && this.#key) await this.#passphraseChecked(this.#key, w);
+      },
+    };
+  }
+
+  /** Runs an Allow authorization (e.g. answering a pending MCP request) inside
+   * #mu so strict-mode toggles or locks cannot interleave with verification. */
+  async authorizeAllow<T>(fn: (v: StoreVerifier) => Promise<T>): Promise<T> {
+    await this.#beforeLock?.('authorizeAllow');
+    return this.#mu.run(async () => {
+      if (!this.#key) {
+        const closed = () => Promise.reject(this.#f.mode === '' ? err.noPassphrase() : err.locked());
+        return fn({
+          status: () => this.status(),
+          guard: closed,
+          strict: async () => false,
+          recordProof: closed,
+          verifyPassphrase: closed,
+        });
+      }
+      return fn(this.#verifier(this.#key));
+    });
+  }
+
   /** What guards the vault; vault_locked while it is locked. */
   guard(): Promise<Guard> {
     return this.#mu.run(() => this.#guardWith(this.#need()));
@@ -1117,9 +1214,11 @@ export class Store {
   /** The user's change of the guard: fn changes it (its error leaves it as
    * it was) and it is written, with the unlock entries of authenticators
    * fn removed. Exemptions of forgotten machines go first. */
-  updateGuard(fn: (g: Guard) => void): Promise<void> {
+  async updateGuard(fn: (g: Guard) => void, authorize?: (v: StoreVerifier, strict: boolean) => Promise<void>): Promise<void> {
+    if (authorize) await this.#beforeLock?.('updateGuard');
     return this.#mu.run(async () => {
       const k = this.#need();
+      if (authorize) await authorize(this.#verifier(k), await this.#strictWith(k));
       await this.#guardWith(k);
       await this.#applyForgotten(k);
       const g = await this.#guardWith(k);

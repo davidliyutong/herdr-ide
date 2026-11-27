@@ -82,6 +82,8 @@ export const Op = {
   Plugin: 'plugin',
   /** Opened by the agent towards the hub for each vault MCP connection. */
   Vault: 'vault',
+  /** Stages or drops a one-time environment for a new terminal. */
+  TermEnv: 'term.env',
   /** Opened by a node towards each hub once another node took its socket. */
   NodeDrain: 'node.drain',
 } as const;
@@ -184,9 +186,21 @@ export interface Reply {
   hc_installed?: boolean;
   hc_action?: 'start' | 'restart';
   privacy?: PrivacyStatus;
+  termenv?: TermEnvStaged;
   plugin?: unknown;
   plugin_length?: number;
   entries_length?: number;
+}
+
+export interface TermEnvStageParams {
+  env: Record<string, string>;
+  argv?: string[];
+  line?: string;
+}
+
+export interface TermEnvStaged {
+  token: string;
+  launch: string[];
 }
 
 export const Access = { Granted: 'granted', Denied: 'denied', Unknown: 'unknown' } as const;

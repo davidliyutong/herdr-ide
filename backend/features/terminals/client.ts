@@ -3,8 +3,17 @@
 // credit for as it draws. Calls reach the terminal core only through the
 // allowlist; terminals that are none of the clients' are answered as
 // terminals that do not exist; a read-only client only observes.
+import { isForeignRuntimeVar } from '#shared/lib/bunenv.ts';
 import type { Logger } from '#shared/lib/log.ts';
-import { HIDDEN_LABEL, isChatHostName } from '#shared/proto/agentproto/index.ts';
+import {
+  HIDDEN_LABEL,
+  isChatHostName,
+  MAX_BODY,
+  MAX_INLINE,
+  Op,
+  type Header,
+  type TermEnvStageParams,
+} from '#shared/proto/agentproto/index.ts';
 import { HCError, type AttachParams, type Conn, type Output, type Stream } from '#shared/proto/hc/index.ts';
 import type { Audit, AuditFields, Who } from '#kernel/audit.ts';
 import { CloseCode, type Channel, type ChannelHandlers, type Message } from '#kernel/channel.ts';
@@ -24,7 +33,7 @@ import {
 } from './allowlist.ts';
 import { NotClients, type Backend, type ClientStream, type Subscriber } from './backend.ts';
 import { Code, frame, FrameKind, goQuote, parseInbound, resizeFrame, type Inbound } from './messages.ts';
-import { hiddenRecord, isObject, otherMachine } from './records.ts';
+import { cleanRecord, hiddenRecord, isObject, otherMachine } from './records.ts';
 import type { Timing } from './timing.ts';
 
 export interface ClientDeps {
@@ -371,6 +380,8 @@ export class TermClient implements Subscriber {
     const signal = AbortSignal.any([this.life.signal, AbortSignal.timeout(this.d.timing.callMs)]);
     if (params && (await this.refuseTargets(sub.b, sub.conn, m, params, signal))) return;
     const ev: AuditFields = { machine: m.m, terminal: params?.terminal ?? null, argv: params?.argv ?? null };
+    let stagedToken = '';
+    const mc = m.method === 'terminal.run' ? this.d.machines.get(m.m) : undefined;
     if (m.method === 'terminal.run') {
       // Hub-only parameter naming the workspace whose linked vault presets
       // should be injected; stripped before reaching the terminal core.
@@ -387,45 +398,127 @@ export class TermClient implements Subscriber {
       if (given === undefined) return this.fail(m.rid, 'usage');
       if (given && Object.keys(given).length) ev.client_env = Object.keys(given).sort();
       ev.cwd = params?.cwd ?? null;
-      const mc = this.d.machines.get(m.m);
       if (mc) {
-        const p: Params = params ?? {};
+        const p: Params = { ...(params ?? {}) };
         const added: string[] = [];
-        // Workspace-linked vault presets (feature 30): injected before
-        // virtual display variables so DISPLAY cannot be overridden, while
-        // keeping explicit client-supplied env vars. Only names are audited.
+        const display = this.d.paneEnv(mc);
+        const ssh = this.d.sshEnv(mc);
+        // Workspace-linked vault presets (feature 30): staged in memory on the
+        // machine's node (Op.TermEnv) and consumed once via <run>/env.sock +
+        // execve, never sent in terminal.run.env (which herdr-core persists to
+        // terminals.json and reuses on kept-terminal recovery). Precedence:
+        // virtual display > client env > vault preset > ssh env.
+        const vaultEnv: Record<string, string> = {};
+        let vaultPresets: string[] = [];
         if (workspace && this.d.workspaceEnv) {
           const resolved = await this.d.workspaceEnv(mc, workspace);
           if (resolved && Object.keys(resolved.env).length) {
-            const names = addEnv(p, resolved.env, false);
+            for (const [k, val] of Object.entries(resolved.env)) {
+              if ((given && k in given) || (display && k in display)) continue;
+              vaultEnv[k] = val;
+            }
+            vaultPresets = resolved.presets;
+          }
+        }
+        const vaultNames = Object.keys(vaultEnv).sort();
+        if (vaultNames.length > 0) {
+          let runArgv: string[] | undefined;
+          if (p.argv !== undefined && p.argv !== null) {
+            if (
+              !Array.isArray(p.argv) ||
+              !p.argv.every((a): a is string => typeof a === 'string' && !a.includes('\0')) ||
+              (p.argv.length > 0 && p.argv[0] === '')
+            ) {
+              return this.fail(m.rid, 'usage');
+            }
+            if (p.argv.length > 0) runArgv = p.argv;
+          }
+          let runLine: string | undefined;
+          if (p.line !== undefined && p.line !== null) {
+            if (typeof p.line !== 'string' || p.line.includes('\0')) return this.fail(m.rid, 'usage');
+            runLine = p.line;
+          }
+          if (runArgv && runLine !== undefined) return this.fail(m.rid, 'usage');
+          const stageEnv: Record<string, string> = { ...vaultEnv };
+          const coreGiven: Record<string, string> = {};
+          if (given) {
+            for (const [k, val] of Object.entries(given)) {
+              if (display && k in display) continue;
+              // Keep BUN_* client vars off the `term-env` Bun binary itself
+              // while still handing them to the execve'd user program.
+              if (isForeignRuntimeVar(k)) stageEnv[k] = val;
+              else coreGiven[k] = val;
+            }
+          }
+          for (const [k, val] of Object.entries(stageEnv)) {
+            if (k === '' || k.includes('=') || k.includes('\0') || val.includes('\0')) return this.fail(m.rid, 'usage');
+          }
+          if (Object.keys(coreGiven).length > 0) p.env = coreGiven;
+          else delete p.env;
+          ev.vault_env = vaultNames;
+          ev.vault_presets = vaultPresets;
+          added.push(...vaultNames);
+          if (display && Object.keys(display).length) {
+            const names = addEnv(p, display, true);
             if (!names) return this.fail(m.rid, 'usage');
-            if (names.length) {
-              ev.vault_env = names;
-              ev.vault_presets = resolved.presets;
+            added.push(...names);
+          }
+          if (ssh && Object.keys(ssh).length) {
+            const sshOnly = Object.fromEntries(Object.entries(ssh).filter(([k]) => !(k in stageEnv)));
+            if (Object.keys(sshOnly).length) {
+              const names = addEnv(p, sshOnly, false);
+              if (!names) return this.fail(m.rid, 'usage');
               added.push(...names);
             }
           }
-        }
-        // New programs get the machine's virtual display (feature 14): its
-        // variables replace any the client gave, so a client cannot point
-        // them elsewhere.
-        const display = this.d.paneEnv(mc);
-        if (display && Object.keys(display).length) {
-          const names = addEnv(p, display, true);
-          if (!names) return this.fail(m.rid, 'usage');
-          added.push(...names);
-        }
-        // Programs on an ssh machine learn that their terminal is shown
-        // elsewhere; what the client gave stays.
-        const ssh = this.d.sshEnv(mc);
-        if (ssh && Object.keys(ssh).length) {
-          const names = addEnv(p, ssh, false);
-          if (!names) return this.fail(m.rid, 'usage');
-          added.push(...names);
-        }
-        if (added.length) {
           ev.env = [...new Set(added)].sort();
-          params = p;
+          const stagePayload: TermEnvStageParams = {
+            env: stageEnv,
+            ...(runArgv ? { argv: runArgv } : {}),
+            ...(runLine !== undefined ? { line: runLine } : {}),
+          };
+          const encoded = Buffer.from(JSON.stringify(stagePayload));
+          if (encoded.length > MAX_BODY) return this.fail(m.rid, 'usage');
+          const h: Header =
+            encoded.length > MAX_INLINE
+              ? { op: Op.TermEnv, action: 'stage', params_length: encoded.length }
+              : { op: Op.TermEnv, action: 'stage', params: stagePayload };
+          try {
+            const rep = await mc.request(h, {
+              signal,
+              timeoutMs: this.d.timing.callMs,
+              ...(encoded.length > MAX_INLINE ? { body: encoded } : {}),
+            });
+            if (!rep.termenv?.token || !Array.isArray(rep.termenv.launch) || rep.termenv.launch.length === 0) {
+              return this.fail(m.rid, 'unavailable');
+            }
+            stagedToken = rep.termenv.token;
+            p.argv = rep.termenv.launch;
+            delete p.line;
+            params = p;
+          } catch {
+            return this.fail(m.rid, 'unavailable');
+          }
+        } else {
+          // New programs get the machine's virtual display (feature 14): its
+          // variables replace any the client gave, so a client cannot point
+          // them elsewhere.
+          if (display && Object.keys(display).length) {
+            const names = addEnv(p, display, true);
+            if (!names) return this.fail(m.rid, 'usage');
+            added.push(...names);
+          }
+          // Programs on an ssh machine learn that their terminal is shown
+          // elsewhere; what the client gave stays.
+          if (ssh && Object.keys(ssh).length) {
+            const names = addEnv(p, ssh, false);
+            if (!names) return this.fail(m.rid, 'usage');
+            added.push(...names);
+          }
+          if (added.length) {
+            ev.env = [...new Set(added)].sort();
+            params = p;
+          }
         }
       }
     }
@@ -434,7 +527,13 @@ export class TermClient implements Subscriber {
     try {
       result = await sub.conn.call(m.method, params ?? NULL_PARAMS, { signal });
     } catch (e) {
+      if (stagedToken && mc) {
+        void mc.request({ op: Op.TermEnv, action: 'drop', params: { token: stagedToken } }, { timeoutMs: 5000 }).catch(() => {});
+      }
       return this.failErr(m.rid, e);
+    }
+    if ((m.method === 'terminal.run' || m.method === 'terminal.get') && isObject(result)) {
+      result = cleanRecord(result);
     }
     if (m.method === 'terminal.list') {
       result = sub.b.visible(result);
