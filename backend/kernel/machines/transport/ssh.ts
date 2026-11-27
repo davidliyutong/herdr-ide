@@ -32,6 +32,17 @@ export class AuthRequiredError extends Error {
   }
 }
 
+/** ssh timed out trying to reach the machine. */
+export class SSHTimeoutError extends Error {
+  /** True when the ssh child process itself hung past our deadline (a dead
+   * ControlMaster); false when ssh exited on its own with a timeout error. */
+  readonly timedOut: boolean;
+  constructor(detail: string, timedOut = false) {
+    super(detail);
+    this.timedOut = timedOut;
+  }
+}
+
 export interface SSHOptions {
   target: string;
   controlDir: string;
@@ -205,7 +216,9 @@ export function classifySSHError(stderr: string, err?: Error): Error {
   ])
     if (s.includes(m)) return new AuthRequiredError(lastLines(stderr, 3).trim());
   const msg = lastLines(stderr, 3).trim();
-  return new Error(msg === '' && err ? err.message : msg);
+  const text = msg === '' && err ? err.message : msg;
+  if (s.includes('timed out')) return new SSHTimeoutError(text);
+  return new Error(text);
 }
 
 export function normArch(m: string): string {
@@ -238,7 +251,7 @@ export async function run(
     cancelSignal: opts.signal,
   });
   if (r.isCanceled) throw opts.signal?.reason ?? new Error('ssh: cancelled');
-  if (r.timedOut) throw Object.assign(new Error('ssh: timed out'), { timedOut: true });
+  if (r.timedOut) throw new SSHTimeoutError('ssh: timed out', true);
   if (r.exitCode === 0) return r.stdout;
   if (r.exitCode === 255) return Promise.reject(classifySSHError(r.stderr, new Error(`exit status ${r.exitCode}`)));
   if (r.exitCode === undefined) throw new Error(`ssh: ${r.shortMessage}`);
@@ -527,7 +540,8 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
       },
     );
   } catch (e) {
-    throw new Error(`upload the machine build ${version}: ${(e as Error).message}`);
+    const msg = `upload the machine build ${version}: ${(e as Error).message}`;
+    throw e instanceof SSHTimeoutError ? new SSHTimeoutError(msg, e.timedOut) : new Error(msg);
   }
   if (!confirmed(out)) throw new Error(`upload the machine build ${version}: the machine did not confirm its sha256`);
   return `${dir}/${HUB_BIN}`;

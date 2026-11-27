@@ -403,7 +403,7 @@ Install the full release directory at that path. The service must run as the use
 
 ## Several hubs and development builds
 
-The chat host survives restarting or reinstalling the app; a newer build asks an older host to make way only while no chat works or waits. Builds of local changes (`-dirty.<time>` versions) are not ordered, so the Chats panel reminds you to **Restart Chat Host**; chats resume their sessions in the new host.
+The chat host survives restarting or reinstalling the app; a newer build (including local `-dirty.<time>` builds, ordered by build time) asks an older host to make way once no chat works or waits. While an active chat keeps an older host running, the Chats panel offers **Restart Chat Host** once it is idle; chats resume their sessions in the new host.
 
 Two hubs reaching the same machine share only the agent build directory unless they use the same instance. Give each its own `--instance` (state in `~/.veldr-<instance>`, terminal core session `veldr-<instance>-<host id>`). For development:
 

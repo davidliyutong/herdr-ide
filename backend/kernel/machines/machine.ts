@@ -6,7 +6,7 @@ import { Reader } from '#shared/lib/streamio.ts';
 import { retryDelay } from '#shared/lib/wait.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { offline } from '../fail.ts';
-import { AuthRequiredError } from './transport/ssh.ts';
+import { AuthRequiredError, SSHTimeoutError } from './transport/ssh.ts';
 import { deployCode } from './transport/errors.ts';
 import { closeStream, type AgentStream, type Session } from './transport/session.ts';
 import { Unusable, validTarget, type Deploy, type HCState, type Spec, type State, type Status } from './spec.ts';
@@ -72,6 +72,11 @@ class Wait {
   wake(): void {
     if (this.wakeUp) this.wakeUp();
     else this.woken = true;
+  }
+
+  /** Drops any wake queued before the next attempt began. */
+  clear(): void {
+    this.woken = false;
   }
 
   /** Resolves 'woken', 'timeout' or 'aborted'. */
@@ -321,6 +326,7 @@ export class Machine {
     const t = this.timing;
     let backoff = t.backoffMinMs;
     while (!signal.aborted) {
+      this.retry.clear();
       this.readyAt = undefined;
       this.setStatus('connecting');
       let dialed: { session: Session; platform: string };
@@ -330,6 +336,13 @@ export class Machine {
       } catch (e) {
         progress.end();
         if (signal.aborted) return;
+        if (e instanceof SSHTimeoutError) {
+          this.setStatus('error', e);
+          this.deps.logger(`machine ${this.label}: ${errorText(e)} (waiting for retry)`);
+          await this.retry.until(Infinity, signal);
+          backoff = t.backoffMinMs;
+          continue;
+        }
         let wait = backoff;
         if (e instanceof AuthRequiredError) {
           this.setStatus('auth_required', e);
@@ -360,6 +373,12 @@ export class Machine {
       dialed.session.close();
       if (signal.aborted) return;
       this.setStatus('error', err ?? new Error('session ended'));
+      if (err instanceof SSHTimeoutError && this.readyAt === undefined) {
+        this.deps.logger(`machine ${this.label}: ${errorText(err)} (waiting for retry)`);
+        await this.retry.until(Infinity, signal);
+        backoff = t.backoffMinMs;
+        continue;
+      }
       this.deps.logger(`machine ${this.label}: session ended: ${errorText(err)}`);
       const stable = this.readyAt !== undefined && performance.now() - this.readyAt >= STABLE_SESSION_MS;
       const delay = stable ? t.sessionRetryMs : Math.max(t.sessionRetryMs, backoff);
@@ -415,7 +434,9 @@ export class Machine {
     try {
       rep = await sess.request({ op: Op.Hello }, { signal, timeoutMs: this.timing.helloTimeoutMs });
     } catch (e) {
-      throw new Error(`hello: ${errorText(e)}`);
+      const msg = `hello: ${errorText(e)}`;
+      if (this.kind === 'ssh' && errorText(e).includes('no reply in time')) throw new SSHTimeoutError(msg);
+      throw new Error(msg);
     }
     this.session = sess;
     this.readyAt = performance.now();

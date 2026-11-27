@@ -609,26 +609,24 @@ export const actions = {
   },
 
   /** Enables or disables a machine (stored by the hub). Disabling a
-   * connected machine asks first: its agent disconnects and VS Code there
-   * stops; its programs keep running there. */
+   * connected machine asks first (and offers to stop its terminal service):
+   * its agent disconnects and VS Code there stops; its programs keep running
+   * there. Already-offline machines disable directly without asking. */
   async setMachineEnabled(m: string, enabled: boolean) {
     const st = useStore.getState().machines[m];
     const machine = st?.label ?? m;
     let stop = false;
-    if (!enabled && st?.status !== 'disabled') {
-      const ask = {
+    if (!enabled && st?.status === 'ready' && !st.code) {
+      const res = await confirmCheckDialog({
         title: t('confirm.disableMachineTitle', { machine }),
         message: t('confirm.disableMachine'),
         confirm: t('menu.disableMachine'),
         danger: true,
-      };
-      // While its agent is connected, the machine's terminal core can be
-      // stopped with it (unchecked: that ends every terminal there).
-      if (st?.status === 'ready' && !st.code) {
-        const res = await confirmCheckDialog({ ...ask, check: t('confirm.disableStopCore'), checked: false });
-        if (!res) return;
-        stop = res.checked;
-      } else if (!(await confirmDialog(ask))) return;
+        check: t('confirm.disableStopCore'),
+        checked: false,
+      });
+      if (!res) return;
+      stop = res.checked;
     }
     // Stopped before the session ends; a failed stop is reported and the
     // machine is disabled all the same.
@@ -636,9 +634,10 @@ export const actions = {
     await putEnabled(m, enabled);
   },
 
-  /** Enables or disables several machines; disabling asks once, naming
-   * them, and may stop the terminal services of those connected. Machines
-   * already so, and those never connected (a code), are left. */
+  /** Enables or disables several machines; disabling asks once when any is
+   * connected, naming them, and may stop the terminal services of those
+   * connected. Already-offline machines disable directly without asking.
+   * Machines already so, and those never connected (a code), are left. */
   async setMachinesEnabled(ids: string[], enabled: boolean) {
     const s = useStore.getState();
     const list = ids
@@ -646,18 +645,17 @@ export const actions = {
       .filter((st) => st && !st.code && (enabled ? st.status === 'disabled' : st.status !== 'disabled'));
     if (list.length <= 1) return list[0] && actions.setMachineEnabled(list[0].id, enabled);
     let stop = false;
-    if (!enabled) {
-      const ask = {
+    if (!enabled && list.some((st) => st.status === 'ready')) {
+      const res = await confirmCheckDialog({
         title: t('confirm.disableMachinesTitle', { n: list.length }),
         message: t('confirm.disableMachines', { machines: quotedNames(list.map((st) => st.label)) }),
         confirm: t('confirm.disable'),
         danger: true,
-      };
-      if (list.some((st) => st.status === 'ready')) {
-        const res = await confirmCheckDialog({ ...ask, check: t('confirm.disableStopCores'), checked: false });
-        if (!res) return;
-        stop = res.checked;
-      } else if (!(await confirmDialog(ask))) return;
+        check: t('confirm.disableStopCores'),
+        checked: false,
+      });
+      if (!res) return;
+      stop = res.checked;
     }
     await Promise.all(
       list.map(async (st) => {

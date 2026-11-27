@@ -61,10 +61,10 @@ Paths on machines are POSIX, so the hub handles them with `node:path`'s `posix`,
 - *disabled* until enabled;
 - *connecting* while it dials, with `deploy`, what the dial is doing: `probe`, `download` (the machine fetches its build), `upload` (`sent` of `total` bytes ssh has read from the hub), `install` (the machine checks and unpacks the upload), `start` (its node); a new step is published at once, an upload's bytes at most every 250 ms (`DEPLOY_PUBLISH_MS`), and the field is gone once the machine leaves *connecting*. The sidebar and the machine's settings show the step and a bar, filled by an upload, moving otherwise;
 - *auth_required* when the dial needs a login (retried periodically);
-- *error* on any other failure, with ssh's message (retried with exponential backoff);
+- *error* on any other failure, with ssh's message (retried with exponential backoff, except ssh timeouts, which wait for a manual **Retry**);
 - *ready* once its agent answers `hello`, whose reply carries the host's platform and directories.
 
-A session that ends turns *error* and reconnects, with the backoff reset after a stable session. The authentication terminal closing and **Retry** end a wait at once. Read-only browsers cannot retry, since an attempt may start an ssh login. Every state change goes to every `/ws` client. Browser event, terminal, chat and GUI channels retry with jittered backoff and reset their delay after a connection stays open for 30 s. The browser's event channel keeps at most 256 messages or 256 Ki UTF-16 code units while disconnected, dropping the oldest messages when it reaches either bound.
+A session that ends turns *error* and reconnects, with the backoff reset after a stable session. The authentication terminal closing and **Retry** end a wait at once; ssh timeouts do not auto-retry and wait for **Retry** (with a quick **Disable** button beside it in the sidebar). Read-only browsers cannot retry, since an attempt may start an ssh login. Every state change goes to every `/ws` client. Browser event, terminal, chat and GUI channels retry with jittered backoff and reset their delay after a connection stays open for 30 s. The browser's event channel keeps at most 256 messages or 256 Ki UTF-16 code units while disconnected, dropping the oldest messages when it reaches either bound.
 
 ### The machines file
 
@@ -104,7 +104,7 @@ Without the file there are no stored machines yet; nothing is written until the 
 - **Ordering** by dragging or **Move Up/Down** (`PUT /api/machines/order`), stored as the file's `order`.
 - **Rename** (`PUT /api/m/{id}/label`); labels are unique (`label_taken`) because `--machine` selects by label.
 - **Remove** (`DELETE /api/m/{id}`) deletes the record and ends the session. Nothing on the machine is removed; its terminal core keeps running. The local machine cannot be removed.
-- **Enable/disable** (`PUT /api/m/{id}/enabled`). Disabling ends the session (the agent exits and stops its code-server; programs keep running in the terminal core). For a ready machine the confirmation offers to stop its terminal core too.
+- **Enable/disable** (`PUT /api/m/{id}/enabled`). Disabling ends the session (the agent exits and stops its code-server; programs keep running in the terminal core). For a ready machine the confirmation offers to stop its terminal core too; already-offline machines disable directly without confirmation.
 
 All of these are refused for read-only browsers and audited (`machine.add`, `machine.rename`, `machine.remove`, `machine.enable`, `machine.disable`, `machine.order`).
 
@@ -153,7 +153,7 @@ The machine's menu reports (`GET /api/m/{id}/hc`) and starts, restarts or stops 
 - **Authentication needed** → ssh's stderr classified as auth → *auth_required* with an authentication terminal (on Windows, instructions and **Retry**).
 - **Network loss** → yamux keepalive ends the session on both sides; the agent exits and releases what it owns ([10](10-remote-resource-lifecycle.md)); the hub reconnects. If ssh is still running shortly after yamux gave up, or a probe through the master times out, the control master died silently (network change, sleep): the hub runs `ssh -O stop` so the next attempt opens a new master instead of hanging. A new password or 2FA login is then needed.
 - **Terminal core unreachable** → the machine stays *ready*; its `hc` state is `error` with a code (`not_bundled`, `install_failed`, `start_failed`, `connect_failed`, `stopped`, …); the hub retries and the menu offers start or restart.
-- **Unreachable machine added** → stored, shown in *error* with ssh's message, retried with backoff.
+- **Unreachable machine added** → stored, shown in *error* with ssh's message; ssh timeouts wait for manual **Retry** (with quick **Disable** beside it), while other errors retry with backoff.
 - **Machines file damaged** → logged; the hub runs with the local machine and `--ssh` targets, keeps changes in memory and leaves the file alone.
 - **Refused stored target** → *error* with `invalid_target`, never dialed; rename, remove or fix the file while the hub is stopped.
 - **Writing the file fails** → the change is refused with `save`.

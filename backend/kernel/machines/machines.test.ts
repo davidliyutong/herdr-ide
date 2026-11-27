@@ -7,6 +7,7 @@ import { Fail } from '../fail.ts';
 import { agentDialer, localSpec, running, sleep, sshSpec, testMachines, waitFor, TEST_INFO } from '../testing.ts';
 import { Op, readLine, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { Machine, type Dialer, type StreamHandler } from './machine.ts';
+import { SSHTimeoutError } from './transport/ssh.ts';
 import { Registry } from './registry.ts';
 import { LOCAL_ID, loadSpecs, sortByOrder, validTarget, type Deploy, type Spec, type State } from './spec.ts';
 
@@ -271,6 +272,74 @@ describe('machines', () => {
     expect(m.state().error).toBe('no');
     m.wake();
     await waitFor('the second dial', () => dials.get('x') === 2);
+    ac.abort();
+    await done;
+  });
+
+  // An SSH timeout does not auto-retry: the machine stays in error until
+  // wake() (manual Retry) or abort/disable.
+  test('an SSH timeout waits for manual retry without auto-retrying', async () => {
+    let dials = 0;
+    const logs: string[] = [];
+    const m = new Machine(sshSpec('x'), {
+      dial: async () => {
+        dials++;
+        throw new SSHTimeoutError('ssh: connect to host x port 22: Operation timed out');
+      },
+      logger: (l) => void logs.push(l),
+      publish: () => {},
+      streams: () => undefined,
+      localSupported: true,
+      timing: { backoffMinMs: 10, backoffMaxMs: 20 },
+    });
+    const ac = new AbortController();
+    const done = m.run(ac.signal);
+    await waitFor('the error', () => m.state().status === 'error');
+    expect(dials).toBe(1);
+    expect(m.state().error).toBe('ssh: connect to host x port 22: Operation timed out');
+    expect(logs.at(-1)).toContain('waiting for retry');
+    // Much longer than backoffMaxMs: still no automatic retry.
+    await sleep(80);
+    expect(dials).toBe(1);
+    expect(m.state().status).toBe('error');
+    // Manual retry wakes it immediately, and a second timeout stops again.
+    m.wake();
+    await waitFor('the manual retry', () => dials === 2 && m.state().status === 'error');
+    await sleep(60);
+    expect(dials).toBe(2);
+    ac.abort();
+    await done;
+  });
+
+  // An SSH hello timeout before the machine ever became ready also waits
+  // for manual retry instead of auto-retrying in a loop.
+  test('an SSH hello timeout waits for manual retry', async () => {
+    const { duplexPair } = await import('node:stream');
+    const { Session } = await import('./transport/session.ts');
+    let dials = 0;
+    const m = new Machine(sshSpec('x'), {
+      dial: async () => {
+        dials++;
+        const [a, b] = duplexPair();
+        // Peer never replies to Op.Hello.
+        b.resume();
+        return { session: new Session(a, () => b.destroy()), platform: 'linux/amd64' };
+      },
+      logger: () => {},
+      publish: () => {},
+      streams: () => undefined,
+      localSupported: true,
+      timing: { helloTimeoutMs: 30, sessionRetryMs: 10, backoffMinMs: 10 },
+    });
+    const ac = new AbortController();
+    const done = m.run(ac.signal);
+    await waitFor('the hello timeout error', () => m.state().status === 'error');
+    expect(dials).toBe(1);
+    expect(m.state().error).toContain('no reply in time');
+    await sleep(80);
+    expect(dials).toBe(1);
+    m.wake();
+    await waitFor('the manual retry', () => dials === 2 && m.state().status === 'error');
     ac.abort();
     await done;
   });

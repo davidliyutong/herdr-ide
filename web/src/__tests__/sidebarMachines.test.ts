@@ -343,7 +343,21 @@ describe('Sidebar machines', () => {
       ]),
     );
     expect(host.querySelector('.machine-status')?.textContent).toContain('connection refused');
-    expect(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Retry')).toBeDefined();
+    const btns = Array.from(host.querySelectorAll<HTMLButtonElement>('.machine-status button'));
+    expect(btns.map((b) => b.textContent)).toEqual(['Retry', 'Disable']);
+    // Quick Disable beside Retry disables an offline machine directly without confirmation.
+    const { useDialog } = await import('../dialog');
+    useDialog.setState({ current: undefined });
+    await act(async () => btns[1].click());
+    expect(useDialog.getState().current).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/m/gpu/enabled',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ enabled: false }) }),
+    );
+    // Neither Retry nor Disable is offered read-only.
+    await act(async () => useStore.getState().setReadOnly(true));
+    expect(host.querySelectorAll('.machine-status button')).toHaveLength(0);
+    await act(async () => useStore.getState().setReadOnly(false));
   });
 
   it('says the local machine needs Linux or macOS where no agent runs on it', async () => {
@@ -367,9 +381,9 @@ describe('Sidebar machines', () => {
     const machine = { id: 'gpu', label: 'gpu', kind: 'ssh', status: 'auth_required', enabled: true } as unknown as MachineState;
     await act(async () => useStore.getState().setMachines([machine]));
     const buttons = () => Array.from(host.querySelectorAll('.machine-status button')).map((b) => b.textContent);
-    expect(buttons()).toEqual(['Sign in…', 'Retry']);
+    expect(buttons()).toEqual(['Sign in…', 'Retry', 'Disable']);
     await act(async () => useStore.setState({ sshLogin: false }));
-    expect(buttons()).toEqual(['Retry']);
+    expect(buttons()).toEqual(['Retry', 'Disable']);
     expect(host.querySelector('.machine-status')?.textContent).toContain('ssh-add');
     useStore.setState({ sshLogin: true });
   });

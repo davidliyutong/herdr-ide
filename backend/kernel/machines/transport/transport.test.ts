@@ -12,6 +12,7 @@ import { checkPrivateDir, controlName } from './controldir.ts';
 import { Session, setReplyTimeout } from './session.ts';
 import {
   AuthRequiredError,
+  SSHTimeoutError,
   authCommand,
   classifySSHError,
   normArch,
@@ -95,14 +96,25 @@ describe('session', () => {
 });
 
 describe('ssh', () => {
-  test('errors that need the user', () => {
+  test('errors that need the user or timed out', () => {
     for (const s of [
       'user@host: Permission denied (publickey,password).',
       'Host key verification failed.',
       "The authenticity of host 'x' can't be established.",
     ])
       expect(classifySSHError(s)).toBeInstanceOf(AuthRequiredError);
-    expect(classifySSHError('ssh: connect to host x port 22: Connection refused')).not.toBeInstanceOf(AuthRequiredError);
+    for (const s of [
+      'ssh: connect to host x port 22: Operation timed out',
+      'ssh: connect to host x port 22: Connection timed out',
+      'Connection timed out during banner exchange',
+    ]) {
+      const e = classifySSHError(s);
+      expect(e).toBeInstanceOf(SSHTimeoutError);
+      expect((e as SSHTimeoutError).timedOut).toBe(false);
+    }
+    const refused = classifySSHError('ssh: connect to host x port 22: Connection refused');
+    expect(refused).not.toBeInstanceOf(AuthRequiredError);
+    expect(refused).not.toBeInstanceOf(SSHTimeoutError);
   });
 
   test('normArch', () => {

@@ -19,8 +19,8 @@ export function setVersion(v: string): void {
 
 /** A build's version as the build names it (git describe: the tag, "v" and
  * three numbers, then "-<n>-g<hash>" commits after it, and "-dirty", which
- * scripts/build.sh follows with the build's time); null for any other (a
- * development build). What follows "-dirty" does not order builds. */
+ * scripts/version.sh follows with ".<unix time>"); null for any other (a
+ * development build). */
 export function parseVersion(v: string): [number, number, number, number] | null {
   v = v.replace(/^v/, '');
   const dirty = v.indexOf('-dirty');
@@ -45,13 +45,28 @@ export function parseVersion(v: string): [number, number, number, number] | null
   return n;
 }
 
-/** Whether build version a is older than b: both are known and a comes first. */
+/** Ordering tie-breaker for builds at the same commit: -1 for a clean build,
+ * 0 for plain "-dirty", or the build timestamp after "-dirty." / "-dirty-"
+ * (scripts/version.sh appends ".<unix seconds>" so local rebuilds replace
+ * older running nodes and chat hosts). */
+function dirtyOrder(v: string): number {
+  const dirty = v.indexOf('-dirty');
+  if (dirty < 0) return -1;
+  const rest = v.slice(dirty + '-dirty'.length);
+  const m = /^[.-](\d+)$/.exec(rest);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) && n > 0 ? n : 0;
+}
+
+/** Whether build version a is older than b: both are known and a comes first
+ * (with dirty builds at the same commit ordered by their build time). */
 export function olderVersion(a: string, b: string): boolean {
   const x = parseVersion(a);
   const y = parseVersion(b);
   if (!x || !y) return false;
   for (let i = 0; i < 4; i++) if (x[i] !== y[i]) return x[i] < y[i];
-  return false;
+  return dirtyOrder(a) < dirtyOrder(b);
 }
 
 export const Op = {
@@ -126,11 +141,14 @@ export interface NodeInfo {
   pid?: number;
 }
 
-/** Whether build n is newer than o: by version when both are known, else by
- * when their executables were written. */
+/** Whether build n is newer than o: by version when both are known and
+ * ordered, else by when their executables were written. */
 export function newer(n: NodeInfo, o: NodeInfo): boolean {
   if (n.build === o.build) return false;
-  if (parseVersion(n.version) && parseVersion(o.version) && n.version !== o.version) return olderVersion(o.version, n.version);
+  if (parseVersion(n.version) && parseVersion(o.version)) {
+    if (olderVersion(o.version, n.version)) return true;
+    if (olderVersion(n.version, o.version)) return false;
+  }
   return n.exe_time > o.exe_time;
 }
 

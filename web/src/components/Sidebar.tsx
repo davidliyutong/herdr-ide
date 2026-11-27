@@ -517,7 +517,12 @@ function MachineItem({ m }: { m: MachineState }) {
                   {m.status === 'auth_required' && m.kind === 'ssh' && sshLogin && (
                     <button onClick={() => useStore.getState().openAuth?.(m.id)}>{t('sidebar.authenticate')}</button>
                   )}
-                  {!readOnly && <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>}
+                  {!readOnly && (
+                    <>
+                      <button onClick={() => conn.retry(m.id)}>{t('sidebar.retry')}</button>
+                      <button onClick={() => void actions.setMachineEnabled(m.id, false)}>{t('sidebar.disable')}</button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
