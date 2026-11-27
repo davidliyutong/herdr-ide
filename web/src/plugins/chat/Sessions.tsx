@@ -106,6 +106,9 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
   // Set when the user explicitly clicks Refresh so the next agents + sessions
   // load bypasses the hub cache.
   const forceRefresh = useRef(false);
+  // Active abort controllers for "Show More" pagination calls so directory
+  // switches or unmount abort in-flight probes cleanly.
+  const moreAborts = useRef(new Set<AbortController>());
   // The chats the sessions are listed with, as the page's chats are now:
   // gone (deleted, or removed by the machine's limits), archived or there.
   const listedIds = Object.values(lists).flatMap((l) => l.sessions.flatMap((s) => (s.chat ? [s.chat] : [])));
@@ -125,6 +128,7 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
     const refresh = forceRefresh.current;
     setKinds(undefined);
     if (readOnly) {
+      forceRefresh.current = false;
       setKinds([]);
       return;
     }
@@ -132,6 +136,7 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
       (k) => !gone && setKinds(k),
       (e) => {
         if (gone || isAbortError(e)) return;
+        forceRefresh.current = false;
         setKinds([]);
       },
     );
@@ -146,12 +151,19 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
   // or unmount so stale probes never pile up on the machine.
   useEffect(() => {
     const gen = ++generation.current;
+    for (const c of moreAborts.current) c.abort();
+    moreAborts.current.clear();
     if (!kinds || !dir) {
+      if (!dir) forceRefresh.current = false;
       setLists({});
       return;
     }
     const refresh = forceRefresh.current;
     forceRefresh.current = false;
+    if (kinds.length === 0) {
+      setLists({});
+      return;
+    }
     const ac = new AbortController();
     setLists(Object.fromEntries(kinds.map((k) => [k, { sessions: [], loading: true }])));
     let cursorIdx = 0;
@@ -172,6 +184,8 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
     for (let i = 0; i < count; i++) void worker();
     return () => {
       ac.abort();
+      for (const c of moreAborts.current) c.abort();
+      moreAborts.current.clear();
     };
   }, [m, dir, kinds]);
 
@@ -180,16 +194,25 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
       const list = lists[kind];
       if (!dir || !list?.next || list.loading) return;
       const gen = generation.current;
+      const ac = new AbortController();
+      moreAborts.current.add(ac);
       const set = (f: (l: KindList) => KindList) =>
         generation.current === gen && setLists((all) => (all[kind] ? { ...all, [kind]: f(all[kind]) } : all));
       set((l) => ({ ...l, loading: true }));
-      chatSessions(m, kind, dir, list.next).then(
-        (page) => set((l) => ({ sessions: merged(l.sessions, page.sessions), next: page.next, loading: false })),
-        (e) => {
-          if (isAbortError(e)) return;
-          set((l) => ({ ...l, loading: false, error: sessionErrorText(e) }));
-        },
-      );
+      chatSessions(m, kind, dir, list.next, { signal: ac.signal })
+        .then(
+          (page) => {
+            if (ac.signal.aborted) return;
+            set((l) => ({ sessions: merged(l.sessions, page.sessions), next: page.next, loading: false }));
+          },
+          (e) => {
+            if (ac.signal.aborted || isAbortError(e)) return;
+            set((l) => ({ ...l, loading: false, error: sessionErrorText(e) }));
+          },
+        )
+        .finally(() => {
+          moreAborts.current.delete(ac);
+        });
     },
     [m, dir, lists],
   );

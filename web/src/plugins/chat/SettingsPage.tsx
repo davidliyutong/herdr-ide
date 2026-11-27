@@ -210,6 +210,7 @@ function ProviderModelsPage({
    * "show all", so we hold 0 selected locally until they pick at least one). */
   const [cleared, setCleared] = useState(false);
   const reqRef = useRef(0);
+  const refreshAbortRef = useRef<AbortController | null>(null);
 
   const switchKey = `${PROVIDER_PREFIX}${kind}`;
   const providerOn = isChatProviderEnabled(values, kind);
@@ -227,6 +228,9 @@ function ProviderModelsPage({
   // Read cached models on mount / machine switch without spawning host or agent.
   useEffect(() => {
     const seq = ++reqRef.current;
+    refreshAbortRef.current?.abort();
+    refreshAbortRef.current = null;
+    setRefreshing(false);
     setCached([]);
     setFetchedAt(undefined);
     setError(undefined);
@@ -235,38 +239,52 @@ function ProviderModelsPage({
       setLoading(false);
       return;
     }
+    const ac = new AbortController();
     setLoading(true);
     void chatApi
-      .models(targetMachine, kind)
+      .models(targetMachine, kind, ac.signal)
       .then((res) => {
-        if (seq !== reqRef.current) return;
+        if (seq !== reqRef.current || ac.signal.aborted) return;
         setCached(res.models);
         setFetchedAt(res.fetchedAt);
       })
       .catch((e: unknown) => {
-        if (seq !== reqRef.current) return;
-        // not_running / not_found simply means no cache yet; keep empty state clean.
-        if (e instanceof ChatFailure && (e.code === 'not_running' || e.code === 'not_found')) return;
+        if (seq !== reqRef.current || ac.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) return;
+        // not_running / not_found means no cache yet; bad_request / unsupported comes from older hosts without Op.Models.
+        if (
+          e instanceof ChatFailure &&
+          (e.code === 'not_running' || e.code === 'not_found' || e.code === 'bad_request' || e.code === 'unsupported')
+        ) {
+          return;
+        }
         setError(failureText(e, agent, 'chat.settings.refreshFailed'));
       })
       .finally(() => {
-        if (seq === reqRef.current) setLoading(false);
+        if (seq === reqRef.current && !ac.signal.aborted) setLoading(false);
       });
+    return () => {
+      ac.abort();
+      refreshAbortRef.current?.abort();
+      refreshAbortRef.current = null;
+    };
   }, [targetMachine, kind, agent]);
 
   const handleRefresh = useCallback(async () => {
     if (readOnly || !targetMachine || refreshing) return;
     const seq = ++reqRef.current;
+    refreshAbortRef.current?.abort();
+    const ac = new AbortController();
+    refreshAbortRef.current = ac;
     setRefreshing(true);
     setError(undefined);
     setHint(undefined);
     try {
-      const res = await chatApi.refreshModels(targetMachine, kind);
-      if (seq !== reqRef.current) return;
+      const res = await chatApi.refreshModels(targetMachine, kind, undefined, ac.signal);
+      if (seq !== reqRef.current || ac.signal.aborted) return;
       setCached(res.models);
       setFetchedAt(res.fetchedAt);
     } catch (e: unknown) {
-      if (seq !== reqRef.current) return;
+      if (seq !== reqRef.current || ac.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) return;
       if (e instanceof ChatFailure && e.code === 'not_found') {
         setError(t('conversation.error.start_not_found', { agent }));
       } else if (e instanceof ChatFailure && (e.code === 'probe_busy' || e.code === 'busy')) {
@@ -275,6 +293,7 @@ function ProviderModelsPage({
         setError(failureText(e, agent, 'chat.settings.refreshFailed'));
       }
     } finally {
+      if (refreshAbortRef.current === ac) refreshAbortRef.current = null;
       if (seq === reqRef.current) setRefreshing(false);
     }
   }, [readOnly, targetMachine, refreshing, kind, agent]);

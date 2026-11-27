@@ -74,8 +74,41 @@ import type { Logger } from '#shared/lib/log.ts';
 import type * as chat from '#shared/proto/chatproto/index.ts';
 import type { AgentProcesses } from './agentproc.ts';
 
+/** Declarative capabilities & runtime characteristics of an Adapter, consumed
+ * by Host/Chat so core orchestration never switches on adapter names. */
+export interface AdapterMeta {
+  /** 'process' resolves and spawns spec.argv[0] via PATH (default);
+   * 'embedded' runs in-process inside the chat host (no PATH lookup, pid = 0). */
+  runtime: 'process' | 'embedded';
+  /** Preferred handoff delivery strategy when switching into this adapter. */
+  handoffInjection?: 'native_history' | 'attributed_context';
+  /** Which native boundary key partial fork requires ('message' for Claude
+   * upToMessageId, 'turn' for Codex beforeTurnId/lastTurnId, 'any', or 'none'). */
+  partialForkBy?: 'message' | 'turn' | 'any' | 'none';
+}
+
+/** Input passed to Adapter.prepareConfig so adapters can supply initial
+ * configuration options (e.g. client-enforced ACP permission mode) before
+ * a chat starts or wakes, without leaking adapter logic into Host. */
+export interface PrepareConfigContext {
+  kind: string;
+  config?: chat.ConfigOption[];
+  options: chat.Options;
+  fromJournal: boolean;
+  settings: chat.ClampedHostSettings;
+}
+
 /** Drives one protocol of coding agents. */
 export interface Adapter {
+  /** Declarative runtime & handoff/fork metadata; defaults to process runtime,
+   * attributed_context handoff, and 'any' partial fork hint. */
+  readonly meta?: AdapterMeta;
+  /** Optional availability probe for embedded runtimes (when meta.runtime is
+   * 'embedded', Host calls this instead of lookPath(spec.argv[0])). */
+  available?(env: Record<string, string>, signal: AbortSignal): Promise<boolean>;
+  /** Optional pre-start/journal-load config normalizer (e.g. injecting a
+   * client-enforced permission mode option for ACP agents without native modes). */
+  prepareConfig?(ctx: PrepareConfigContext): chat.ConfigOption[] | undefined;
   /** Runs the agent for a chat: a new session, or p.resume's. Resolves once
    * the session exists (its id known) or rejects when it did not come to
    * be; the session's events then go to sink until it is done. signal
@@ -109,14 +142,14 @@ export interface Adapter {
   fork?(p: ForkParams, signal: AbortSignal): Promise<ForkResult>;
 }
 
-/** An agent process running one session. */
+/** An agent runtime executing one session (an external process group, or an
+ * in-process embedded runtime with pid === 0). */
 export interface Session {
   /** The agent's id of the session. */
   readonly id: string;
-  /** The id of the agent's process, the leader of its process group; 0
-   * while none runs. The host signals the group itself: SIGKILL when the
-   * agent outlives close()'s grace, SIGTERM and then SIGKILL when it is
-   * told to stop at once (a signal of the terminal core). */
+  /** The id of the agent's process, the leader of its process group; 0 for an
+   * in-process embedded runtime or when no process runs. The host signals the
+   * group only when pid > 0. */
   readonly pid: number;
   /** Starts a turn with p.content, or, while one runs, queues, steers or
    * interrupts according to p.delivery (a queued event under p.message tells
@@ -135,6 +168,9 @@ export interface Session {
   /** Sets the configuration option id (a ConfigOption of the chat) to value,
    * one of its values. */
   setConfig(id: string, value: string, signal: AbortSignal): Promise<void>;
+  /** Updates the session's known model list after an Op.Models refresh so
+   * subsequent setConfig(model) calls accept newly discovered models. */
+  updateModels?(models: readonly chat.ModelOption[]): void;
   /** Compacts the conversation's context, optionally guided by instructions. */
   compact(signal: AbortSignal, instructions?: string): Promise<void>;
   /** Terminates a running background task or subagent by its BackgroundTask.id. */
@@ -281,6 +317,10 @@ export interface RewindParams {
 export interface RewindResult {
   /** New session id if rewinding branched to a new session id. */
   sessionId?: string;
+  /** True when the rewound session is now a brand-new empty session with no
+   * persisted conversation yet (so a later sleep/wake must start fresh instead
+   * of passing --resume). */
+  fresh?: boolean;
 }
 
 /** A structured conversation message for native history injection on handoff. */

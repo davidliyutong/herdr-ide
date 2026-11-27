@@ -575,7 +575,74 @@ describe('a chat pane’s menu', () => {
     ]);
     expect(chatMenu('m', view('nope'))).toEqual([]);
     useStore.getState().setReadOnly(true);
-    expect(chatMenu('m', view(B))).toEqual([]);
+    expect(labels(chatMenu('m', view(B)))).toEqual([t('chat.export')]);
+    expect(chatMenu('m', view('nope'))).toEqual([]);
+  });
+
+  it('confirms lossy fork from context menu and passes workspace + reports vault status on fork', async () => {
+    const F = 'c00000000000000f9';
+    const toast = vi.fn(() => 0);
+    useStore.setState({ toast });
+    applyMessage('m', msg([st(B, { kind: 'agy', title: 'Agy Chat' })], 1, true));
+    useChats.setState((s) => ({
+      live: {
+        ...s.live,
+        [`m\n${B}`]: {
+          link: 'attached',
+          info: {
+            id: B,
+            kind: 'agy',
+            title: 'Agy Chat',
+            cwd: '/w',
+            state: 'idle',
+            config: [],
+            commands: [],
+            capabilities: {
+              images: false,
+              compact: false,
+              queue: false,
+              plan: false,
+              questions: false,
+              effort: false,
+              model: false,
+              cancelQueued: false,
+              fork: false,
+            },
+          },
+        },
+      },
+    }));
+    answers[`POST /api/m/m/p/chat/fork`] = () =>
+      new Response(
+        JSON.stringify({
+          chat: st(F, { kind: 'agy', title: 'Agy Chat (fork)' }),
+          vault: { injected: 0, locked: true },
+        }),
+        { status: 200 },
+      );
+
+    const list = chatMenu('m', view(B, { agent: 'agy' }));
+    entry(list, t('chat.fork')).run!();
+    await settle();
+    const dlg = useDialog.getState().current as Extract<DialogRequest, { kind: 'confirm' }>;
+    expect(dlg?.kind).toBe('confirm');
+    expect(dlg?.title).toBe(t('chat.forkLossyTitle'));
+    useDialog.setState({ current: undefined });
+    dlg.resolve(true);
+    await settle();
+    await settle();
+
+    const forkCall = calls.find((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/fork');
+    expect(forkCall).toBeDefined();
+    expect(forkCall!.body).toMatchObject({ chat: B, workspace: 'w2w2w2w2' });
+    await vi.waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        t('vault.inject.locked'),
+        expect.objectContaining({ label: expect.any(String) }),
+        undefined,
+        'warning',
+      ),
+    );
   });
 
   it('titles the pane by the chat, else the agent, and marks a chat that is no more', () => {

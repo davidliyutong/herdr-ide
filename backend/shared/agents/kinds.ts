@@ -71,8 +71,12 @@ export interface Kind {
 export interface ChatSpec {
   /** The protocol the agent speaks (ADAPTERS). */
   adapter: AdapterName;
+  /** How the adapter runs: 'process' spawns argv[0] resolved via PATH (default);
+   * 'embedded' runs in-process inside the chat host with no external binary. */
+  runtime?: 'process' | 'embedded';
   /** The command the adapter adds its protocol's own arguments to; argv[0]
-   * is looked up in the user's PATH and is the program start runs too. */
+   * is looked up in the user's PATH and is the program start runs too. Empty
+   * for an embedded runtime. */
   argv: string[];
   /** Added to the agent's environment; absent for nothing. */
   env?: Record<string, string>;

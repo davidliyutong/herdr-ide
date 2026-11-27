@@ -40,7 +40,7 @@ import {
 } from './api';
 import { canContinueInTerminal, continueInTerminal } from './handoff';
 import { STATE_DELETED } from './protocol';
-import { applyStates, chatState, liveKey, loadAgents, offeredKinds, upsertState, useChats } from './state';
+import { applyStates, chatGone, chatState, liveKey, loadAgents, offeredKinds, upsertState, useChats } from './state';
 import { CHAT_PLUGIN, CHAT_VIEW, chatPane, chatRef } from './view';
 
 /** External request to open inline rewind on a specific user turn in a pane. */
@@ -349,27 +349,47 @@ function customHandoffBytes(explicit?: number): number | undefined {
   return kb !== DEFAULT_HANDOFF_MAX_KB ? kb * 1024 : undefined;
 }
 
+/** Prompts the user before forking a chat whose adapter lacks native fork
+ * (falling back to a handoff summary seed). Returns true to proceed. */
+export async function confirmLossyFork(m: string, chat: string, kind?: string): Promise<boolean> {
+  const live = useChats.getState().live[liveKey(m, chat)];
+  const lossy = !!live?.info && !live.info.capabilities?.fork;
+  if (!lossy) return true;
+  const agent = agentName(kind ?? chatState(m, chat)?.kind);
+  return confirmDialog({
+    title: t('chat.forkLossyTitle'),
+    message: t('chat.forkLossyMessage', { agent }),
+    confirm: t('chat.forkLossyConfirm'),
+  });
+}
+
 /** Forks an existing chat (up to upToSeq, or its end) into a new chat tab. */
 export async function forkChat(
   m: string,
   chat: string,
-  o: { upToSeq?: number; title?: string; from?: string; maxBytes?: number } = {},
+  o: { upToSeq?: number; title?: string; from?: string; maxBytes?: number; workspace?: string } = {},
 ): Promise<string | undefined> {
   if (useStore.getState().readOnly) return void toast(t('conversation.error.read_only'));
   const st = chatState(m, chat);
   const maxBytes = customHandoffBytes(o.maxBytes);
+  const workspace = chatWorkspaceFor(m, o.workspace, o.from);
   let forked;
+  let vault: NewChatVault | undefined;
   try {
-    forked = await chatApi.fork(m, {
+    const res = await chatApi.forkWithVault(m, {
       chat,
       ...(o.upToSeq !== undefined ? { upToSeq: o.upToSeq } : {}),
       ...(o.title ? { title: o.title } : {}),
       ...(maxBytes !== undefined ? { maxBytes } : {}),
+      ...(workspace ? { workspace } : {}),
     });
+    forked = res.chat;
+    vault = res.vault;
   } catch (e) {
     toast(failureText(e, agentName(st?.kind), 'chat.forkFailed'));
     return undefined;
   }
+  reportChatVault(vault);
   upsertState(m, forked);
   return openChat(m, forked.id, forked.kind, o.from);
 }
@@ -379,25 +399,31 @@ export async function switchChatAgent(
   m: string,
   chat: string,
   targetKind: string,
-  o: { upToSeq?: number; from?: string; maxBytes?: number } = {},
+  o: { upToSeq?: number; from?: string; maxBytes?: number; workspace?: string } = {},
 ): Promise<string | undefined> {
   if (useStore.getState().readOnly) return void toast(t('conversation.error.read_only'));
   const targetName = agentName(targetKind);
   const mode = permissionMode(useSettings.getState().values, m, targetKind);
   const maxBytes = customHandoffBytes(o.maxBytes);
+  const workspace = chatWorkspaceFor(m, o.workspace, o.from);
   let switched;
+  let vault: NewChatVault | undefined;
   try {
-    switched = await chatApi.switchChat(m, {
+    const res = await chatApi.switchChatWithVault(m, {
       chat,
       targetKind,
       ...(mode ? { options: { mode } } : {}),
       ...(o.upToSeq !== undefined ? { upToSeq: o.upToSeq } : {}),
       ...(maxBytes !== undefined ? { maxBytes } : {}),
+      ...(workspace ? { workspace } : {}),
     });
+    switched = res.chat;
+    vault = res.vault;
   } catch (e) {
     toast(failureText(e, targetName, 'chat.switchAgentFailed'));
     return undefined;
   }
+  reportChatVault(vault);
   upsertState(m, switched);
   return openChat(m, switched.id, switched.kind, o.from);
 }
@@ -541,16 +567,30 @@ export function exportChatMenu(m: string, chat: string, o: { upToSeq?: number; k
 export function chatMenu(m: string, view: L.PluginView): MenuEntry[] {
   const ref = chatRef(view);
   const chat = ref.chat;
-  if (!chat || useStore.getState().readOnly) return [];
+  if (!chat) return [];
   const st = chatState(m, chat);
   const kind = ref.agent ?? st?.kind;
+  if (useStore.getState().readOnly) {
+    if (chatGone(useChats.getState(), m, chat)) return [];
+    return [{ label: t('chat.export'), icon: createElement(Download), submenu: exportChatMenu(m, chat, { kind }) }];
+  }
   const from = L.viewKey(view.id);
+  const working = st?.state === 'working' || st?.state === 'waiting' || st?.state === 'starting';
   const out: MenuEntry[] = [
     { label: t('chat.rename'), icon: createElement(Pencil), run: () => startRename(m, view.id) },
-    { label: t('chat.fork'), icon: createElement(GitFork), run: () => void forkChat(m, chat, { from }) },
+    {
+      label: t('chat.fork'),
+      icon: createElement(GitFork),
+      disabled: working,
+      run: () => {
+        void confirmLossyFork(m, chat, kind).then((ok) => {
+          if (ok) void forkChat(m, chat, { from });
+        });
+      },
+    },
   ];
   const others = switchAgentMenu(m, chat, kind, from);
-  if (others.length) out.push({ label: t('chat.switchAgent'), icon: createElement(ArrowLeftRight), submenu: others });
+  if (others.length) out.push({ label: t('chat.switchAgent'), icon: createElement(ArrowLeftRight), disabled: working, submenu: others });
   out.push({ label: t('chat.export'), icon: createElement(Download), submenu: exportChatMenu(m, chat, { kind }) });
   if (canContinueInTerminal(m, view))
     out.push({

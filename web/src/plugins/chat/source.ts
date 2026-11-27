@@ -112,9 +112,21 @@ export class ChatSourceImpl implements ChatSource {
   userTurns(): Array<{ seq: number; text: string }> {
     const out: Array<{ seq: number; text: string }> = [];
     const seenClient = new Set<string>();
+    const waitingContent = new Map<string, ContentBlock[]>();
     for (const raw of this.stored) {
       if (!isObject(raw)) continue;
       const ev = raw as unknown as Event;
+      if (
+        ev.t === 'queued' &&
+        ev.state === 'waiting' &&
+        typeof ev.message === 'string' &&
+        ev.message &&
+        Array.isArray(ev.content) &&
+        ev.content.length > 0
+      ) {
+        waitingContent.set(ev.message, ev.content as ContentBlock[]);
+        continue;
+      }
       const isUser = ev.t === 'user' || (ev.t === 'queued' && ev.state === 'taken');
       if (!isUser || typeof ev.seq !== 'number') continue;
       const cid = typeof ev.clientId === 'string' && ev.clientId ? ev.clientId : '';
@@ -122,7 +134,13 @@ export class ChatSourceImpl implements ChatSource {
         if (seenClient.has(cid)) continue;
         seenClient.add(cid);
       }
-      const content = Array.isArray(ev.content) ? (ev.content as ContentBlock[]) : [];
+      const rawContent = Array.isArray(ev.content) ? (ev.content as ContentBlock[]) : [];
+      const content =
+        rawContent.length > 0
+          ? rawContent
+          : ev.t === 'queued' && typeof ev.message === 'string'
+            ? (waitingContent.get(ev.message) ?? [])
+            : [];
       const text = blocksText(content).replace(/\s+/g, ' ').trim();
       out.push({ seq: ev.seq, text });
     }
@@ -329,6 +347,8 @@ export class ChatSourceImpl implements ChatSource {
       this.stored = [];
       this.liveEvents = [];
       this.last = 0;
+      this.usage = undefined;
+      this.live({ usage: undefined });
       this.emit({ t: 'reset' });
       this.cur = undefined;
       queueMicrotask(() => {
@@ -389,6 +409,8 @@ export class ChatSourceImpl implements ChatSource {
     this.stored = [];
     this.liveEvents = [];
     this.last = 0;
+    this.usage = undefined;
+    this.live({ usage: undefined });
     this.attachedNow = false;
     this.emit({ t: 'reset' });
     this.cur = undefined;

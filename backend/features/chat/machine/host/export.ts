@@ -47,7 +47,11 @@ function trimBytes(s: string, max: number): string {
   if (b.length <= max) return s;
   const ell = '…';
   const ellBytes = Buffer.byteLength(ell, 'utf8');
-  if (max <= ellBytes) return b.subarray(0, Math.max(0, max)).toString('utf8');
+  if (max <= ellBytes) {
+    let cut = Math.max(0, max);
+    while (cut > 0 && (b[cut]! & 0xc0) === 0x80) cut--;
+    return b.subarray(0, cut).toString('utf8');
+  }
   let cut = max - ellBytes;
   while (cut > 0 && (b[cut]! & 0xc0) === 0x80) cut--;
   return b.subarray(0, cut).toString('utf8') + ell;
@@ -384,14 +388,18 @@ export function exportMarkdown(events: readonly chat.Event[], opts: ExportOption
   }
 
   const fixedBytes = Buffer.byteLength(header + auxSections + planSection + '\n\n## Transcript\n\n', 'utf8');
-  const budget = Math.max(256, maxBytes - fixedBytes - Buffer.byteLength(omittedNote, 'utf8'));
+  const rawAvail = maxBytes - fixedBytes - Buffer.byteLength(omittedNote, 'utf8');
+  if (rawAvail <= 0) {
+    return trimBytes(header + auxSections + planSection, maxBytes);
+  }
+  const budget = rawAvail;
 
   // Reserve space for Original Request when budget >= 4 KiB so a large final turn
   // never crowds it out.
   let goalSection = '';
   let goalBytes = 0;
   const firstUserIdx = turns.findIndex((t) => t.kind === 'user');
-  if (maxBytes >= 4096 && firstUserIdx >= 0) {
+  if (maxBytes >= 4096 && firstUserIdx >= 0 && budget > 512) {
     const goalCap = Math.min(8192, Math.max(512, Math.floor(maxBytes / 6)));
     const cand = trimBytes(`\n\n## Original Request\n\n${turns[firstUserIdx]!.text}`, goalCap);
     const cb = Buffer.byteLength(cand, 'utf8');
@@ -400,7 +408,7 @@ export function exportMarkdown(events: readonly chat.Event[], opts: ExportOption
       goalBytes = cb;
     }
   }
-  const tailBudget = Math.max(256, budget - goalBytes);
+  const tailBudget = Math.max(0, budget - goalBytes);
 
   // Keep the most recent turns that fit the byte budget.
   const kept: string[] = [];

@@ -3,7 +3,10 @@
 // (Linux /proc/<pid>/fd -> conversations/<uuid>.db*), and its summary index
 // (<agy dir>/conversation_summaries.db) which maps root conversations to
 // their workspace URIs, active state and last-modified time.
-import { DatabaseSync } from 'node:sqlite';
+//
+// All external SQLite reads run off the node's main thread via Resolver's
+// ReadOnlySQLiteWorker so slow mounts, large scans, or TOCTOU FIFOs never
+// stall the single-threaded event loop.
 import { posix } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validSessionId } from '#shared/agents/kinds.ts';
@@ -11,6 +14,7 @@ import { SessionFrom } from '#shared/proto/agentproto/index.ts';
 import { resolvedRoot } from './claude.ts';
 import { Search, TIMING, clean, mtimeOf, sameDir, uniq, type Found, type Info, type Proc } from './common.ts';
 import type { Resolver } from './sessions.ts';
+import type { SQLRow } from './sqlworker.ts';
 
 /** The process whose open conversation database identified this result. */
 const fileOwners = new WeakMap<Found, number>();
@@ -18,6 +22,7 @@ const fileOwners = new WeakMap<Found, number>();
 const SIDE_FILES = ['-wal', '-shm', '-journal'];
 const MAX_SUMMARIES = 512;
 const MAX_TRAJ_META = 64 << 10;
+const MAX_TRAJ_ROWS = 64;
 
 function fromFile(id: string, pid: number): Found {
   const found = { id, source: SessionFrom.FD };
@@ -174,8 +179,8 @@ interface SummaryRow {
 }
 
 /** Checks that a SQLite database and any side files beside it are regular
- * user-owned files (never symlinks or FIFOs) before opening read-only. */
-async function safeOpenDb(r: Resolver, dbPath: string): Promise<DatabaseSync | null> {
+ * user-owned files (never symlinks or FIFOs) and returns the worker open spec. */
+async function safeDbTarget(r: Resolver, dbPath: string): Promise<{ path?: string; url?: string } | null> {
   // Reject a symlink at dbPath itself before resolving parent symlinks.
   const directSt = await r.files.lstatOwn(dbPath);
   if (!directSt) return null;
@@ -195,93 +200,81 @@ async function safeOpenDb(r: Resolver, dbPath: string): Promise<DatabaseSync | n
     if (!st.isFile() || (r.files.uid >= 0 && Number(st.uid) !== r.files.uid)) return null;
     if (suffix === '-wal') wal = true;
   }
-  try {
-    let db: DatabaseSync;
-    if (!wal) {
-      const u = pathToFileURL(real);
-      u.searchParams.set('immutable', '1');
-      db = new DatabaseSync(u, { readOnly: true });
-    } else {
-      db = new DatabaseSync(real, { readOnly: true });
-    }
-    db.exec('PRAGMA query_only = 1; PRAGMA busy_timeout = 0;');
-    return db;
-  } catch {
-    return null;
+  if (!wal) {
+    const u = pathToFileURL(real);
+    u.searchParams.set('immutable', '1');
+    return { url: u.href };
   }
+  return { path: real };
 }
 
-function tableColumns(db: DatabaseSync, table: string): Set<string> {
-  try {
-    const rows = db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as Array<{ name?: unknown }>;
-    return new Set(rows.map((r) => String(r.name ?? '')));
-  } catch {
-    return new Set();
-  }
+async function tableColumns(
+  all: (sql: string, params?: (string | number)[]) => Promise<SQLRow[] | null>,
+  table: string,
+): Promise<Set<string>> {
+  const rows = await all('SELECT name FROM pragma_table_info(?)', [table]);
+  if (!rows) return new Set();
+  return new Set(rows.map((r) => String(r.name ?? '')));
 }
 
-/** Reads recent rows from <dir>/conversation_summaries.db safely. */
-async function readSummaries(r: Resolver, dir: string, onlyId?: string): Promise<SummaryRow[]> {
+/** Reads recent rows from <dir>/conversation_summaries.db safely off the main thread. */
+async function readSummaries(r: Resolver, dir: string, onlyId?: string, signal?: AbortSignal): Promise<SummaryRow[]> {
   const dbPath = posix.join(dir, 'conversation_summaries.db');
-  const db = await safeOpenDb(r, dbPath);
-  if (!db) return [];
-  try {
-    const cols = tableColumns(db, 'conversation_summaries');
-    if (!cols.has('conversation_id') || !cols.has('workspace_uris')) return [];
-    const sel = [
-      'conversation_id',
-      'workspace_uris',
-      cols.has('parent_conversation_id') ? 'parent_conversation_id' : "'' AS parent_conversation_id",
-      cols.has('nesting_depth') ? 'nesting_depth' : '0 AS nesting_depth',
-      cols.has('status') ? 'status' : "'' AS status",
-      cols.has('not_fully_idle') ? 'not_fully_idle' : '0 AS not_fully_idle',
-      cols.has('killed') ? 'killed' : '0 AS killed',
-      cols.has('last_modified_time') ? 'last_modified_time' : 'NULL AS last_modified_time',
-    ].join(', ');
-    const orderCol = cols.has('last_modified_time') ? ' ORDER BY last_modified_time DESC' : '';
-    const rawRows = (
-      onlyId
-        ? db.prepare(`SELECT ${sel} FROM conversation_summaries WHERE conversation_id = ? LIMIT 1`).all(onlyId)
-        : db.prepare(`SELECT ${sel} FROM conversation_summaries${orderCol} LIMIT ?`).all(MAX_SUMMARIES)
-    ) as Array<Record<string, unknown>>;
-    const out: SummaryRow[] = [];
-    for (const row of rawRows) {
-      const id = typeof row.conversation_id === 'string' ? row.conversation_id : '';
-      if (!validSessionId(id)) continue;
-      const parent = typeof row.parent_conversation_id === 'string' ? row.parent_conversation_id : '';
-      const nestingDepth = typeof row.nesting_depth === 'number' ? row.nesting_depth : Number(row.nesting_depth ?? 0) || 0;
-      const status = typeof row.status === 'string' ? row.status : '';
-      const notIdle =
-        row.not_fully_idle === 1 || row.not_fully_idle === true || row.not_fully_idle === '1' || row.not_fully_idle === 'true';
-      const killed = row.killed === 1 || row.killed === true || row.killed === '1' || row.killed === 'true';
-      out.push({
-        id,
-        workspaces: parseWorkspaces(row.workspace_uris),
-        parent,
-        nestingDepth,
-        running: status === 'CASCADE_RUN_STATUS_RUNNING',
-        active: status === 'CASCADE_RUN_STATUS_RUNNING' || notIdle,
-        killed,
-        modifiedMs: parseSqliteTime(row.last_modified_time),
-      });
-    }
-    return out;
-  } catch {
-    return [];
-  } finally {
-    try {
-      db.close();
-    } catch {
-      // closed
-    }
-  }
+  const target = await safeDbTarget(r, dbPath);
+  if (!target) return [];
+  const rows = await r.sqlWorker().withDb(
+    target,
+    async (all) => {
+      const cols = await tableColumns(all, 'conversation_summaries');
+      if (!cols.has('conversation_id') || !cols.has('workspace_uris')) return [];
+      const sel = [
+        'conversation_id',
+        'workspace_uris',
+        cols.has('parent_conversation_id') ? 'parent_conversation_id' : "'' AS parent_conversation_id",
+        cols.has('nesting_depth') ? 'nesting_depth' : '0 AS nesting_depth',
+        cols.has('status') ? 'status' : "'' AS status",
+        cols.has('not_fully_idle') ? 'not_fully_idle' : '0 AS not_fully_idle',
+        cols.has('killed') ? 'killed' : '0 AS killed',
+        cols.has('last_modified_time') ? 'last_modified_time' : 'NULL AS last_modified_time',
+      ].join(', ');
+      const orderCol = cols.has('last_modified_time') ? ' ORDER BY last_modified_time DESC' : '';
+      const rawRows = onlyId
+        ? await all(`SELECT ${sel} FROM conversation_summaries WHERE conversation_id = ? LIMIT 1`, [onlyId])
+        : await all(`SELECT ${sel} FROM conversation_summaries${orderCol} LIMIT ?`, [MAX_SUMMARIES]);
+      if (!rawRows) return [];
+      const out: SummaryRow[] = [];
+      for (const row of rawRows) {
+        const id = typeof row.conversation_id === 'string' ? row.conversation_id : '';
+        if (!validSessionId(id)) continue;
+        const parent = typeof row.parent_conversation_id === 'string' ? row.parent_conversation_id : '';
+        const nestingDepth = typeof row.nesting_depth === 'number' ? row.nesting_depth : Number(row.nesting_depth ?? 0) || 0;
+        const status = typeof row.status === 'string' ? row.status : '';
+        const notIdle = row.not_fully_idle === 1 || row.not_fully_idle === '1' || row.not_fully_idle === 'true';
+        const killed = row.killed === 1 || row.killed === '1' || row.killed === 'true';
+        out.push({
+          id,
+          workspaces: parseWorkspaces(row.workspace_uris),
+          parent,
+          nestingDepth,
+          running: status === 'CASCADE_RUN_STATUS_RUNNING',
+          active: status === 'CASCADE_RUN_STATUS_RUNNING' || notIdle,
+          killed,
+          modifiedMs: parseSqliteTime(row.last_modified_time),
+        });
+      }
+      return out;
+    },
+    signal,
+  );
+  return rows ?? [];
 }
 
 /** Finds the parent conversation id (if any) of a conversation via
  * conversation_summaries.db, so subagents map back to their root session. */
-async function parentOf(r: Resolver, dirs: readonly string[], id: string): Promise<string> {
+async function parentOf(r: Resolver, dirs: readonly string[], id: string, signal?: AbortSignal): Promise<string> {
   for (const d of dirs) {
-    const rows = await readSummaries(r, d, id);
+    if (signal?.aborted) return '';
+    const rows = await readSummaries(r, d, id, signal);
     const hit = rows[0];
     if (hit && hit.parent && validSessionId(hit.parent)) return hit.parent;
   }
@@ -301,12 +294,16 @@ export async function resolveAgy(r: Resolver, kind: string, p: Proc, signal: Abo
     const convDirs = await agyConvDirs(r, dirs);
     let parent = '';
     let parentPID = 0;
+    // Deduplicate candidate conversation IDs across .db/-wal/-shm FDs and child
+    // PIDs so parentOf() never re-opens conversation_summaries.db for the same ID.
+    const checkedIds = new Set<string>();
     const fromFD = async (pid: number): Promise<Found | null> => {
       if (signal.aborted) return null;
       for (const target of (await r.procs.fds(pid)) ?? []) {
         const id = openConv(target, convDirs);
-        if (!id) continue;
-        const par = await parentOf(r, dirs, id);
+        if (!id || checkedIds.has(id)) continue;
+        checkedIds.add(id);
+        const par = await parentOf(r, dirs, id, signal);
         if (par) {
           if (!parent) {
             parent = par;
@@ -336,7 +333,7 @@ export async function resolveAgy(r: Resolver, kind: string, p: Proc, signal: Abo
   const matches: Array<{ id: string; mod: number; running: boolean; active: boolean }> = [];
   for (const d of dirs) {
     if (signal.aborted) return null;
-    const rows = await readSummaries(r, d);
+    const rows = await readSummaries(r, d, undefined, signal);
     for (const row of rows) {
       if (signal.aborted) return null;
       if (row.killed || row.parent !== '' || row.nestingDepth > 0 || seen.has(row.id)) continue;
@@ -481,7 +478,7 @@ function parseTrajectoryInfo(b: Uint8Array): Info {
 
 /** Reads an Antigravity conversation's workspace and timestamp from
  * conversation_summaries.db first, falling back to trajectory_metadata_blob
- * in dbPath. */
+ * in dbPath (both executed off the main thread in Resolver's SQLite worker). */
 export async function agyInfo(r: Resolver, id: string, dbPath: string): Promise<Info> {
   const baseDir = posix.dirname(posix.dirname(dbPath));
   for (const d of uniq(baseDir, ...r.agyDirs())) {
@@ -491,32 +488,34 @@ export async function agyInfo(r: Resolver, id: string, dbPath: string): Promise<
       return { cwd: hit.workspaces[0]!, started: hit.modifiedMs };
     }
   }
-  const db = await safeOpenDb(r, dbPath);
-  if (!db) return { cwd: '', started: null };
-  try {
-    const cols = tableColumns(db, 'trajectory_metadata_blob');
+  const target = await safeDbTarget(r, dbPath);
+  if (!target) return { cwd: '', started: null };
+  const info = await r.sqlWorker().withDb(target, async (all) => {
+    const cols = await tableColumns(all, 'trajectory_metadata_blob');
     if (!cols.has('data')) return { cwd: '', started: null };
-    const rows = db
-      .prepare('SELECT CASE WHEN length(data) <= ? THEN data END AS data FROM trajectory_metadata_blob')
-      .all(MAX_TRAJ_META) as Array<{ data?: unknown }>;
+    // Prefer octet_length when supported (SQLite >= 3.43) so BLOB/TEXT sizes
+    // are measured in bytes; fall back to length() on older builds, always with LIMIT.
+    const rows =
+      (await all('SELECT CASE WHEN octet_length(data) <= ? THEN data END AS data FROM trajectory_metadata_blob LIMIT ?', [
+        MAX_TRAJ_META,
+        MAX_TRAJ_ROWS,
+      ])) ??
+      (await all('SELECT CASE WHEN length(data) <= ? THEN data END AS data FROM trajectory_metadata_blob LIMIT ?', [
+        MAX_TRAJ_META,
+        MAX_TRAJ_ROWS,
+      ]));
+    if (!rows) return { cwd: '', started: null };
     let cwd = '';
     let started: number | null = null;
     for (const row of rows) {
       const b = row.data instanceof Uint8Array ? row.data : typeof row.data === 'string' ? Buffer.from(row.data) : null;
-      if (!b || b.length === 0) continue;
-      const info = parseTrajectoryInfo(b);
-      if (!cwd && info.cwd) cwd = info.cwd;
-      if (started === null && info.started !== null) started = info.started;
+      if (!b || b.length === 0 || b.length > MAX_TRAJ_META) continue;
+      const parsed = parseTrajectoryInfo(b);
+      if (!cwd && parsed.cwd) cwd = parsed.cwd;
+      if (started === null && parsed.started !== null) started = parsed.started;
       if (cwd && started !== null) break;
     }
     return { cwd, started };
-  } catch {
-    return { cwd: '', started: null };
-  } finally {
-    try {
-      db.close();
-    } catch {
-      // closed
-    }
-  }
+  });
+  return info ?? { cwd: '', started: null };
 }

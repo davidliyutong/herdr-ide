@@ -6,7 +6,8 @@ import { Adapter as AdapterKind } from '#shared/agents/kinds.ts';
 import { Notice, noticeMethod, VERSION } from '#shared/proto/agentproto/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { hostFile, open } from '#shared/store/index.ts';
-import { OPTION_ALLOW_ONCE } from '../adapter.ts';
+import { acpAdapter } from '../acp/adapter.ts';
+import { OPTION_ALLOW_ONCE, type Adapter } from '../adapter.ts';
 import { DB_NAME, MIGRATIONS } from './journal.ts';
 import { Client, FAKE_KIND, TestHost, eventually, startHost, text } from './testing.ts';
 import { extended } from '#shared/testdata/extended.ts';
@@ -1101,7 +1102,7 @@ describe('the chat host', () => {
 
     // Partial fork pointing at Turn 1's User seq extends to end of Turn 1 (before Turn 2),
     // sets partial: true, resolves upToMessageId to assistantUuid1 (NOT toolu_01XYZ or msg_01ABCDEF),
-    // sets beforeTurnId = 'turn-2', and carries vault extraEnv!
+    // sets beforeTurnId = 'turn-2', and NEVER inherits src's vault extraEnv when req.env is absent!
     const pFork = await h.request({ op: chat.Op.Fork, chat: id, upToSeq: u1.seq, title: 'After T1' });
     expect(pFork.ok).toBe(true);
     expect(h.fake.forkCalls.at(-1)).toMatchObject({
@@ -1111,21 +1112,39 @@ describe('the chat host', () => {
       beforeTurnId: 'turn-2',
     });
     await h.fake.session();
-    expect(h.fake.starts.at(-1)!.env).toMatchObject({ CARRY_SECRET: secret });
+    expect(h.fake.starts.at(-1)!.env.CARRY_SECRET).toBeUndefined();
 
-    // Fork pointing at the LAST turn (q2Taken.seq) normalizes to a full fork (partial absent).
+    // Fork pointing at the LAST turn (q2Taken.seq) normalizes to a full fork (partial absent)
+    // and forwards freshly supplied req.env (resolved from an unlocked vault) when provided.
     h.fake.forkSessionId = 'forked-full-2';
-    const fullFork = await h.request({ op: chat.Op.Fork, chat: id, upToSeq: q2Taken.seq, title: 'Full' });
+    const freshForkSecret = 'vault-fresh-fork-s3cr3t';
+    const fullFork = await h.request({
+      op: chat.Op.Fork,
+      chat: id,
+      upToSeq: q2Taken.seq,
+      title: 'Full',
+      env: { FRESH_SECRET: freshForkSecret },
+    });
     expect(fullFork.ok).toBe(true);
     expect(h.fake.forkCalls.at(-1)!.partial).toBeUndefined();
     expect(h.fake.forkCalls.at(-1)!.upToMessageId).toBeUndefined();
     await h.fake.session();
+    expect(h.fake.starts.at(-1)!.env.CARRY_SECRET).toBeUndefined();
+    expect(h.fake.starts.at(-1)!.env.FRESH_SECRET).toBe(freshForkSecret);
 
-    // Switch carries vault extraEnv and restores seed if Turn.Error fires before rejecting prompt.
-    const sw = await h.request({ op: chat.Op.Switch, chat: id, targetKind: FAKE_KIND });
+    // Switch NEVER inherits src's vault extraEnv, forwards fresh req.env when supplied,
+    // and restores seed if Turn.Error fires before rejecting prompt.
+    const freshSwitchSecret = 'vault-fresh-switch-s3cr3t';
+    const sw = await h.request({
+      op: chat.Op.Switch,
+      chat: id,
+      targetKind: FAKE_KIND,
+      env: { SWITCH_SECRET: freshSwitchSecret },
+    });
     expect(sw.ok).toBe(true);
     const swSess = await h.fake.session();
-    expect(h.fake.starts.at(-1)!.env).toMatchObject({ CARRY_SECRET: secret });
+    expect(h.fake.starts.at(-1)!.env.CARRY_SECRET).toBeUndefined();
+    expect(h.fake.starts.at(-1)!.env.SWITCH_SECRET).toBe(freshSwitchSecret);
     const swAtt = await h.attach(sw.chat!.id, 0);
     await swAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
     // Force Turn.Error inside prompt before rejection (clearing this.turn early): seed must still restore!
@@ -1280,6 +1299,7 @@ describe('the chat host', () => {
       const origSpec = t.o.spec;
       t.o.spec = (kind) =>
         kind === 'grok' ? { adapter: AdapterKind.ACP, argv: ['/bin/sh', '--grok'], newSessionMeta: { yoloMode: false } } : origSpec(kind);
+      (t.fake as Adapter).prepareConfig = acpAdapter().prepareConfig;
       t.o.adapters = { ...t.o.adapters, [AdapterKind.ACP]: t.fake };
       t.fake.config = [
         {
@@ -1474,6 +1494,126 @@ describe('the chat host', () => {
     cAtt.close();
     dAtt.close();
     eAtt.close();
+  });
+
+  test('security & concurrency invariants: stopAgent wipes extraEnv, Full mode skips Plan permissions, rewind/fork guards, and embedded runtime', async () => {
+    // 1. stopAgent (via Op.Close) wipes extraEnv; resuming the chat does NOT pass stale vault secrets.
+    const h = await host((t) => {
+      t.fake.caps.rewind = true;
+      t.fake.caps.rewindFiles = true;
+      t.fake.caps.fork = true;
+      t.fake.config = [
+        {
+          id: 'mode',
+          name: 'Mode',
+          category: chat.Category.Mode,
+          type: chat.CONFIG_SELECT,
+          currentValue: chat.Mode.Default,
+          options: [
+            { value: chat.Mode.Default, name: 'Default' },
+            { value: chat.Mode.AcceptEdits, name: 'Accept Edits' },
+            { value: chat.Mode.Full, name: 'Full Access', full: true },
+          ],
+        },
+      ];
+    });
+    await h.request({ op: chat.Op.Configure, settings: { allowFull: true } });
+    const created = await h.request({ op: chat.Op.New, kind: FAKE_KIND, cwd: h.cwd, env: { VAULT_KEY: 'ephemeral-s3cr3t' } });
+    expect(created.ok).toBe(true);
+    const id = created.chat!.id;
+    const s1 = await h.fake.session();
+    expect(h.fake.starts.at(-1)!.env.VAULT_KEY).toBe('ephemeral-s3cr3t');
+    const a = await h.attach(id, 0);
+    await a.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    // 2. Switching to Full mode auto-approves Command permissions, NEVER Plan permissions!
+    await a.command({ op: chat.CommandOp.Prompt, content: text('turn one') });
+    await s1.expect('prompt:turn one');
+    const u1 = await a.until((e) => e.t === chat.EventType.User);
+    const planPerm = s1.permission(chat.PermissionKind.Plan);
+    const permEv = await a.until((e) => e.t === chat.EventType.Permission && e.kind === chat.PermissionKind.Plan);
+    expect(await a.command({ op: chat.CommandOp.SetConfig, config: 'mode', value: chat.Mode.Full })).toBeUndefined();
+    // Plan permission MUST still be pending (not auto-approved by Full mode).
+    let planSettled = false;
+    void planPerm.then(() => {
+      planSettled = true;
+    });
+    await Bun.sleep(20);
+    expect(planSettled).toBe(false);
+    // Cancel the plan permission and finish Turn 1, including a mid-turn steered Queued(Taken) event.
+    await a.command({ op: chat.CommandOp.Permission, request: permEv.id!, cancelled: true });
+    s1.sink.event({
+      t: chat.EventType.Queued,
+      message: 'steered-mid',
+      content: text('mid turn steer'),
+      state: chat.QueuedState.Taken,
+    });
+    const steeredEv = await a.until((e) => e.t === chat.EventType.Queued && e.state === chat.QueuedState.Taken);
+    s1.endTurn('end_turn');
+    await a.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+
+    // 3. Rewind refuses a mid-turn steered Queued(Taken) target with BadRequest!
+    const badRewind = await a.command({ op: chat.CommandOp.Rewind, seq: steeredEv.seq! });
+    expect(badRewind?.code).toBe(chat.Code.BadRequest);
+
+    // 4. Putting the chat to sleep (calls stopAgent) wipes extraEnv; rewinding wakes the sleeping
+    //    chat before checking capabilities.rewind, passes NO VAULT_KEY, and marks r.fresh = true on
+    //    Turn-1 rewind even when restoreFiles: true!
+    const stopped = h.chat(id).stopAgent(chat.State.Sleeping);
+    await h.host.endSession(stopped, false);
+    await a.until((e) => e.t === chat.EventType.State && e.state === chat.State.Sleeping);
+    // Configure fake adapter so Turn-1 rewind returns { sessionId: 'fresh-sid', fresh: true }.
+    const origStart = h.fake.start.bind(h.fake);
+    h.fake.start = async (p, sink, signal) => {
+      const sess = await origStart(p, sink, signal);
+      sess.rewind = async () => ({ sessionId: 'fresh-after-t1', fresh: true });
+      return sess;
+    };
+    const rwPromise = a.command({ op: chat.CommandOp.Rewind, seq: u1.seq!, restoreFiles: true });
+    await h.fake.session();
+    expect(await rwPromise).toBeUndefined();
+    expect(h.fake.starts.at(-1)!.env.VAULT_KEY).toBeUndefined();
+    expect(h.chat(id).r.fresh).toBe(true);
+    a.close();
+
+    // 5. Embedded runtime adapter (meta.runtime = 'embedded', argv = [], pid = 0, available())
+    //    works end-to-end in Host without any PATH lookup or signalGroup calls.
+    let embeddedAvailable = false;
+    const hEmb = await host((t) => {
+      const origSpec = t.o.spec;
+      t.o.spec = (kind) => (kind === 'pi' ? { adapter: AdapterKind.ACP, argv: [], runtime: 'embedded' } : origSpec(kind));
+      const embAdapter: Adapter = {
+        meta: { runtime: 'embedded', handoffInjection: 'attributed_context', partialForkBy: 'none' },
+        available: async () => embeddedAvailable,
+        start: async (p, sink, signal) => {
+          const sess = await t.fake.start({ ...p, argv: ['/bin/sh'] }, sink, signal);
+          Object.defineProperty(sess, 'pid', { value: 0 });
+          return sess;
+        },
+        sessions: async () => ({ sessions: [], next: '' }),
+        history: async () => {},
+        models: async () => [{ value: 'pi-1', name: 'Pi 1' }],
+      };
+      t.o.adapters = { ...t.o.adapters, [AdapterKind.ACP]: embAdapter };
+    });
+    // When available() returns false, Op.Agents reports unavailable without PATH error.
+    const a1 = await hEmb.request({ op: chat.Op.Agents, kinds: ['pi'] });
+    expect(a1.agents).toEqual([{ kind: 'pi', available: false, reason: 'not_found' }]);
+    // When available() returns true, Op.Agents reports available and Op.New starts cleanly with pid = 0.
+    embeddedAvailable = true;
+    const a2 = await hEmb.request({ op: chat.Op.Agents, kinds: ['pi'] });
+    expect(a2.agents).toEqual([{ kind: 'pi', available: true }]);
+    const piNew = await hEmb.request({ op: chat.Op.New, kind: 'pi', cwd: hEmb.cwd });
+    expect(piNew.ok).toBe(true);
+    const piSess = await hEmb.fake.session();
+    expect(piSess.pid).toBe(0);
+    const piAtt = await hEmb.attach(piNew.chat!.id, 0);
+    await piAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+    await piAtt.command({ op: chat.CommandOp.Prompt, content: text('hello embedded') });
+    await piSess.expect('prompt:hello embedded');
+    piSess.endTurn('end_turn');
+    await piAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+    piAtt.close();
   });
 });
 

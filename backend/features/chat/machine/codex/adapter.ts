@@ -70,6 +70,7 @@ import {
 } from './mapping.ts';
 import { ClosedError, Conn } from './rpc.ts';
 import { CODEX_TIMING, CodexSession, callError, initialize, listModels, refuse, startError, type CodexTiming } from './session.ts';
+import { LiveSessions } from '../runtime.ts';
 
 export { CODEX_TIMING, type CodexTiming } from './session.ts';
 
@@ -101,7 +102,7 @@ interface Client {
 /** The Codex adapter. */
 export function codexAdapter(o: CodexAdapterOptions = {}): Adapter {
   const t: CodexTiming = { ...CODEX_TIMING, ...o.timing };
-  const live = new Set<CodexSession>();
+  const live = new LiveSessions<CodexSession>();
 
   /** An app-server started to answer questions, which done ends. */
   async function probe(p: RunParams, signal: AbortSignal, clientInfo?: ClientInfo): Promise<Client> {
@@ -169,6 +170,8 @@ export function codexAdapter(o: CodexAdapterOptions = {}): Adapter {
   }
 
   return {
+    meta: { runtime: 'process', handoffInjection: 'native_history', partialForkBy: 'turn' },
+
     async start(p: StartParams, sink: Sink, signal: AbortSignal): Promise<Session> {
       checkRun(p.argv, p.cwd);
       const s = new CodexSession({ ...p, logger: logger(p.logger) }, sink, t, (x) => live.delete(x));
@@ -259,7 +262,7 @@ export function codexAdapter(o: CodexAdapterOptions = {}): Adapter {
         } catch (e) {
           throw e instanceof ChatProtoError ? e : new ChatProtoError(callError(e));
         }
-        if (ms.length > 0) for (const s of live) s.updateModels(ms);
+        if (ms.length > 0) for (const s of live) s.applyModels(ms);
         return ms.toModelOptions();
       } finally {
         await c.done();

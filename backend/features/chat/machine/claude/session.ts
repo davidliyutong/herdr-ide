@@ -25,6 +25,7 @@ import { ChatProtoError, Code, EventType, QueuedState, TurnState, type ChatError
 import { Resolver } from '#machine/agents/sessions.ts';
 import type { ModelsParams, PromptParams, RewindParams, RewindResult, Session, Sink, StartParams } from '../adapter.ts';
 import type { StopTiming } from '../agentproc.ts';
+import { markUsageStale } from '../runtime.ts';
 import {
   Config,
   EFFORT_DEFAULT,
@@ -431,6 +432,40 @@ export class ClaudeSession implements Session {
     return modelOptionsOf(raw);
   }
 
+  /** Applies a refreshed model list from another session or probe so setModel
+   * accepts newly discovered models without restarting this session. */
+  updateModels(models: readonly chat.ModelOption[]): void {
+    if (this.ended || this.closing || models.length === 0) return;
+    const prevByValue = new Map(this.cfg.models.map((m) => [m.value, m]));
+    const next = models.map((m) => {
+      const prev = prevByValue.get(m.value);
+      const levels = (m.efforts ?? []).filter((e) => e !== EFFORT_DEFAULT);
+      return {
+        value: m.value,
+        resolved: prev?.resolved ?? '',
+        displayName: m.name,
+        description: m.description ?? '',
+        supportsEffort: levels.length > 0 || (prev?.supportsEffort ?? false),
+        levels: levels.length > 0 ? levels : (prev?.levels ?? []),
+      };
+    });
+    if (this.cfg.model && !next.some((m) => m.value === this.cfg.model)) {
+      const cur = prevByValue.get(this.cfg.model);
+      next.unshift(
+        cur ?? {
+          value: this.cfg.model,
+          resolved: '',
+          displayName: this.cfg.model,
+          description: '',
+          supportsEffort: false,
+          levels: [],
+        },
+      );
+    }
+    this.cfg.models = next;
+    this.configChanged();
+  }
+
   get pid(): number {
     if (this.ended || !this.run?.spawn) return 0;
     return this.run.spawn.pid;
@@ -776,6 +811,7 @@ export class ClaudeSession implements Session {
   private usageChanged(): void {
     const u: chat.Usage = { used: this.usage.used, size: this.usage.size };
     if (this.usage.percentage) u.percentage = this.usage.percentage;
+    if (this.usage.stale) u.stale = true;
     if (this.usage.cost) u.cost = { ...this.usage.cost };
     if (this.usage.limits && this.usage.limits.length > 0) u.limits = this.usage.limits.map((l) => ({ ...l }));
     this.sink.update((c) => (c.usage = u));
@@ -790,6 +826,7 @@ export class ClaudeSession implements Session {
       this.usage.used = num(cu.totalTokens);
       this.usage.size = max;
       this.usage.percentage = num(cu.percentage);
+      delete this.usage.stale;
     }
     if (model !== '' && this.running === '') this.running = model;
     if (model !== '' && this.cfg.model === '') {
@@ -1363,6 +1400,7 @@ export class ClaudeSession implements Session {
       if (used > 0) {
         this.usage.used = used;
         this.usage.percentage = 0;
+        delete this.usage.stale;
         const mu = isObj(r.modelUsage) ? r.modelUsage[this.running] : undefined;
         if (isObj(mu) && num(mu.contextWindow) > 0) this.usage.size = num(mu.contextWindow);
       }
@@ -1850,11 +1888,13 @@ export class ClaudeSession implements Session {
     }
     if (p.resumeBeforeId && this.hasConversation) {
       await this.restartRun({ full: this.launchedFull, resume: true, resumeSessionAt: p.resumeBeforeId }, signal);
+      this.usage = markUsageStale(this.usage) ?? { used: 0, size: 0 };
       return {};
     }
     const newId = randomUUID();
     await this.restartRun({ full: this.launchedFull, resume: false, newSessionId: newId }, signal);
-    return { sessionId: newId };
+    this.usage = markUsageStale(this.usage) ?? { used: 0, size: 0 };
+    return { sessionId: newId, fresh: true };
   }
 
   /** Terminates a running background task or subagent by its task_id. */
@@ -1875,6 +1915,7 @@ export class ClaudeSession implements Session {
     const cmd = extra !== '' ? `/compact ${extra}` : '/compact';
     const m: Sent = { uuid: randomUUID(), message: '', clientId: '', content: [], queued: false, taken: false };
     this.sent.set(m.uuid, m);
+    this.usage = markUsageStale(this.usage) ?? { used: 0, size: 0 };
     this.startTurn();
     this.notice(Notice.Command, extra !== '' ? { name: '/compact', instructions: extra } : { name: '/compact' });
     try {

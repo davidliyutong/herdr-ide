@@ -127,6 +127,13 @@ export const agentsFeature = (o: AgentsOptions = {}) =>
             else resolving.delete(m.id);
           }
         });
+        // Do not cache transient misses (not_found / other_cwd) for 5 s so newly
+        // created transcripts are found promptly (machine Resolver caches misses
+        // for 1 s); keep coalescing concurrent callers and caching ok / compressed.
+        const rep = r as { ok?: boolean; code?: string } | null;
+        if (!rep || (rep.ok !== true && rep.code !== 'compressed')) {
+          resolveCache.invalidate(key);
+        }
         c.header('Cache-Control', 'no-store');
         return c.json(r as object);
       });

@@ -29,6 +29,7 @@ import { badRequest } from './content.ts';
 import { historyOf, sessionsOf } from './history.ts';
 import type { SdkSource } from './load.ts';
 import { CLAUDE_TIMING, ClaudeSession, probeModels, type ClaudeTiming } from './session.ts';
+import { LiveSessions } from '../runtime.ts';
 
 export { CLAUDE_TIMING, type ClaudeTiming } from './session.ts';
 
@@ -75,8 +76,9 @@ export function claudeAdapter(o: ClaudeAdapterOptions): Adapter {
   /** The programs this adapter runs: their records of the sessions they run
    * are the host's own, not a terminal's. */
   const own = new Set<number>();
-  /** Live sessions managed by this adapter, reused for supportedModels(). */
-  const live = new Set<ClaudeSession>();
+  /** Live sessions managed by this adapter, reused for supportedModels() and
+   * updated uniformly when Op.Models refreshes. */
+  const live = new LiveSessions<ClaudeSession>();
 
   /** The in_terminal error of a session another Claude Code than the
    * host's own runs: one whose record names it, of a process that runs and
@@ -89,6 +91,8 @@ export function claudeAdapter(o: ClaudeAdapterOptions): Adapter {
   }
 
   return {
+    meta: { runtime: 'process', handoffInjection: 'attributed_context', partialForkBy: 'message' },
+
     async start(p: StartParams, sink: Sink, signal: AbortSignal): Promise<Session> {
       const id = p.resume !== '' ? p.resume : p.sessionId;
       const { mode, model, effort } = p.options;
@@ -109,7 +113,6 @@ export function claudeAdapter(o: ClaudeAdapterOptions): Adapter {
       const s = new ClaudeSession({ ...p, logger: p.logger ?? discard }, sink, id, t, own, sdk);
       await s.begin(signal);
       live.add(s);
-      void s.done.then(() => live.delete(s));
       return s;
     },
 
@@ -132,13 +135,17 @@ export function claudeAdapter(o: ClaudeAdapterOptions): Adapter {
       for (const s of live) {
         if (!s.canQuery()) continue;
         try {
-          return await s.supportedModels(signal);
+          const list = await s.supportedModels(signal);
+          live.notifyModels(list, (other) => other !== s);
+          return list;
         } catch (e) {
           if (signal.aborted) throw e;
         }
       }
       const sdk = await o.sdk.load();
-      return probeModels(sdk, { ...p, logger: p.logger ?? discard }, t, own, signal);
+      const list = await probeModels(sdk, { ...p, logger: p.logger ?? discard }, t, own, signal);
+      live.notifyModels(list);
+      return list;
     },
 
     async fork(p: ForkParams, signal: AbortSignal): Promise<ForkResult> {

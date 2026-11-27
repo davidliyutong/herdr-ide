@@ -351,4 +351,57 @@ describe('handoff compiler', () => {
     expect(renderAttributedContext(sel)).toContain('Old text');
     expect(renderNativeHistoryMessages(sel)[0]!.text).toContain('Old text');
   });
+
+  test('caps tool-heavy turns, preserves Latest Plan, and keeps native history messages within tight maxBytes', () => {
+    const events: chat.Event[] = [
+      { seq: 1, t: chat.EventType.User, content: [{ type: 'text', text: 'Audit all modules' }] },
+      // 40 tool calls in a single turn.
+      ...Array.from({ length: 40 }, (_, i): chat.Event => ({
+        seq: 2 + i,
+        t: chat.EventType.Update,
+        item: `tool-${i}`,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: `tool-${i}`,
+          title: `Inspect file-${i}.ts`,
+          kind: 'read',
+          status: 'completed',
+          rawInput: { path: `src/module-${i}/index.ts` },
+        },
+      })),
+      {
+        seq: 50,
+        t: chat.EventType.Update,
+        item: 'a-big',
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Summary: ' + 'detail '.repeat(600) } },
+      },
+      {
+        seq: 51,
+        t: chat.EventType.Update,
+        update: {
+          sessionUpdate: 'plan',
+          entries: [
+            { content: 'Step 1: harden tailer', status: 'completed' },
+            { content: 'Step 2: verify budgets', status: 'in_progress' },
+          ],
+        },
+      },
+      { seq: 52, t: chat.EventType.Turn, state: chat.TurnState.End, stopReason: 'end_turn' },
+    ];
+    const seed = buildHandoffSeed([{ chatId: 'c0000000000000001', kind: 'claude', cwd: '/repo', events }], {
+      cwd: '/repo',
+      targetKind: 'codex',
+      maxBytes: 3072,
+    });
+    const sel = selectHandoff(seed, { maxBytes: 3072 });
+    const attributed = renderAttributedContext(sel);
+    expect(Buffer.byteLength(attributed, 'utf8')).toBeLessThanOrEqual(3072);
+    expect(attributed).toContain('## Latest Plan');
+    expect(attributed).toContain('Step 2: verify budgets');
+
+    const native = renderNativeHistoryMessages(sel);
+    const nativeBytes = native.reduce((n, m) => n + Buffer.byteLength(m.text, 'utf8'), 0);
+    expect(nativeBytes).toBeLessThanOrEqual(3072);
+    expect(native.some((m) => m.text.includes('Step 2: verify budgets'))).toBe(true);
+  });
 });

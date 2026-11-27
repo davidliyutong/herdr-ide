@@ -380,38 +380,60 @@ export const chatApi = {
    * any chat is working, waiting or starting). */
   stopHost: (m: string) => send<unknown>(`${base(m)}/host/stop`, { method: 'POST' }).then(() => {}),
   /** Cached models for an agent kind from a running host (never starts host/agent). */
-  async models(m: string, kind: string): Promise<{ models: ModelOption[]; fetchedAt?: string }> {
-    const r = await send<{ models?: unknown; fetchedAt?: unknown }>(`${base(m)}/models?${query({ kind })}`, { cache: 'no-store' });
+  async models(m: string, kind: string, signal?: AbortSignal): Promise<{ models: ModelOption[]; fetchedAt?: string }> {
+    const r = await send<{ models?: unknown; fetchedAt?: unknown }>(`${base(m)}/models?${query({ kind })}`, {
+      cache: 'no-store',
+      ...(signal ? { signal } : {}),
+    });
     const models = list(r.models, MAX_MODELS, readModelOption);
     const fetchedAt = typeof r.fetchedAt === 'string' && r.fetchedAt ? r.fetchedAt.slice(0, 64) : undefined;
     return fetchedAt ? { models, fetchedAt } : { models };
   },
   /** Probes an agent kind on machine m for its latest model list (starts host if needed). */
-  async refreshModels(m: string, kind: string, cwd?: string): Promise<{ models: ModelOption[]; fetchedAt?: string }> {
-    const r = await send<{ models?: unknown; fetchedAt?: unknown }>(
-      `${base(m)}/models`,
-      jsonInit('POST', { kind, ...(cwd ? { cwd } : {}), refresh: true }),
-    );
+  async refreshModels(m: string, kind: string, cwd?: string, signal?: AbortSignal): Promise<{ models: ModelOption[]; fetchedAt?: string }> {
+    const r = await send<{ models?: unknown; fetchedAt?: unknown }>(`${base(m)}/models`, {
+      ...jsonInit('POST', { kind, ...(cwd ? { cwd } : {}), refresh: true }),
+      ...(signal ? { signal } : {}),
+    });
     const models = list(r.models, MAX_MODELS, readModelOption);
     const fetchedAt = typeof r.fetchedAt === 'string' && r.fetchedAt ? r.fetchedAt.slice(0, 64) : undefined;
     return fetchedAt ? { models, fetchedAt } : { models };
   },
-  /** Forks an existing chat (up to upToSeq, or its end) into a new chat. */
-  async fork(m: string, body: { chat: string; upToSeq?: number; title?: string; maxBytes?: number }): Promise<ChatState> {
-    const r = await send<{ chat?: unknown }>(`${base(m)}/fork`, jsonInit('POST', body));
+  /** Forks an existing chat (up to upToSeq, or its end) into a new chat, returning optional vault summary. */
+  async forkWithVault(
+    m: string,
+    body: { chat: string; upToSeq?: number; title?: string; maxBytes?: number; workspace?: string },
+  ): Promise<{ chat: ChatState; vault?: NewChatVault }> {
+    const r = await send<{ chat?: unknown; vault?: unknown }>(`${base(m)}/fork`, jsonInit('POST', body));
     const chat = readState(r.chat);
     if (!chat) throw new ChatFailure('protocol', 'no chat in the answer');
-    return chat;
+    const vault = readNewChatVault(r.vault);
+    return vault ? { chat, vault } : { chat };
+  },
+  /** Forks an existing chat (up to upToSeq, or its end) into a new chat. */
+  async fork(
+    m: string,
+    body: { chat: string; upToSeq?: number; title?: string; maxBytes?: number; workspace?: string },
+  ): Promise<ChatState> {
+    return (await chatApi.forkWithVault(m, body)).chat;
+  },
+  /** Exports context from a chat and starts a new chat with targetKind in the same directory, returning optional vault summary. */
+  async switchChatWithVault(
+    m: string,
+    body: { chat: string; targetKind: string; options?: Options; upToSeq?: number; maxBytes?: number; workspace?: string },
+  ): Promise<{ chat: ChatState; vault?: NewChatVault }> {
+    const r = await send<{ chat?: unknown; vault?: unknown }>(`${base(m)}/switch`, jsonInit('POST', body));
+    const chat = readState(r.chat);
+    if (!chat) throw new ChatFailure('protocol', 'no chat in the answer');
+    const vault = readNewChatVault(r.vault);
+    return vault ? { chat, vault } : { chat };
   },
   /** Exports context from a chat and starts a new chat with targetKind in the same directory. */
   async switchChat(
     m: string,
-    body: { chat: string; targetKind: string; options?: Options; upToSeq?: number; maxBytes?: number },
+    body: { chat: string; targetKind: string; options?: Options; upToSeq?: number; maxBytes?: number; workspace?: string },
   ): Promise<ChatState> {
-    const r = await send<{ chat?: unknown }>(`${base(m)}/switch`, jsonInit('POST', body));
-    const chat = readState(r.chat);
-    if (!chat) throw new ChatFailure('protocol', 'no chat in the answer');
-    return chat;
+    return (await chatApi.switchChatWithVault(m, body)).chat;
   },
   /** Exports a chat's conversation as a bounded Markdown digest. */
   async exportMarkdown(m: string, chat: string, upToSeq?: number, maxBytes?: number): Promise<string> {

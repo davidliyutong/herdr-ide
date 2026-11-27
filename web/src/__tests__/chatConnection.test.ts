@@ -521,6 +521,29 @@ describe('the chat source', () => {
     source.stop();
   });
 
+  it('clears cached usage on reset and resolves userTurns previews for Codex Queued(taken) without content', async () => {
+    hub.chat(A, { kind: 'codex', state: 'idle', usage: { used: 4200, size: 200_000 } }, [
+      { seq: 1, t: 'user', content: [{ type: 'text', text: 'first turn' }] },
+      { seq: 2, t: 'queued', state: 'waiting', message: 'q-steer', content: [{ type: 'text', text: 'queued follow-up' }] },
+      { seq: 3, t: 'queued', state: 'taken', message: 'q-steer' },
+    ]);
+    const source = new ChatSourceImpl('m', A);
+    await flush();
+    expect(useChats.getState().live[liveKey('m', A)]?.usage).toMatchObject({ used: 4200, size: 200_000 });
+    expect(source.userTurns()).toEqual([
+      { seq: 1, text: 'first turn' },
+      { seq: 3, text: 'queued follow-up' },
+    ]);
+
+    // After rewind reset to a fresh chat with no usage, live usage MUST be cleared (never stuck at 4200).
+    hub.chat(A, { kind: 'codex', state: 'idle' }, []);
+    hub.event(A, { seq: 0, live: true, t: 'reset' as never });
+    await flush();
+    await flush();
+    expect(useChats.getState().live[liveKey('m', A)]?.usage).toBeUndefined();
+    source.stop();
+  });
+
   it('is kept a while after the last pane let go of it, then detached', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     hub.chat(A, { kind: 'claude', state: 'idle' });

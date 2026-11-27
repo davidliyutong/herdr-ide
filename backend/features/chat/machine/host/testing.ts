@@ -246,7 +246,10 @@ export class FakeSession implements Session {
   }
 
   /** Asks a permission; the answer comes on the promise. */
-  permission(kind = chat.PermissionKind.Command, signal = new AbortController().signal): Promise<PermissionAnswer | chat.ChatError> {
+  permission(
+    kind: string = chat.PermissionKind.Command,
+    signal = new AbortController().signal,
+  ): Promise<PermissionAnswer | chat.ChatError> {
     return this.sink
       .permission(
         {

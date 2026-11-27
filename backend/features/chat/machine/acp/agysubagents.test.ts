@@ -434,4 +434,133 @@ describe('AgySubagentTracker', () => {
       tmp.cleanup();
     }
   });
+
+  test('parseSubagentCreated handles nested braces and } inside JSON strings', () => {
+    const content = `Created the following subagent:\n{"note":"a } b { c","conversationId":"${CHILD_SID}","meta":{"nested":true},"logAbsoluteUri":"file:///tmp/t.jsonl"}`;
+    expect(parseSubagentCreated(content)).toEqual({
+      conversationId: CHILD_SID,
+      logPath: '/tmp/t.jsonl',
+    });
+  });
+
+  test('refuses parent-dir symlink escape, drains >1 MiB multi-chunk transcripts, guards re-entrant completion, and enforces caps', () => {
+    const tmp = makeTempAgyDir();
+    try {
+      const parentFile = transcriptPath(tmp.agyDir, PARENT_SID);
+      const childSid2 = '44444444-4444-4444-8444-444444444444';
+      const escapedSid = '55555555-5555-4555-8555-555555555555';
+
+      // Create an outside directory symlinked into brain/<escapedSid> (parent-dir escape!).
+      const outside = posix.join(tmp.root, 'outside-brain');
+      mkdirSync(posix.join(outside, '.system_generated', 'logs'), { recursive: true, mode: 0o700 });
+      writeJsonl(posix.join(outside, '.system_generated', 'logs', 'transcript.jsonl'), [
+        { step_index: 1, type: 'PLANNER_RESPONSE', content: 'SHOULD_NOT_BE_READ' },
+      ]);
+      mkdirSync(posix.join(tmp.agyDir, 'brain'), { recursive: true, mode: 0o700 });
+      symlinkSync(outside, posix.join(tmp.agyDir, 'brain', escapedSid));
+
+      const events: chat.Event[] = [];
+      const tracker = new AgySubagentTracker(
+        { emit: (ev) => events.push(ev), updateTasks: () => {}, logf: () => {} },
+        { dirs: [tmp.agyDir], pollMs: 0 },
+      );
+      tracker.setSession(PARENT_SID);
+
+      // Concurrent subagent calls (1 normal >1 MiB + 1 parent-dir symlink escape + early report matching).
+      tracker.onToolUpdate({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call_big',
+        name: 'invoke_subagent',
+        status: 'in_progress',
+        rawInput: { TypeName: 'self', Role: 'Big Worker', Prompt: 'Emit > 1 MiB' },
+      });
+      tracker.onToolUpdate({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call_escape',
+        name: 'invoke_subagent',
+        status: 'in_progress',
+        rawInput: { TypeName: 'self', Role: 'Escaped', Prompt: 'Attempt symlink escape' },
+      });
+
+      // Write > 1.1 MiB child transcript with multi-byte UTF-8 and final message at the tail.
+      const bigChildFile = transcriptPath(tmp.agyDir, childSid2);
+      const pad = '你好🚀'.repeat(400); // ~4 KiB per entry
+      const bigEntries: Record<string, unknown>[] = [];
+      for (let i = 1; i <= 300; i++) {
+        bigEntries.push({ step_index: i, type: 'PLANNER_RESPONSE', thinking: `chunk-${i} ${pad}` });
+      }
+      bigEntries.push({ step_index: 301, type: 'PLANNER_RESPONSE', content: 'FINAL_TAIL_MARKER' });
+      writeJsonl(bigChildFile, bigEntries);
+
+      // Write parent spawns and completion report.
+      writeJsonl(parentFile, [
+        { step_index: 1, type: 'GENERIC', content: `Created the following subagent:\n{"conversationId":"${childSid2}"}` },
+        { step_index: 2, type: 'GENERIC', content: `Created the following subagent:\n{"conversationId":"${escapedSid}"}` },
+        { step_index: 3, type: 'SYSTEM_MESSAGE', content: `[Message] sender=${childSid2} content=Finished big run` },
+      ]);
+
+      tracker.poll();
+      // Calling onTurnEnd after already completed must NOT emit a duplicate parent completion!
+      tracker.onTurnEnd();
+
+      // Parent-dir symlink escape produced ZERO child events.
+      expect(events.filter((e) => e.parent === 'call_escape')).toHaveLength(0);
+
+      // Big child drained across >1 MiB boundary and emitted FINAL_TAIL_MARKER without U+FFFD corruption.
+      const bigChildEvents = events.filter((e) => e.parent === 'call_big');
+      expect(bigChildEvents.length).toBeGreaterThan(0);
+      expect(bigChildEvents.some((e) => JSON.stringify(e.update).includes('FINAL_TAIL_MARKER'))).toBe(true);
+      expect(bigChildEvents.some((e) => JSON.stringify(e.update).includes('\ufffd'))).toBe(false);
+
+      // Parent completion for call_big was emitted exactly ONCE.
+      const bigParentCompletions = events.filter(
+        (e) => !e.parent && e.item === 'call_big' && (e.update as Record<string, unknown>).status === 'completed',
+      );
+      expect(bigParentCompletions).toHaveLength(1);
+
+      // Verify MAX_SUBAGENTS (64) eviction keeps memory bounded.
+      for (let i = 0; i < 70; i++) {
+        tracker.onToolUpdate({
+          sessionUpdate: 'tool_call',
+          toolCallId: `call_cap_${i}`,
+          name: 'invoke_subagent',
+          status: 'in_progress',
+          rawInput: { TypeName: 'self', Role: `R${i}`, Prompt: `P${i}` },
+        });
+      }
+      expect(tracker.tracks('call_cap_69')).toBe(true);
+      expect(tracker.tracks('call_cap_0')).toBe(false);
+      tracker.stop();
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test('loadAgySubagentHistory maps ERROR/Encountered error steps to failed status with parity to live tracker', () => {
+    const tmp = makeTempAgyDir();
+    try {
+      const parentFile = transcriptPath(tmp.agyDir, PARENT_SID);
+      const childFile = transcriptPath(tmp.agyDir, CHILD_SID);
+      writeJsonl(parentFile, [
+        { step_index: 1, type: 'GENERIC', content: `Created the following subagent:\n{"conversationId":"${CHILD_SID}"}` },
+        { step_index: 2, type: 'SYSTEM_MESSAGE', content: `[Message] sender=${CHILD_SID} content=Done` },
+      ]);
+      writeJsonl(childFile, [
+        { step_index: 1, type: 'PLANNER_RESPONSE', tool_calls: [{ name: 'read_file', args: { Path: '"/missing"' } }] },
+        { step_index: 2, type: 'GENERIC', status: 'ERROR', content: 'Encountered error: ENOENT' },
+      ]);
+      const emitted: chat.Event[] = [];
+      loadAgySubagentHistory(
+        PARENT_SID,
+        [{ toolCallId: 'call_err', raw: { toolCallId: 'call_err', name: 'invoke_subagent', rawInput: { Role: 'Reader' } } }],
+        [tmp.agyDir],
+        (ev) => emitted.push(ev),
+      );
+      const failedRead = emitted.filter((e) => e.parent === 'call_err' && (e.update as Record<string, unknown>).kind === 'read').at(-1)!
+        .update as Record<string, unknown>;
+      expect(failedRead.status).toBe('failed');
+    } finally {
+      tmp.cleanup();
+    }
+  });
 });

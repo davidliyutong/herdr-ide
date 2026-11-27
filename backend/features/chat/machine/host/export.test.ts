@@ -238,6 +238,37 @@ describe('exportMarkdown', () => {
     expect(md).toContain('Earlier turns omitted');
     expect(md).toContain('Middle turn 16');
   });
+
+  test('preserves Latest Plan and valid UTF-8 on multi-byte content under tight maxBytes', () => {
+    const events: chat.Event[] = [
+      { seq: 1, t: chat.EventType.User, content: [{ type: 'text', text: '请帮我优化这个模块 🚀 ' + '测试内容'.repeat(200) }] },
+      {
+        seq: 2,
+        t: chat.EventType.Update,
+        item: 'a1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: '好的，以下是详细方案：' + '步骤说明'.repeat(300) },
+        },
+      },
+      {
+        seq: 3,
+        t: chat.EventType.Update,
+        update: {
+          sessionUpdate: 'plan',
+          entries: [
+            { content: 'Plan Alpha: keep intact', status: 'in_progress' },
+            { content: 'Plan Beta: verify UTF-8', status: 'pending' },
+          ],
+        },
+      },
+    ];
+    const md = exportMarkdown(events, { title: '中文会话', kind: 'agy', maxBytes: 2200 });
+    expect(Buffer.byteLength(md, 'utf8')).toBeLessThanOrEqual(2200);
+    expect(md).not.toContain('\ufffd');
+    expect(md).toContain('## Latest Plan');
+    expect(md).toContain('Plan Alpha: keep intact');
+  });
 });
 
 describe('exportJson', () => {

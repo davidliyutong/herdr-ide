@@ -26,6 +26,8 @@ import * as chat from '#shared/proto/chatproto/index.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import type { AgentProcess } from '../agentproc.ts';
 import type { PromptParams, Session, Sink, StartParams } from '../adapter.ts';
+import type { SessionObserver } from '../observer.ts';
+import { acpExtension } from './extensions.ts';
 import {
   Items,
   UPDATE_COMMANDS,
@@ -38,7 +40,6 @@ import {
   UPDATE_USER,
   contentUpdate,
 } from './items.ts';
-import { AgySubagentTracker, agyDataDirs, DEFAULT_POLL_MS } from './agysubagents.ts';
 import {
   AbortedError,
   ClosedError,
@@ -272,7 +273,7 @@ export class AcpSession implements Session {
   private readonly logger: Logger;
   private readonly sink: Sink;
   private readonly t: AcpTiming;
-  private agySub: AgySubagentTracker | null = null;
+  private observer: SessionObserver | null = null;
 
   constructor(kind: string, logger: Logger, sink: Sink, t: AcpTiming, itemPrefix: string) {
     this.kind = kind;
@@ -281,6 +282,11 @@ export class AcpSession implements Session {
     this.t = t;
     this.done = new Promise((r) => (this.resolveDone = r));
     this.it = new Items(itemPrefix, true, (ev) => this.emit(ev));
+  }
+
+  /** Agent kind id served by this session (e.g. 'agy', 'kimi', 'grok'). */
+  get agentKind(): string {
+    return this.kind;
   }
 
   /** Speaks the protocol on proc's pipes and follows its end. */
@@ -442,8 +448,10 @@ export class AcpSession implements Session {
       rewindFiles: false,
     };
     this.sid = id;
-    if (this.kind === 'agy') {
-      this.agySub = new AgySubagentTracker(
+    const ext = acpExtension(this.kind);
+    if (ext?.createObserver) {
+      this.observer = ext.createObserver(
+        p,
         {
           emit: (ev) => this.emit(ev),
           updateTasks: (tasks) => {
@@ -455,9 +463,9 @@ export class AcpSession implements Session {
           },
           logf: (line) => this.logf(line),
         },
-        { dirs: agyDataDirs(p.argv, p.env, p.cwd), pollMs: this.t.subagentPollMs ?? DEFAULT_POLL_MS },
+        this.t.subagentPollMs,
       );
-      this.agySub.setSession(id);
+      this.observer.setSession(id);
     }
     this.sizes = contextSizes(r.models);
     this.sink.update((c) => {
@@ -528,8 +536,8 @@ export class AcpSession implements Session {
         this.once(`update ${kind}`);
         return; // the host states the user's prompts
       }
-      if (this.agySub && (kind === UPDATE_TOOL_CALL || kind === UPDATE_TOOL)) {
-        const norm = this.agySub.onToolUpdate(u);
+      if (this.observer?.onToolUpdate && (kind === UPDATE_TOOL_CALL || kind === UPDATE_TOOL)) {
+        const norm = this.observer.onToolUpdate(u);
         if (norm) {
           this.it.update(UPDATE_TOOL_CALL, norm);
           return;
@@ -776,8 +784,8 @@ export class AcpSession implements Session {
     const wasCompacting = this.compactingTurn === t;
     if (wasCompacting) this.compactingTurn = null;
     const aborted = err !== undefined || (isObj(res) && res.stopReason === 'cancelled');
-    this.agySub?.onTurnEnd(aborted);
-    this.it.endTurn(aborted ? (id) => !this.agySub?.tracks(id) : undefined);
+    this.observer?.onTurnEnd?.(aborted);
+    this.it.endTurn(aborted && this.observer?.tracks ? (id) => !this.observer!.tracks!(id) : undefined);
     this.turn = null;
     t.ac.abort();
     if (err !== undefined) {
@@ -794,7 +802,13 @@ export class AcpSession implements Session {
     const q = this.queue.shift();
     if (q && !this.closing) {
       this.emit(queuedEvent(QueuedState.Taken, q, true));
-      this.startTurn(q.wireContent ?? q.content, undefined);
+      const isQueuedCompact = this.hasCompactCommand() && isCompactPrompt(q.content);
+      if (isQueuedCompact) {
+        this.invalidateUsageForCompact();
+        this.emit({ t: EventType.Notice, method: noticeMethod(Notice.Compacting) });
+      }
+      const nextTurn = this.startTurn(q.wireContent ?? q.content, undefined);
+      if (isQueuedCompact) this.compactingTurn = nextTurn;
     } else if (q) {
       this.queue.unshift(q);
     }
@@ -885,6 +899,28 @@ export class AcpSession implements Session {
     if (!o) throw perr(Code.BadRequest, 'the chat has no such option');
     if (!hasValue(o, value)) throw perr(Code.BadRequest, 'not a value of the option');
     await this.set(signal, this.sid, id, value, id === this.legacy);
+  }
+
+  /** Applies a refreshed model list from Op.Models so setConfig accepts newly
+   * discovered models on already-live ACP sessions. */
+  updateModels(models: readonly chat.ModelOption[]): void {
+    if (this.ended || this.closing || models.length === 0) return;
+    let changed = false;
+    for (const opt of this.config) {
+      if (opt.category !== chat.Category.Model) continue;
+      changed = true;
+      const values: chat.ConfigValue[] = models.map((m) => ({
+        value: m.value,
+        name: m.name,
+        ...(m.description ? { description: m.description } : {}),
+      }));
+      if (opt.currentValue && !values.some((v) => v.value === opt.currentValue)) {
+        const cur = (opt.options ?? []).find((v) => v.value === opt.currentValue);
+        values.unshift(cur ?? { value: opt.currentValue, name: opt.currentValue });
+      }
+      opt.options = values;
+    }
+    if (changed) this.stateConfig();
   }
 
   /** Sets an option the agent has to one of its values. */
@@ -1003,7 +1039,7 @@ export class AcpSession implements Session {
   private finish(): void {
     if (this.ended) return;
     this.ended = true;
-    this.agySub?.stop();
+    this.observer?.stop();
     if (!this.closing) {
       const status = this.proc.status();
       const stderr = this.proc.stderr();
@@ -1011,7 +1047,7 @@ export class AcpSession implements Session {
     }
     const t = this.turn;
     this.compactingTurn = null;
-    this.it.endTurn((id) => !this.agySub?.tracks(id));
+    this.it.endTurn(this.observer?.tracks ? (id) => !this.observer!.tracks!(id) : undefined);
     if (t) {
       this.turn = null;
       t.ac.abort();

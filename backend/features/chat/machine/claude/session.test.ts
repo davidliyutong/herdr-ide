@@ -1115,15 +1115,89 @@ describe('fork, rewind & uuid propagation (#6)', () => {
     expect(argvsAfterRewind[1]).toContain(`--resume=${TEST_SESSION}`);
     expect(argvsAfterRewind[1]).toContain(`--resume-session-at=${a1}`);
 
-    // Rewind turn 1 (no resumeBeforeId) -> fresh session id!
+    // Rewind turn 1 (no resumeBeforeId) -> fresh session id + fresh: true flag + stale usage!
     const rw2 = await s.rewind({ userMessageId: u1 }, sig());
     expect(rw2.sessionId).toBeTruthy();
+    expect(rw2.fresh).toBe(true);
     expect(rw2.sessionId).not.toBe(TEST_SESSION);
     expect(s.id).toBe(rw2.sessionId!);
     const argvsAfterFresh = r.argvs();
     expect(argvsAfterFresh).toHaveLength(3);
     expect(argvsAfterFresh[2]).toContain(`--session-id=${rw2.sessionId}`);
     expect(argvsAfterFresh[2]).not.toContain('--resume=');
+  }, 30_000);
+
+  test('prompt handoffContext stays on wire only and adapter.models() propagates refreshed models to live Claude sessions', async () => {
+    const adapter = claudeAdapter({ sdk: devSdk, timing: { titles: [] } });
+    const liveRun = new FakeRun(
+      script([
+        ...initLines(),
+        inL({
+          type: 'user',
+          uuid: 'u-handoff',
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: '<handoff_context>\nfrom codex\n</handoff_context>\n\nclean user prompt' }],
+          },
+        }),
+        stateOut('running'),
+        textOut('msg_h', 'got it'),
+        resultOut(),
+        stateOut('idle'),
+        inL({ type: 'control_request', request_id: 'req_m', request: { subtype: 'set_model', model: 'claude-next-9' } }),
+        outL({ type: 'control_response', response: { subtype: 'success', request_id: 'req_m', response: {} } }),
+      ]),
+    );
+    runs.push(liveRun);
+    const s = (await adapter.start(liveRun.params(), liveRun.host, sig(30_000))) as ClaudeSession;
+    sessions.push(s);
+    await liveRun.until(s, 2);
+
+    await s.prompt(
+      {
+        content: text('clean user prompt'),
+        handoffContext: '<handoff_context>\nfrom codex\n</handoff_context>',
+        message: 'm1',
+        clientId: 'c1',
+        recorded: false,
+      },
+      sig(),
+    );
+    await liveRun.until(s, 7);
+    // Stored User event emitted by adapter has clean content only; wire user message carries handoffContext.
+    expect(liveRun.eventsOf(EventType.User)[0]?.content).toEqual(text('clean user prompt'));
+    const wireMsg = liveRun.wrote().find((w) => w.type === 'user')!.message as { content: unknown[] };
+    expect(wireMsg.content).toEqual([{ type: 'text', text: '<handoff_context>\nfrom codex\n</handoff_context>\n\nclean user prompt' }]);
+
+    // Before models() refresh, claude-next-9 is rejected by setConfig.
+    expect(codeOf(await rejects(s.setConfig(OPTION_MODEL, 'claude-next-9', sig())))).toBe(Code.BadRequest);
+
+    // A second live session whose catalog includes claude-next-9 answers adapter.models()
+    // (or probeModels when s1 is busy) and propagates the refreshed list to live session `s`!
+    const probeInit = {
+      ...(canned().initialize as Record<string, unknown>),
+      models: [{ value: 'claude-next-9', displayName: 'Claude Next 9', description: 'Refreshed' }],
+    };
+    const s2Run = new FakeRun(script(initLines(probeInit)));
+    runs.push(s2Run);
+    const s2Params = { ...s2Run.params(), sessionId: '22222222-2222-4222-8222-222222222222' };
+    const s2 = (await adapter.start(s2Params, s2Run.host, sig(30_000))) as ClaudeSession;
+    sessions.push(s2);
+    // Simulate s1 unable to answer canQuery() (e.g. mid-turn), so adapter.models() queries s2
+    // and broadcasts the refreshed models back to s1 via LiveSessions.notifyModels.
+    const origCanQuery = s.canQuery.bind(s);
+    s.canQuery = () => false;
+    try {
+      const refreshed = await adapter.models!(s2Params, sig(30_000));
+      expect(refreshed.map((m) => m.value)).toEqual(['claude-next-9']);
+    } finally {
+      s.canQuery = origCanQuery;
+    }
+
+    // Live session `s` now accepts claude-next-9!
+    await s.setConfig(OPTION_MODEL, 'claude-next-9', sig());
+    await liveRun.until(s, -1);
+    expect(liveRun.host.chat.config?.find((c) => c.id === OPTION_MODEL)?.currentValue).toBe('claude-next-9');
   }, 30_000);
 });
 

@@ -375,7 +375,15 @@ class UuidProxy implements ReadAt {
 
   async read(buffer: Uint8Array, offset: number, length: number, position: number): Promise<{ bytesRead: number }> {
     const res = await this.fh.read(buffer, offset, length, position);
-    if (res.bytesRead === 0) return res;
+    if (res.bytesRead === 0) {
+      if (this.lineLen > 0) {
+        const uuid = !this.cont && this.lineLen <= TRANSCRIPT_MAX_LINE ? this.scanner.finish() : (this.scanner.reset(), '');
+        if (uuid !== '') this.uuids.set(this.lineStart, uuid);
+        this.lineLen = 0;
+        this.cont = false;
+      }
+      return res;
+    }
     if (position < this.start) {
       // eachClaude's 1-byte probe at start - 1 to check whether start begins a line.
       this.cont = !(res.bytesRead === 1 && buffer[offset] === 0x0a);

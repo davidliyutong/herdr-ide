@@ -974,15 +974,54 @@ function trimTurnToBudget(t: HandoffTurn, maxTokens: number, maxBytes: number): 
   const uMaxBytes = Math.max(192, Math.floor(maxBytes * userShare));
   const aMaxTok = Math.max(64, maxTokens - uMaxTok);
   const aMaxBytes = Math.max(256, maxBytes - uMaxBytes);
-  return {
+
+  // Reserve a portion of assistant budget for tools/clarifications/notices and
+  // cap their count so a tool-heavy turn cannot blow past maxTokens / maxBytes
+  // and crowd out `## Latest Plan` at the end of rendered context.
+  const maxToolCap = Math.min(t.tools.length, Math.max(2, Math.floor(aMaxBytes / 256)));
+  const maxClarCap = Math.min(t.clarifications.length, Math.max(1, Math.floor(aMaxBytes / 512)));
+  const maxNoticeCap = Math.min(t.notices.length, Math.max(1, Math.floor(aMaxBytes / 512)));
+  const trimmedTools = t.tools.slice(-maxToolCap).map((tool) => ({
+    ...tool,
+    ...(tool.output ? { output: trimToBudget(tool.output, Math.min(120, Math.floor(aMaxTok / 3)), 480, true) } : {}),
+  }));
+  const trimmedClar = t.clarifications.slice(-maxClarCap);
+  const trimmedNotices = t.notices.slice(-maxNoticeCap);
+
+  let out: HandoffTurn = {
     ...t,
     userText: trimToBudget(t.userText, uMaxTok, uMaxBytes, true),
     assistantText: trimToBudget(t.assistantText, aMaxTok, aMaxBytes, true),
-    tools: t.tools.map((tool) => ({
-      ...tool,
-      ...(tool.output ? { output: trimToBudget(tool.output, Math.min(120, Math.floor(aMaxTok / 3)), 480, true) } : {}),
-    })),
+    tools: trimmedTools,
+    clarifications: trimmedClar,
+    notices: trimmedNotices,
   };
+
+  // If tools/notices/clarifications still push assistant body past budget,
+  // shrink tool list / text proportionally until the turn actually fits.
+  while (
+    (estimateTokens(formatUserTurnBody(out) + formatAssistantTurnBody(out)) > maxTokens ||
+      utf8Bytes(formatUserTurnBody(out) + formatAssistantTurnBody(out)) > maxBytes) &&
+    (out.tools.length > 0 || out.notices.length > 0 || out.clarifications.length > 0)
+  ) {
+    if (out.tools.length > 0) out = { ...out, tools: out.tools.slice(Math.ceil(out.tools.length / 2)) };
+    else if (out.notices.length > 0) out = { ...out, notices: out.notices.slice(Math.ceil(out.notices.length / 2)) };
+    else if (out.clarifications.length > 0)
+      out = { ...out, clarifications: out.clarifications.slice(Math.ceil(out.clarifications.length / 2)) };
+  }
+
+  // Final guard on userText/assistantText if framing overhead still exceeds budget.
+  const combinedBytes = utf8Bytes(formatUserTurnBody(out)) + utf8Bytes(formatAssistantTurnBody(out));
+  if (combinedBytes > maxBytes) {
+    const uHeadroom = Math.max(64, Math.floor(maxBytes * 0.35));
+    const aHeadroom = Math.max(64, maxBytes - uHeadroom - 64);
+    out = {
+      ...out,
+      userText: trimToBudget(out.userText, Math.max(16, Math.floor(maxTokens * 0.35)), uHeadroom, true),
+      assistantText: trimToBudget(out.assistantText, Math.max(16, Math.floor(maxTokens * 0.55)), aHeadroom, true),
+    };
+  }
+  return out;
 }
 
 function buildOmittedSpan(refs: readonly OmittedTurnRef[]): OmittedSpan | undefined {
@@ -1023,7 +1062,7 @@ function pickKeyCommands(commands: readonly HandoffCommandResult[]): HandoffComm
   return [...failed, ...completed].sort((a, b) => a.turnIndex - b.turnIndex);
 }
 
-function formatOmittedSection(span: OmittedSpan): string {
+function formatOmittedSection(span: OmittedSpan, maxBytes?: number): string {
   const sourceLabels = span.sources.map((s) => {
     const seq = s.seqEnd > 0 ? ` seq ${s.seqStart || 1}–${s.seqEnd}` : '';
     return `${agentTitle(s.agentKind)} chat \`${s.chatId}\`${seq}`;
@@ -1040,10 +1079,13 @@ function formatOmittedSection(span: OmittedSpan): string {
     for (const r of span.refs) {
       const scope = r.touched.length ? ` [${r.touched.join(', ')}]` : '';
       const sum = r.summary || '(no text summary)';
-      lines.push(`- Turn ${r.index} (${agentTitle(r.agentKind)}): ${sum}${scope}`);
+      const line = `- Turn ${r.index} (${agentTitle(r.agentKind)}): ${sum}${scope}`;
+      if (maxBytes !== undefined && utf8Bytes(lines.join('\n') + '\n' + line) > maxBytes) break;
+      lines.push(line);
     }
   }
-  return lines.join('\n');
+  const out = lines.join('\n');
+  return maxBytes !== undefined ? trimUtf8End(out, maxBytes) : out;
 }
 
 function formatKeyCommandsSection(commands: readonly HandoffCommandResult[]): string {
@@ -1288,7 +1330,8 @@ export function selectHandoff(seed: HandoffSeed, opts: SelectHandoffOptions = {}
   // Fit omitted command results within actual remaining budget (cmdReserve + any unused tail headroom).
   const remainingTokAfterTail = Math.max(0, availTokens - usedTokens - origTok - tailUsedTok);
   const remainingBytesAfterTail = Math.max(0, availBytes - usedBytes - origBytes - tailUsedBytes);
-  const spanText = omittedSpan ? formatOmittedSection(omittedSpan) : '';
+  const spanCapBytes = Math.max(256, Math.min(omittedReserveBytes, remainingBytesAfterTail || omittedReserveBytes));
+  const spanText = omittedSpan ? formatOmittedSection(omittedSpan, spanCapBytes) : '';
   const spanTok = spanText ? estimateTokens(spanText) : 0;
   const spanBytes = spanText ? utf8Bytes(spanText) : 0;
 
@@ -1345,16 +1388,23 @@ export function renderAttributedContext(sel: HandoffSelection): string {
     sections.push(`## Original Request (Turn ${sel.originalRequest.turnIndex})\n\n${sel.originalRequest.text}`);
   }
   if (sel.omittedSpan) {
-    sections.push(formatOmittedSection(sel.omittedSpan));
+    sections.push(formatOmittedSection(sel.omittedSpan, Math.max(256, Math.floor(sel.effectiveByteBudget * 0.2))));
   }
   const files = formatFilesSection(sel.modifiedFiles);
   if (files) sections.push(files);
   const cmds = formatKeyCommandsSection(sel.keyCommands);
   if (cmds) sections.push(cmds);
-  if (sel.keptTurns.length > 0) {
-    sections.push('## Conversation Transcript\n\n' + sel.keptTurns.map(formatTurnAsMarkdown).join('\n\n'));
-  }
   const plan = formatPlanSection(sel.latestPlan);
+  const planBytes = plan ? utf8Bytes(plan) + 2 : 0;
+  const planTok = plan ? estimateTokens(plan) : 0;
+  if (sel.keptTurns.length > 0) {
+    const transcript = '## Conversation Transcript\n\n' + sel.keptTurns.map(formatTurnAsMarkdown).join('\n\n');
+    const preBytes = utf8Bytes(sections.join('\n\n')) + 2;
+    const preTok = estimateTokens(sections.join('\n\n'));
+    const maxTransBytes = Math.max(256, sel.effectiveByteBudget - preBytes - planBytes);
+    const maxTransTok = Math.max(64, sel.effectiveTokenBudget - preTok - planTok);
+    sections.push(trimToBudget(transcript, maxTransTok, maxTransBytes, true));
+  }
   if (plan) sections.push(plan);
 
   return trimToBudget(sections.join('\n\n'), sel.effectiveTokenBudget, sel.effectiveByteBudget);
@@ -1368,10 +1418,16 @@ export function formatHandoffPrefixBlock(attributedContext: string): string {
 
 /** Renders a selected handoff into structured user/assistant messages for
  * backends that support native history injection (e.g. Codex `thread/inject_items`).
- * Guarantees clean user/assistant alternation and explicit agent attribution. */
+ * Guarantees clean user/assistant alternation, explicit agent attribution, and
+ * strict adherence to sel.effectiveByteBudget / sel.effectiveTokenBudget. */
 export function renderNativeHistoryMessages(sel: HandoffSelection): HandoffMessage[] {
   if (sel.seed.legacyMarkdown) {
-    return [{ role: 'user', text: `<handoff_context>\n${sel.seed.legacyMarkdown}\n</handoff_context>` }];
+    return [
+      {
+        role: 'user',
+        text: `<handoff_context>\n${trimToBudget(sel.seed.legacyMarkdown, sel.effectiveTokenBudget, sel.effectiveByteBudget)}\n</handoff_context>`,
+      },
+    ];
   }
 
   const prevAgents = sel.lineageKinds.map(agentTitle);
@@ -1385,7 +1441,7 @@ export function renderNativeHistoryMessages(sel: HandoffSelection): HandoffMessa
     preambleParts.push(`## Original Request (Turn ${sel.originalRequest.turnIndex})\n\n${sel.originalRequest.text}`);
   }
   if (sel.omittedSpan) {
-    preambleParts.push(formatOmittedSection(sel.omittedSpan));
+    preambleParts.push(formatOmittedSection(sel.omittedSpan, Math.max(256, Math.floor(sel.effectiveByteBudget * 0.2))));
   }
   const files = formatFilesSection(sel.modifiedFiles);
   if (files) preambleParts.push(files);
@@ -1429,7 +1485,31 @@ export function renderNativeHistoryMessages(sel: HandoffSelection): HandoffMessa
       merged.push({ ...m });
     }
   }
-  return merged;
+
+  // Enforce effectiveByteBudget / effectiveTokenBudget across the entire message list.
+  const maxBytes = Math.max(512, sel.effectiveByteBudget);
+  const maxTokens = Math.max(128, sel.effectiveTokenBudget);
+  const totalBytes = () => merged.reduce((sum, m) => sum + utf8Bytes(m.text), 0);
+  const totalTokens = () => merged.reduce((sum, m) => sum + estimateTokens(m.text), 0);
+  if (totalBytes() <= maxBytes && totalTokens() <= maxTokens) return merged;
+
+  // Trim proportionally, preserving the preamble message (index 0) and most recent messages.
+  let remainingBytes = maxBytes;
+  let remainingTokens = maxTokens;
+  const bounded: HandoffMessage[] = [];
+  for (let i = 0; i < merged.length; i++) {
+    const m = merged[i]!;
+    const leftCount = merged.length - i;
+    const shareBytes = i === merged.length - 1 ? remainingBytes : Math.max(128, Math.floor(remainingBytes / leftCount));
+    const shareTokens = i === merged.length - 1 ? remainingTokens : Math.max(32, Math.floor(remainingTokens / leftCount));
+    if (remainingBytes < 64 || remainingTokens < 16) break;
+    const text = trimToBudget(m.text, Math.min(remainingTokens, shareTokens), Math.min(remainingBytes, shareBytes), i > 0);
+    if (!text) continue;
+    remainingBytes = Math.max(0, remainingBytes - utf8Bytes(text));
+    remainingTokens = Math.max(0, remainingTokens - estimateTokens(text));
+    bounded.push({ ...m, text });
+  }
+  return bounded.length > 0 ? bounded : [{ role: 'user', text: trimToBudget(preamble, maxTokens, maxBytes) }];
 }
 
 /** Convenience helper: computes summary metadata for `Notice.Switched` from a seed. */

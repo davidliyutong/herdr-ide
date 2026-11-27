@@ -1442,4 +1442,33 @@ describe('Antigravity (agy)', () => {
     symlinkSync(outside, recPath);
     expect(await e.r.resolve('claude', { pid: 100, argv: ['claude'], cwd })).toBeNull();
   });
+
+  test('Antigravity deduplicates open .db/-wal/-shm FDs and isolates SQLite reads in ReadOnlySQLiteWorker', async () => {
+    const pf = newProcfs(start - HOUR);
+    const e = newEnv();
+    e.procRoot = pf.root;
+    const sParent = sid(10);
+    const sChild = sid(11);
+    const childDb = writeConvDb(e, sChild, start);
+    const parentDb = writeConvDb(e, sParent, start);
+    writeSummaries(e, [
+      { id: sParent, workspaces: [`file://${cwd}`], modified: new Date(start).toISOString() },
+      { id: sChild, workspaces: [`file://${cwd}`], parent: sParent, depth: 1, modified: new Date(start).toISOString() },
+    ]);
+    // Simulate a process holding .db, .db-wal, and .db-shm open for the same subagent DB
+    // alongside a child process holding the same FDs.
+    pf.add(300, 1, 300, 'agy', start, [], {
+      '5': childDb,
+      '6': `${childDb}-wal`,
+      '7': `${childDb}-shm`,
+    });
+    pf.add(301, 300, 300, 'agy-helper', start + 50, [], {
+      '3': childDb,
+      '4': `${childDb}-wal`,
+    });
+    expect(await e.r.resolve('agy', { pid: 300, argv: ['agy'], cwd })).toEqual(found(sParent, SessionFrom.FD));
+    expect((await e.r.locate('agy', sParent)).path).toBe(parentDb);
+    // Worker closes cleanly without hanging.
+    e.r.close();
+  });
 });

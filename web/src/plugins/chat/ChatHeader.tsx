@@ -9,13 +9,22 @@ import { InlineEdit } from '../../components/InlineEdit';
 import { StatusDot } from '../../components/StatusDot';
 import { openMenu, type MenuEntry } from '../../contextMenu';
 import { chatAdapter } from '../../conversation/kinds';
-import { confirmDialog } from '../../dialog';
 import { t, type MessageKey } from '../../i18n';
 import { shortPath, type AgentStatus } from '../../lib/machine';
 import { useStore } from '../../state/store';
 import type { PluginView } from '../../term/layout';
 import type { PaneHeaderViewProps } from '../api';
-import { agentName, brandKindIcon, exportChatMenu, forkChat, renameChat, requestRewind, switchAgentMenu, useChatUi } from './ops';
+import {
+  agentName,
+  brandKindIcon,
+  confirmLossyFork,
+  exportChatMenu,
+  forkChat,
+  renameChat,
+  requestRewind,
+  switchAgentMenu,
+  useChatUi,
+} from './ops';
 import { CHAT_STATES } from './protocol';
 import { chatUserTurns } from './source';
 import { chatGone, liveKey, useChats } from './state';
@@ -123,16 +132,9 @@ export function ChatHeader({ m, pane, view, home }: PaneHeaderViewProps) {
 
   const onForkClick = useCallback(async () => {
     if (!chat) return;
-    if (lossyFork) {
-      const ok = await confirmDialog({
-        title: t('chat.forkLossyTitle'),
-        message: t('chat.forkLossyMessage', { agent }),
-        confirm: t('chat.forkLossyConfirm'),
-      });
-      if (!ok) return;
-    }
+    if (!(await confirmLossyFork(m, chat, kind))) return;
     void forkChat(m, chat, { from: pane });
-  }, [m, chat, pane, lossyFork, agent]);
+  }, [m, chat, kind, pane]);
 
   const onExportClick = useCallback(
     (e: MouseEvent<HTMLButtonElement>) => {
@@ -161,6 +163,7 @@ export function ChatHeader({ m, pane, view, home }: PaneHeaderViewProps) {
   }
 
   const canEdit = !readOnly && !gone;
+  const canExport = !gone && !offline;
   const working = state === 'working' || state === 'waiting' || state === 'starting';
   const rewindDisabled = working || !!live?.info?.handedOff;
   const dotStatus: AgentStatus | undefined = !gone && status ? status : label ? 'idle' : undefined;
@@ -198,52 +201,60 @@ export function ChatHeader({ m, pane, view, home }: PaneHeaderViewProps) {
           {label}
         </span>
       )}
-      {canEdit && (
+      {(canEdit || canExport) && (
         <span
           className="pane-plugin-actions chat-head-actions"
           onMouseDown={(e) => (e.target as HTMLElement).closest('button') && e.preventDefault()}
         >
-          <button
-            type="button"
-            className={rewindUnsupported ? 'chat-action-rewind is-unsupported' : 'chat-action-rewind'}
-            title={rewindUnsupported ? t('chat.rewindUnsupportedHint', { agent }) : t('chat.rewindHint')}
-            aria-label={rewindUnsupported ? t('chat.rewindUnsupported', { agent }) : t('chat.rewind')}
-            aria-haspopup="menu"
-            aria-disabled={rewindUnsupported || undefined}
-            disabled={rewindDisabled}
-            onClick={onRewindClick}
-          >
-            <RotateCcw aria-hidden />
-          </button>
-          <button
-            type="button"
-            className="chat-action-fork"
-            data-lossy={lossyFork || undefined}
-            title={lossyFork ? t('chat.forkLossyHint', { agent }) : t('chat.forkHint')}
-            aria-label={t('chat.fork')}
-            onClick={() => void onForkClick()}
-          >
-            <GitFork aria-hidden />
-          </button>
-          <button
-            type="button"
-            className="chat-action-switch"
-            title={t('chat.switchAgentHint')}
-            aria-label={t('chat.switchAgent')}
-            onClick={onSwitchClick}
-          >
-            <ArrowLeftRight aria-hidden />
-          </button>
-          <button
-            type="button"
-            className="chat-action-export"
-            title={t('chat.exportHint')}
-            aria-label={t('chat.export')}
-            aria-haspopup="menu"
-            onClick={onExportClick}
-          >
-            <Download aria-hidden />
-          </button>
+          {canEdit && (
+            <>
+              <button
+                type="button"
+                className={rewindUnsupported ? 'chat-action-rewind is-unsupported' : 'chat-action-rewind'}
+                title={rewindUnsupported ? t('chat.rewindUnsupportedHint', { agent }) : t('chat.rewindHint')}
+                aria-label={rewindUnsupported ? t('chat.rewindUnsupported', { agent }) : t('chat.rewind')}
+                aria-haspopup="menu"
+                aria-disabled={rewindUnsupported || undefined}
+                disabled={rewindDisabled}
+                onClick={onRewindClick}
+              >
+                <RotateCcw aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="chat-action-fork"
+                data-lossy={lossyFork || undefined}
+                title={lossyFork ? t('chat.forkLossyHint', { agent }) : t('chat.forkHint')}
+                aria-label={t('chat.fork')}
+                disabled={working}
+                onClick={() => void onForkClick()}
+              >
+                <GitFork aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="chat-action-switch"
+                title={t('chat.switchAgentHint')}
+                aria-label={t('chat.switchAgent')}
+                disabled={working}
+                onClick={onSwitchClick}
+              >
+                <ArrowLeftRight aria-hidden />
+              </button>
+            </>
+          )}
+          {canExport && (
+            <button
+              type="button"
+              className="chat-action-export"
+              title={t('chat.exportHint')}
+              aria-label={t('chat.export')}
+              aria-haspopup="menu"
+              onClick={onExportClick}
+            >
+              <Download aria-hidden />
+            </button>
+          )}
           <span className="sep" />
         </span>
       )}

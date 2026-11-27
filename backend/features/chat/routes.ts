@@ -124,6 +124,7 @@ const forkBody = z.object({
   upToSeq: optSeq,
   title: opt,
   maxBytes: optMaxBytes,
+  workspace: opt,
 });
 
 const switchBody = z.object({
@@ -131,6 +132,7 @@ const switchBody = z.object({
   targetKind: opt,
   upToSeq: optSeq,
   maxBytes: optMaxBytes,
+  workspace: opt,
   options: z.object({ model: opt, effort: opt, mode: opt }).nullish(),
 });
 
@@ -182,6 +184,36 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
     if (!validCwd(cwd)) throw badRequest('cwd: a clean absolute path');
     c.var.audit.cwd = auditText(cwd);
     return cwd;
+  };
+  /** Resolves fresh workspace vault environment variables for a new, forked,
+   * or switched chat. Fails closed (no env) when no workspace is provided or
+   * the vault is locked/unlinked; logs injected names and preset ids to audit. */
+  const resolveWorkspaceEnv = async (
+    c: Ctx,
+    workspace: string,
+  ): Promise<{
+    env: Record<string, string> | undefined;
+    vault: { injected: number; locked?: boolean; missing?: string[]; logFailed?: boolean; corrupt?: boolean } | undefined;
+  }> => {
+    if (workspace && (Buffer.byteLength(workspace) > 128 || /[\x00-\x1f\x7f]/.test(workspace)))
+      throw badRequest('workspace: a workspace id');
+    if (!workspace || !workspaceEnv) return { env: undefined, vault: undefined };
+    const resolved = await workspaceEnv(c.var.machine.id, workspace, c.var.client);
+    if (resolved.presets.length === 0 && !resolved.corrupt) return { env: undefined, vault: undefined };
+    let env: Record<string, string> | undefined;
+    if (resolved.names.length) {
+      env = resolved.env;
+      c.var.audit.vault_env = resolved.names;
+      c.var.audit.vault_presets = resolved.presets;
+    }
+    const vault = {
+      injected: resolved.names.length,
+      ...(resolved.locked ? { locked: true } : {}),
+      ...(resolved.missing.length ? { missing: resolved.missing } : {}),
+      ...(resolved.logFailed ? { logFailed: true } : {}),
+      ...(resolved.corrupt ? { corrupt: true } : {}),
+    };
+    return { env, vault };
   };
 
   /** Which kinds the machine can start; start starts its host. */
@@ -257,8 +289,7 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
     const o = b.options;
     if (o && (!validOption(o.model) || !validOption(o.effort) || (o.mode && !(chat.MODES as readonly string[]).includes(o.mode))))
       throw badRequest('options: model, effort and a mode');
-    if (b.workspace && (Buffer.byteLength(b.workspace) > 128 || /[\x00-\x1f\x7f]/.test(b.workspace)))
-      throw badRequest('workspace: a workspace id');
+    const { env, vault } = await resolveWorkspaceEnv(c, b.workspace);
     c.var.audit.cwd = auditText(b.cwd);
     if (b.resume) Object.assign(c.var.audit, { resume: b.resume, import: b.import });
     if (o?.mode) c.var.audit.mode = o.mode;
@@ -267,25 +298,6 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
       ...(o.effort ? { effort: o.effort } : {}),
       ...(o.mode ? { mode: o.mode } : {}),
     };
-    let env: Record<string, string> | undefined;
-    let vault: { injected: number; locked?: boolean; missing?: string[]; logFailed?: boolean; corrupt?: boolean } | undefined;
-    if (b.workspace && workspaceEnv) {
-      const resolved = await workspaceEnv(c.var.machine.id, b.workspace, c.var.client);
-      if (resolved.presets.length > 0 || resolved.corrupt) {
-        if (resolved.names.length) {
-          env = resolved.env;
-          c.var.audit.vault_env = resolved.names;
-          c.var.audit.vault_presets = resolved.presets;
-        }
-        vault = {
-          injected: resolved.names.length,
-          ...(resolved.locked ? { locked: true } : {}),
-          ...(resolved.missing.length ? { missing: resolved.missing } : {}),
-          ...(resolved.logFailed ? { logFailed: true } : {}),
-          ...(resolved.corrupt ? { corrupt: true } : {}),
-        };
-      }
-    }
     // A Claude Code chat runs on Anthropic's Agent SDK, which the machine
     // gets first: asked again although it failed lately, the user asking.
     try {
@@ -419,7 +431,7 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
 
   /** Forks a chat (optionally up to upToSeq) into a new chat. */
   api.post('/fork', ctx.mutating('fork'), async (c) => {
-    let b: z.output<typeof forkBody> = { chat: '', upToSeq: undefined, title: '' };
+    let b: z.output<typeof forkBody> = { chat: '', upToSeq: undefined, title: '', maxBytes: undefined, workspace: '' };
     const raw = Buffer.from(await readBody(c.req.raw, MAX_BODY))
       .toString('utf8')
       .trim();
@@ -429,7 +441,7 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
         if (!r.success) throw r.error;
         b = r.data;
       } catch {
-        throw badRequest('the body: {chat, upToSeq?, title?}');
+        throw badRequest('the body: {chat, upToSeq?, title?, workspace?}');
       }
     }
     const id = b.chat || query(c, 'chat');
@@ -438,12 +450,22 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
     const maxBytes = b.maxBytes ?? undefined;
     const title = b.title ? b.title.trim() : '';
     if (title && Buffer.byteLength(title) > 512) throw badRequest('title: too long');
+    const { env, vault } = await resolveWorkspaceEnv(c, b.workspace);
     c.var.audit.chat = id;
     if (upToSeq) c.var.audit.upToSeq = upToSeq;
-    const known = board.watch.snapshot().machines[c.var.machine.id]?.states.find((s) => s.id === id);
-    if (known?.kind) {
+    let kind = board.watch.snapshot().machines[c.var.machine.id]?.states.find((s) => s.id === id)?.kind;
+    if (!kind) {
       try {
-        await board.ensureSdk(c.var.machine.id, known.kind, bounded(c, timing.sdkMs), {
+        const listed = await ask(c, { op: chat.Op.Chats }, { start: false });
+        const chats = (listed.chats ?? []) as unknown as chat.Chat[];
+        kind = chats.find((ch) => ch.id === id)?.kind;
+      } catch {
+        // Host not running or unreachable; Op.Fork below will start/report it.
+      }
+    }
+    if (kind) {
+      try {
+        await board.ensureSdk(c.var.machine.id, kind, bounded(c, timing.sdkMs), {
           retry: true,
           audit: (event, fields) => ctx.audit.log(c.var.who, event, fields),
         });
@@ -459,13 +481,14 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
         ...(upToSeq ? { upToSeq } : {}),
         ...(title ? { title } : {}),
         ...(maxBytes !== undefined ? { maxBytes } : {}),
+        ...(env ? { env } : {}),
       },
       { ms: timing.sessionsMs, start: true, agent: true },
     );
     const newId = res.chat?.id;
     if (typeof newId !== 'string' || !chat.validChatID(newId)) throw failOf(protocolError("the chat host's answer has no chat"));
     c.var.audit.forked_chat = newId;
-    return c.json({ chat: res.chat });
+    return c.json({ chat: res.chat, ...(vault ? { vault } : {}) });
   });
 
   /** Exports conversation context from a chat and creates a new chat of targetKind. */
@@ -476,13 +499,14 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
       if (!r.success) throw r.error;
       b = r.data;
     } catch {
-      throw badRequest('the body: {chat, targetKind, options?, upToSeq?}');
+      throw badRequest('the body: {chat, targetKind, options?, upToSeq?, workspace?}');
     }
     if (!chat.validChatID(b.chat)) throw badRequest("chat: a chat's id");
     if (!chatKinds().includes(b.targetKind)) throw badRequest('targetKind: an agent kind with a chat');
     const o = b.options;
     if (o && (!validOption(o.model) || !validOption(o.effort) || (o.mode && !(chat.MODES as readonly string[]).includes(o.mode))))
       throw badRequest('options: model, effort and a mode');
+    const { env, vault } = await resolveWorkspaceEnv(c, b.workspace);
     c.var.audit.chat = b.chat;
     c.var.audit.targetKind = b.targetKind;
     if (b.upToSeq) c.var.audit.upToSeq = b.upToSeq;
@@ -509,13 +533,14 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
         ...(b.upToSeq ? { upToSeq: b.upToSeq } : {}),
         ...(b.maxBytes != null ? { maxBytes: b.maxBytes } : {}),
         ...(options ? { options } : {}),
+        ...(env ? { env } : {}),
       },
       { ms: timing.sessionsMs, start: true, agent: true },
     );
     const newId = res.chat?.id;
     if (typeof newId !== 'string' || !chat.validChatID(newId)) throw failOf(protocolError("the chat host's answer has no chat"));
     c.var.audit.switched_chat = newId;
-    return c.json({ chat: res.chat });
+    return c.json({ chat: res.chat, ...(vault ? { vault } : {}) });
   });
 
   /** Exports a chat's conversation as a bounded Markdown digest (default) or

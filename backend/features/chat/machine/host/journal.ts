@@ -567,6 +567,7 @@ export class Journal {
   async truncateAfter(
     chatId: string,
     beforeSeq: number,
+    opts?: { fresh?: boolean },
   ): Promise<{ seq: number; bytes: number; turnEnd: number; historyAfter: string; first: number; updated: number }> {
     const kept = await this.allEvents(chatId, beforeSeq);
     let seq = 0;
@@ -589,11 +590,12 @@ export class Journal {
       }
     }
     const ts = updated || Date.now();
+    const freshVal = opts?.fresh !== undefined ? (opts.fresh ? 1 : 0) : seq === 0 ? 1 : 0;
     await this.tx(
       { sql: 'DELETE FROM events WHERE chat = ? AND seq > ?', params: [chatId, beforeSeq] },
       {
         sql: 'UPDATE chats SET seq = ?, bytes = ?, turn_end = ?, history_after = ?, seen = MIN(seen, ?), updated = ?, fresh = ? WHERE id = ?',
-        params: [seq, bytes, turnEnd, historyAfter, seq, ts, seq === 0 ? 1 : 0, chatId],
+        params: [seq, bytes, turnEnd, historyAfter, seq, ts, freshVal, chatId],
       },
     );
     return { seq, bytes, turnEnd, historyAfter, first, updated: ts };

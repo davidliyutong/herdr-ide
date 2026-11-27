@@ -11,11 +11,13 @@
 // transcripts read-only (refusing symlinks and bounding every read), emits the
 // child's thoughts, tool calls and messages with `Event.parent` set to the
 // spawning `toolCallId`, and publishes active subagents in `Chat.tasks`.
-import { openSync, closeSync, readSync, lstatSync, realpathSync } from 'node:fs';
+import { closeSync } from 'node:fs';
 import { posix } from 'node:path';
 import { validSessionId } from '#shared/agents/kinds.ts';
 import { SLUG } from '#shared/lib/brand.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
+import { SafeFileTailer, openContainedRegular } from '#machine/agents/tailer.ts';
+import type { SessionObserver } from '../observer.ts';
 import { UPDATE_MESSAGE, UPDATE_THOUGHT, UPDATE_TOOL_CALL } from './items.ts';
 import { clip, isObj, MAX_NAME, str, type Obj } from './state.ts';
 
@@ -27,6 +29,8 @@ export const MAX_SUBAGENTS = 64;
 const MAX_READ_BYTES = 1 << 20;
 /** Most bytes kept in an incomplete line buffer before discarding the line. */
 const MAX_LINE_BYTES = 1 << 20;
+/** Upper bound on multi-chunk drainAll() reads during history replay / completion. */
+const MAX_DRAIN_BYTES = 32 << 20;
 /** Most characters kept from a subagent tool call's text output. */
 const MAX_OUTPUT_CHARS = 32_768;
 /** Most events emitted for a single subagent transcript. */
@@ -34,7 +38,7 @@ const MAX_CHILD_EVENTS = 1024;
 /** Most characters kept in a subagent summary. */
 const MAX_SUMMARY_CHARS = 4096;
 
-const CHILD_CREATED_RE = /Created the following subagent:\s*(\{[\s\S]*?\})/;
+const CHILD_CREATED_MARKER = 'Created the following subagent:';
 const SENDER_MSG_RE = /\[Message\][^\n]*\bsender=([0-9a-f-]{36})\b[^\n]*\bcontent=([\s\S]*?)(?:\n<\/SYSTEM_MESSAGE>|$)/;
 const EXIT_CODE_RE = /^Command exited with code (-?\d+)\./m;
 const HEADER_STAMP_RE = /^(?:(?:Created At|Completed At): [^\n]*\n)+/;
@@ -173,98 +177,82 @@ export function transcriptPath(agyDir: string, sessionId: string): string {
   return posix.join(agyDir, 'brain', sessionId, '.system_generated', 'logs', 'transcript.jsonl');
 }
 
-/** Safely opens a user-owned regular file (rejecting symlinks and special files)
- * and reads up to MAX_READ_BYTES starting from `offset`. */
-function safeReadChunk(path: string, offset: number, uid: number): { bytes: Buffer; nextOffset: number; size: number } | null {
-  let lst;
+/** Whether p exists as a safe, user-owned regular file strictly inside allowedRoots. */
+function isSafeContainedFile(p: string, allowedRoots: readonly string[], uid: number): boolean {
+  const opened = openContainedRegular(p, allowedRoots, uid);
+  if (!opened) return false;
   try {
-    lst = lstatSync(path);
+    closeSync(opened.fd);
   } catch {
-    return null;
+    // closed
   }
-  if (!lst.isFile() || lst.isSymbolicLink()) return null;
-  if (uid >= 0 && lst.uid !== uid) return null;
-  if (lst.size <= offset) return { bytes: Buffer.alloc(0), nextOffset: offset, size: lst.size };
-  let real: string;
-  try {
-    real = realpathSync(path);
-  } catch {
-    return null;
-  }
-  let rst;
-  try {
-    rst = lstatSync(real);
-  } catch {
-    return null;
-  }
-  if (!rst.isFile() || rst.dev !== lst.dev || rst.ino !== lst.ino) return null;
-  const toRead = Math.min(lst.size - offset, MAX_READ_BYTES);
-  const buf = Buffer.allocUnsafe(toRead);
-  let fd = -1;
-  try {
-    fd = openSync(real, 'r');
-    const n = readSync(fd, buf, 0, toRead, offset);
-    return { bytes: buf.subarray(0, n), nextOffset: offset + n, size: lst.size };
-  } catch {
-    return null;
-  } finally {
-    if (fd >= 0) {
-      try {
-        closeSync(fd);
-      } catch {
-        // closed
-      }
-    }
-  }
+  return true;
 }
 
-/** Incremental JSONL tailer for a single regular file. */
-class JsonlTailer {
-  path: string;
-  private offset = 0;
-  private rem = '';
-  private readonly uid: number;
-
-  constructor(path: string, uid: number, startOffset = 0) {
-    this.path = path;
-    this.uid = uid;
-    this.offset = startOffset;
-  }
-
-  /** Fast-forwards to the current end of the file (if it exists). */
-  seekEnd(): void {
-    try {
-      const st = lstatSync(this.path);
-      if (st.isFile() && !st.isSymbolicLink() && (this.uid < 0 || st.uid === this.uid)) {
-        this.offset = st.size;
-      }
-    } catch {
-      // File may not exist yet; start at 0 when created.
+/** Extracts a balanced top-level JSON object starting at the first `{` after `from`. */
+function extractJsonObject(text: string, from: number): string | null {
+  const start = text.indexOf('{', from);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
     }
   }
+  return null;
+}
 
-  /** Reads and parses newly appended complete JSONL objects. */
-  poll(): Obj[] {
-    const chunk = safeReadChunk(this.path, this.offset, this.uid);
-    if (!chunk || chunk.bytes.length === 0) return [];
-    this.offset = chunk.nextOffset;
-    const text = this.rem + chunk.bytes.toString('utf8');
-    const lines = text.split('\n');
-    const tail = lines.pop() ?? '';
-    this.rem = Buffer.byteLength(tail) <= MAX_LINE_BYTES ? tail : '';
-    const out: Obj[] = [];
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || Buffer.byteLength(trimmed) > MAX_LINE_BYTES) continue;
-      try {
-        const v: unknown = JSON.parse(trimmed);
-        if (isObj(v)) out.push(v);
-      } catch {
-        // Ignore partial or malformed lines.
-      }
+/** Maps a GENERIC tool result step onto a pending child tool call (shared by
+ * live tailing and history replay so status/exitCode/error detection match). */
+function applyGenericStep(pending: PendingChildTool, step: Obj): Obj {
+  const rawContent = str(step.content) ?? '';
+  const cleaned = cleanGenericOutput(rawContent);
+  const stepStatus = str(step.status) ?? 'DONE';
+  const status = stepStatus === 'ERROR' || stepStatus === 'FAILED' ? 'failed' : 'completed';
+  const exitMatch = EXIT_CODE_RE.exec(cleaned);
+  const next: Obj = { ...pending.update, status };
+  if (exitMatch) {
+    const code = Number.parseInt(exitMatch[1]!, 10);
+    if (Number.isFinite(code)) {
+      const meta = isObj(next._meta) ? { ...next._meta } : {};
+      const own = isObj(meta[SLUG]) ? { ...(meta[SLUG] as Obj) } : {};
+      own.exitCode = code;
+      meta[SLUG] = own;
+      next._meta = meta;
+      if (code !== 0) next.status = 'failed';
     }
-    return out;
+  } else if (cleaned.startsWith('Encountered error')) {
+    next.status = 'failed';
   }
+  if (cleaned) {
+    next.content = [{ type: 'content', content: { type: 'text', text: cleaned } }];
+  }
+  return next;
+}
+
+/** Safe finite non-negative token delta from a PLANNER_RESPONSE step. */
+function stepTokens(step: Obj): number {
+  const inTok =
+    typeof step.input_tokens === 'number' && Number.isFinite(step.input_tokens) && step.input_tokens > 0 ? step.input_tokens : 0;
+  const outTok =
+    typeof step.output_tokens === 'number' && Number.isFinite(step.output_tokens) && step.output_tokens > 0 ? step.output_tokens : 0;
+  const cacheTok =
+    typeof step.cache_read_tokens === 'number' && Number.isFinite(step.cache_read_tokens) && step.cache_read_tokens > 0
+      ? step.cache_read_tokens
+      : 0;
+  return inTok + outTok + cacheTok;
 }
 
 /** Decodes Antigravity transcript tool_call args (values are often JSON-encoded
@@ -404,10 +392,12 @@ function cleanGenericOutput(text: string): string {
 
 /** Extracts `conversationId` from an `invoke_subagent` GENERIC output block. */
 export function parseSubagentCreated(content: string): { conversationId: string; logPath: string } | null {
-  const m = CHILD_CREATED_RE.exec(content);
-  if (!m) return null;
+  const marker = content.indexOf(CHILD_CREATED_MARKER);
+  if (marker < 0) return null;
+  const rawJson = extractJsonObject(content, marker + CHILD_CREATED_MARKER.length);
+  if (!rawJson) return null;
   try {
-    const parsed: unknown = JSON.parse(m[1]!);
+    const parsed: unknown = JSON.parse(rawJson);
     if (!isObj(parsed)) return null;
     const id = str(parsed.conversationId)?.trim() ?? '';
     if (!validSessionId(id)) return null;
@@ -451,9 +441,10 @@ interface TrackedSubagent {
   acpCompleted: boolean;
   /** Child conversation UUID once discovered from parent transcript. */
   childId: string;
-  tailer: JsonlTailer | null;
+  tailer: SafeFileTailer | null;
   pendingTools: PendingChildTool[];
   status: 'in_progress' | 'completed' | 'failed' | 'cancelled';
+  completing: boolean;
   startedMs: number;
   startedAt: string;
   tokens: number;
@@ -482,8 +473,8 @@ export interface AgySubagentOptions {
 
 /** Tracks Antigravity subagents spawned by an ACP session, streaming their
  * nested transcript items under `Event.parent = <invoke_subagent toolCallId>`
- * and publishing live entries to `Chat.tasks`. */
-export class AgySubagentTracker {
+ * and publishing live entries to `Chat.tasks`. Implements SessionObserver. */
+export class AgySubagentTracker implements SessionObserver {
   private readonly host: AgySubagentHost;
   private readonly dirs: readonly string[];
   private readonly pollMs: number;
@@ -491,7 +482,7 @@ export class AgySubagentTracker {
 
   private parentSid = '';
   private parentDir = '';
-  private parentTailer: JsonlTailer | null = null;
+  private parentTailer: SafeFileTailer | null = null;
   private readonly subs = new Map<string, TrackedSubagent>();
   private readonly byChildId = new Map<string, TrackedSubagent>();
   private readonly earlyCreated: Array<{ conversationId: string; logPath: string }> = [];
@@ -514,48 +505,48 @@ export class AgySubagentTracker {
     this.resolveParentTailer(true);
   }
 
+  private makeTailer(path: string, root: string, startOffset = 0): SafeFileTailer {
+    return new SafeFileTailer(path, {
+      allowedRoots: [root],
+      uid: this.uid,
+      startOffset,
+      maxReadBytes: MAX_READ_BYTES,
+      maxLineBytes: MAX_LINE_BYTES,
+    });
+  }
+
   /** Locates the parent session's `transcript.jsonl` if present on disk. */
-  private resolveParentTailer(seekToEnd: boolean): JsonlTailer | null {
+  private resolveParentTailer(seekToEnd: boolean): SafeFileTailer | null {
     if (this.parentTailer) return this.parentTailer;
     if (!this.parentSid) return null;
     for (const d of this.dirs) {
       const p = transcriptPath(d, this.parentSid);
-      try {
-        const st = lstatSync(p);
-        if (st.isFile() && !st.isSymbolicLink() && (this.uid < 0 || st.uid === this.uid)) {
-          this.parentDir = d;
-          const tailer = new JsonlTailer(p, this.uid);
-          if (seekToEnd) tailer.seekEnd();
-          this.parentTailer = tailer;
-          return tailer;
-        }
-      } catch {
-        // not created yet in this dir
+      if (isSafeContainedFile(p, [d], this.uid)) {
+        this.parentDir = d;
+        const tailer = this.makeTailer(p, d);
+        if (seekToEnd) tailer.seekEnd();
+        this.parentTailer = tailer;
+        return tailer;
       }
     }
     return null;
   }
 
-  /** Resolves a validated child transcript path under one of the trusted dirs. */
-  private childTranscriptPath(childId: string, hintedPath: string): string {
+  /** Resolves a validated child transcript path and its containing data dir. */
+  private childTranscriptSpec(childId: string, hintedPath: string): { path: string; root: string } | null {
     const expectedSuffix = posix.join('brain', childId, '.system_generated', 'logs', 'transcript.jsonl');
     const dirs = this.parentDir ? [this.parentDir, ...this.dirs.filter((d) => d !== this.parentDir)] : [...this.dirs];
     if (hintedPath) {
       const cleanHint = posix.normalize(hintedPath);
       for (const d of dirs) {
-        if (cleanHint === posix.join(d, expectedSuffix)) return cleanHint;
+        if (cleanHint === posix.join(d, expectedSuffix)) return { path: cleanHint, root: d };
       }
     }
     for (const d of dirs) {
       const p = posix.join(d, expectedSuffix);
-      try {
-        const st = lstatSync(p);
-        if (st.isFile() && !st.isSymbolicLink() && (this.uid < 0 || st.uid === this.uid)) return p;
-      } catch {
-        // try next
-      }
+      if (isSafeContainedFile(p, [d], this.uid)) return { path: p, root: d };
     }
-    return dirs.length > 0 ? posix.join(dirs[0]!, expectedSuffix) : '';
+    return dirs.length > 0 ? { path: posix.join(dirs[0]!, expectedSuffix), root: dirs[0]! } : null;
   }
 
   /** Intercepts an ACP `tool_call` / `tool_call_update` for `invoke_subagent`.
@@ -587,6 +578,7 @@ export class AgySubagentTracker {
         tailer: null,
         pendingTools: [],
         status: 'in_progress',
+        completing: false,
         startedMs: now,
         startedAt: new Date(now).toISOString(),
         tokens: 0,
@@ -660,20 +652,21 @@ export class AgySubagentTracker {
     if (this.stopped) return;
     const parent = this.resolveParentTailer(false);
     if (parent) {
-      for (const step of parent.poll()) {
+      for (const step of parent.poll().items) {
         this.handleParentStep(step);
       }
     }
     for (const sub of this.subs.values()) {
       if (sub.status !== 'in_progress' || !sub.childId) continue;
       if (!sub.tailer) {
-        const p = this.childTranscriptPath(sub.childId, '');
-        if (p) sub.tailer = new JsonlTailer(p, this.uid);
+        const spec = this.childTranscriptSpec(sub.childId, '');
+        if (spec) sub.tailer = this.makeTailer(spec.path, spec.root);
       }
       if (!sub.tailer) continue;
-      const lines = sub.tailer.poll();
+      const { items: lines } = sub.tailer.poll();
       if (lines.length === 0) continue;
       for (const step of lines) {
+        if (sub.status !== 'in_progress') break;
         this.handleChildStep(sub, step);
       }
       if (sub.status === 'in_progress') {
@@ -768,8 +761,8 @@ export class AgySubagentTracker {
   private linkChild(sub: TrackedSubagent, childId: string, hintedPath: string): void {
     sub.childId = childId;
     this.byChildId.set(childId, sub);
-    const p = this.childTranscriptPath(childId, hintedPath);
-    if (p) sub.tailer = new JsonlTailer(p, this.uid);
+    const spec = this.childTranscriptSpec(childId, hintedPath);
+    if (spec) sub.tailer = this.makeTailer(spec.path, spec.root);
     const earlySummary = this.earlyReports.get(childId);
     if (earlySummary !== undefined) {
       this.earlyReports.delete(childId);
@@ -782,19 +775,15 @@ export class AgySubagentTracker {
     this.publishTasks();
   }
 
-  private handleChildStep(sub: TrackedSubagent, step: Obj): void {
+  private handleChildStep(sub: TrackedSubagent, step: Obj, allowComplete = true): void {
     if (sub.emitted >= MAX_CHILD_EVENTS) return;
     const type = str(step.type) ?? '';
     const idx = typeof step.step_index === 'number' ? step.step_index : sub.emitted;
     const prefix = `agy-sub-${sub.childId.slice(0, 8)}`;
 
     if (type === 'PLANNER_RESPONSE') {
-      const inTok = typeof step.input_tokens === 'number' ? step.input_tokens : 0;
-      const outTok = typeof step.output_tokens === 'number' ? step.output_tokens : 0;
-      const cacheTok = typeof step.cache_read_tokens === 'number' ? step.cache_read_tokens : 0;
-      if (inTok + outTok + cacheTok > 0) {
-        sub.tokens += inTok + outTok;
-      }
+      const tok = stepTokens(step);
+      if (tok > 0) sub.tokens += tok;
 
       const thinking = (str(step.thinking) ?? '').trim();
       if (thinking) {
@@ -838,7 +827,7 @@ export class AgySubagentTracker {
       // its reply to the parent, we can mark it completed right away.
       if (tcs.length === 0 && sub.pendingTools.length === 0) {
         sub.hadFinalResponse = true;
-        if (sub.sentReplyToParent) {
+        if (allowComplete && sub.sentReplyToParent) {
           this.completeSubagent(sub);
         }
       }
@@ -848,28 +837,7 @@ export class AgySubagentTracker {
     if (type === 'GENERIC') {
       const pending = sub.pendingTools.shift();
       if (!pending) return;
-      const rawContent = str(step.content) ?? '';
-      const cleaned = cleanGenericOutput(rawContent);
-      const stepStatus = str(step.status) ?? 'DONE';
-      let status = stepStatus === 'ERROR' || stepStatus === 'FAILED' ? 'failed' : 'completed';
-      const exitMatch = EXIT_CODE_RE.exec(cleaned);
-      const next: Obj = { ...pending.update, status };
-      if (exitMatch) {
-        const code = Number.parseInt(exitMatch[1]!, 10);
-        if (Number.isFinite(code)) {
-          const meta = isObj(next._meta) ? { ...next._meta } : {};
-          const own = isObj(meta[SLUG]) ? { ...(meta[SLUG] as Obj) } : {};
-          own.exitCode = code;
-          meta[SLUG] = own;
-          next._meta = meta;
-          if (code !== 0) next.status = 'failed';
-        }
-      } else if (cleaned.startsWith('Encountered error')) {
-        next.status = 'failed';
-      }
-      if (cleaned) {
-        next.content = [{ type: 'content', content: { type: 'text', text: cleaned } }];
-      }
+      const next = applyGenericStep(pending, step);
       this.emitChild(sub, pending.id, next);
       if (pending.sentMessageToParent && next.status === 'completed') {
         sub.sentReplyToParent = true;
@@ -879,22 +847,29 @@ export class AgySubagentTracker {
   }
 
   private completeSubagent(sub: TrackedSubagent): void {
-    if (sub.status !== 'in_progress') return;
-    // Drain any final lines from the child transcript before closing it out.
-    if (sub.tailer) {
-      for (const step of sub.tailer.poll()) {
-        this.handleChildStep(sub, step);
+    if (sub.status !== 'in_progress' || sub.completing) return;
+    sub.completing = true;
+    try {
+      // Drain all remaining lines from the child transcript before closing it out
+      // (bounded to MAX_DRAIN_BYTES, with recursive completion suppressed).
+      if (sub.tailer) {
+        for (const step of sub.tailer.drainAll(MAX_DRAIN_BYTES)) {
+          if (sub.emitted >= MAX_CHILD_EVENTS) break;
+          this.handleChildStep(sub, step, false);
+        }
       }
+      // Settle any tool call that never received a GENERIC step.
+      for (const pending of sub.pendingTools) {
+        this.emitChild(sub, pending.id, { ...pending.update, status: 'completed' });
+      }
+      sub.pendingTools = [];
+      sub.status = 'completed';
+      this.emitParentUpdate(sub);
+      this.publishTasks();
+      this.maybeStopTimer();
+    } finally {
+      sub.completing = false;
     }
-    // Settle any tool call that never received a GENERIC step.
-    for (const pending of sub.pendingTools) {
-      this.emitChild(sub, pending.id, { ...pending.update, status: 'completed' });
-    }
-    sub.pendingTools = [];
-    sub.status = 'completed';
-    this.emitParentUpdate(sub);
-    this.publishTasks();
-    this.maybeStopTimer();
   }
 
   private emitChild(sub: TrackedSubagent, item: string, update: Obj): void {
@@ -968,27 +943,28 @@ export function loadAgySubagentHistory(
   uid = typeof process.getuid === 'function' ? process.getuid() : -1,
 ): void {
   if (!validSessionId(parentSessionId) || subagentToolCalls.length === 0) return;
-  // Find parent transcript and read from offset 0 (entire history).
+  // Find parent transcript and drain full history (bounded to MAX_DRAIN_BYTES).
   let parentDir = '';
-  let parentTailer: JsonlTailer | null = null;
+  let parentTailer: SafeFileTailer | null = null;
   for (const d of dirs) {
     const p = transcriptPath(d, parentSessionId);
-    try {
-      const st = lstatSync(p);
-      if (st.isFile() && !st.isSymbolicLink() && (uid < 0 || st.uid === uid)) {
-        parentDir = d;
-        parentTailer = new JsonlTailer(p, uid, 0);
-        break;
-      }
-    } catch {
-      // try next
+    if (isSafeContainedFile(p, [d], uid)) {
+      parentDir = d;
+      parentTailer = new SafeFileTailer(p, {
+        allowedRoots: [d],
+        uid,
+        startOffset: 0,
+        maxReadBytes: MAX_READ_BYTES,
+        maxLineBytes: MAX_LINE_BYTES,
+      });
+      break;
     }
   }
   if (!parentTailer || !parentDir) return;
   // Discover children in order from parent transcript.
   const created: Array<{ conversationId: string; logPath: string }> = [];
   const reports = new Map<string, string>();
-  for (const step of parentTailer.poll()) {
+  for (const step of parentTailer.drainAll(MAX_DRAIN_BYTES)) {
     const type = str(step.type) ?? '';
     const content = str(step.content) ?? '';
     if (type === 'GENERIC') {
@@ -999,14 +975,44 @@ export function loadAgySubagentHistory(
       if (m) reports.set(m.sender, clip(m.content, MAX_SUMMARY_CHARS));
     }
   }
+  const searchDirs = [parentDir, ...dirs.filter((d) => d !== parentDir)];
   // Replay each matched child's transcript under its parent toolCallId.
   const n = Math.min(subagentToolCalls.length, created.length);
   for (let i = 0; i < n; i++) {
     const tc = subagentToolCalls[i]!;
     const child = created[i]!;
-    const childPath = transcriptPath(parentDir, child.conversationId);
-    const tailer = new JsonlTailer(childPath, uid, 0);
-    const steps = tailer.poll();
+    const expectedSuffix = posix.join('brain', child.conversationId, '.system_generated', 'logs', 'transcript.jsonl');
+    let childPath = '';
+    let childRoot = '';
+    if (child.logPath) {
+      const cleanHint = posix.normalize(child.logPath);
+      for (const d of searchDirs) {
+        if (cleanHint === posix.join(d, expectedSuffix) && isSafeContainedFile(cleanHint, [d], uid)) {
+          childPath = cleanHint;
+          childRoot = d;
+          break;
+        }
+      }
+    }
+    if (!childPath) {
+      for (const d of searchDirs) {
+        const p = posix.join(d, expectedSuffix);
+        if (isSafeContainedFile(p, [d], uid)) {
+          childPath = p;
+          childRoot = d;
+          break;
+        }
+      }
+    }
+    if (!childPath || !childRoot) continue;
+    const tailer = new SafeFileTailer(childPath, {
+      allowedRoots: [childRoot],
+      uid,
+      startOffset: 0,
+      maxReadBytes: MAX_READ_BYTES,
+      maxLineBytes: MAX_LINE_BYTES,
+    });
+    const steps = tailer.drainAll(MAX_DRAIN_BYTES);
     if (steps.length === 0) continue;
     const { typeName, role } = agySubagentInput(tc.raw);
     const pending: PendingChildTool[] = [];
@@ -1020,9 +1026,8 @@ export function loadAgySubagentHistory(
       const type = str(step.type) ?? '';
       const idx = typeof step.step_index === 'number' ? step.step_index : emitted;
       if (type === 'PLANNER_RESPONSE') {
-        const inTok = typeof step.input_tokens === 'number' ? step.input_tokens : 0;
-        const outTok = typeof step.output_tokens === 'number' ? step.output_tokens : 0;
-        if (inTok + outTok > 0) tokens += inTok + outTok;
+        const tok = stepTokens(step);
+        if (tok > 0) tokens += tok;
         const thinking = (str(step.thinking) ?? '').trim();
         if (thinking && emitted < MAX_CHILD_EVENTS) {
           emitted++;
@@ -1059,17 +1064,7 @@ export function loadAgySubagentHistory(
       } else if (type === 'GENERIC') {
         const p = pending.shift();
         if (!p || emitted >= MAX_CHILD_EVENTS) continue;
-        const cleaned = cleanGenericOutput(str(step.content) ?? '');
-        const exitMatch = EXIT_CODE_RE.exec(cleaned);
-        const next: Obj = { ...p.update, status: 'completed' };
-        if (exitMatch) {
-          const code = Number.parseInt(exitMatch[1]!, 10);
-          if (Number.isFinite(code)) {
-            next._meta = { [SLUG]: { exitCode: code } };
-            if (code !== 0) next.status = 'failed';
-          }
-        }
-        if (cleaned) next.content = [{ type: 'content', content: { type: 'text', text: cleaned } }];
+        const next = applyGenericStep(p, step);
         emitted++;
         emit({ t: chat.EventType.Update, item: p.id, parent: tc.toolCallId, update: next });
       }

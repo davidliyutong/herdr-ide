@@ -29,7 +29,7 @@ import {
 import type { EnsureOptions, SdkProvision } from './sdkprovision.ts';
 import { HostLink, readError, type HostConn, type Opener, type Response } from './hostconn.ts';
 import { ChatPage } from './page.ts';
-import { hostSettings } from './settings.ts';
+import { hostSettings, isHostSettingKey } from './settings.ts';
 import type { Limits, Timing } from './timing.ts';
 import { Watcher } from './watch.ts';
 import { HubCode, type StatesData } from './wire.ts';
@@ -105,6 +105,7 @@ export class ChatSwitchboard {
       broadcast: o.broadcast,
       publishAgent: o.publishAgent,
       turnedOff: () => this.closePages(HubCode.PluginDisabled),
+      onOffline: (m) => this.invalidateMachine(m),
       version: o.version,
       now: o.now,
       logger: o.logger,
@@ -282,7 +283,7 @@ export class ChatSwitchboard {
     const some = new Set<string>();
     for (const c of changes) {
       if (c.key.startsWith('plugins.')) this.watch.poke();
-      else if (c.key.startsWith('chat.')) {
+      else if (isHostSettingKey(c.key)) {
         if (c.machine === '') all = true;
         else some.add(c.machine);
       }

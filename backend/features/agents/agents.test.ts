@@ -195,6 +195,34 @@ test('busy', async () => {
   expect((await resolve(tc, 'box', q(MAX_RESOLVING + 1))).status).toBe(200);
 });
 
+test('resolve does not cache transient not_found misses, while caching ok and compressed hits', async () => {
+  const a: Agents = { calls: [] };
+  const tc = await setup(a);
+  let calls = 0;
+  a.reply = () => {
+    calls++;
+    if (calls === 1) return { ok: true, plugin: { ok: false, code: 'not_found' } };
+    return { ok: true, plugin: { ok: true, id: sid1 } };
+  };
+  const r1 = await resolve(tc, 'box', resolveQuery);
+  expect([r1.status, JSON.parse(r1.body)]).toEqual([200, { ok: false, code: 'not_found' }]);
+  // Second call immediately after a transient not_found MUST re-query the machine!
+  const r2 = await resolve(tc, 'box', resolveQuery);
+  expect([r2.status, JSON.parse(r2.body)]).toEqual([200, { ok: true }]);
+  expect(a.calls).toHaveLength(2);
+  // Third call hits the cache for the positive result.
+  const r3 = await resolve(tc, 'box', resolveQuery);
+  expect([r3.status, JSON.parse(r3.body)]).toEqual([200, { ok: true }]);
+  expect(a.calls).toHaveLength(2);
+
+  // Compressed results are permanent and stay cached.
+  a.reply = () => ({ ok: true, plugin: { ok: false, code: 'compressed' } });
+  const q2 = `kind=codex&session=${sid2}&cwd=/x`;
+  expect(JSON.parse((await resolve(tc, 'box', q2)).body)).toEqual({ ok: false, code: 'compressed' });
+  expect(JSON.parse((await resolve(tc, 'box', q2)).body)).toEqual({ ok: false, code: 'compressed' });
+  expect(a.calls).toHaveLength(3);
+});
+
 test('goQuery', () => {
   const q = goQuery('?a=1&a=2&b=x+y&c=%2F%E2%9C%93&d=%FF&e=%zz&f;g=1&h');
   expect([...q]).toEqual([

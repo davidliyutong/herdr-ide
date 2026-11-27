@@ -1023,9 +1023,9 @@ button.conv-stop > .lucide {
   background: var(--error);
 }
 
-/* Markdown still arriving: its blocks one after the other, as one text. */
+/* Markdown still arriving: keep compact block rhythm matching settled output. */
 .conv-stream > .markdown + .markdown {
-  margin-top: 0;
+  margin-top: 0.75em;
 }
 
 /* ---- a subagent's call: its items nested, a rule at their left ---- */

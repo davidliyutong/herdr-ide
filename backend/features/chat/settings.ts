@@ -79,6 +79,22 @@ export const settings = defineModule({
 
 const MIB = 1 << 20;
 
+/** Keys that affect hostSettings() and require Op.Configure on live chat hosts.
+ * Hub/UI-only keys (chat.handoffMaxKB, chat.providers.*, chat.visibleModels.*)
+ * do not affect the host process and should not trigger Op.Configure churn. */
+const HOST_SETTING_KEYS = new Set<string>([
+  'chat.permissionMode',
+  'chat.allowFullAccess',
+  'chat.idleStopMinutes',
+  'chat.maxLive',
+  'chat.maxChats',
+  'chat.retentionDays',
+  'chat.maxTotalMB',
+  'chat.maxChatMB',
+]);
+
+export const isHostSettingKey = (key: string): boolean => HOST_SETTING_KEYS.has(key) || key.startsWith('chat.permissionMode.');
+
 /** Machine m's settings for its chat host, clamped. */
 export function hostSettings(store: Store, m: string): chat.ClampedHostSettings {
   const s = store.of(settings);

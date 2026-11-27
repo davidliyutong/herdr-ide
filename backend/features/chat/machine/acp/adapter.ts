@@ -39,6 +39,7 @@ import type {
   ForkResult,
   HistoryParams,
   ModelsParams,
+  PrepareConfigContext,
   RunParams,
   Session,
   SessionsParams,
@@ -46,11 +47,12 @@ import type {
   StartParams,
 } from '../adapter.ts';
 import type { AgentProcess } from '../agentproc.ts';
-import { Items, UPDATE_TOOL, UPDATE_TOOL_CALL, contentUpdate } from './items.ts';
-import { agyDataDirs, agySubagentInput, isAgySubagentCall, loadAgySubagentHistory, normalizeAgySubagentCall } from './agysubagents.ts';
+import { LiveSessions } from '../runtime.ts';
+import { acpExtension } from './extensions.ts';
+import { Items, contentUpdate } from './items.ts';
 import { Conn, initialize, permissionCancelled, RequestError, type Handler, type InitializeResult } from './rpc.ts';
 import { ACP_TIMING, AcpSession, callError, startError, type AcpTiming } from './session.ts';
-import { clip, isObj, modelOptions, str, type Obj } from './state.ts';
+import { LEGACY_MODE_ID, LEGACY_MODE_ID_ALT, clientModeOption, clip, isObj, markFull, modelOptions, str, type Obj } from './state.ts';
 
 export { ACP_TIMING, type AcpTiming } from './session.ts';
 
@@ -135,6 +137,7 @@ function probeHandler(notify?: (method: string, params: unknown) => void): Handl
 export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
   const t: AcpTiming = { ...ACP_TIMING, ...o.timing };
   const itemPrefix = o.itemPrefix ?? randomPrefix;
+  const live = new LiveSessions<AcpSession>();
 
   /** Runs the agent and initializes it. */
   async function startProbe(p: RunParams, h: Handler, signal: AbortSignal): Promise<{ pr: Probe; init: InitializeResult }> {
@@ -158,6 +161,29 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
   }
 
   return {
+    meta: { runtime: 'process', handoffInjection: 'attributed_context', partialForkBy: 'none' },
+
+    /** Synthesizes the client-enforced permission mode option before start or
+     * journal wake for ACP kinds without a native mode option (e.g. Grok, or a
+     * sleeping pre-upgrade ACP chat whose saved config lacks a mode option). */
+    prepareConfig(ctx: PrepareConfigContext): chat.ConfigOption[] | undefined {
+      if (ctx.config?.some((opt) => opt.category === chat.Category.Mode)) return undefined;
+      const hasConfig = (ctx.config?.length ?? 0) > 0;
+      if (!hasConfig && !acpExtension(ctx.kind)?.needsClientMode) return undefined;
+      const cfg: chat.ConfigOption[] = (ctx.config ?? []).map((opt) => ({
+        ...opt,
+        options: (opt.options ?? []).map((v) => ({ ...v })),
+      }));
+      const id = cfg.some((opt) => opt.id === LEGACY_MODE_ID) ? LEGACY_MODE_ID_ALT : LEGACY_MODE_ID;
+      const fallback = ctx.fromJournal ? chat.Mode.Default : (ctx.settings.defaultModes?.[ctx.kind] ?? ctx.settings.defaultMode);
+      let cur = ctx.options.mode || fallback;
+      if (cur !== chat.Mode.AcceptEdits && cur !== chat.Mode.Full) cur = chat.Mode.Default;
+      if (!ctx.fromJournal && !ctx.settings.allowFull && cur === chat.Mode.Full) cur = chat.Mode.Default;
+      cfg.push(clientModeOption(id, cur));
+      markFull(cfg);
+      return cfg;
+    },
+
     async start(p: StartParams, sink: Sink, signal: AbortSignal): Promise<Session> {
       checkRun(p.argv, p.cwd);
       const s = new AcpSession(p.kind, logger(p.logger), sink, t, itemPrefix());
@@ -184,6 +210,7 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
         }
         throw new ChatProtoError(e);
       }
+      live.add(s);
       return s;
     },
 
@@ -249,7 +276,9 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
         }
         const r: Obj = isObj(res) ? res : {};
         if (typeof r.sessionId === 'string') sid = r.sessionId;
-        return modelOptions(r.configOptions, r.models, init.capabilities.image);
+        const list = modelOptions(r.configOptions, r.models, init.capabilities.image);
+        live.notifyModels(list, (s) => s.agentKind === p.kind);
+        return list;
       } finally {
         if (sid && init.capabilities.close && !pr.conn.ended) {
           try {
@@ -304,26 +333,17 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
      * is emitted; nothing when the replay has no such item. */
     async history(p: HistoryParams, emit: (ev: Event) => void, signal: AbortSignal): Promise<void> {
       const h = new History(p.after, emit);
-      const agySubCalls: Array<{ toolCallId: string; raw: Obj }> = [];
-      const agySubSeen = new Set<string>();
+      const hook = acpExtension(p.kind)?.createHistoryHook?.(p);
       const { pr, init } = await startProbe(
         p,
         probeHandler((method, params) => {
           if (method !== 'session/update' || !isObj(params) || params.sessionId !== p.sessionId) return;
           const u = params.update;
           if (!isObj(u) || typeof u.sessionUpdate !== 'string' || !contentUpdate(u.sessionUpdate)) return;
-          if (p.kind === 'agy' && (u.sessionUpdate === UPDATE_TOOL_CALL || u.sessionUpdate === UPDATE_TOOL) && isAgySubagentCall(u)) {
-            const id = str(u.toolCallId);
-            if (id) {
-              if (!agySubSeen.has(id)) {
-                agySubSeen.add(id);
-                agySubCalls.push({ toolCallId: id, raw: { ...u } });
-              }
-              const { typeName, role } = agySubagentInput(u);
-              const status = str(u.status) || 'completed';
-              h.update(UPDATE_TOOL_CALL, normalizeAgySubagentCall(u, { status, role, typeName }));
-              return;
-            }
+          const intercepted = hook?.onUpdate(u.sessionUpdate, u);
+          if (intercepted) {
+            h.update(str(intercepted.sessionUpdate) ?? u.sessionUpdate, intercepted);
+            return;
           }
           h.update(u.sessionUpdate, u);
         }),
@@ -346,9 +366,7 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
           logger(p.logger)(
             `acp ${p.kind}: the import's last item ${JSON.stringify(p.after)} is not in the replay of ${p.sessionId}: nothing imported`,
           );
-        else if (p.kind === 'agy' && p.after === '' && agySubCalls.length > 0) {
-          loadAgySubagentHistory(p.sessionId, agySubCalls, agyDataDirs(p.argv, p.env, p.cwd), emit);
-        }
+        else hook?.afterReplay(emit);
       } finally {
         h.close();
         await pr.end();

@@ -23,7 +23,8 @@ import type {
   Sink,
   StartParams,
 } from '../adapter.ts';
-import { agentEnv, lookPath } from './env.ts';
+import { agentEnv } from './env.ts';
+import { markUsageStale, resolveAdapterCommand } from '../runtime.ts';
 import {
   estimatePromptTokens,
   formatHandoffPrefixBlock,
@@ -286,10 +287,12 @@ export class Chat {
   gen = 0;
   starting = false;
   start: Start | null = null;
-  /** A prompt waits for the start. */
+  /** A prompt, rewind, or fork holds the chat across async transitions. */
   held = false;
   /** A turn runs. */
   turn = false;
+  /** Synchronous guard while startTurn awaits preparePromptHandoff before emitting User. */
+  private turnStarting = false;
   pending = new Map<string, Pending>();
   /** The messages the adapter queued and did not tell taken or cancelled. */
   queued = new Set<string>();
@@ -340,9 +343,10 @@ export class Chat {
   private trimming = false;
   private restoreClientIDs: boolean;
   private loadClientIDs?: Promise<void>;
-  /** Extra environment variables for this chat's agent process (e.g. from
-   * workspace-linked vault presets): kept in memory only, never written to
-   * the journal or logged. */
+  /** Extra environment variables for this chat's initial agent process launch
+   * (e.g. from workspace-linked vault presets): kept in memory only, never
+   * written to the journal, never inherited on fork/switch, and wiped once
+   * consumed or when the agent stops. */
   private extraEnv?: Record<string, string>;
   /** Pending handoff seed (Op.Switch or fallback Op.Fork) to inject natively
    * (e.g. Codex thread/inject_items) or prepend as attributed context on the
@@ -351,6 +355,9 @@ export class Chat {
   private seedLoaded: boolean;
   /** Remembered when the running agent rejected native injectHistory with Unsupported. */
   private nativeInjectUnsupported = false;
+  /** Seed consumed by the currently running turn so async Turn(Error) with zero
+   * agent output restores it (ACP / Claude resolve prompt() before API errors). */
+  private turnSeed: HandoffSeed | undefined;
   /** Number of EventType.Update events received during the current turn
    * (used to restore pending seed if a turn fails before any output). */
   private turnUpdates = 0;
@@ -364,11 +371,6 @@ export class Chat {
     this.seedLoaded = !restoreClientIDs;
     this.extraEnv = extraEnv ? { ...extraEnv } : undefined;
     this.made = { seq: r.chat.seq, historyAfter: r.historyAfter, turnEnd: r.turnEnd };
-  }
-
-  /** Returns a shallow copy of memory-only vault env overrides for fork/switch. */
-  envOverrides(): Record<string, string> | undefined {
-    return this.extraEnv ? { ...this.extraEnv } : undefined;
   }
 
   /** Sets pending handoff seed in memory (caller persists to journal). */
@@ -821,10 +823,10 @@ export class Chat {
     this.setState(state || chat.State.Sleeping);
   }
 
-  /** Whether a turn runs, is to start with what was queued, or waits on a
-   * blocking permission/question for the user. */
+  /** Whether a turn runs, is starting, is to start with what was queued, or
+   * waits on a blocking permission/question for the user. */
   busy(): boolean {
-    return this.turn || this.next || this.hasBlockingPending();
+    return this.turn || this.turnStarting || this.next || this.hasBlockingPending();
   }
 
   /** Has the chat work between the end of a turn and the start of the next
@@ -951,6 +953,9 @@ export class Chat {
       this.start = null;
     }
     this.starting = false;
+    this.turnStarting = false;
+    this.turnSeed = undefined;
+    this.extraEnv = undefined;
     this.endNext();
     this.queued.clear();
     this.cancelPending(chat.By.Ended, errEnded(), true);
@@ -989,10 +994,11 @@ export class Chat {
         if (sess) await this.h.endLate(sess);
         return;
       }
-      st.abort.abort();
-      this.starting = false;
-      this.start = null;
       if (!sess) {
+        st.abort.abort();
+        this.starting = false;
+        this.start = null;
+        this.extraEnv = undefined;
         e ??= perr(chat.Code.StartFailed, 'the adapter made no session');
         st.err = e;
         this.logf(`did not start: ${chat.errorText(e)}`);
@@ -1005,7 +1011,6 @@ export class Chat {
         this.h.pokeQuiet();
         return;
       }
-      this.sess = sess;
       const id = sess.id;
       if (id !== '' && SESSION_ID.test(id)) this.r.chat.sessionId = id;
       if (this.untrustedGen !== st.gen)
@@ -1016,10 +1021,22 @@ export class Chat {
       delete this.r.chat.closed;
       delete this.r.chat.error;
       this.rest = chat.State.Sleeping;
+      // Complete native handoff injection BEFORE exposing this.sess and clearing
+      // starting so an early prompt waits for st.done instead of duplicating inject_items.
       if (resume === '' && typeof sess.injectHistory === 'function') {
         await this.tryNativeInject(sess, st.gen);
-        if (this.gen !== st.gen || this.deleted) return;
+        if (this.gen !== st.gen || this.deleted) {
+          st.err = perr(chat.Code.Ended, "the chat's start was cancelled");
+          await this.h.endLate(sess);
+          return;
+        }
       }
+      st.abort.abort();
+      this.starting = false;
+      this.start = null;
+      this.sess = sess;
+      // Secrets were consumed for launch; never retain across future sleep/wake.
+      this.extraEnv = undefined;
       this.emitInfo();
       this.settle();
       const gen = this.gen;
@@ -1042,8 +1059,8 @@ export class Chat {
     const signal = AbortSignal.any([st.abort.signal, AbortSignal.timeout(h.o.startTimeout)]);
     const extra = this.extraEnv ? { ...this.extraEnv, ...found.spec.env } : found.spec.env;
     const env = agentEnv(await h.env(signal), extra, cwd);
-    const path = await lookPath(found.spec.argv[0]!, env);
-    if (!path) return { err: perr(chat.Code.NotFound, `${found.spec.argv[0]} is not in the user's PATH`) };
+    const resolved = await resolveAdapterCommand(found.adapter, found.spec, env, signal);
+    if (!resolved.ok) return { err: perr(chat.Code.NotFound, `${resolved.missing} is not in the user's PATH`) };
     if (!h.makeRoom(this)) return { err: perr(chat.Code.TooMany, 'as many agents as the settings allow work, wait or start') };
     const settings = h.settings();
     if (!opts.mode) opts.mode = settings.defaultModes?.[kind] ?? settings.defaultMode;
@@ -1053,7 +1070,7 @@ export class Chat {
     }
     const p: StartParams = {
       kind,
-      argv: [path, ...found.spec.argv.slice(1)],
+      argv: resolved.argv,
       env,
       cwd,
       resume,
@@ -1145,10 +1162,9 @@ export class Chat {
     if ('code' in found) return;
     const sig = AbortSignal.any([signal, AbortSignal.timeout(h.o.startTimeout)]);
     const env = agentEnv(await h.env(sig), found.spec.env, cwd);
-    // None for an agent not in the PATH: an adapter that reads files needs
-    // none.
-    const path = await lookPath(found.spec.argv[0]!, env);
-    const argv = path ? [path, ...found.spec.argv.slice(1)] : [];
+    // Empty argv for an embedded runtime or an agent not in PATH (file-based history needs none).
+    const resolved = await resolveAdapterCommand(found.adapter, found.spec, env, sig);
+    const argv = resolved.ok ? resolved.argv : [];
     let n = 0;
     let err: chat.ChatError | undefined;
     try {
@@ -1304,25 +1320,28 @@ export class Chat {
   /** Ensures the chat has a live agent session (starting/resuming if sleeping
    * or closed, checking inTerminal first). When shareStart is true (used by
    * setConfig), callers share an in-progress start without blocking a user
-   * prompt arriving while the agent wakes up. */
-  private async ensureRunning(shareStart = false): Promise<chat.ChatError | undefined> {
+   * prompt arriving while the agent wakes up. When alreadyHeld is true (used by
+   * rewind while holding `this.held`), skips the self-contention guard and
+   * preserves the caller's hold. */
+  private async ensureRunning(shareStart = false, alreadyHeld = false): Promise<chat.ChatError | undefined> {
     let checked = false;
     for (;;) {
       if (this.deleted) return perr(chat.Code.UnknownChat, 'no such chat');
       if (this.sess) return undefined;
       if (this.starting && this.start) {
-        if (this.held && !shareStart) return perr(chat.Code.Busy, 'the chat is starting');
+        if (this.held && !shareStart && !alreadyHeld) return perr(chat.Code.Busy, 'the chat is starting');
         const st = this.start;
-        if (!shareStart) this.held = true;
+        const takeHold = !shareStart && !alreadyHeld;
+        if (takeHold) this.held = true;
         try {
           await st.done;
         } finally {
-          if (!shareStart) this.held = false;
+          if (takeHold) this.held = false;
         }
         if (!this.sess && !this.starting) return st.err ?? errEnded();
         continue;
       }
-      if (this.held) return perr(chat.Code.Busy, 'the chat is starting');
+      if (this.held && !alreadyHeld) return perr(chat.Code.Busy, 'the chat is starting');
       if (this.h.stopping) return perr(chat.Code.Ended, 'the host stops');
       const handedOff = !!this.r.chat.handedOff;
       const session = this.r.fresh ? '' : this.r.chat.sessionId;
@@ -1333,12 +1352,13 @@ export class Chat {
         continue;
       }
       const st = this.beginStart();
-      if (!shareStart) this.held = true;
+      const takeHold = !shareStart && !alreadyHeld;
+      if (takeHold) this.held = true;
       try {
         if (handedOff && session !== '') await this.withHistory(() => this.history(st.abort.signal, session, Way.CatchUpStart));
         await this.launch(st, session);
       } finally {
-        if (!shareStart) this.held = false;
+        if (takeHold) this.held = false;
       }
       if (!this.sess && !this.starting) return st.err ?? errEnded();
     }
@@ -1445,14 +1465,24 @@ export class Chat {
     const uuid = randomUUID();
     const sess = this.sess!;
     const gen = this.gen;
-    const { seed, handoffContext } = await this.preparePromptHandoff(sess, gen, content, true);
-    if (this.gen !== gen || this.deleted) {
-      if (seed) await this.restoreSeed(seed);
-      return perr(chat.Code.Ended, "the chat's agent ended");
+    // Mark busy synchronously BEFORE awaiting preparePromptHandoff so concurrent
+    // prompts, forks, switches, rewinds or compacts cannot race into this idle chat.
+    this.turnStarting = true;
+    let seed: HandoffSeed | undefined;
+    let handoffContext: string | undefined;
+    try {
+      ({ seed, handoffContext } = await this.preparePromptHandoff(sess, gen, content, true));
+      if (this.gen !== gen || this.deleted) {
+        if (seed) await this.restoreSeed(seed);
+        return perr(chat.Code.Ended, "the chat's agent ended");
+      }
+      this.emit({ t: chat.EventType.User, item: uuid, entryUuid: uuid, content, ...(clientId ? { clientId } : {}) });
+      this.turn = true;
+      this.turnUpdates = 0;
+      this.turnSeed = seed;
+    } finally {
+      this.turnStarting = false;
     }
-    this.emit({ t: chat.EventType.User, item: uuid, entryUuid: uuid, content, ...(clientId ? { clientId } : {}) });
-    this.turn = true;
-    this.turnUpdates = 0;
     this.settle();
     if (titled) this.emitInfo();
     const e = await this.call((signal) =>
@@ -1468,11 +1498,14 @@ export class Chat {
         signal,
       ),
     );
-    if (e && seed && this.gen === gen && this.turnUpdates === 0) {
-      await this.restoreSeed(seed);
+    if (e && this.turnSeed && this.gen === gen && this.turnUpdates === 0) {
+      const toRestore = this.turnSeed;
+      this.turnSeed = undefined;
+      await this.restoreSeed(toRestore);
     }
     if (e && this.gen === gen && this.turn) {
       this.turn = false;
+      this.turnSeed = undefined;
       this.cancelPending(chat.By.Ended, undefined, false);
       this.emit({ t: chat.EventType.Turn, state: chat.TurnState.Error, error: e });
       this.settle();
@@ -1652,7 +1685,7 @@ export class Chat {
       if (grantsFull || grantsEdits) {
         let settled = false;
         for (const p of [...this.pending.values()].sort((a, b) => a.n - b.n)) {
-          if (p.question || !p.allowOnce) continue;
+          if (p.question || !p.allowOnce || p.kind === chat.PermissionKind.Plan) continue;
           if (grantsFull || (grantsEdits && p.kind === chat.PermissionKind.File)) {
             this.resolve(p, { perm: { option: p.allowOnce }, q: { cancelled: true } }, chat.By.User);
             settled = true;
@@ -1717,13 +1750,7 @@ export class Chat {
     const err = await this.call((signal) => sess.compact(signal, instructions || undefined));
     if (!err && this.r.chat.usage) {
       if (!this.r.chat.usage.stale) {
-        const prev = this.r.chat.usage;
-        this.r.chat.usage = {
-          ...prev,
-          used: 0,
-          percentage: 0,
-          stale: true,
-        };
+        this.r.chat.usage = markUsageStale(this.r.chat.usage);
       }
       this.emitInfo();
     }
@@ -1766,124 +1793,157 @@ export class Chat {
     }
     const clientId = cmd.clientId ?? '';
     if (typeof clientId !== 'string' || clientId.length > 256) return { err: perr(chat.Code.BadRequest, 'clientId too long') };
-    await this.flush();
-    if (targetSeq > this.r.chat.seq) return { err: perr(chat.Code.NotFound, 'no event at seq') };
-    const stored = await this.h.journal.allEvents(this.id);
-    const parsed: chat.Event[] = [];
-    for (const row of stored) {
-      try {
-        parsed.push(JSON.parse(row.line) as chat.Event);
-      } catch {
-        // skip unparseable line
+
+    // Hold this chat across all async rewind steps so no concurrent prompt,
+    // second rewind, fork, switch, or handoff can interleave and corrupt the journal.
+    this.held = true;
+    let resetSeq = 0;
+    try {
+      await this.flush();
+      if (this.deleted) return { err: perr(chat.Code.UnknownChat, 'no such chat') };
+      if (targetSeq > this.r.chat.seq) return { err: perr(chat.Code.NotFound, 'no event at seq') };
+      const stored = await this.h.journal.allEvents(this.id);
+      const parsed: chat.Event[] = [];
+      for (const row of stored) {
+        try {
+          parsed.push(JSON.parse(row.line) as chat.Event);
+        } catch {
+          // skip unparseable line
+        }
       }
-    }
-    const idx = parsed.findIndex((ev) => ev.seq === targetSeq && isUserTurn(ev));
-    if (idx < 0) return { err: perr(chat.Code.NotFound, 'no user message at seq') };
-    if (images && this.sess && !this.r.chat.capabilities.images) return { err: perr(chat.Code.Unsupported, 'the agent takes no images') };
+      const idx = parsed.findIndex((ev) => ev.seq === targetSeq && isUserTurn(ev));
+      if (idx < 0) return { err: perr(chat.Code.NotFound, 'no user message at seq') };
 
-    // If an adapter emitted Turn(start) (plus host State/Info) right before Queued(taken),
-    // rewind before that Turn(start) too so no orphan Turn(start) remains.
-    const turnStartIdx = turnBoundaryIdx(parsed, idx);
-    const beforeSeq = (parsed[turnStartIdx]!.seq ?? targetSeq) - 1;
-    const targetEv = parsed[idx]!;
-    const userMessageId = transcriptUuid(targetEv);
-    const hasEarlierTurn = parsed.slice(0, turnStartIdx).some(isUserTurn);
-
-    // Resolve Claude resumeBeforeId strictly from real transcript entry UUIDs (never msg_01.../toolu_01...).
-    let resumeBeforeId: string | undefined;
-    for (let i = turnStartIdx - 1; i >= 0; i--) {
-      const ev = parsed[i]!;
-      if (ev.parent) continue;
-      const uid = transcriptUuid(ev);
-      if (uid) {
-        resumeBeforeId = uid;
-        break;
+      // Refuse rewinding to a mid-turn steered Queued(taken) message inside an
+      // already-open turn: backends like Codex revert at whole-turn granularity.
+      if (parsed[idx]!.t === chat.EventType.Queued) {
+        for (let i = idx - 1; i >= 0; i--) {
+          const prev = parsed[i]!;
+          if (
+            prev.t === chat.EventType.Turn &&
+            (prev.state === chat.TurnState.End || prev.state === chat.TurnState.Error) &&
+            !prev.parent
+          ) {
+            break;
+          }
+          if (isUserTurn(prev)) {
+            return { err: perr(chat.Code.BadRequest, 'cannot rewind to a mid-turn steered message') };
+          }
+        }
       }
-    }
 
-    // Resolve Codex beforeTurnId from the target turn's EventType.Turn item.
-    let beforeTurnId: string | undefined;
-    for (let i = turnStartIdx; i < parsed.length; i++) {
-      const ev = parsed[i]!;
-      if (i > idx && isUserTurn(ev)) break;
-      if (ev.t === chat.EventType.Turn && !ev.parent && ev.item) {
-        beforeTurnId = ev.item;
-        break;
+      // If an adapter emitted Turn(start) (plus host State/Info) right before Queued(taken),
+      // rewind before that Turn(start) too so no orphan Turn(start) remains.
+      const turnStartIdx = turnBoundaryIdx(parsed, idx);
+      const beforeSeq = (parsed[turnStartIdx]!.seq ?? targetSeq) - 1;
+      const targetEv = parsed[idx]!;
+      const userMessageId = transcriptUuid(targetEv);
+      const hasEarlierTurn = parsed.slice(0, turnStartIdx).some(isUserTurn);
+
+      // Resolve Claude resumeBeforeId strictly from real transcript entry UUIDs (never msg_01.../toolu_01...).
+      let resumeBeforeId: string | undefined;
+      for (let i = turnStartIdx - 1; i >= 0; i--) {
+        const ev = parsed[i]!;
+        if (ev.parent) continue;
+        const uid = transcriptUuid(ev);
+        if (uid) {
+          resumeBeforeId = uid;
+          break;
+        }
       }
-    }
 
-    const restoreFiles = !!cmd.restoreFiles;
-    if (!this.r.chat.capabilities.rewind) {
-      return { err: perr(chat.Code.Unsupported, 'the agent does not support native rewind') };
-    }
-    if (!hasEarlierTurn && !restoreFiles) {
-      const old = this.stopAgent(chat.State.Sleeping);
-      await this.h.endSession(old, true);
-      this.r.chat.sessionId = '';
-      this.r.fresh = true;
-      this.setSeed(undefined);
-      await this.h.journal.deleteSetting(`seed:${this.id}`).catch(() => {});
-    } else {
-      if (!this.sess && this.r.chat.sessionId !== '' && !this.r.fresh) {
-        const wakeErr = await this.ensureRunning();
+      // Resolve Codex beforeTurnId from the target turn's EventType.Turn item.
+      let beforeTurnId: string | undefined;
+      for (let i = turnStartIdx; i < parsed.length; i++) {
+        const ev = parsed[i]!;
+        if (i > idx && isUserTurn(ev)) break;
+        if (ev.t === chat.EventType.Turn && !ev.parent && ev.item) {
+          beforeTurnId = ev.item;
+          break;
+        }
+      }
+
+      const restoreFiles = !!cmd.restoreFiles;
+      // Wake sleeping chat before checking capabilities so pre-upgrade chats
+      // and image capability checks reflect the live adapter's true capabilities.
+      if (
+        !this.sess &&
+        this.r.chat.sessionId !== '' &&
+        !this.r.fresh &&
+        (hasEarlierTurn || restoreFiles || images || !this.r.chat.capabilities.rewind)
+      ) {
+        const wakeErr = await this.ensureRunning(true, true);
         if (wakeErr) return { err: wakeErr };
       }
-      if (!this.sess?.rewind) {
+      if (images && this.sess && !this.r.chat.capabilities.images) {
+        return { err: perr(chat.Code.Unsupported, 'the agent takes no images') };
+      }
+      if (!this.r.chat.capabilities.rewind) {
         return { err: perr(chat.Code.Unsupported, 'the agent does not support native rewind') };
       }
-      if (restoreFiles && !this.r.chat.capabilities.rewindFiles) {
-        return { err: perr(chat.Code.Unsupported, 'the agent does not support restoring files') };
-      }
-      const params: RewindParams = {
-        ...(userMessageId ? { userMessageId } : {}),
-        ...(resumeBeforeId ? { resumeBeforeId } : {}),
-        ...(beforeTurnId ? { beforeTurnId } : {}),
-        ...(restoreFiles ? { restoreFiles: true } : {}),
-      };
-      const r = await this.callValue((signal) => this.sess!.rewind!(params, signal));
-      if ('err' in r) return { err: r.err };
-      if (r.value?.sessionId && SESSION_ID.test(r.value.sessionId)) this.r.chat.sessionId = r.value.sessionId;
-    }
-
-    // Cancel any deferred info timer and ALL pending questions (including async)
-    // and flush in-flight journal appends before truncating so nothing races truncateAfter.
-    if (this.infoTimer) {
-      clearTimeout(this.infoTimer);
-      this.infoTimer = null;
-    }
-    this.infoDirty = false;
-    this.cancelPending(chat.By.Cancel, undefined, true);
-    this.settle();
-    await this.flush();
-
-    const trunc = await this.h.journal.truncateAfter(this.id, beforeSeq);
-    this.r.chat.seq = trunc.seq;
-    this.r.bytes = trunc.bytes;
-    this.r.turnEnd = trunc.turnEnd;
-    this.r.historyAfter = trunc.historyAfter;
-    this.r.chat.seen = Math.min(this.r.chat.seen, trunc.seq);
-    this.r.chat.updated = timeOf(trunc.updated);
-    if (this.r.chat.usage) {
-      if (!hasEarlierTurn && !this.r.chat.usage.cost && !this.r.chat.usage.limits?.length) {
-        delete this.r.chat.usage;
+      if (!hasEarlierTurn && !restoreFiles) {
+        const old = this.stopAgent(chat.State.Sleeping);
+        await this.h.endSession(old, true);
+        this.r.chat.sessionId = '';
+        this.r.fresh = true;
+        this.setSeed(undefined);
+        await this.h.journal.deleteSetting(`seed:${this.id}`).catch(() => {});
       } else {
-        this.r.chat.usage = {
-          ...this.r.chat.usage,
-          used: 0,
-          percentage: 0,
-          stale: true,
+        if (!this.sess?.rewind) {
+          return { err: perr(chat.Code.Unsupported, 'the agent does not support native rewind') };
+        }
+        if (restoreFiles && !this.r.chat.capabilities.rewindFiles) {
+          return { err: perr(chat.Code.Unsupported, 'the agent does not support restoring files') };
+        }
+        const params: RewindParams = {
+          ...(userMessageId ? { userMessageId } : {}),
+          ...(resumeBeforeId ? { resumeBeforeId } : {}),
+          ...(beforeTurnId ? { beforeTurnId } : {}),
+          ...(restoreFiles ? { restoreFiles: true } : {}),
         };
+        const r = await this.callValue((signal) => this.sess!.rewind!(params, signal));
+        if ('err' in r) return { err: r.err };
+        if (r.value?.sessionId && SESSION_ID.test(r.value.sessionId)) this.r.chat.sessionId = r.value.sessionId;
+        if (r.value?.fresh || !hasEarlierTurn) this.r.fresh = true;
       }
-    }
-    this.first = trunc.first === 0 ? trunc.seq + 1 : trunc.first;
-    this.made = { seq: trunc.seq, historyAfter: trunc.historyAfter, turnEnd: trunc.turnEnd };
-    this.clients.clear();
-    this.clientOrder.length = 0;
-    this.restoreClientIDs = true;
-    this.save();
-    this.notify();
 
-    const resetSeq = trunc.seq;
+      // Cancel any deferred info timer and ALL pending questions (including async)
+      // and flush in-flight journal appends before truncating so nothing races truncateAfter.
+      if (this.infoTimer) {
+        clearTimeout(this.infoTimer);
+        this.infoTimer = null;
+      }
+      this.infoDirty = false;
+      this.cancelPending(chat.By.Cancel, undefined, true);
+      this.settle();
+      await this.flush();
+
+      const trunc = await this.h.journal.truncateAfter(this.id, beforeSeq, { fresh: this.r.fresh });
+      this.r.chat.seq = trunc.seq;
+      this.r.bytes = trunc.bytes;
+      this.r.turnEnd = trunc.turnEnd;
+      this.r.historyAfter = trunc.historyAfter;
+      this.r.chat.seen = Math.min(this.r.chat.seen, trunc.seq);
+      this.r.chat.updated = timeOf(trunc.updated);
+      if (this.r.chat.usage) {
+        if (!hasEarlierTurn && !this.r.chat.usage.cost && !this.r.chat.usage.limits?.length) {
+          delete this.r.chat.usage;
+        } else {
+          this.r.chat.usage = markUsageStale(this.r.chat.usage);
+        }
+      }
+      this.first = trunc.first === 0 ? trunc.seq + 1 : trunc.first;
+      this.made = { seq: trunc.seq, historyAfter: trunc.historyAfter, turnEnd: trunc.turnEnd };
+      this.clients.clear();
+      this.clientOrder.length = 0;
+      this.restoreClientIDs = true;
+      this.save();
+      this.notify();
+      resetSeq = trunc.seq;
+    } finally {
+      this.held = false;
+    }
+
     return {
       afterAck: async () => {
         // Notify live subscribers to discard events after resetSeq (sent strictly after ack).
@@ -1898,12 +1958,18 @@ export class Chat {
           // ignore serialization failure
         }
         if (hasContent && !this.deleted && !this.stopped) {
-          await this.prompt({
+          const pe = await this.prompt({
             op: chat.CommandOp.Prompt,
             id: cmd.id,
             content: cmd.content,
             ...(clientId ? { clientId } : {}),
           });
+          if (pe && !this.deleted && !this.stopped) {
+            this.logf(`rewind follow-up prompt failed: ${chat.errorText(pe)}`);
+            this.emit({ t: chat.EventType.Notice, method: noticeMethod(Notice.Error), params: { message: pe.message, code: pe.code } });
+            this.save();
+            this.notify();
+          }
         }
       },
     };
@@ -1958,6 +2024,7 @@ export class Chat {
         if (ev.t === chat.EventType.Update) {
           this.r.fresh = false;
           this.turnUpdates++;
+          this.turnSeed = undefined;
         }
         if (ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.UntrustedFolder)) {
           // Told once, until an agent of the chat starts in a trusted
@@ -1990,7 +2057,16 @@ export class Chat {
           // Blocking requests asked in the turn are cancelled; async questions survive.
           this.cancelPending(chat.By.Ended, undefined, false);
           this.turn = false;
-          if (ev.state === chat.TurnState.End) this.r.fresh = false;
+          if (ev.state === chat.TurnState.End) {
+            this.r.fresh = false;
+            this.turnSeed = undefined;
+          } else if (this.turnSeed && this.turnUpdates === 0) {
+            const toRestore = this.turnSeed;
+            this.turnSeed = undefined;
+            this.h.track(this.restoreSeed(toRestore));
+          } else {
+            this.turnSeed = undefined;
+          }
           this.emit(ev);
           this.awaitNext();
         } else return this.dropEvent(`${ev.t}:${ev.state}`);

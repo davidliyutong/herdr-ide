@@ -1156,4 +1156,91 @@ describe('the ACP adapter', () => {
     expect(mode?.options?.find((v) => v.value === 'accept-edits')?.full).toBeUndefined();
     await h.close(s);
   });
+
+  test('prompt handoffContext goes on wire only (clean User/Queued), queued /compact invalidates usage, and models() updates live sessions', async () => {
+    const h = new Harness();
+    const sid = '00000000-0000-4000-8000-0000000000a1';
+    const steps = h
+      .rec('agy', '01-initialize')
+      .concat(h.rec('agy', '02-session-new'))
+      .concat([
+        // Turn 1: wire prompt carries handoffContext before user text.
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"<handoff_context>\\nprior context\\n</handoff_context>"},{"type":"text","text":"continue work"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"usage_update","used":9000,"size":1048576}}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}`),
+        // Turn 2: queued /compact triggered after Turn 1 finishes while queued.
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"/compact"}]}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}`),
+        // setConfig for a model discovered by adapter.models() refresh!
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":5,"method":"session/set_config_option","params":{"configId":"model","sessionId":"${sid}","value":"gemini-5-preview"}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","id":5,"result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gemini-5-preview","options":[{"value":"gemini-5-preview","name":"Gemini 5 Preview"}]}]}}`,
+        ),
+        msgLine('out', `{"jsonrpc":"2.0","id":6,"method":"session/close","params":{"sessionId":"${sid}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":6,"result":{}}`),
+      ]);
+    const p = h.params(steps);
+    p.kind = 'agy';
+    const s = await h.start(p);
+
+    // Send prompt with handoffContext (recorded: false so adapter emits EventType.User) AND queue /compact behind it.
+    await s.prompt({
+      content: [{ type: 'text', text: 'continue work' }],
+      handoffContext: '<handoff_context>\nprior context\n</handoff_context>',
+      message: 'm1',
+      clientId: 'c1',
+      recorded: false,
+    });
+    await s.prompt({
+      content: [{ type: 'text', text: '/compact' }],
+      message: 'm2',
+      clientId: 'c2',
+      recorded: false,
+    });
+    expect((await h.host.await('turn 1 end', turnOver)).stopReason).toBe('end_turn');
+    expect((await h.host.await('queued /compact end', turnOver)).stopReason).toBe('end_turn');
+
+    // Stored User event MUST NOT contain handoffContext.
+    const userEv = h.host.events.find((e) => e.t === chat.EventType.User);
+    expect(userEv?.content).toEqual([{ type: 'text', text: 'continue work' }]);
+    // Queued /compact emitted Notice.Compacting and marked usage stale.
+    expect(h.host.events.some((e) => e.t === chat.EventType.Notice && e.method === noticeMethod(Notice.Compacting))).toBe(true);
+    expect(h.host.chat.usage).toMatchObject({ used: 0, size: 1048576, stale: true });
+
+    // Before models() refresh, setting an unknown model fails with BadRequest.
+    expect((await rejects(s.setConfig('model', 'gemini-5-preview', never()))).code).toBe(chat.Code.BadRequest);
+
+    // Probe models() returning gemini-5-preview: propagates to live Agy session automatically!
+    const probeSteps = h
+      .rec('agy', '01-initialize')
+      .concat([
+        msgLine('out', `{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"${h.dir}","mcpServers":[]}}`),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","id":2,"result":{"sessionId":"${sid}","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gemini-5-preview","options":[{"value":"gemini-5-preview","name":"Gemini 5 Preview"}]}]}}`,
+        ),
+        msgLine('out', `{"jsonrpc":"2.0","id":3,"method":"session/close","params":{"sessionId":"${sid}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{}}`),
+      ]);
+    const refreshed = await h.a.models!({ ...h.params(probeSteps), kind: 'agy' }, never());
+    expect(refreshed.map((m) => m.value)).toEqual(['gemini-5-preview']);
+
+    // Live session now accepts gemini-5-preview via setConfig!
+    await s.setConfig('model', 'gemini-5-preview', never());
+    expect(optionOf(h.host.chat.config ?? [], chat.Category.Model)?.currentValue).toBe('gemini-5-preview');
+    await h.close(s);
+  });
 });

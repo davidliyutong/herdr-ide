@@ -29,9 +29,11 @@ interface Entry<T> {
 }
 
 interface InFlight<T> {
+  key: string;
   promise: Promise<T>;
   waiters: number;
   ac: AbortController;
+  stale: boolean;
 }
 
 /** Waits for p unless signal aborts first, letting callers cancel their wait
@@ -64,6 +66,9 @@ function waitWithSignal<T>(p: Promise<T>, signal: AbortSignal, onCancel: () => v
 export class ProbeCache<T> {
   private readonly entries = new Map<string, Entry<T>>();
   private readonly inflight = new Map<string, InFlight<T>>();
+  /** Tracks every active flight (including refresh: true) so invalidation aborts
+   * all in-flight probes and prevents stale completions from repopulating entries. */
+  private readonly active = new Set<InFlight<T>>();
   private readonly ttlMs: number;
   private readonly maxEntries: number;
   private readonly now: () => number;
@@ -99,22 +104,33 @@ export class ProbeCache<T> {
         pending.waiters++;
         return waitWithSignal(pending.promise, o.signal, () => this.dropWaiter(key, pending));
       }
+    } else {
+      // Any earlier flight for this key must not overwrite the newer refresh.
+      for (const f of this.active) {
+        if (f.key === key) f.stale = true;
+      }
+      this.inflight.delete(key);
     }
 
     const ac = new AbortController();
     const sharedSignal = AbortSignal.any([ac.signal, AbortSignal.timeout(o.timeoutMs)]);
     const flight: InFlight<T> = {
+      key,
       promise: undefined as unknown as Promise<T>,
       waiters: 1,
       ac,
+      stale: false,
     };
+    this.active.add(flight);
     flight.promise = fetch(sharedSignal).then(
       (value) => {
-        this.put(key, value);
+        this.active.delete(flight);
+        if (!flight.stale) this.put(key, value);
         if (this.inflight.get(key) === flight) this.inflight.delete(key);
         return value;
       },
       (err) => {
+        this.active.delete(flight);
         if (this.inflight.get(key) === flight) this.inflight.delete(key);
         throw err;
       },
@@ -128,6 +144,8 @@ export class ProbeCache<T> {
   private dropWaiter(key: string, flight: InFlight<T>): void {
     flight.waiters--;
     if (flight.waiters <= 0) {
+      flight.stale = true;
+      this.active.delete(flight);
       if (this.inflight.get(key) === flight) this.inflight.delete(key);
       flight.ac.abort();
     }
@@ -148,9 +166,11 @@ export class ProbeCache<T> {
     for (const k of [...this.entries.keys()]) {
       if (k.startsWith(prefix)) this.entries.delete(k);
     }
-    for (const [k, f] of [...this.inflight.entries()]) {
-      if (k.startsWith(prefix)) {
-        this.inflight.delete(k);
+    for (const f of [...this.active]) {
+      if (f.key.startsWith(prefix)) {
+        f.stale = true;
+        this.active.delete(f);
+        if (this.inflight.get(f.key) === f) this.inflight.delete(f.key);
         f.ac.abort();
       }
     }
@@ -158,7 +178,11 @@ export class ProbeCache<T> {
 
   clear(): void {
     this.entries.clear();
-    for (const f of this.inflight.values()) f.ac.abort();
+    for (const f of [...this.active]) {
+      f.stale = true;
+      f.ac.abort();
+    }
+    this.active.clear();
     this.inflight.clear();
   }
 }
@@ -188,7 +212,7 @@ export function overlaySessionChats(
     const matched = bySession.get(s.sessionId);
     if (matched) {
       out.chat = matched;
-    } else if (out.chat && !existingIds.has(out.chat) && states.length > 0) {
+    } else if (out.chat && !existingIds.has(out.chat)) {
       delete out.chat;
     }
     return out;

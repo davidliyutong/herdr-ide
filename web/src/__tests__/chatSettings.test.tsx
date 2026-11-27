@@ -295,4 +295,48 @@ describe('ChatSettingsPage (provider submenus & model list visibility)', () => {
     expect(q<HTMLButtonElement>('.chat-models-refresh')!.disabled).toBe(true);
     expect(q<HTMLInputElement>('.chat-model-row input[type="checkbox"]')!.disabled).toBe(true);
   });
+
+  it('resets refreshing state and aborts in-flight refresh on machine switch, and ignores passive bad_request from older hosts', async () => {
+    let refreshAborted = false;
+    answers['GET /api/m/m1/p/chat/models'] = () => new Response(JSON.stringify({ error: 'bad_request' }), { status: 400 });
+    answers['GET /api/m/m2/p/chat/models'] = () =>
+      new Response(JSON.stringify({ models: [{ value: 'claude-sonnet-4-6', name: 'Sonnet 4.6' }] }), { status: 200 });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET';
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        calls.push({ method, url: String(url), body });
+        if (method === 'POST' && String(url).includes('/api/m/m1/p/chat/models')) {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              refreshAborted = true;
+              reject(new DOMException('Aborted', 'AbortError'));
+            });
+          });
+        }
+        const fn = answers[routeOf(String(url), method)];
+        return fn ? fn(String(url), body) : new Response('{}', { status: 200 });
+      }),
+    );
+
+    useStore.getState().openSettings({ page: 'chat', row: 'chat.visibleModels.claude' });
+    await renderPage();
+    // Passive GET /models returning bad_request (v0.6.0 host) shows clean empty state with no error alert.
+    expect(q('[role="alert"]')).toBeNull();
+
+    // Start a hanging refresh on m1, then switch targetMachine to m2.
+    await act(async () => q<HTMLButtonElement>('.chat-models-refresh')!.click());
+    expect(q<HTMLButtonElement>('.chat-models-refresh')!.disabled).toBe(true);
+
+    const sel = q<HTMLSelectElement>('.chat-settings-machine')!;
+    await act(async () => {
+      sel.value = 'm2';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(settle);
+    expect(refreshAborted).toBe(true);
+    expect(q<HTMLButtonElement>('.chat-models-refresh')!.disabled).toBe(false);
+    expect(q('.chat-model-row[data-model="claude-sonnet-4-6"]')).not.toBeNull();
+  });
 });

@@ -1483,4 +1483,48 @@ describe('async questions, models, FIFO queue/steer/interrupt, fork/rewind, and 
       expect(userEv?.content).toEqual([{ type: 'text', text: 'new prompt' }]);
     }
   });
+
+  test('rewind marks internal usage stale so rate-limit updates do not resurrect pre-rewind token usage', async () => {
+    const sc = new Script();
+    sc.begin();
+    const t1 = sc.request('turn/start');
+    sc.reply(t1, inProgress('turn-1'));
+    sc.turnStarted('turn-1');
+    sc.line({
+      dir: 'in',
+      msg: {
+        method: 'thread/tokenUsage/updated',
+        params: {
+          threadId: Script.THREAD,
+          turnId: 'turn-1',
+          tokenUsage: {
+            total: { totalTokens: 50000, inputTokens: 40000, cachedInputTokens: 0, outputTokens: 10000, reasoningOutputTokens: 0 },
+            last: { totalTokens: 50000, inputTokens: 40000, cachedInputTokens: 0, outputTokens: 10000, reasoningOutputTokens: 0 },
+            modelContextWindow: 200000,
+          },
+        },
+      },
+    });
+    sc.turnCompleted('turn-1', 'completed');
+    const rev = sc.request('thread/revert');
+    sc.reply(rev, {});
+    sc.line({
+      dir: 'in',
+      msg: {
+        method: 'account/rateLimits/updated',
+        params: { rateLimits: { limitId: 'primary', primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 0 } } },
+      },
+    });
+    const f = new FakeRun('', HANDSHAKE, sc.file());
+    const { s, k } = await start(f);
+    await prompt(s, 'm1', 'first');
+    await k.wait('turn 1 ended', turnEnds(1));
+    expect(k.chat.usage).toMatchObject({ used: 50000, size: 200000 });
+
+    await s.rewind({ beforeTurnId: 'turn-1' }, AbortSignal.timeout(PATIENCE));
+    expect(k.chat.usage).toMatchObject({ used: 0, size: 200000, stale: true });
+    // After account/rateLimits/updated arrives, used MUST stay 0 and stale: true (never resurrect 50000!).
+    await k.wait('rate limits updated', (sink) => (sink.chat.usage?.limits?.length ?? 0) > 0);
+    expect(k.chat.usage).toMatchObject({ used: 0, size: 200000, stale: true });
+  });
 });

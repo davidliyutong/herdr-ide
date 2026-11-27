@@ -288,8 +288,18 @@ describe('the chat pane', () => {
     expect(q('.chat-action-rewind')).toBeNull();
     expect(q('.chat-action-fork')).toBeNull();
     expect(q('.chat-action-switch')).toBeNull();
-    expect(q('.chat-action-export')).toBeNull();
+    expect(q('.chat-action-export')).not.toBeNull();
     await vi.waitFor(() => expect(q<HTMLTextAreaElement>('textarea')?.disabled).toBe(true));
+  });
+
+  it('disables header Fork, Switch Agent, and Rewind buttons while a turn is working', async () => {
+    chats.chat(A, { kind: 'claude', title: 'Busy', state: 'working' });
+    await pane(view(A));
+    expect(q<HTMLButtonElement>('.chat-action-rewind')?.disabled).toBe(true);
+    expect(q<HTMLButtonElement>('.chat-action-fork')?.disabled).toBe(true);
+    expect(q<HTMLButtonElement>('.chat-action-switch')?.disabled).toBe(true);
+    // Export stays enabled even while working.
+    expect(q<HTMLButtonElement>('.chat-action-export')?.disabled).toBe(false);
   });
 
   it('forks, switches agent, and exports Markdown from the header actions', async () => {

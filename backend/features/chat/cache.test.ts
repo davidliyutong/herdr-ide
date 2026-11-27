@@ -91,10 +91,52 @@ describe('ProbeCache', () => {
       'v2',
     );
   });
+
+  test('invalidatePrefix and clear abort in-flight refresh probes and prevent stale resurrection', async () => {
+    const cache = new ProbeCache<string>({ ttlMs: 60_000, maxEntries: 8, now: () => 0 });
+    let releaseRefresh!: (v: string) => void;
+    let refreshSignal!: AbortSignal;
+    const pRefresh = cache.get('m1\0k', { refresh: true, signal: AbortSignal.timeout(5000), timeoutMs: 5000 }, (sig) => {
+      refreshSignal = sig;
+      return new Promise<string>((r) => (releaseRefresh = r));
+    });
+
+    // Invalidate while refresh: true is in flight: upstream signal MUST abort and
+    // even if upstream still resolves late, it must NOT repopulate the cache!
+    cache.invalidatePrefix('m1\0');
+    expect(refreshSignal.aborted).toBe(true);
+    releaseRefresh('stale-from-dead-host');
+    await pRefresh;
+
+    const after = await cache.get('m1\0k', { signal: AbortSignal.timeout(5000), timeoutMs: 5000 }, async () => 'new-host-value');
+    expect(after).toBe('new-host-value');
+
+    // Earlier normal flight must not overwrite a newer refresh: true result.
+    let releaseOld!: (v: string) => void;
+    let releaseNew!: (v: string) => void;
+    const pOld = cache.get(
+      'm2\0k',
+      { signal: AbortSignal.timeout(5000), timeoutMs: 5000 },
+      () => new Promise<string>((r) => (releaseOld = r)),
+    );
+    const pNew = cache.get(
+      'm2\0k',
+      { refresh: true, signal: AbortSignal.timeout(5000), timeoutMs: 5000 },
+      () => new Promise<string>((r) => (releaseNew = r)),
+    );
+    releaseNew('newer-refresh');
+    expect(await pNew).toBe('newer-refresh');
+    releaseOld('older-normal');
+    expect(await pOld).toBe('older-normal');
+    // Cache retains 'newer-refresh', NOT 'older-normal'.
+    expect(await cache.get('m2\0k', { signal: AbortSignal.timeout(5000), timeoutMs: 5000 }, async () => 'unexpected')).toBe(
+      'newer-refresh',
+    );
+  });
 });
 
 describe('overlaySessionChats', () => {
-  test('reflects newly imported and deleted chats over cached sessions', () => {
+  test('reflects newly imported and deleted chats over cached sessions, including empty live states after last delete', () => {
     const cached: chat.Session[] = [
       { sessionId: 's1', cwd: '/w', title: 'first' },
       { sessionId: 's2', cwd: '/w', title: 'second', chat: 'c0000000000000002' },
@@ -115,5 +157,14 @@ describe('overlaySessionChats', () => {
     const out = overlaySessionChats(cached, 'claude', states);
     expect(out[0]?.chat).toBe('c0000000000000001');
     expect(out[1]?.chat).toBeUndefined();
+
+    // When the watch is known and the last chat was deleted (states = []), stale chat links MUST be cleared.
+    const emptyOut = overlaySessionChats(cached, 'claude', []);
+    expect(emptyOut[0]?.chat).toBeUndefined();
+    expect(emptyOut[1]?.chat).toBeUndefined();
+
+    // When the watch has not yet read states (states = undefined), cached chat links stay untouched.
+    const unknownOut = overlaySessionChats(cached, 'claude', undefined);
+    expect(unknownOut[1]?.chat).toBe('c0000000000000002');
   });
 });

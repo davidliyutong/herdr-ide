@@ -499,6 +499,33 @@ describe('routes', () => {
     expect(code2).toBe(200);
     expect(body2.vault).toEqual({ injected: 0, locked: true });
     expect(r.host.requests.filter((q) => q.op === chat.Op.New).at(-1)!.env).toBeUndefined();
+
+    // Fork and switch resolve fresh workspaceEnv too: fail closed when locked or workspace omitted,
+    // inject fresh env and audit only names (never values) when unlocked.
+    const srcId = (body.chat as chat.Chat).id;
+    const [fkLockedCode, fkLockedBody] = await r.call('POST', m('fork'), JSON.stringify({ chat: srcId, workspace: 'ws-9' }));
+    expect(fkLockedCode).toBe(200);
+    expect(fkLockedBody.vault).toEqual({ injected: 0, locked: true });
+    expect(r.host.requests.filter((q) => q.op === chat.Op.Fork).at(-1)!.env).toBeUndefined();
+
+    const [swNoWsCode, swNoWsBody] = await r.call('POST', m('switch'), JSON.stringify({ chat: srcId, targetKind: 'codex' }));
+    expect(swNoWsCode).toBe(200);
+    expect(swNoWsBody.vault).toBeUndefined();
+    expect(r.host.requests.filter((q) => q.op === chat.Op.Switch).at(-1)!.env).toBeUndefined();
+
+    locked = false;
+    const [fkCode, fkBody] = await r.call('POST', m('fork'), JSON.stringify({ chat: srcId, workspace: 'ws-9' }));
+    expect(fkCode).toBe(200);
+    expect(fkBody.vault).toEqual({ injected: 1, missing: ['OLD_KEY'] });
+    expect(r.host.requests.filter((q) => q.op === chat.Op.Fork).at(-1)!.env).toEqual({ CHAT_SECRET: 'chat-secret-val' });
+    expect(r.lastAudit()).toMatchObject({ event: 'chat.fork', vault_env: ['CHAT_SECRET'], vault_presets: ['p1'] });
+
+    const [swCode, swBody] = await r.call('POST', m('switch'), JSON.stringify({ chat: srcId, targetKind: 'codex', workspace: 'ws-9' }));
+    expect(swCode).toBe(200);
+    expect(swBody.vault).toEqual({ injected: 1, missing: ['OLD_KEY'] });
+    expect(r.host.requests.filter((q) => q.op === chat.Op.Switch).at(-1)!.env).toEqual({ CHAT_SECRET: 'chat-secret-val' });
+    expect(r.lastAudit()).toMatchObject({ event: 'chat.switch', vault_env: ['CHAT_SECRET'], vault_presets: ['p1'] });
+    expect(r.audit.text()).not.toContain('chat-secret-val');
   });
 
   test('models, fork, switch and export routes', async () => {

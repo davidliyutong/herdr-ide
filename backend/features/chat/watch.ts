@@ -105,6 +105,9 @@ export interface WatcherOptions {
   publishAgent: (ev: AgentEvent) => void;
   /** The feature was turned off: the pages' subscriptions end. */
   turnedOff: () => void;
+  /** Called when a machine goes offline or its chat host ends unexpectedly,
+   * so hub-side probe caches for that machine can be invalidated. */
+  onOffline?: (m: string) => void;
   /** This hub's build (agentproto's VERSION). */
   version: () => string;
   now: () => number;
@@ -273,8 +276,10 @@ export class Watcher {
     const stale: Array<[string, StatesData]> = [];
     for (const [m, w] of this.records) {
       if (!ready.has(m)) {
+        const wasReady = w.ready;
         w.ready = false;
         if (w.running) w.abort?.abort();
+        if (wasReady) this.o.onOffline?.(m);
         if (!this.o.machines.get(m) && !w.running) {
           // A machine the user removed.
           this.records.delete(m);
@@ -414,6 +419,9 @@ export class Watcher {
       if (code !== 'offline') this.o.logger(`chat: watch of ${w.id}: ${asChatError(err).message}`);
     }
     if (gone) this.o.broadcast(gone, w.id);
+    if (!dropping && !signal.aborted && (code === NOT_RUNNING || wasUp)) {
+      this.o.onOffline?.(w.id);
+    }
   }
 
   /** Whether st, which follows old (had: the hub knew the chat), is a

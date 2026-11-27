@@ -42,16 +42,16 @@ import { posix } from 'node:path';
 import { Reader } from '#shared/lib/streamio.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { Notice, VERSION, noticeMethod } from '#shared/proto/agentproto/index.ts';
-import { Adapter as AdapterKind, type ChatSpec } from '#shared/agents/kinds.ts';
+import type { ChatSpec } from '#shared/agents/kinds.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { closeQuietly, tryLock } from '#machine/sys/fs.ts';
 import { inode, listenUnix } from '#machine/sockets.ts';
 import { rmSync, lstatSync, openSync, statSync, constants as fsc } from 'node:fs';
-import { LEGACY_MODE_ID, LEGACY_MODE_ID_ALT, clientModeOption, markFull } from '../acp/state.ts';
 import type { Adapter, Adapters, ClientInfo, Session } from '../adapter.ts';
 import { AgentProcesses, signalGroup } from '../agentproc.ts';
-import { Chat, SESSION_ID, errorOf, isUserTurn, modeOption, now, perr, transcriptUuid, turnBoundaryIdx, validOption } from './chat.ts';
-import { Environment, agentEnv, isDir, lookPath, userHome, type Env } from './env.ts';
+import { isEmbeddedRuntime, resolveAdapterCommand } from '../runtime.ts';
+import { Chat, SESSION_ID, errorOf, isUserTurn, now, perr, transcriptUuid, turnBoundaryIdx, validOption } from './chat.ts';
+import { Environment, agentEnv, isDir, userHome, type Env } from './env.ts';
 import { AGENT_TITLE_RUNES, clip } from './events.ts';
 import { clampExportBytes, exportJson, exportMarkdown } from './export.ts';
 import { buildHandoffSeed, clampHandoffBytes, summarizeHandoffNotice, type HandoffSeed, type HandoffSegment } from './handoff.ts';
@@ -406,35 +406,26 @@ export class Host {
     this.quit();
   }
 
-  /** Kills every agent's group at once. */
+  /** Kills every external agent's process group at once (embedded runtimes have pid 0). */
   private killAll(): void {
     this.procs.signal('SIGKILL');
-    for (const c of this.chats.values()) if (c.sess) signalGroup(c.sess.pid, 'SIGKILL');
-    for (const s of this.ending.keys()) signalGroup(s.pid, 'SIGKILL');
+    for (const c of this.chats.values()) if (c.sess && c.sess.pid > 0) signalGroup(c.sess.pid, 'SIGKILL');
+    for (const s of this.ending.keys()) if (s.pid > 0) signalGroup(s.pid, 'SIGKILL');
   }
 
-  /** Ensures an ACP chat without a native mode option (Grok, or a sleeping
-   * pre-upgrade ACP chat loaded from the journal) exposes the client-enforced
-   * permission mode option immediately so the UI renders the mode selector
-   * before the agent starts or wakes. */
-  private ensureClientModeConfig(r: Row, fromJournal: boolean): void {
+  /** Lets a chat's adapter normalize/populate initial configuration options
+   * before start or journal wake (e.g. ACP client-enforced permission mode). */
+  private prepareChatConfig(r: Row, fromJournal: boolean): void {
     const found = this.spec(r.chat.kind);
-    if ('code' in found || found.spec.adapter !== AdapterKind.ACP) return;
-    if (modeOption(r.chat.config)) return;
-    const hasConfig = (r.chat.config?.length ?? 0) > 0;
-    if (!hasConfig && r.chat.kind !== 'grok') return;
-    const cfg: chat.ConfigOption[] = (r.chat.config ?? []).map((o) => ({
-      ...o,
-      options: (o.options ?? []).map((v) => ({ ...v })),
-    }));
-    const id = cfg.some((o) => o.id === LEGACY_MODE_ID) ? LEGACY_MODE_ID_ALT : LEGACY_MODE_ID;
-    const fallback = fromJournal ? chat.Mode.Default : (this.current.defaultModes?.[r.chat.kind] ?? this.current.defaultMode);
-    let cur = r.options.mode || fallback;
-    if (cur !== chat.Mode.AcceptEdits && cur !== chat.Mode.Full) cur = chat.Mode.Default;
-    if (!fromJournal && !this.current.allowFull && cur === chat.Mode.Full) cur = chat.Mode.Default;
-    cfg.push(clientModeOption(id, cur));
-    markFull(cfg);
-    r.chat.config = cfg;
+    if ('code' in found || !found.adapter.prepareConfig) return;
+    const next = found.adapter.prepareConfig({
+      kind: r.chat.kind,
+      config: r.chat.config,
+      options: r.options,
+      fromJournal,
+      settings: this.current,
+    });
+    if (next) r.chat.config = next;
   }
 
   /** Reads the journal's chats. A chat whose agent ran when the last host
@@ -442,7 +433,7 @@ export class Host {
    * in an error. */
   private async load(): Promise<void> {
     for (const r of await this.journal.loadChats()) {
-      this.ensureClientModeConfig(r, true);
+      this.prepareChatConfig(r, true);
       const c = new Chat(this, r, true);
       c.first = r.first === 0 ? r.chat.seq + 1 : r.first;
       this.chats.set(r.chat.id, c);
@@ -614,9 +605,10 @@ export class Host {
   /** The chat spec of a kind and its adapter, or why there is none. */
   spec(kind: string | undefined): { spec: ChatSpec; adapter: Adapter } | chat.ChatError {
     const spec = kind ? this.opts.spec(kind) : undefined;
-    if (!spec || spec.argv.length === 0) return perr(chat.Code.Unsupported, 'the kind has no chat');
+    if (!spec) return perr(chat.Code.Unsupported, 'the kind has no chat');
     const adapter = Object.hasOwn(this.opts.adapters, spec.adapter) ? this.opts.adapters[spec.adapter] : undefined;
     if (!adapter) return perr(chat.Code.Unsupported, `this host has no adapter ${spec.adapter}`);
+    if (spec.argv.length === 0 && !isEmbeddedRuntime(adapter, spec)) return perr(chat.Code.Unsupported, 'the kind has no chat');
     return { spec, adapter };
   }
 
@@ -756,7 +748,7 @@ export class Host {
    * host stops, it settles once the agent is gone (killed at once on a
    * signal of the terminal core): no agent outlives the host. */
   async endLate(sess: Session): Promise<void> {
-    if (this.stopping && this.fast) signalGroup(sess.pid, 'SIGKILL');
+    if (this.stopping && this.fast && sess.pid > 0) signalGroup(sess.pid, 'SIGKILL');
     await this.endSession(sess, this.stopping);
   }
 
@@ -780,7 +772,7 @@ export class Host {
         await Promise.race([sess.done, new Promise((r) => (signal.aborted ? r(0) : signal.addEventListener('abort', r, { once: true })))]);
         if (!gone) {
           this.logf(`an agent did not end in ${this.o.closeGrace / 1000} s${err ? ` (${err})` : ''}: killed`);
-          signalGroup(sess.pid, 'SIGKILL');
+          if (sess.pid > 0) signalGroup(sess.pid, 'SIGKILL');
         }
         this.ending.delete(sess);
         this.pokeQuiet();
@@ -831,7 +823,7 @@ export class Host {
     }
     for (const s of this.ending.keys()) if (!sessions.includes(s)) sessions.push(s);
     const killAll = () => {
-      for (const s of sessions) signalGroup(s.pid, 'SIGKILL');
+      for (const s of sessions) if (s.pid > 0) signalGroup(s.pid, 'SIGKILL');
       this.procs.signal('SIGKILL');
     };
     if (!fast) {
@@ -840,7 +832,7 @@ export class Host {
       killAll();
       return;
     }
-    for (const s of sessions) signalGroup(s.pid, 'SIGTERM');
+    for (const s of sessions) if (s.pid > 0) signalGroup(s.pid, 'SIGTERM');
     this.procs.signal('SIGTERM');
     const signal = AbortSignal.timeout(this.o.killAfter);
     const all = Promise.all(
@@ -862,7 +854,8 @@ export class Host {
 
   // ---- requests
 
-  /** Tells which kinds' programs the user's PATH has. */
+  /** Tells which kinds' runtimes are available on this machine (PATH lookup for
+   * external-process adapters, or Adapter.available for embedded runtimes). */
   private async agents(req: Request): Promise<chat.Response> {
     const kinds = req.kinds ?? [];
     if (kinds.length > MAX_KINDS) return refusal(chat.Code.BadRequest, 'too many kinds');
@@ -870,9 +863,12 @@ export class Host {
     const agents: chat.AgentStatus[] = [];
     for (const kind of kinds) {
       const found = this.spec(kind);
-      if ('code' in found) agents.push({ kind, available: false, reason: chat.Reason.Unsupported });
-      else if (!(await lookPath(found.spec.argv[0]!, agentEnv(user, found.spec.env, ''))))
-        agents.push({ kind, available: false, reason: chat.Reason.NotFound });
+      if ('code' in found) {
+        agents.push({ kind, available: false, reason: chat.Reason.Unsupported });
+        continue;
+      }
+      const resolved = await resolveAdapterCommand(found.adapter, found.spec, agentEnv(user, found.spec.env, ''), this.signal);
+      if (!resolved.ok) agents.push({ kind, available: false, reason: chat.Reason.NotFound });
       else agents.push({ kind, available: true });
     }
     return { ok: true, agents };
@@ -945,7 +941,7 @@ export class Host {
       renamed: false,
       untrustedTold: false,
     };
-    this.ensureClientModeConfig(r, false);
+    this.prepareChatConfig(r, false);
     try {
       await this.journal.insertChat(r);
     } catch (e) {
@@ -1230,14 +1226,14 @@ export class Host {
     const signal = this.probeSignal(connSignal);
     try {
       const env = agentEnv(await this.env(signal), found.spec.env, req.cwd);
-      const path = await lookPath(found.spec.argv[0]!, env);
-      if (!path) return refusal(chat.Code.NotFound, `${found.spec.argv[0]} is not in the user's PATH`);
+      const resolved = await resolveAdapterCommand(found.adapter, found.spec, env, signal);
+      if (!resolved.ok) return refusal(chat.Code.NotFound, `${resolved.missing} is not in the user's PATH`);
       let list: { sessions: chat.Session[]; next: string };
       try {
         list = await found.adapter.sessions(
           {
             kind: req.kind!,
-            argv: [path, ...found.spec.argv.slice(1)],
+            argv: resolved.argv,
             env,
             cwd: req.cwd,
             cursor: req.cursor ?? '',
@@ -1488,13 +1484,13 @@ export class Host {
       let list: chat.ModelOption[];
       if (found.adapter.models) {
         const env = agentEnv(await this.env(signal), found.spec.env, cwd);
-        const path = await lookPath(found.spec.argv[0]!, env);
-        if (!path) return refusal(chat.Code.NotFound, `${found.spec.argv[0]} is not in the user's PATH`);
+        const resolved = await resolveAdapterCommand(found.adapter, found.spec, env, signal);
+        if (!resolved.ok) return refusal(chat.Code.NotFound, `${resolved.missing} is not in the user's PATH`);
         try {
           list = await found.adapter.models(
             {
               kind,
-              argv: [path, ...found.spec.argv.slice(1)],
+              argv: resolved.argv,
               env,
               cwd,
               procs: this.procs,
@@ -1531,195 +1527,206 @@ export class Host {
     if (!src || src.deleted) return refusal(chat.Code.UnknownChat, 'no such chat');
     if (src.starting || src.held || src.busy()) return refusal(chat.Code.Busy, 'a turn runs');
     if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
+    const reqEnv = validateEnv(req.env);
+    if (reqEnv === null) return refusal(chat.Code.BadRequest, 'env: invalid environment variables');
     const found = this.spec(src.r.chat.kind);
     if ('code' in found) return { error: found };
-    await src.flush();
-    const upToSeq = req.upToSeq;
-    if (upToSeq !== undefined && (upToSeq < 1 || upToSeq > src.r.chat.seq)) return refusal(chat.Code.BadRequest, 'upToSeq out of range');
+    src.held = true;
+    try {
+      await src.flush();
+      const upToSeq = req.upToSeq;
+      if (upToSeq !== undefined && (upToSeq < 1 || upToSeq > src.r.chat.seq)) return refusal(chat.Code.BadRequest, 'upToSeq out of range');
 
-    const storedAll = await this.journal.allEvents(src.id);
-    const parsedAll: chat.Event[] = [];
-    for (const row of storedAll) {
-      try {
-        parsedAll.push(JSON.parse(row.line) as chat.Event);
-      } catch {
-        // skip
+      const storedAll = await this.journal.allEvents(src.id);
+      const parsedAll: chat.Event[] = [];
+      for (const row of storedAll) {
+        try {
+          parsedAll.push(JSON.parse(row.line) as chat.Event);
+        } catch {
+          // skip
+        }
       }
-    }
-    const lastSeq = parsedAll.at(-1)?.seq ?? src.r.chat.seq;
-    // Normalize upToSeq: when pointing at a user turn (User or Queued(taken)),
-    // extend to the end of that turn (right before the next user turn, or full
-    // session if it is the last turn) so journal and native session stay aligned.
-    let resolvedUpToSeq = upToSeq;
-    if (resolvedUpToSeq !== undefined) {
-      const targetIdx = parsedAll.findIndex((e) => e.seq === resolvedUpToSeq);
-      if (targetIdx >= 0 && isUserTurn(parsedAll[targetIdx]!)) {
-        let nextUserIdx = -1;
-        for (let i = targetIdx + 1; i < parsedAll.length; i++) {
-          if (isUserTurn(parsedAll[i]!)) {
-            nextUserIdx = i;
+      const lastSeq = parsedAll.at(-1)?.seq ?? src.r.chat.seq;
+      // Normalize upToSeq: when pointing at a user turn (User or Queued(taken)),
+      // extend to the end of that turn (right before the next user turn, or full
+      // session if it is the last turn) so journal and native session stay aligned.
+      let resolvedUpToSeq = upToSeq;
+      if (resolvedUpToSeq !== undefined) {
+        const targetIdx = parsedAll.findIndex((e) => e.seq === resolvedUpToSeq);
+        if (targetIdx >= 0 && isUserTurn(parsedAll[targetIdx]!)) {
+          let nextUserIdx = -1;
+          for (let i = targetIdx + 1; i < parsedAll.length; i++) {
+            if (isUserTurn(parsedAll[i]!)) {
+              nextUserIdx = i;
+              break;
+            }
+          }
+          if (nextUserIdx < 0) {
+            resolvedUpToSeq = lastSeq;
+          } else {
+            const nextBoundary = turnBoundaryIdx(parsedAll, nextUserIdx);
+            const endIdx = Math.max(targetIdx, nextBoundary - 1);
+            resolvedUpToSeq = parsedAll[endIdx]!.seq ?? resolvedUpToSeq;
+          }
+        }
+      }
+
+      const partial = resolvedUpToSeq !== undefined && resolvedUpToSeq < lastSeq;
+      const kept = partial ? parsedAll.filter((e) => (e.seq ?? 0) <= resolvedUpToSeq!) : parsedAll;
+      const copyBound = partial ? resolvedUpToSeq : lastSeq > 0 ? lastSeq : undefined;
+
+      // Extract native turn/message boundary hints for partial forks.
+      let upToMessageId: string | undefined;
+      let lastTurnId: string | undefined;
+      let beforeTurnId: string | undefined;
+      if (partial) {
+        for (let i = kept.length - 1; i >= 0; i--) {
+          const ev = kept[i]!;
+          if (ev.parent) continue;
+          if (!upToMessageId) {
+            const uid = transcriptUuid(ev);
+            if (uid) upToMessageId = uid;
+          }
+          if (!lastTurnId && ev.t === chat.EventType.Turn && ev.item) lastTurnId = ev.item;
+          if (upToMessageId && lastTurnId) break;
+        }
+        for (const ev of parsedAll) {
+          if ((ev.seq ?? 0) <= resolvedUpToSeq! || ev.parent || !ev.item) continue;
+          if (ev.t === chat.EventType.Turn) {
+            beforeTurnId = ev.item;
             break;
           }
         }
-        if (nextUserIdx < 0) {
-          resolvedUpToSeq = lastSeq;
-        } else {
-          const nextBoundary = turnBoundaryIdx(parsedAll, nextUserIdx);
-          const endIdx = Math.max(targetIdx, nextBoundary - 1);
-          resolvedUpToSeq = parsedAll[endIdx]!.seq ?? resolvedUpToSeq;
+      }
+
+      const customTitle = req.title ? clip(req.title, AGENT_TITLE_RUNES).trim() : '';
+      const title = customTitle || (src.r.chat.title ? clip(`${src.r.chat.title} (fork)`, AGENT_TITLE_RUNES) : '');
+
+      let nativeSessionId = '';
+      const sliceBy = found.adapter.meta?.partialForkBy ?? 'any';
+      const hasNativeSlice =
+        !partial ||
+        (sliceBy === 'none'
+          ? false
+          : sliceBy === 'message'
+            ? !!upToMessageId
+            : sliceBy === 'turn'
+              ? !!(beforeTurnId || lastTurnId)
+              : !!(upToMessageId || beforeTurnId || lastTurnId));
+      if (found.adapter.fork && src.r.chat.sessionId !== '' && !src.r.fresh && hasNativeSlice) {
+        const signal = AbortSignal.any([this.signal, AbortSignal.timeout(this.o.startTimeout)]);
+        const env = agentEnv(await this.env(signal), found.spec.env, src.r.chat.cwd);
+        const resolved = await resolveAdapterCommand(found.adapter, found.spec, env, signal);
+        if (resolved.ok) {
+          try {
+            const res = await found.adapter.fork(
+              {
+                kind: src.r.chat.kind,
+                argv: resolved.argv,
+                env,
+                cwd: src.r.chat.cwd,
+                sessionId: src.r.chat.sessionId,
+                ...(partial ? { partial: true } : {}),
+                ...(upToMessageId ? { upToMessageId } : {}),
+                ...(lastTurnId ? { lastTurnId } : {}),
+                ...(beforeTurnId ? { beforeTurnId } : {}),
+                ...(title ? { title } : {}),
+                procs: this.procs,
+                logger: this.logger,
+                client: this.client,
+              },
+              signal,
+            );
+            if (res?.sessionId && SESSION_ID.test(res.sessionId)) nativeSessionId = res.sessionId;
+          } catch (e) {
+            const ce = errorOf(e, signal);
+            if (ce.code !== chat.Code.Unsupported) return { error: ce };
+          }
         }
       }
-    }
 
-    const partial = resolvedUpToSeq !== undefined && resolvedUpToSeq < lastSeq;
-    const kept = partial ? parsedAll.filter((e) => (e.seq ?? 0) <= resolvedUpToSeq!) : parsedAll;
-
-    // Extract native turn/message boundary hints for partial forks.
-    let upToMessageId: string | undefined;
-    let lastTurnId: string | undefined;
-    let beforeTurnId: string | undefined;
-    if (partial) {
-      for (let i = kept.length - 1; i >= 0; i--) {
-        const ev = kept[i]!;
-        if (ev.parent) continue;
-        if (!upToMessageId) {
-          const uid = transcriptUuid(ev);
-          if (uid) upToMessageId = uid;
-        }
-        if (!lastTurnId && ev.t === chat.EventType.Turn && ev.item) lastTurnId = ev.item;
-        if (upToMessageId && lastTurnId) break;
-      }
-      for (const ev of parsedAll) {
-        if ((ev.seq ?? 0) <= resolvedUpToSeq! || ev.parent || !ev.item) continue;
-        if (ev.t === chat.EventType.Turn) {
-          beforeTurnId = ev.item;
-          break;
-        }
-      }
-    }
-
-    const customTitle = req.title ? clip(req.title, AGENT_TITLE_RUNES).trim() : '';
-    const title = customTitle || (src.r.chat.title ? clip(`${src.r.chat.title} (fork)`, AGENT_TITLE_RUNES) : '');
-
-    let nativeSessionId = '';
-    const hasNativeSlice =
-      !partial ||
-      (found.spec.adapter === 'claude'
-        ? !!upToMessageId
-        : found.spec.adapter === 'codex'
-          ? !!(beforeTurnId || lastTurnId)
-          : !!(upToMessageId || beforeTurnId || lastTurnId));
-    if (found.adapter.fork && src.r.chat.sessionId !== '' && !src.r.fresh && hasNativeSlice) {
-      const signal = AbortSignal.any([this.signal, AbortSignal.timeout(this.o.startTimeout)]);
-      const env = agentEnv(await this.env(signal), found.spec.env, src.r.chat.cwd);
-      const path = await lookPath(found.spec.argv[0]!, env);
-      if (path) {
+      const native = nativeSessionId !== '';
+      const turn = this.newTurn.then(async (): Promise<chat.Response> => {
+        const room = await this.roomForChat();
+        if (room) return { error: room };
+        if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
+        const t = timeOf(now());
+        const newId = chat.newChatID();
+        const opts: chat.Options = { ...src.r.options };
+        if (opts.mode === chat.Mode.Full && !this.current.allowFull) opts.mode = chat.Mode.Default;
+        const r: Row = {
+          chat: {
+            id: newId,
+            kind: src.r.chat.kind,
+            title,
+            cwd: src.r.chat.cwd,
+            sessionId: nativeSessionId,
+            state: chat.State.Starting,
+            status: chat.Status.Idle,
+            created: t,
+            updated: t,
+            seq: 0,
+            seen: 0,
+            capabilities: emptyCapabilities(),
+          },
+          turnEnd: 0,
+          options: opts,
+          historyAfter: '',
+          bytes: 0,
+          fresh: !native,
+          renamed: !!(customTitle || src.r.renamed || title),
+          untrustedTold: false,
+        };
+        this.prepareChatConfig(r, false);
         try {
-          const res = await found.adapter.fork(
-            {
-              kind: src.r.chat.kind,
-              argv: [path, ...found.spec.argv.slice(1)],
-              env,
-              cwd: src.r.chat.cwd,
-              sessionId: src.r.chat.sessionId,
-              ...(partial ? { partial: true } : {}),
-              ...(upToMessageId ? { upToMessageId } : {}),
-              ...(lastTurnId ? { lastTurnId } : {}),
-              ...(beforeTurnId ? { beforeTurnId } : {}),
-              ...(title ? { title } : {}),
-              procs: this.procs,
-              logger: this.logger,
-              client: this.client,
-            },
-            signal,
-          );
-          if (res?.sessionId && SESSION_ID.test(res.sessionId)) nativeSessionId = res.sessionId;
+          await this.journal.insertChat(r);
+          const copied = await this.journal.copyEventsUpTo(src.id, newId, copyBound);
+          r.chat.seq = copied.seq;
+          r.chat.seen = copied.seq;
+          r.bytes = copied.bytes;
+          r.turnEnd = copied.turnEnd;
+          r.historyAfter = copied.historyAfter;
+          if (copied.lastAt) r.chat.updated = timeOf(copied.lastAt);
+          await this.journal.saveChat(r);
         } catch (e) {
-          const ce = errorOf(e, signal);
-          if (ce.code !== chat.Code.Unsupported) return { error: ce };
+          this.logf(`fork chat ${src.id}: ${(e as Error).message}`);
+          await this.journal.deleteChat(newId).catch(() => {});
+          return refusal(chat.Code.Failed, 'the journal did not fork the chat');
         }
-      }
-    }
-
-    const native = nativeSessionId !== '';
-    const turn = this.newTurn.then(async (): Promise<chat.Response> => {
-      const room = await this.roomForChat();
-      if (room) return { error: room };
-      if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
-      const t = timeOf(now());
-      const newId = chat.newChatID();
-      const opts: chat.Options = { ...src.r.options };
-      if (opts.mode === chat.Mode.Full && !this.current.allowFull) opts.mode = chat.Mode.Default;
-      const r: Row = {
-        chat: {
-          id: newId,
-          kind: src.r.chat.kind,
-          title,
-          cwd: src.r.chat.cwd,
-          sessionId: nativeSessionId,
-          state: chat.State.Starting,
-          status: chat.Status.Idle,
-          created: t,
-          updated: t,
-          seq: 0,
-          seen: 0,
-          capabilities: emptyCapabilities(),
-        },
-        turnEnd: 0,
-        options: opts,
-        historyAfter: '',
-        bytes: 0,
-        fresh: !native,
-        renamed: !!(customTitle || src.r.renamed || title),
-        untrustedTold: false,
-      };
-      this.ensureClientModeConfig(r, false);
-      try {
-        await this.journal.insertChat(r);
-        const copied = await this.journal.copyEventsUpTo(src.id, newId, partial ? resolvedUpToSeq : undefined);
-        r.chat.seq = copied.seq;
-        r.chat.seen = copied.seq;
-        r.bytes = copied.bytes;
-        r.turnEnd = copied.turnEnd;
-        r.historyAfter = copied.historyAfter;
-        if (copied.lastAt) r.chat.updated = timeOf(copied.lastAt);
-        await this.journal.saveChat(r);
-      } catch (e) {
-        this.logf(`fork chat ${src.id}: ${(e as Error).message}`);
-        await this.journal.deleteChat(newId).catch(() => {});
-        return refusal(chat.Code.Failed, 'the journal did not fork the chat');
-      }
-      const c = new Chat(this, r, false, src.envOverrides());
-      c.first = 1;
-      if (!native && kept.length > 0) {
-        const lineage = await this.collectLineageSegments(src.id, partial ? resolvedUpToSeq : undefined);
-        const seed = buildHandoffSeed(lineage.segments, {
-          title: src.r.chat.title,
-          cwd: src.r.chat.cwd,
-          targetKind: src.r.chat.kind,
-          ...(req.maxBytes !== undefined ? { maxBytes: clampHandoffBytes(req.maxBytes) } : {}),
-          ...(lineage.fallbackSeed ? { fallbackSeed: lineage.fallbackSeed } : {}),
+        const c = new Chat(this, r, false, reqEnv);
+        c.first = 1;
+        if (!native && kept.length > 0) {
+          const lineage = await this.collectLineageSegments(src.id, copyBound);
+          const seed = buildHandoffSeed(lineage.segments, {
+            title: src.r.chat.title,
+            cwd: src.r.chat.cwd,
+            targetKind: src.r.chat.kind,
+            ...(req.maxBytes !== undefined ? { maxBytes: clampHandoffBytes(req.maxBytes) } : {}),
+            ...(lineage.fallbackSeed ? { fallbackSeed: lineage.fallbackSeed } : {}),
+          });
+          c.setSeed(seed);
+          await this.journal.putSetting(`seed:${newId}`, seed).catch(() => {});
+        }
+        this.chats.set(newId, c);
+        c.emit({
+          t: chat.EventType.Notice,
+          method: noticeMethod(Notice.Forked),
+          params: { fromChat: src.id, native, ...(partial ? { upToSeq: resolvedUpToSeq } : {}) },
         });
-        c.setSeed(seed);
-        await this.journal.putSetting(`seed:${newId}`, seed).catch(() => {});
-      }
-      this.chats.set(newId, c);
-      c.emit({
-        t: chat.EventType.Notice,
-        method: noticeMethod(Notice.Forked),
-        params: { fromChat: src.id, native, ...(partial ? { upToSeq: resolvedUpToSeq } : {}) },
+        c.r.chat.seen = c.madeSeq();
+        const st = c.beginStart();
+        const view = c.snapshot();
+        c.save();
+        c.notify();
+        this.pokeQuiet();
+        this.track(c.launch(st, nativeSessionId));
+        return { ok: true, chat: view };
       });
-      c.r.chat.seen = c.madeSeq();
-      const st = c.beginStart();
-      const view = c.snapshot();
-      c.save();
-      c.notify();
-      this.pokeQuiet();
-      this.track(c.launch(st, nativeSessionId));
-      return { ok: true, chat: view };
-    });
-    this.newTurn = turn.catch(() => {});
-    return turn;
+      this.newTurn = turn.catch(() => {});
+      return await turn;
+    } finally {
+      src.held = false;
+    }
   }
 
   /** Walks `Notice.Switched` lineage backwards from `chatId` (up to depth 8,
@@ -1799,6 +1806,8 @@ export class Host {
     const src = this.lookup(req.chat);
     if (!src || src.deleted) return refusal(chat.Code.UnknownChat, 'no such chat');
     if (src.starting || src.held || src.busy()) return refusal(chat.Code.Busy, 'a turn runs');
+    const reqEnv = validateEnv(req.env);
+    if (reqEnv === null) return refusal(chat.Code.BadRequest, 'env: invalid environment variables');
     const found = this.spec(req.targetKind);
     if ('code' in found) return { error: found };
     const opts: chat.Options = {};
@@ -1814,88 +1823,92 @@ export class Host {
     if (opts.mode === chat.Mode.Full && !this.current.allowFull)
       return refusal(chat.Code.NotAllowed, 'full access is not allowed on this machine');
     if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
-    if (src.r.chat.handedOff && !src.sess && !src.starting) await src.catchUpNow();
-    await src.flush();
-    const upToSeq = req.upToSeq;
-    if (upToSeq !== undefined && (upToSeq < 1 || upToSeq > src.r.chat.seq)) return refusal(chat.Code.BadRequest, 'upToSeq out of range');
-    const snapshotSeq = upToSeq ?? src.r.chat.seq;
-    const lineage = await this.collectLineageSegments(src.id, upToSeq);
-    const seed = buildHandoffSeed(lineage.segments, {
-      title: src.r.chat.title,
-      cwd: src.r.chat.cwd,
-      targetKind: req.targetKind,
-      ...(req.maxBytes !== undefined ? { maxBytes: clampHandoffBytes(req.maxBytes) } : {}),
-      ...(lineage.fallbackSeed ? { fallbackSeed: lineage.fallbackSeed } : {}),
-    });
-    const injection: 'native_history' | 'attributed_context' =
-      found.spec.adapter === AdapterKind.Codex ? 'native_history' : 'attributed_context';
-    const summary = summarizeHandoffNotice(seed, injection);
-
-    const turn = this.newTurn.then(async (): Promise<chat.Response> => {
-      const room = await this.roomForChat();
-      if (room) return { error: room };
-      if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
-      const t = timeOf(now());
-      const newId = chat.newChatID();
-      const title = src.r.chat.title;
-      const r: Row = {
-        chat: {
-          id: newId,
-          kind: req.targetKind!,
-          title,
-          cwd: src.r.chat.cwd,
-          sessionId: '',
-          state: chat.State.Starting,
-          status: chat.Status.Idle,
-          created: t,
-          updated: t,
-          seq: 0,
-          seen: 0,
-          capabilities: emptyCapabilities(),
-        },
-        turnEnd: 0,
-        options: opts,
-        historyAfter: '',
-        bytes: 0,
-        fresh: true,
-        renamed: !!title,
-        untrustedTold: false,
-      };
-      this.ensureClientModeConfig(r, false);
-      try {
-        await this.journal.insertChat(r);
-        await this.journal.putSetting(`seed:${newId}`, seed);
-      } catch (e) {
-        this.logf(`switch chat ${src.id}: ${(e as Error).message}`);
-        await this.journal.deleteChat(newId).catch(() => {});
-        return refusal(chat.Code.Failed, 'the journal did not create the switched chat');
-      }
-      const c = new Chat(this, r, false, src.envOverrides());
-      c.first = 1;
-      c.setSeed(seed);
-      this.chats.set(newId, c);
-      c.emit({
-        t: chat.EventType.Notice,
-        method: noticeMethod(Notice.Switched),
-        params: {
-          fromChat: src.id,
-          fromKind: src.r.chat.kind,
-          ...(snapshotSeq > 0 ? { fromSeq: snapshotSeq } : {}),
-          ...(upToSeq !== undefined ? { upToSeq } : {}),
-          ...summary,
-        },
+    src.held = true;
+    try {
+      if (src.r.chat.handedOff && !src.sess && !src.starting) await src.catchUpNow();
+      await src.flush();
+      const upToSeq = req.upToSeq;
+      if (upToSeq !== undefined && (upToSeq < 1 || upToSeq > src.r.chat.seq)) return refusal(chat.Code.BadRequest, 'upToSeq out of range');
+      const snapshotSeq = upToSeq ?? src.r.chat.seq;
+      const lineage = await this.collectLineageSegments(src.id, upToSeq);
+      const seed = buildHandoffSeed(lineage.segments, {
+        title: src.r.chat.title,
+        cwd: src.r.chat.cwd,
+        targetKind: req.targetKind,
+        ...(req.maxBytes !== undefined ? { maxBytes: clampHandoffBytes(req.maxBytes) } : {}),
+        ...(lineage.fallbackSeed ? { fallbackSeed: lineage.fallbackSeed } : {}),
       });
-      c.r.chat.seen = c.madeSeq();
-      const st = c.beginStart();
-      const view = c.snapshot();
-      c.save();
-      c.notify();
-      this.pokeQuiet();
-      this.track(c.launch(st, ''));
-      return { ok: true, chat: view };
-    });
-    this.newTurn = turn.catch(() => {});
-    return turn;
+      const injection: 'native_history' | 'attributed_context' = found.adapter.meta?.handoffInjection ?? 'attributed_context';
+      const summary = summarizeHandoffNotice(seed, injection);
+
+      const turn = this.newTurn.then(async (): Promise<chat.Response> => {
+        const room = await this.roomForChat();
+        if (room) return { error: room };
+        if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
+        const t = timeOf(now());
+        const newId = chat.newChatID();
+        const title = src.r.chat.title;
+        const r: Row = {
+          chat: {
+            id: newId,
+            kind: req.targetKind!,
+            title,
+            cwd: src.r.chat.cwd,
+            sessionId: '',
+            state: chat.State.Starting,
+            status: chat.Status.Idle,
+            created: t,
+            updated: t,
+            seq: 0,
+            seen: 0,
+            capabilities: emptyCapabilities(),
+          },
+          turnEnd: 0,
+          options: opts,
+          historyAfter: '',
+          bytes: 0,
+          fresh: true,
+          renamed: !!title,
+          untrustedTold: false,
+        };
+        this.prepareChatConfig(r, false);
+        try {
+          await this.journal.insertChat(r);
+          await this.journal.putSetting(`seed:${newId}`, seed);
+        } catch (e) {
+          this.logf(`switch chat ${src.id}: ${(e as Error).message}`);
+          await this.journal.deleteChat(newId).catch(() => {});
+          return refusal(chat.Code.Failed, 'the journal did not create the switched chat');
+        }
+        const c = new Chat(this, r, false, reqEnv);
+        c.first = 1;
+        c.setSeed(seed);
+        this.chats.set(newId, c);
+        c.emit({
+          t: chat.EventType.Notice,
+          method: noticeMethod(Notice.Switched),
+          params: {
+            fromChat: src.id,
+            fromKind: src.r.chat.kind,
+            ...(snapshotSeq > 0 ? { fromSeq: snapshotSeq } : {}),
+            ...(upToSeq !== undefined ? { upToSeq } : {}),
+            ...summary,
+          },
+        });
+        c.r.chat.seen = c.madeSeq();
+        const st = c.beginStart();
+        const view = c.snapshot();
+        c.save();
+        c.notify();
+        this.pokeQuiet();
+        this.track(c.launch(st, ''));
+        return { ok: true, chat: view };
+      });
+      this.newTurn = turn.catch(() => {});
+      return await turn;
+    } finally {
+      src.held = false;
+    }
   }
 
   /** Exports req.chat's conversation up to optional req.upToSeq as Markdown
@@ -1979,7 +1992,7 @@ export class Host {
   private removable(): Removable[] {
     const out: Removable[] = [];
     for (const c of this.chats.values()) {
-      if (c.r.chat.state !== chat.State.Closed || c.sess || c.starting || c.deleted) continue;
+      if (c.r.chat.state !== chat.State.Closed || c.sess || c.starting || c.held || c.deleted) continue;
       const closed = Date.parse(c.r.chat.closed ?? '') || 0;
       const archived = Date.parse(c.r.chat.archived ?? '') || 0;
       out.push({ c, archived: archived > 0, since: Math.max(closed, archived) });

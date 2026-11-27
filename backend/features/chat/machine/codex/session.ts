@@ -43,6 +43,7 @@ import {
   type StartParams,
 } from '../adapter.ts';
 import type { AgentProcess, StopTiming } from '../agentproc.ts';
+import { markUsageStale } from '../runtime.ts';
 import type {
   ClientRequests,
   ItemCompletedNotification,
@@ -1053,7 +1054,7 @@ export class CodexSession implements Session {
   }
 
   /** Replaces the session's cached model catalog after an Op.Models refresh. */
-  updateModels(ms: Models): void {
+  applyModels(ms: Models): void {
     if (this.ended || this.closing) return;
     this.models = ms;
     this.st.effort = this.models.effortFor(this.st.model, this.st.effort, '');
@@ -1103,6 +1104,9 @@ export class CodexSession implements Session {
         throw new ChatProtoError(callError(e));
       }
       this.plan = { id: '', text: '' };
+      this.usage = markUsageStale(this.usage) ?? { used: 0, size: 0 };
+      this.dirty = true;
+      this.flushUsage(true)?.();
       this.supersedeAsyncAsk();
       for (const pend of this.takePending()) pend.ac.abort();
       this.items.clear();
@@ -1212,6 +1216,7 @@ export class CodexSession implements Session {
       this.active = true;
       this.turn = '';
       this.compacting = true;
+      this.usage = markUsageStale(this.usage) ?? { used: 0, size: 0 };
       this.promptId = '';
       this.skipUser = false;
       const c = this.c!;
@@ -1336,6 +1341,7 @@ export class CodexSession implements Session {
           this.usage.used = typeof used === 'number' ? used : 0;
           if (typeof w === 'number' && w > 0) this.usage.size = w;
           delete this.usage.percentage;
+          delete this.usage.stale;
           if (this.usage.size > 0) this.usage.percentage = (this.usage.used * 100) / this.usage.size;
           this.dirty = true;
           const flush = this.flushUsage(false);
