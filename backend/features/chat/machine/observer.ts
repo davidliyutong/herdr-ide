@@ -1,12 +1,8 @@
 // Read-only session/transcript observation contract, strictly separated from
-// writable Session turn execution.
-//
-// Today this powers read-only sidecar observation such as Antigravity's on-disk
-// subagent transcript tailing (acp/agysubagents.ts). Because an observer never
-// owns writes or subprocess stdin, the same contract naturally hosts a future
-// "Native CLI writes + Native UI tails & renders" mode where a terminal CLI
-// owns the session and a read-only observer streams transcript updates into
-// Chat's journal and live subscribers.
+// writable Session turn execution. Observers never own writes or subprocess
+// stdin; they publish observed events and background task snapshots into an
+// ObserverSink (used by Antigravity's on-disk subagent tracker in
+// acp/agysubagents.ts).
 import type * as chat from '#shared/proto/chatproto/index.ts';
 
 /** Destination where a read-only SessionObserver publishes observed events and

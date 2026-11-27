@@ -39,6 +39,7 @@ export interface ObservedStream {
 export interface SessionResolver {
   resolve(kind: string, p: Proc, signal: AbortSignal): Promise<Found | null>;
   stamp(kind: string, p: Proc, last: Found): Promise<string>;
+  close?(): void;
 }
 
 /** The clock of the trackers and of the sessions' schedule (tests give a
@@ -196,6 +197,7 @@ export class Detector {
   private readonly clock: Clock;
   private readonly timing: DetectTiming;
   private readonly terms = new Map<string, Watched>();
+  private resolverClosed = false;
   /** One resolve runs at a time; resolving is the terminal it runs for,
    * which peers leaves out. */
   private resolving = '';
@@ -273,9 +275,13 @@ export class Detector {
     }
   }
 
-  /** Ends every follower. */
+  /** Ends every follower and releases resolver background resources. */
   stopAll(): void {
     for (const w of this.terms.values()) w.stop?.abort();
+    if (!this.resolverClosed) {
+      this.resolverClosed = true;
+      this.resolver?.close?.();
+    }
   }
 
   /** How many other terminals than the one resolved for run an agent of

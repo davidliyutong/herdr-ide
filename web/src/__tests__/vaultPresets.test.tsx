@@ -946,6 +946,7 @@ describe('panel env injection wiring (terminals and chat)', () => {
   it('always passes workspace on startup restore and terminal.run (even before vault loads), and warns when locked', async () => {
     const runCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
     const fakeConn = {
+      connected: true,
       start() {},
       subscribe() {},
       unsubscribe() {},
@@ -980,6 +981,7 @@ describe('panel env injection wiring (terminals and chat)', () => {
     useStore.setState({ readOnly: false, toasts: [] });
     const model = new TermModel(fakeConn as unknown as TermConnection);
     setTermModel(model);
+    model.subscribe('m1');
     fakeConn.onMessage?.({ t: 'backend', m: 'm1', state: 'ready', version: '1.0' });
     fakeConn.onMessage?.({
       t: 'snapshot',
@@ -1038,6 +1040,7 @@ describe('panel env injection wiring (terminals and chat)', () => {
     });
 
     const fakeConn = {
+      connected: true,
       start() {},
       subscribe() {},
       unsubscribe() {},
@@ -1050,6 +1053,7 @@ describe('panel env injection wiring (terminals and chat)', () => {
     };
     const model = new TermModel(fakeConn as unknown as TermConnection);
     setTermModel(model);
+    model.subscribe('m1');
     fakeConn.onMessage?.({ t: 'backend', m: 'm1', state: 'ready', version: '1.0' });
     fakeConn.onMessage?.({ t: 'snapshot', m: 'm1', terminals: [] });
     await new Promise((r) => setTimeout(r, 0));

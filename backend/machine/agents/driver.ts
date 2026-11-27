@@ -1,7 +1,6 @@
 // Table-driven driver contract for coding agents' on-disk session detection
-// and transcript location (sessions.ts). Adding a new agent format (such as
-// Pi-Agent, Gemini CLI, or future Native CLI + Native UI agents) is one driver
-// entry here instead of editing five switch statements across Resolver.
+// and transcript location (sessions.ts). Each supported transcript format
+// registers one SessionDriver entry in SESSION_DRIVERS.
 import type { FileHandle } from 'node:fs/promises';
 import { agyInfo, agyStamp, resolveAgy, searchAgy } from './agy.ts';
 import { claudeInfoOf, claudeStamp, claudeSubagents, resolveClaude, searchClaude } from './claude.ts';

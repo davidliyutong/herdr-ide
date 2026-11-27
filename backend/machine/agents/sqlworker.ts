@@ -64,6 +64,7 @@ export class ReadOnlySQLiteWorker {
   private pending: ((r: SQLReply) => void) | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private closed = false;
   private readonly timeoutMs: number;
   private readonly idleCloseMs: number;
 
@@ -79,8 +80,9 @@ export class ReadOnlySQLiteWorker {
     fn: (all: (sql: string, params?: (string | number)[]) => Promise<SQLRow[] | null>) => Promise<T>,
     signal?: AbortSignal,
   ): Promise<T | null> {
+    if (this.closed || signal?.aborted) return null;
     const run = this.chain.then(async (): Promise<T | null> => {
-      if (signal?.aborted) return null;
+      if (this.closed || signal?.aborted) return null;
       this.clearIdle();
       const opened = await this.send({ op: 'open', ...open }, signal);
       if (!opened.ok) {
@@ -89,11 +91,12 @@ export class ReadOnlySQLiteWorker {
       }
       try {
         return await fn(async (sql, params = []) => {
+          if (this.closed) return null;
           const r = await this.send({ op: 'all', sql, params }, signal);
           return r.ok ? (r.rows ?? []) : null;
         });
       } finally {
-        if (this.w) await this.send({ op: 'close' }, undefined).catch(() => {});
+        if (!this.closed && this.w) await this.send({ op: 'close' }, undefined).catch(() => {});
         this.armIdle();
       }
     });
@@ -102,6 +105,7 @@ export class ReadOnlySQLiteWorker {
   }
 
   private send(m: SQLRequest, signal?: AbortSignal): Promise<SQLReply> {
+    if (this.closed) return Promise.resolve({ ok: false, errcode: NO_ANSWER });
     if (m.op === 'close' && !this.w) return Promise.resolve({ ok: true });
     if (signal?.aborted) return Promise.resolve({ ok: false, errcode: NO_ANSWER });
     const w = (this.w ??= this.start());
@@ -136,7 +140,7 @@ export class ReadOnlySQLiteWorker {
 
   private armIdle(): void {
     this.clearIdle();
-    if (!this.w || this.idleCloseMs <= 0) return;
+    if (this.closed || !this.w || this.idleCloseMs <= 0) return;
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
       if (!this.pending) this.fail();
@@ -152,6 +156,7 @@ export class ReadOnlySQLiteWorker {
   }
 
   close(): void {
+    this.closed = true;
     this.fail();
   }
 

@@ -1615,6 +1615,66 @@ describe('the chat host', () => {
     await piAtt.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
     piAtt.close();
   });
+
+  test('closing a switched chat aborts in-flight tryNativeInject via st.abort.signal', async () => {
+    let injectStarted!: () => void;
+    const startedP = new Promise<void>((r) => (injectStarted = r));
+    let injectAborted = false;
+    let starts = 0;
+    const h = await host((t) => {
+      t.fake.nativeHistory = true;
+      const origStart = t.fake.start.bind(t.fake);
+      t.fake.start = async (p, sink, signal) => {
+        starts++;
+        const sess = await origStart(p, sink, signal);
+        if (starts === 2) {
+          sess.injectHistory = async (_msgs, sig) => {
+            injectStarted();
+            await new Promise<void>((_resolve, reject) => {
+              if (sig.aborted) {
+                injectAborted = true;
+                reject(new Error('aborted'));
+                return;
+              }
+              sig.addEventListener(
+                'abort',
+                () => {
+                  injectAborted = true;
+                  reject(new Error('aborted'));
+                },
+                { once: true },
+              );
+            });
+          };
+        }
+        return sess;
+      };
+    });
+
+    // Source chat with one completed turn.
+    const { chat: src, s: s1 } = await h.newChat();
+    const a1 = await h.attach(src.id, 0);
+    await a1.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+    await a1.command({ op: chat.CommandOp.Prompt, content: text('hello source') });
+    await s1.expect('prompt:hello source');
+    s1.say('r1', 'reply from source');
+    s1.endTurn('end_turn');
+    await a1.until((e) => e.t === chat.EventType.State && e.state === chat.State.Idle);
+    a1.close();
+
+    // Switch; launch enters tryNativeInject and blocks on injectHistory.
+    const sw = await h.request({ op: chat.Op.Switch, chat: src.id, targetKind: FAKE_KIND });
+    expect(sw.ok).toBe(true);
+    const dstId = sw.chat!.id;
+    await startedP;
+
+    // Closing the switched chat must abort injectHistory immediately instead of waiting for callTimeout.
+    const t0 = Date.now();
+    const closed = await h.request({ op: chat.Op.Close, chat: dstId });
+    expect(closed.ok).toBe(true);
+    expect(injectAborted).toBe(true);
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
 });
 
 void writeFileSync;

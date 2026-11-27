@@ -21,6 +21,7 @@ import { posix } from 'node:path';
 import type { FileHandle } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { SessionFrom } from '#shared/proto/agentproto/index.ts';
+import { ReadOnlySQLiteWorker } from './sqlworker.ts';
 import {
   CLAUDE_MAX_NAME,
   LIMITS,
@@ -1470,5 +1471,32 @@ describe('Antigravity (agy)', () => {
     expect((await e.r.locate('agy', sParent)).path).toBe(parentDb);
     // Worker closes cleanly without hanging.
     e.r.close();
+  });
+
+  test('ReadOnlySQLiteWorker.close() never respawns mid-withDb or on queued calls', async () => {
+    const e = newEnv();
+    const dbPath = posix.join(e.tempDir(), 'worker-close.db');
+    const db = new DatabaseSync(dbPath);
+    db.exec('CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (1);');
+    db.close();
+
+    const worker = new ReadOnlySQLiteWorker(2000, 10_000);
+    let secondRows: unknown = 'unset';
+    const first = worker.withDb({ path: dbPath }, async (all) => {
+      const r1 = await all('SELECT n FROM t');
+      expect(r1).toEqual([{ n: 1 }]);
+      expect(worker.running).toBe(true);
+      worker.close();
+      expect(worker.running).toBe(false);
+      secondRows = await all('SELECT n FROM t');
+      return secondRows;
+    });
+    const queued = worker.withDb({ path: dbPath }, async () => 'ran');
+    expect(await first).toBeNull();
+    expect(secondRows).toBeNull();
+    expect(await queued).toBeNull();
+    expect(worker.running).toBe(false);
+    expect(await worker.withDb({ path: dbPath }, async () => 'after')).toBeNull();
+    expect(worker.running).toBe(false);
   });
 });

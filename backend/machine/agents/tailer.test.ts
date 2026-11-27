@@ -62,6 +62,11 @@ describe('SafeFileTailer & openContainedRegular', () => {
       symlinkSync(outside.dir, dirLink);
       expect(openContainedRegular(posix.join(dirLink, 'secret.jsonl'), [root], uid)).toBeNull();
 
+      // Empty allowedRoots fails closed (never disables containment).
+      expect(openContainedRegular(good, [], uid)).toBeNull();
+      // Non-existent allowedRoots fails closed.
+      expect(openContainedRegular(good, [posix.join(t.dir, 'missing-root')], uid)).toBeNull();
+
       // Regular owned file inside root still opens cleanly.
       chmodSync(good, 0o600);
       const again = openContainedRegular(good, [root], uid);
@@ -105,6 +110,19 @@ describe('SafeFileTailer & openContainedRegular', () => {
       expect(tailer.drainAll(4096)).toEqual([]);
       writeFileSync(file, initial + '{"msg":"part-done"}\n', 'utf8');
       expect(tailer.drainAll(4096)).toEqual([{ msg: 'part-done' }]);
+
+      // drainAll enforces maxTotalBytes strictly without overshooting by a full maxReadBytes chunk.
+      const capFile = posix.join(t.dir, 'capped.jsonl');
+      writeFileSync(capFile, '{"n":1}\n{"n":2}\n{"n":3}\n{"n":4}\n', 'utf8');
+      const capped = new SafeFileTailer(capFile, {
+        allowedRoots: [t.dir],
+        uid: process.getuid!(),
+        maxReadBytes: 16,
+        maxLineBytes: 80,
+      });
+      expect(capped.drainAll(20)).toEqual([{ n: 1 }, { n: 2 }]);
+      expect(capped.position).toBe(20);
+      expect(capped.drainAll(20)).toEqual([{ n: 3 }, { n: 4 }]);
     } finally {
       t.cleanup();
     }

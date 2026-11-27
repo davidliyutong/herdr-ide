@@ -247,6 +247,7 @@ export function usageMachine(o: UsageMachineOptions = {}) {
       housekeep: (when) => scanner.housekeep(when.getTime()),
       close: () => {
         sessions.close();
+        resolver.close();
         cache.close();
       },
     };

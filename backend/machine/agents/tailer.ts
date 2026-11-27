@@ -1,6 +1,5 @@
-// Safe, bounded, incremental JSONL file tailing under explicit root directories.
-// Shared by read-only transcript/subagent observers (ACP Antigravity subagents,
-// and future Native CLI + Native UI live transcript tailers).
+// Safe, bounded, incremental JSONL file tailing under explicit root directories,
+// used by read-only transcript and subagent observers (such as ACP Antigravity subagents).
 //
 // Security guarantees:
 //   - Leaf path must be a regular user-owned file (never a symlink or FIFO).
@@ -79,10 +78,9 @@ export function openContainedRegular(path: string, allowedRoots: readonly string
     return null;
   }
 
-  if (allowedRoots.length > 0) {
-    const roots = resolveRoots(allowedRoots);
-    if (!roots.some((root) => isWithinRoot(real, root))) return null;
-  }
+  if (allowedRoots.length === 0) return null;
+  const roots = resolveRoots(allowedRoots);
+  if (!roots.some((root) => isWithinRoot(real, root))) return null;
 
   let fd = -1;
   try {
@@ -210,9 +208,11 @@ export class SafeFileTailer {
     }
   }
 
-  /** Reads at most one chunk (maxReadBytes) and parses all newly completed JSON objects. */
-  poll(): PollResult<Record<string, unknown>> {
-    const chunk = safeReadContainedChunk(this.path, this.offset, this.allowedRoots, this.uid, this.maxReadBytes);
+  /** Reads at most one chunk (capped at maxReadBytes and maxBytes) and parses all newly completed JSON objects. */
+  poll(maxBytes = this.maxReadBytes): PollResult<Record<string, unknown>> {
+    const cap = Math.min(this.maxReadBytes, maxBytes);
+    if (cap <= 0) return { items: [], bytesRead: 0, more: false };
+    const chunk = safeReadContainedChunk(this.path, this.offset, this.allowedRoots, this.uid, cap);
     if (!chunk || chunk.bytes.length === 0) {
       return { items: [], bytesRead: 0, more: false };
     }
@@ -226,7 +226,7 @@ export class SafeFileTailer {
     const out: Record<string, unknown>[] = [];
     let total = 0;
     while (total < maxTotalBytes) {
-      const res = this.poll();
+      const res = this.poll(Math.min(this.maxReadBytes, maxTotalBytes - total));
       if (res.items.length > 0) out.push(...res.items);
       total += res.bytesRead;
       if (!res.more || res.bytesRead === 0) break;

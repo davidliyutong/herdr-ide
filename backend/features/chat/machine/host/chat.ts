@@ -408,10 +408,10 @@ export class Chat {
    * fresh session with a pending handoff seed. Marks the chat non-fresh on
    * success so sleep/restart resumes the persisted thread with its injected
    * history intact. Leaves the seed in place on Unsupported or transient error. */
-  private async tryNativeInject(sess: Session, gen: number): Promise<boolean> {
-    if (this.nativeInjectUnsupported || typeof sess.injectHistory !== 'function') return false;
+  private async tryNativeInject(sess: Session, gen: number, abort?: AbortSignal): Promise<boolean> {
+    if (this.nativeInjectUnsupported || typeof sess.injectHistory !== 'function' || abort?.aborted) return false;
     const seed = await this.peekSeed();
-    if (!seed) return false;
+    if (!seed || abort?.aborted) return false;
     const hasPayload =
       seed.turns.length > 0 ||
       !!seed.originalRequest ||
@@ -428,7 +428,9 @@ export class Chat {
       await this.takeSeed();
       return true;
     }
-    const signal = AbortSignal.any([this.h.signal, AbortSignal.timeout(this.h.o.callTimeout)]);
+    const signals: AbortSignal[] = [this.h.signal, AbortSignal.timeout(this.h.o.callTimeout)];
+    if (abort) signals.push(abort);
+    const signal = AbortSignal.any(signals);
     try {
       await sess.injectHistory(messages, signal);
     } catch (e) {
@@ -1024,7 +1026,7 @@ export class Chat {
       // Complete native handoff injection BEFORE exposing this.sess and clearing
       // starting so an early prompt waits for st.done instead of duplicating inject_items.
       if (resume === '' && typeof sess.injectHistory === 'function') {
-        await this.tryNativeInject(sess, st.gen);
+        await this.tryNativeInject(sess, st.gen, st.abort.signal);
         if (this.gen !== st.gen || this.deleted) {
           st.err = perr(chat.Code.Ended, "the chat's start was cancelled");
           await this.h.endLate(sess);
