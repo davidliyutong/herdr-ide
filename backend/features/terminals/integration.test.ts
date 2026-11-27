@@ -6,9 +6,9 @@
 // ts-term, whose node and terminal core are stopped at the end; skipped
 // without HC_TEST_BIN.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { CHAT_HOST_NAME, HIDDEN_CHAT_HOST, HIDDEN_LABEL, Op } from '#shared/proto/agentproto/index.ts';
@@ -40,6 +40,8 @@ describe.skipIf(!HC)('a real herdr-core', () => {
   let feature: TerminalsFeature;
   let machines: Machines;
   let stop: () => Promise<void>;
+  let workspaceEnvHook:
+    ((ws: string) => Promise<{ env: Record<string, string>; names: string[]; presets: string[] } | undefined>) | undefined;
   const clients: TestClient[] = [];
   const client = async () => {
     const c = await TestClient.open(tc);
@@ -88,7 +90,10 @@ describe.skipIf(!HC)('a real herdr-core', () => {
         platform: `${os}/${arch}`,
       }),
     });
-    feature = terminalsFeature({ hc: async () => hc });
+    feature = terminalsFeature({
+      hc: async () => hc,
+      workspaceEnv: async (_m, ws) => workspaceEnvHook?.(ws),
+    });
     tc = testHub({ features: [feature], machines, settings: { 'terminal.sshEnv': true, 'plugins.agents.enabled': true } });
     stop = running(tc.hub);
     await waitFor('the local machine', () => machines.get(M)!.ready, 30_000);
@@ -369,4 +374,132 @@ while :; do sleep 1; done
       if (m.type === 'agent' && m.terminal === addr && (m.data as Record<string, unknown>).agent === null) break;
     }
   }, 120_000);
+
+  test('ephemeral vault env: never written to terminals.json on disk and never reused on kept-terminal recovery', async () => {
+    const SECRET_NAME = 'TEST_VAULT_SECRET';
+    const SECRET_VAL = 'sentinel-vault-9f8e7d6c-4b3a2918';
+    const PUBLIC_VAL = 'client-public-keep-check';
+    workspaceEnvHook = async (ws) =>
+      ws === 'ws-vault' ? { env: { [SECRET_NAME]: SECRET_VAL }, names: [SECRET_NAME], presets: ['p-vault'] } : undefined;
+
+    const scanTreeFor = (dir: string, skipFile: string, needles: string[]): string[] => {
+      const hits: string[] = [];
+      for (const name of readdirSync(dir)) {
+        const full = join(dir, name);
+        if (full === skipFile) continue;
+        const st = lstatSync(full);
+        if (st.isDirectory()) hits.push(...scanTreeFor(full, skipFile, needles));
+        else if (st.isFile()) {
+          const buf = readFileSync(full, 'latin1');
+          for (const n of needles) if (buf.includes(n)) hits.push(`${full}:${n}`);
+        }
+      }
+      return hits;
+    };
+
+    try {
+      const c = await client();
+      await c.ready(M);
+      const runReply = await c.call(
+        1,
+        'terminal.run',
+        {
+          keep: true,
+          workspace: 'ws-vault',
+          argv: ['/bin/sh'],
+          cwd: '/',
+          size: { cols: 80, rows: 24 },
+          env: { CLIENT_PUBLIC: PUBLIC_VAL, BUN_BE_BUN: '1' },
+        },
+        M,
+      );
+      expect(runReply.error).toBeUndefined();
+      const createdRec = runReply.result as { address: string; argv?: string[] };
+      const addr = createdRec.address;
+      expect(createdRec.argv).toEqual(['/bin/sh']);
+
+      c.send({ t: 'attach', rid: 2, m: M, terminal: addr, cols: 80, rows: 24 });
+      const sid = (await c.until('attached', 10_000)).s as number;
+      c.bin(sid, FrameKind.Data, `printf 'init=%s|%s|%s|%s\\n' "$$" "$${SECRET_NAME}" "$CLIENT_PUBLIC" "$BUN_BE_BUN"\r`);
+      let out = '';
+      const initRe = /init=(\d+)\|sentinel-vault-9f8e7d6c-4b3a2918\|client-public-keep-check\|1/;
+      while (!initRe.test(out)) {
+        const m = await c.until('bin', 10_000);
+        if (m.kind === FrameKind.Data) {
+          out += m.data as string;
+          c.send({ t: 'ack', s: sid, n: Buffer.byteLength(m.data as string, 'latin1') });
+        }
+      }
+      const initialPid = Number(initRe.exec(out)![1]);
+      expect(initialPid).toBeGreaterThan(1);
+
+      // `execve` replaced `term-env` in place: herdr-core's tracked PID is the shell itself.
+      const gotRec = (await c.call(3, 'terminal.get', { terminal: addr }, M)).result as { pid?: number; argv?: string[] };
+      expect(gotRec.pid).toBe(initialPid);
+      expect(gotRec.argv).toEqual(['/bin/sh']);
+
+      // Locate herdr-core's persisted terminals.json and verify it wrote CLIENT_PUBLIC,
+      // while neither SECRET_NAME nor SECRET_VAL exists anywhere in the temporary home!
+      const hcRep = await machines.get(M)!.request({ op: Op.HC, action: 'status' });
+      const session = hcRep.hc!.session;
+      const hcSocket = hcRep.hc!.socket;
+      const terminalsJsonPath = join(home, '.local', 'state', 'herdr-core', session, 'terminals.json');
+      expect(existsSync(terminalsJsonPath)).toBe(true);
+      const rawTerminalsJson = readFileSync(terminalsJsonPath, 'utf8');
+      expect(rawTerminalsJson).toContain(PUBLIC_VAL);
+      expect(rawTerminalsJson).not.toContain(SECRET_VAL);
+      expect(rawTerminalsJson).not.toContain(SECRET_NAME);
+      expect(scanTreeFor(home, agentBin, [SECRET_VAL, SECRET_NAME])).toEqual([]);
+
+      // Replaying the consumed token recorded in herdr-core's internal argv fails closed (126).
+      const tokenMatch = /"([0-9a-f]{48})"/.exec(rawTerminalsJson);
+      expect(tokenMatch).not.toBeNull();
+      const replay = spawnSync(agentBin, ['term-env', tokenMatch![1]], {
+        env: { ...process.env, HOME: home, HC_TERMINAL_SOCKET: hcSocket },
+        encoding: 'utf8',
+      });
+      expect(replay.status).toBe(126);
+      expect(replay.stdout).toBe('');
+      expect(replay.stderr).not.toContain(SECRET_VAL);
+
+      // Lock/unlink the vault preset, then crash the shell (SIGKILL) so herdr-core's
+      // `keep: true` recovery spawns a replacement shell from `restart_env`.
+      workspaceEnvHook = undefined;
+      process.kill(initialPid, 'SIGKILL');
+
+      for (const deadline = Date.now() + 15_000; ;) {
+        const ev = await c.until('event', Math.max(100, deadline - Date.now()));
+        if (ev.terminal === addr && ev.type === 'restarted') {
+          expect(JSON.stringify(ev)).not.toContain(tokenMatch![1]);
+          break;
+        }
+      }
+
+      // Attach to the replacement shell on the same kept terminal address:
+      // CLIENT_PUBLIC stays from restart_env, while the vault secret is MISSING.
+      c.send({ t: 'attach', rid: 4, m: M, terminal: addr, cols: 80, rows: 24 });
+      const sid2 = (await c.until('attached', 10_000)).s as number;
+      c.bin(sid2, FrameKind.Data, `printf 'after_sigkill=%s|%s\\n' "\${${SECRET_NAME}:-MISSING}" "\${CLIENT_PUBLIC:-MISSING}"\r`);
+      out = '';
+      while (!out.includes(`after_sigkill=MISSING|${PUBLIC_VAL}`)) {
+        const m = await c.until('bin', 10_000);
+        if (m.bin === sid2 && m.kind === FrameKind.Data) {
+          out += m.data as string;
+          c.send({ t: 'ack', s: sid2, n: Buffer.byteLength(m.data as string, 'latin1') });
+        }
+      }
+      expect(out).not.toContain(SECRET_VAL);
+
+      // Also restart herdr-core via the hub route so state reloads from terminals.json
+      // on disk, confirming nothing on disk reintroduces the secret.
+      expect((await tc.request('POST', `/api/m/${M}/hc/restart`)).status).toBe(200);
+      while ((await c.until('backend', 15_000)).state !== 'ready');
+      await c.until('snapshot', 15_000);
+      expect(scanTreeFor(home, agentBin, [SECRET_VAL, SECRET_NAME])).toEqual([]);
+
+      await c.call(10, 'terminal.kill', { terminal: addr }, M);
+    } finally {
+      workspaceEnvHook = undefined;
+    }
+  }, 90_000);
 });
