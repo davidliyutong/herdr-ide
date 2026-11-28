@@ -184,6 +184,16 @@ export function stickToEnd(scrollTop: number, scrollHeight: number, clientHeight
   return scrollHeight - scrollTop - clientHeight <= END_SLACK;
 }
 
+/** Whether a list that held at its end still does after a scroll: a move up
+ * leaves it however small (a slow swipe moves a few pixels at a time, and
+ * new output would pull it back before it got past END_SLACK), but not the
+ * browser's clamp when the content got shorter, which leaves it at its very
+ * end; a list away from its end comes back within END_SLACK of it. */
+export function holdsEnd(wasAtEnd: boolean, movedUp: boolean, scrollTop: number, scrollHeight: number, clientHeight: number): boolean {
+  if (wasAtEnd && movedUp) return scrollHeight - scrollTop - clientHeight <= 1;
+  return stickToEnd(scrollTop, scrollHeight, clientHeight);
+}
+
 const sourceKeys = new WeakMap<ChatSource, number>();
 let nextKey = 0;
 function sourceKey(s: ChatSource): number {
@@ -316,6 +326,13 @@ export function Conversation({
   /** An item to show and focus once it is drawn. */
   const reveal = useRef<string | undefined>(undefined);
   const [away, setAway] = useState(() => (initialSaved ? !initialSaved.atEnd : false));
+  /** The list's scrollTop at its last scroll event, to tell a move up. */
+  const lastTop = useRef<number | undefined>(undefined);
+  /** Where a touch was, to tell a swipe that moves the list up. */
+  const touchY = useRef<number | undefined>(undefined);
+  /** While the user reads away from the end, the first item shown then: the
+   * items that come do not push it out of the window of items drawn. */
+  const [pinned, setPinned] = useState<string | undefined>(undefined);
   const [limit, setLimit] = useState(() => Math.max(SHOWN_ITEMS, initialSaved?.limit ?? SHOWN_ITEMS));
   const [earlier, setEarlier] = useState<'idle' | 'loading' | 'none'>('idle');
   const [rewindTarget, setRewindTarget] = useState<{ seq: number; nonce: number } | undefined>(undefined);
@@ -581,20 +598,58 @@ export function Conversation({
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el || !shownRef.current || el.clientHeight === 0 || el.scrollHeight === 0) return;
+    const movedUp = lastTop.current !== undefined && el.scrollTop < lastTop.current - 0.5;
+    lastTop.current = el.scrollTop;
     if (restoreRef.current) {
       // Ignore the browser's async scroll notification from our own restore assignment;
       // any other scrollTop change means the user scrolled manually.
       if (lastRestoredTop.current !== undefined && Math.abs(el.scrollTop - lastRestoredTop.current) <= 2) return;
       clearRestore();
     }
-    const end = stickToEnd(el.scrollTop, el.scrollHeight, el.clientHeight);
+    const end = holdsEnd(atEnd.current, movedUp, el.scrollTop, el.scrollHeight, el.clientHeight);
     atEnd.current = end;
     setAway(!end);
     recordScroll(el, end);
   };
 
-  const hidden = Math.max(0, conv.items.length - limit);
+  /** The user moves the list up (a wheel, a swipe): it leaves its end at
+   * once, before output that comes before the scroll event pulls it back.
+   * Nothing when there is nothing above to go to. */
+  const leaveEnd = () => {
+    const el = scrollRef.current;
+    if (!el || !atEnd.current || el.scrollTop <= 0) return;
+    atEnd.current = false;
+    setAway(true);
+  };
+  const onWheel = (e: React.WheelEvent) => {
+    clearRestore();
+    if (e.deltaY < 0 && !e.ctrlKey) leaveEnd();
+  };
+  const onTouchStart = (e: React.TouchEvent) => {
+    clearRestore();
+    touchY.current = e.touches[0]?.clientY;
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const y = e.touches[0]?.clientY;
+    // A finger moving down moves the list up.
+    if (y !== undefined && touchY.current !== undefined && y > touchY.current) leaveEnd();
+    touchY.current = y;
+  };
+
+  // The window of items drawn: the last `limit`, but while the user reads
+  // away from the end not past the item first shown then, which new items
+  // would otherwise push out from under the reader.
+  const pinnedAt = pinned === undefined ? -1 : conv.items.findIndex((it) => it.id === pinned);
+  const trimmed = Math.max(0, conv.items.length - limit);
+  const hidden = pinnedAt >= 0 ? Math.min(trimmed, pinnedAt) : trimmed;
   const visibleItems = hidden ? conv.items.slice(hidden) : conv.items;
+  const firstShown = visibleItems[0]?.id;
+  useLayoutEffect(() => {
+    // Away from the end the first item shown stays (earlier ones shown since
+    // move it up); at the end the window follows the newest again.
+    const next = away ? firstShown : undefined;
+    if (next !== pinned) setPinned(next);
+  }, [away, firstShown, pinned]);
 
   const focusReveal = useCallback(() => {
     if (!shownRef.current) return;
@@ -738,9 +793,10 @@ export function Conversation({
           aria-label={t('conversation.list', { agent })}
           tabIndex={0}
           onScroll={onScroll}
-          onWheel={clearRestore}
+          onWheel={onWheel}
           onPointerDown={clearRestore}
-          onTouchStart={clearRestore}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
           onKeyDown={clearRestore}
         >
           <div ref={listRef} className="conv-list">

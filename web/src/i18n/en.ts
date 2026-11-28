@@ -954,6 +954,8 @@ export const en = {
   'plugins.transfers.description': 'Files dropped onto panes and files downloaded from machines, with their progress in the status bar.',
   'settings.section.plugins': 'Plugins',
   'command.view.togglePanel': 'Toggle Right Sidebar',
+  'command.view.panel.next': 'Next Sidebar Tool',
+  'command.view.panel.previous': 'Previous Sidebar Tool',
   // files plugin
   'command.view.panel.files': 'Show Explorer',
   'settings.plugins.files.enabled': 'File explorer',

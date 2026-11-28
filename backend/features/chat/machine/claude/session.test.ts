@@ -216,7 +216,7 @@ describe('the program', () => {
     30_000,
   );
 
-  test('the start refuses what is no session it can run, before running anything, and a model initialize does not list', async () => {
+  test('the start refuses what is no session it can run, before running anything', async () => {
     const edits: Record<string, (p: StartParams) => void> = {
       'relative program': (p) => (p.argv = ['claude']),
       'no program': (p) => (p.argv = []),
@@ -232,8 +232,36 @@ describe('the program', () => {
       expect(`${name}: ${err?.code}`).toBe(`${name}: ${Code.BadRequest}`);
       expect(r.log().trim()).toBe('');
     }
-    const { err } = await start(initLines(), { edit: (p) => (p.options.model = 'claude-nonesuch-1') });
-    expect(err?.code).toBe(Code.BadRequest);
+  }, 30_000);
+
+  test('a model initialize does not list (withdrawn): the next of the chat’s models it lists, else the program’s own', async () => {
+    // The first the program lists of Options.model, then Options.models.
+    {
+      const { r, s } = await started(initLines(), {
+        edit: (p) => (p.options = { model: 'claude-nonesuch-1', models: ['claude-gone-2', 'sonnet', 'haiku'] }),
+      });
+      await r.until(s, -1);
+      await Bun.sleep(50);
+      expect(r.argvs()[0]).toContain('--model=claude-nonesuch-1');
+      const wrote = r.wrote().map((w) => JSON.stringify(w.request ?? {}));
+      expect(wrote).toContain(JSON.stringify({ subtype: 'set_model', model: 'claude-sonnet-5-5' }));
+      expect(config(r)[OPTION_MODEL]).toBe('sonnet');
+    }
+    // None listed: the launch's --model is undone, the program's own model is the chat's.
+    {
+      const { r, s, err } = await start(initLines(), {
+        edit: (p) => (p.options = { model: 'claude-nonesuch-1', models: ['claude-gone-2'] }),
+      });
+      expect(err).toBeUndefined();
+      await r.until(s!, -1);
+      await Bun.sleep(50);
+      const sets = r
+        .wrote()
+        .map((w) => w.request as Record<string, unknown> | undefined)
+        .filter((q) => q?.subtype === 'set_model');
+      expect(sets).toEqual([{ subtype: 'set_model' }]);
+      expect(config(r)[OPTION_MODEL]).not.toBe('claude-nonesuch-1');
+    }
   }, 30_000);
 
   test("the chat's options at the start: an alias pinned to its model, an effort; the configuration and capabilities", async () => {
@@ -1273,6 +1301,101 @@ describe('background tasks, subagents & stopTask (#10)', () => {
     expect(r.host.chat.tasks).toBeUndefined();
     expect(r.eventsOf(EventType.Update).some((e) => e.item === 'toolu_old')).toBe(false);
   });
+
+  test('a foreground task ends with its tool call’s result when its bookend never comes; one moved to the background meanwhile comes back with the level', async () => {
+    const bash = (id: string, command: string) =>
+      outL({
+        type: 'assistant',
+        parent_tool_use_id: null,
+        message: { id: 'msg_' + id, role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] },
+      });
+    const returned = (id: string, content: string) =>
+      outL({
+        type: 'user',
+        parent_tool_use_id: null,
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content, is_error: false }] },
+      });
+    const fg = (task: string, tool: string, description: string) =>
+      outL({
+        type: 'system',
+        subtype: 'task_started',
+        task_id: task,
+        tool_use_id: tool,
+        task_type: 'local_bash',
+        description,
+        is_backgrounded: false,
+      });
+    const { r, s } = await started([
+      ...initLines(),
+      userIn('run'),
+      stateOut('running'),
+      // A long command: its task starts in the foreground, and the program
+      // drops its task_notification (a full task event queue).
+      bash('toolu_fg', 'bun test'),
+      fg('task-fg', 'toolu_fg', 'bun test'),
+      returned('toolu_fg', '1620 pass'),
+      // One moved to the background whose placeholder result comes before
+      // the task_updated that says so: the level lists it.
+      bash('toolu_bg', 'grep -a x big'),
+      fg('task-bg', 'toolu_bg', 'grep -a x big'),
+      returned('toolu_bg', 'moved to the background'),
+      outL({
+        type: 'system',
+        subtype: 'background_tasks_changed',
+        tasks: [{ task_id: 'task-bg', task_type: 'local_bash', description: 'grep -a x big' }],
+      }),
+      resultOut(),
+      stateOut('idle'),
+    ]);
+    const seen: Array<string[] | undefined> = [];
+    const update = r.host.update.bind(r.host);
+    r.host.update = (fn) => {
+      update(fn);
+      seen.push(r.host.chat.tasks?.map((t) => t.id));
+    };
+    await r.until(s, 2);
+    await s.prompt({ content: text('run'), message: 'm1', clientId: 'c1', recorded: true }, sig());
+    await r.until(s, -1);
+    // The running tasks, each change once: the first ends with its result,
+    // the second with its, until the level brings it back.
+    expect(seen.filter((x, i) => JSON.stringify(x) !== JSON.stringify(i === 0 ? undefined : seen[i - 1]))).toEqual([
+      ['task-fg'],
+      undefined,
+      ['task-bg'],
+      undefined,
+      ['task-bg'],
+    ]);
+    expect(r.host.chat.tasks?.map((t) => ({ id: t.id, bg: t.backgrounded, tool: t.toolCallId }))).toEqual([
+      { id: 'task-bg', bg: true, tool: 'toolu_bg' },
+    ]);
+  }, 30_000);
+
+  test('stopping a task the program no longer runs (its end unheard) clears it from the tasks', async () => {
+    const { r, s } = await started([
+      ...initLines(),
+      userIn('run'),
+      stateOut('running'),
+      outL({
+        type: 'system',
+        subtype: 'background_tasks_changed',
+        tasks: [{ task_id: 'ghost', task_type: 'local_bash', description: 'npm run dev' }],
+      }),
+      resultOut(),
+      stateOut('idle'),
+      inL({ type: 'control_request', request_id: 'req_stop', request: { subtype: 'stop_task', task_id: 'ghost' } }),
+      outL({
+        type: 'control_response',
+        response: { subtype: 'error', request_id: 'req_stop', error: 'No task found with ID: ghost' },
+      }),
+    ]);
+    await r.until(s, 2);
+    await s.prompt({ content: text('run'), message: 'm1', clientId: 'c1', recorded: true }, sig());
+    // Line 7: the program waits for the stop.
+    await r.until(s, 7);
+    expect(r.host.chat.tasks?.map((t) => t.id)).toEqual(['ghost']);
+    await s.stopTask('ghost', sig());
+    expect(r.host.chat.tasks).toBeUndefined();
+  }, 30_000);
 
   test('tracks background_tasks_changed, task_started without tool_use_id, task_updated is_backgrounded/error, cancelled on stopped, and stopTask()', async () => {
     const { r, s } = await started([

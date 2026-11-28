@@ -558,6 +558,24 @@ describe('the ACP adapter', () => {
     expect(h.log.lines.join('\n')).toContain('no model "no-such-model" to start with');
   });
 
+  test("a chat's models: the first the agent offers of Options.model, then Options.models (one withdrawn is passed over)", async () => {
+    const h = new Harness();
+    const steps = h.rec('kimi', '01-initialize').concat(h.rec('kimi', '02-session-new'));
+    const sid = `"sessionId":"${SID}"`;
+    steps.push(
+      msgLine(
+        'out',
+        `{"jsonrpc":"2.0","id":3,"method":"session/set_config_option","params":{${sid},"configId":"model","value":"kimi-code/k3"}}`,
+      ),
+      msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{}}`),
+    );
+    const p = h.params(steps);
+    p.options = { model: 'kimi-code/withdrawn', models: ['kimi-code/also-gone', 'kimi-code/k3', 'kimi-code/k3-256k'] };
+    const s = await h.start(p);
+    await h.close(s);
+    expect(optionOf(h.host.chat.config ?? [], chat.Category.Model)?.currentValue).toBe('kimi-code/k3');
+  });
+
   test("an agent's session modes without a configuration option of category mode: an option of the chat's own, set by session/set_mode", async () => {
     const h = new Harness();
     const steps = h.rec('kimi', '01-initialize').concat(h.rec('kimi', '02-session-new'));
@@ -595,6 +613,14 @@ describe('the ACP adapter', () => {
       const res = m.result as Record<string, Record<string, unknown>> | undefined;
       if (!res?.agentCapabilities) return false;
       res.agentCapabilities.promptCapabilities = {};
+      return true;
+    });
+    // An agent without a /compact command: the recording advertises one in an
+    // update after session/new's answer, which a start may or may not have seen.
+    edit(steps, (m) => {
+      const u = (m.params as { update?: { sessionUpdate?: string; availableCommands?: { name: string }[] } } | undefined)?.update;
+      if (u?.sessionUpdate !== 'available_commands_update' || !u.availableCommands) return false;
+      u.availableCommands = u.availableCommands.filter((c) => c.name !== 'compact');
       return true;
     });
     const s = await h.start(h.params(steps));

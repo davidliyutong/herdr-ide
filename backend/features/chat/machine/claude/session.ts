@@ -660,13 +660,24 @@ export class ClaudeSession implements Session {
     this.cfg.models = modelsOf(init.models);
     const version = str(init.claude_code_version);
     const commands = slashCommands(init.commands);
-    const want = this.cfg.model || this.p.options.model || '';
-    if (want !== '') {
-      const m = this.cfg.find(want);
-      if (!m) throw badRequest('unknown model ' + want);
+    // The model set last, else the first of the chat's the program lists; a
+    // model it no longer lists is passed over, and with none of them the
+    // program's own default stays (the launch's --model undone).
+    const wants = this.cfg.model ? [this.cfg.model] : chat.startModels(this.p.options);
+    const m = wants.map((w) => this.cfg.find(w)).find((x) => x !== undefined);
+    if (wants.length > 0 && !this.cfg.find(wants[0]!))
+      this.log(
+        `claude: the model ${JSON.stringify(wants[0])} is not offered; ${m ? JSON.stringify(m.value) : "the program's own"} is used`,
+      );
+    if (m) {
       this.cfg.model = m.value;
-      if (m.resolved !== '' && m.resolved !== this.launchModel) await this.call(run, 'set_model', (q) => q.setModel(m.resolved), signal);
-      this.modelArg = firstOf(m.resolved, m.value);
+      const arg = firstOf(m.resolved, m.value);
+      if (arg !== this.launchModel) await this.call(run, 'set_model', (q) => q.setModel(arg), signal);
+      this.modelArg = arg;
+    } else if (this.launchModel !== '') {
+      this.cfg.model = '';
+      await this.call(run, 'set_model', (q) => q.setModel(undefined), signal);
+      this.modelArg = '';
     }
     const effort = this.cfg.effort;
     if (effort !== EFFORT_DEFAULT) {
@@ -1091,7 +1102,27 @@ export class ClaudeSession implements Session {
       if (h.toolCallId !== '') e.item = h.toolCallId;
       if (entryUuid !== '') e.entryUuid = entryUuid;
       this.emit(e);
+      const status = isObj(ev.update) ? str(ev.update.status) : '';
+      if (h.toolCallId !== '' && (status === 'completed' || status === 'failed')) this.toolReturned(h.toolCallId);
     }
+  }
+
+  /** A tool call returned its result: the tasks it ran in the foreground
+   * (the call blocked on them) are over, whether or not their
+   * task_notification came: the program queues task events in a bounded
+   * queue that drops bookends when full, and no level signal lists
+   * foreground tasks. A task moved to the background returned at once and
+   * stays; should its result come before the task_updated that says so,
+   * background_tasks_changed (the level of background tasks) lists it again.
+   * The task-to-call map stays for the frames still to come. */
+  private toolReturned(tool: string): void {
+    let ended = false;
+    for (const [id, t] of this.liveTasks) {
+      if (t.toolCallId !== tool || t.backgrounded) continue;
+      this.liveTasks.delete(id);
+      ended = true;
+    }
+    if (ended) this.tasksChanged();
   }
 
   private notice(name: string, params?: unknown, entryUuid = ''): void {
@@ -1902,7 +1933,22 @@ export class ClaudeSession implements Session {
     if (!taskId || Buffer.byteLength(taskId) > 128) throw badRequest('no such task');
     const run = this.current();
     signal.throwIfAborted();
-    await this.call(run, 'stop_task', (q) => q.stopTask(taskId), signal);
+    // The program refuses to stop a task it does not have running (its
+    // StopTaskError: not_found, or not_running once it ended); the ids asked
+    // for are those it gave, so a refusal means the task tracked is over and
+    // its end was not heard (a dropped bookend). No answer in time, an abort
+    // or the program's end are errors as for any call.
+    let refused: unknown;
+    await this.call(run, 'stop_task', (q) => q.stopTask(taskId).catch((e: unknown) => void (refused = e)), signal);
+    if (refused === undefined) return;
+    if (run.silent || this.ended) throw gone();
+    this.log(`claude: stop_task ${JSON.stringify(taskId)} refused (${messageOf(refused)}); the task is no longer running`);
+    this.taskEnded(taskId);
+  }
+
+  /** A task the program no longer runs leaves the tasks the chat lists. */
+  private taskEnded(taskId: string): void {
+    if (this.liveTasks.delete(taskId)) this.tasksChanged();
   }
 
   /** Compacts the conversation: the /compact command, a turn of its own.

@@ -19,7 +19,7 @@ Plugin `search`: `web/src/plugins/search`, `backend/features/search/hub.ts` (`PO
 The action `search` checks its parameters (`dir` expanded as the explorer's paths are) and runs one of two engines with the same result shape:
 
 - **ripgrep** (`machine/rg.ts`): `rg` on the agent's `PATH`, else the copy a code-server the agent installed ships. It runs with `--json --no-config`, the query after `--`, globs as `--glob=<value>`, in a session of its own whose process group is killed when the search ends; it respects ignore files, skips binary files and follows no links.
-- **The walker** (`machine/walk.ts`) otherwise: regular files up to a size limit, opened without blocking, binary ones skipped, no links followed; the query is a JavaScript regular expression or quoted text, and only the top-level `.gitignore` is honored.
+- **The walker** (`machine/walk.ts`) otherwise: regular files up to a size limit, opened without blocking, binary ones skipped, no links followed; the query is a regular expression in RE2's syntax (re2js; ripgrep's own engine is of the same family: no backreferences or lookaround, which are refused as `bad_regex`) or quoted text, matched in time linear in the text, as are the include and exclude globs, so no query or pattern can stall the node; only the top-level `.gitignore` is honored.
 
 Both skip version control folders and `node_modules` and read globs alike (`machine/glob.ts`). A result lists files by path with their matching lines, a bounded preview and match ranges in UTF-16 code units, as Monaco counts them (`machine/excerpt.ts`). A search stops at `maxResults` matches, a time limit or (the walker) a number of files, answering what it found with `truncated`, `reason` and the `engine` that ran. Searches per machine are limited (`busy` beyond); closing the hub's stream stops one.
 
@@ -44,10 +44,10 @@ The hub's route only reads: it is not mutating, so read-only mode searches and n
 
 ## Security
 
-A search reads what the agent's user can read and writes nothing. ripgrep runs without a shell, with the query and patterns as values, never options, and without a configuration file (`--no-config`, `RIPGREP_CONFIG_PATH` removed), so no preprocessor (`--pre`) or other option comes from the request or the machine. See [SECURITY.md](../../SECURITY.md).
+A search reads what the agent's user can read and writes nothing. ripgrep runs without a shell, with the query and patterns as values, never options, and without a configuration file (`--no-config`, `RIPGREP_CONFIG_PATH` removed), so no preprocessor (`--pre`) or other option comes from the request or the machine. The walker, which runs in the node that serves the terminals, matches queries and globs with RE2 (re2js), in linear time: a read-only user's search cannot hold its thread. See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-- `backend/features/search/machine.test.ts`: the same searches with the walker and, where `rg` is installed, ripgrep; recorded `--json` output; globs, previews, limits, parameter checks.
+- `backend/features/search/machine.test.ts`: the same searches with the walker and, where `rg` is installed, ripgrep; recorded `--json` output; globs, previews, limits, parameter checks; expressions and globs that backtrack catastrophically in JavaScript finish quickly in the walker, and backreferences and lookaround are refused.
 - `backend/features/search/search.test.ts`: the route, read-only, an offline machine, the timeout.
 - `web/src/__tests__/search.test.ts` (rows, params, the followed folder, aborting, opening a match); `filesEditor.test.ts` (the editor at the requested line).

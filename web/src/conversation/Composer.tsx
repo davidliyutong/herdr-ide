@@ -42,7 +42,8 @@ import {
   Zap,
 } from 'lucide-react';
 import { APP_SLUG } from '../brand';
-import { FilePicker } from '../components/FilePicker';
+import { FilePicker, relativePosix } from '../components/FilePicker';
+import { carriesPaths, draggedPaths, takesPaths } from '../pathsDrag';
 import { useDismiss } from '../components/useDismiss';
 import { FileIcon } from '../fileIcons';
 import { t, type MessageKey } from '../i18n';
@@ -855,7 +856,18 @@ export function Composer({
     addFiles(list);
   };
   const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  // Rows of the file explorer of the chat's machine attach as files, as the
+  // file picker attaches them (folders too: the agent reads them where they
+  // are); rows of another machine are refused.
+  const takesRows = (e: DragEvent) => !readOnly && !!base?.m && takesPaths(e.dataTransfer, base.m);
   const onDragOver = (e: DragEvent<HTMLDivElement>) => {
+    if (carriesPaths(e.dataTransfer)) {
+      if (!takesRows(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setDragging(true);
+      return;
+    }
     if (readOnly || !hasFiles(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = caps.images ? 'copy' : 'none';
@@ -863,6 +875,21 @@ export function Composer({
   };
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
     setDragging(false);
+    if (carriesPaths(e.dataTransfer)) {
+      if (!takesRows(e)) return;
+      e.preventDefault();
+      const rows = draggedPaths(e.dataTransfer, base!.m);
+      if (!rows) return;
+      const dirs = new Set(rows.dirs);
+      const root = base!.dir || '/';
+      addFileChips(
+        rows.paths.map((path) =>
+          dirs.has(path) ? { path, label: relativePosix(root, path), isDir: true } : { path, label: relativePosix(root, path) },
+        ),
+      );
+      inputRef.current?.focus();
+      return;
+    }
     if (readOnly || !hasFiles(e)) return;
     e.preventDefault();
     addFiles(Array.from(e.dataTransfer.files));
@@ -1130,7 +1157,11 @@ export function Composer({
   }, [rawModel, modelPicker?.visibleModels]);
   const effort = configOf(chat, CATEGORY_THOUGHT_LEVEL);
   const mode = configOf(chat, CATEGORY_MODE);
-  const setConfig = (id: string, value: string) => run(() => source.setConfig(id, value));
+  const setConfig = (id: string, value: string) =>
+    run(async () => {
+      await source.setConfig(id, value);
+      if (id === rawModel?.id) modelPicker?.onModelChosen?.(value);
+    });
   const fullBlocked: FullBlocked = readOnly ? 'readOnly' : allowFull ? undefined : 'off';
   const canCancelQueued = caps.cancelQueued && !readOnly;
   const canSteerQueued = !!source.steerQueued && !readOnly && (!!caps.steer || caps.cancelQueued);
@@ -1330,7 +1361,7 @@ export function Composer({
           <div className="conv-file-chips" role="list" aria-label={t('conversation.attach.filesLabel')}>
             {attachedFiles.map((f) => (
               <span key={f.path} className="conv-file-chip" role="listitem" title={f.path}>
-                <FileIcon name={baseNameOf(f.label)} kind="file" />
+                <FileIcon name={baseNameOf(f.label)} kind={f.isDir ? 'dir' : 'file'} />
                 <span className="conv-file-chip-label ellipsis">{f.label}</span>
                 {!readOnly && (
                   <button

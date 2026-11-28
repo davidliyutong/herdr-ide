@@ -11,6 +11,7 @@ import { TermConnection } from '../term/connection';
 import { TerminalStore } from '../term/store';
 import { isLive, type BackendState, type TerminalRecord } from '../term/protocol';
 import * as L from '../term/layout';
+import { recentPanes } from '../paneHistory';
 import { nextPlace, settled, SETTLE_MS, type Place } from '../term/place';
 import { currentDisplay } from '../appearance';
 import { t } from '../i18n';
@@ -519,6 +520,8 @@ export class TermModel {
       const placed = change(L.createWorkspace(before, L.newId(), ''));
       if (placed.workspaces.some((w) => w.tabs.length)) after = placed;
     }
+    // A closed tab that was shown gives way to the one the user saw last.
+    after = L.showRecentTab(before, after, recentPanes(m));
     if (L.sameLayout(after, before)) return false;
     this.layouts.set(m, after);
     if (after.workspaces.some((w) => w.tabs.length > 0)) this.hadLayout.add(m);

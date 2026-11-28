@@ -7,6 +7,7 @@ import * as chat from '#shared/proto/chatproto/index.ts';
 import { AgentProcesses } from '../agentproc.ts';
 import { AGENT_SESSION_VARS, Environment, agentEnv, agentVar, loginEnv, lookPath, parseEnv } from './env.ts';
 import { ELISION, capStderr, checkAnswers, checkContent, clip, cutMiddle, cutStrings, fit, masked, promptTitle } from './events.ts';
+import { startOptions } from './host.ts';
 import { LogFile, teeLogger } from './log.ts';
 import { cleanAbs, trustable } from './trust.ts';
 import { Client, eventually } from './testing.ts';
@@ -326,4 +327,23 @@ describe("the host's end on the terminal core's signals", () => {
     expect(Date.now() - t0).toBeLessThan(5000);
     await eventually("the agent's group is gone", () => groupGone(pid), 3000);
   });
+});
+
+test("a new chat's options in their bounds: models non-empty valid values, at most MAX_START_MODELS", () => {
+  expect(startOptions(undefined)).toEqual({});
+  expect(startOptions({ model: 'm', models: ['n', 'o'], mode: chat.Mode.Plan })).toEqual({
+    model: 'm',
+    models: ['n', 'o'],
+    mode: chat.Mode.Plan,
+  });
+  expect(startOptions({ models: [] })).toEqual({});
+  for (const bad of [
+    { models: ['ok', ''] },
+    { models: ['a\nb'] },
+    { models: 'm' as unknown as string[] },
+    { models: [1] as unknown as string[] },
+    { models: Array.from({ length: chat.MAX_START_MODELS + 1 }, (_, i) => `m${i}`) },
+    { mode: 'yolo' },
+  ])
+    expect(startOptions(bad)).toBeUndefined();
 });

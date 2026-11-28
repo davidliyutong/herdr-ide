@@ -18,6 +18,7 @@ import type { MachineState } from '../lib/machine';
 import { useSettings } from '../settings';
 import { definePlugins } from '../plugins/registry';
 import { filesPlugin } from '../plugins/files';
+import { useTree } from '../plugins/files/tree';
 import { vscodePlugin } from '../plugins/vscode';
 import { surfaceMenu } from '../menus';
 import { isItem } from '../contextMenu';
@@ -93,9 +94,12 @@ describe('openLink', () => {
 describe('openLink default file routing (File Explorer preview vs VS Code)', () => {
   let hub: FakeHub;
   const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+  /** The folders the machine has, as its stat answers. */
+  let folders: string[] = [];
 
   beforeEach(async () => {
     posts.length = 0;
+    folders = [];
     definePlugins([vscodePlugin, filesPlugin]);
     vscodeOn();
     useSettings.setState((s) => ({
@@ -106,7 +110,13 @@ describe('openLink default file routing (File Explorer preview vs VS Code)', () 
       },
     }));
     vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
-      posts.push({ url, body: init?.body ? JSON.parse(String(init.body)) : {} });
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      if (url.endsWith('/files/stat')) {
+        const entries = (body.paths as string[]).map((path) => ({ path, exists: true, is_dir: folders.includes(path), size: 0, mtime: 0 }));
+        return new Response(JSON.stringify({ entries }), { status: 200 });
+      }
+      if (url.includes('/files/list')) return new Response(JSON.stringify({ entries: [] }), { status: 200 });
+      posts.push({ url, body });
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     });
     hub = new FakeHub();
@@ -149,6 +159,34 @@ describe('openLink default file routing (File Explorer preview vs VS Code)', () 
     // Did not launch or bridge into VS Code.
     expect(L.codeViews(ws)).toHaveLength(0);
     expect(posts).toEqual([]);
+  });
+
+  it('opens a file beside the terminal, where the next link replaces it', async () => {
+    const ctx = { m: 'a', pane: 's1', cwd: '/home/u/proj', home: '/home/u' };
+    openLink({ kind: 'path', text: 'src/a.ts' }, ctx);
+    await settle();
+    let ws = hub.model.layout('a')!.workspaces[0];
+    expect(ws.tabs).toHaveLength(1);
+    expect(ws.tabs[0].root).toMatchObject({ split: 'horizontal', children: [{ terminal: 's1' }, {}] });
+    expect(L.pluginViews(ws, 'files', 'editor').map((v) => v.view)).toMatchObject([{ path: '/home/u/proj/src/a.ts', preview: true }]);
+    openLink({ kind: 'path', text: 'src/b.ts' }, ctx);
+    await settle();
+    ws = hub.model.layout('a')!.workspaces[0];
+    expect(ws.tabs).toHaveLength(1);
+    expect(L.pluginViews(ws, 'files', 'editor').map((v) => v.view.path)).toEqual(['/home/u/proj/src/b.ts']);
+  });
+
+  it('shows a folder expanded in the explorer instead of an editor', async () => {
+    folders = ['/home/u/proj/configs'];
+    openLink({ kind: 'path', text: 'configs' }, { m: 'a', pane: 's1', cwd: '/home/u/proj', home: '/home/u' });
+    await settle();
+    const ws = hub.model.layout('a')!.workspaces[0];
+    expect(L.pluginViews(ws, 'files', 'editor')).toHaveLength(0);
+    expect(ws.tabs[0].root).toEqual({ terminal: 's1' });
+    const tree = useTree.getState();
+    expect(tree.m).toBe('a');
+    expect(tree.expanded['/home/u/proj/configs']).toBe(true);
+    expect(tree.selection).toEqual(['/home/u/proj/configs']);
   });
 
   it('routes to VS Code when files.openLinks is set to vscode', async () => {

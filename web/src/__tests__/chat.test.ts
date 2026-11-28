@@ -50,10 +50,20 @@ describe('the chat plugin', () => {
       'chat.allowFullAccess',
       'chat.handoffMaxKB',
       'chat.idleStopMinutes',
+      'chat.lastModel.agy',
+      'chat.lastModel.claude',
+      'chat.lastModel.codex',
+      'chat.lastModel.grok',
+      'chat.lastModel.kimi',
       'chat.maxChatMB',
       'chat.maxChats',
       'chat.maxLive',
       'chat.maxTotalMB',
+      'chat.model.agy',
+      'chat.model.claude',
+      'chat.model.codex',
+      'chat.model.grok',
+      'chat.model.kimi',
       'chat.permissionMode',
       'chat.permissionMode.agy',
       'chat.permissionMode.claude',
@@ -76,6 +86,7 @@ describe('the chat plugin', () => {
       expect(defaults[`chat.permissionMode.${k}`]).toBe('inherit');
       expect(defaults[`chat.providers.${k}`]).toBe(true);
       expect(defaults[`chat.visibleModels.${k}`]).toEqual([]);
+      expect([defaults[`chat.model.${k}`], defaults[`chat.lastModel.${k}`]]).toEqual(['', '']);
     }
     for (const mode of P.MODES) expect(registry.i18n).toContain(`settings.chat.permissionMode.${mode}`);
     definePlugins([chatPlugin]);

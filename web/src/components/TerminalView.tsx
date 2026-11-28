@@ -14,6 +14,7 @@ import { appearanceOf, useThemeKind } from '../appearance';
 import { handleKey, shellKeyContext } from '../keymap';
 import { uploadPasted } from '../transfers';
 import { droppedItems, droppedPaths, filesAreOn } from '../drop';
+import { draggedPathsText, takesPaths } from '../pathsDrag';
 import { shortPath } from '../lib/machine';
 import { TermPane, type ShownMath } from '../vt/pane';
 import { openFind, useFind } from '../vt/find';
@@ -35,9 +36,10 @@ interface Props {
   shown?: boolean;
 }
 
-/** What dropping files on the terminal does. */
-function dropLabel(m: string, terminal: string): string {
-  if (filesAreOn(m)) return t('surface.dropHere');
+/** What dropping files on the terminal does: the explorer's rows and files
+ * on the machine are pasted where they are, others uploaded first. */
+function dropLabel(m: string, terminal: string, what: 'files' | 'paths'): string {
+  if (what === 'paths' || filesAreOn(m)) return t('surface.dropHere');
   const st = useStore.getState().machines[m];
   const dir = terms.directory(m, terminal);
   const machine = st?.label ?? m;
@@ -61,7 +63,7 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
   const [closed, setClosed] = useState<{ reason: string; code?: number }>();
   const [math, setMath] = useState<ShownMath>();
   const [title, setTitle] = useState('');
-  const [drop, setDrop] = useState(false);
+  const [drop, setDrop] = useState<'files' | 'paths'>();
   const [flash, setFlash] = useState(false);
   const [cell, setCell] = useState({ cw: 8, ch: 16 });
   const [bar, setBar] = useState<{ total: number; offset: number; len: number }>();
@@ -117,6 +119,8 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
         scrollback: () => getPrefs().scrollback,
         onPasteFiles: (files) => uploadPasted(m, files),
         onDropFiles: (items) => droppedPaths(m, droppedItems(items), terms.directory(m, terminal)),
+        takesPaths: (dt) => takesPaths(dt, m),
+        onDropPaths: (dt) => draggedPathsText(dt, m),
         onDropTarget: setDrop,
         setTitle,
         onMath: setMath,
@@ -249,7 +253,7 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
       {findHere && <FindBar m={m} terminal={terminal} />}
       {drop && (
         <div className="pane-drop">
-          <span>{dropLabel(m, terminal)}</span>
+          <span>{dropLabel(m, terminal, drop)}</span>
         </div>
       )}
       {closed && (

@@ -2,7 +2,7 @@
 // what the machine's chat host runs and keeps (chatproto's host settings,
 // whose bounds these are), and reach each machine's host with Op.Configure
 // (hostSettings).
-import { bool, defineModule, enumOf, int, stringList, type Setting, type Store } from '#kernel/config/settings/index.ts';
+import { bool, defineModule, enumOf, int, stringList, text, type Setting, type Store } from '#kernel/config/settings/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 
 const section = 'chat';
@@ -27,6 +27,16 @@ function validModelList(list: string[]): string | undefined {
   }
   return undefined;
 }
+
+/** chat.model.<kind>'s value for the model chosen last in a chat of the kind
+ * (chat.lastModel.<kind>); no model id begins with "@". */
+export const LAST_MODEL = '@last';
+
+const validModel = (s: string): string | undefined =>
+  s === '' || (s.trim() !== '' && Buffer.byteLength(s) <= 256) ? undefined : 'a model id of at most 256 bytes';
+
+const validStartModel = (s: string): string | undefined =>
+  s === LAST_MODEL || !s.startsWith('@') ? validModel(s) : `a model id, or ${LAST_MODEL} for the one chosen last`;
 
 const number = (def: number, min: number, max: number, step: number, order: number) =>
   int({ default: def, min, max, step, scope: 'machine', section, order });
@@ -74,13 +84,32 @@ export const settings = defineModule({
         stringList({ default: [], scope: 'app', section, group: 'chatModels', order: 100 + i, check: validModelList }),
       ]),
     ),
+    /** Per-provider model a new chat starts with: '' the agent's default,
+     * LAST_MODEL the one chosen last (chat.lastModel.<kind>), else a model
+     * id. One hidden by chat.visibleModels.<kind> or no longer offered is
+     * passed over for the first shown model the agent offers. */
+    ...Object.fromEntries(
+      CHAT_PROVIDERS.map((k, i): [string, Setting] => [
+        `chat.model.${k}`,
+        text({ default: '', scope: 'app', section, group: 'chatModels', order: 110 + i, check: validStartModel }),
+      ]),
+    ),
+    /** Per-provider model chosen last in a chat's model picker, kept while
+     * chat.model.<kind> is LAST_MODEL. */
+    ...Object.fromEntries(
+      CHAT_PROVIDERS.map((k, i): [string, Setting] => [
+        `chat.lastModel.${k}`,
+        text({ default: '', scope: 'app', section, group: 'chatModels', order: 120 + i, check: validModel }),
+      ]),
+    ),
   },
 });
 
 const MIB = 1 << 20;
 
 /** Keys that affect hostSettings() and require Op.Configure on live chat hosts.
- * Hub/UI-only keys (chat.handoffMaxKB, chat.providers.*, chat.visibleModels.*)
+ * Hub/UI-only keys (chat.handoffMaxKB, chat.providers.*, chat.visibleModels.*,
+ * chat.model.*, chat.lastModel.*)
  * do not affect the host process and should not trigger Op.Configure churn. */
 const HOST_SETTING_KEYS = new Set<string>([
   'chat.permissionMode',

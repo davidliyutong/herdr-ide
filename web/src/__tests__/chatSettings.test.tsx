@@ -252,6 +252,56 @@ describe('ChatSettingsPage (provider submenus & model list visibility)', () => {
     expect(q('.chat-settings-providers')).not.toBeNull();
   });
 
+  it('chooses the model new chats start with; a choice no longer offered or hidden stays chosen and says what starts instead', async () => {
+    answers['GET /api/m/m1/p/chat/models'] = () =>
+      new Response(
+        JSON.stringify({
+          models: [
+            { value: 'default', name: 'Default (recommended)' },
+            { value: 'opus', name: 'Opus' },
+            { value: 'sonnet', name: 'Sonnet' },
+          ],
+        }),
+        { status: 200 },
+      );
+    answers['PUT /api/settings'] = () => new Response(JSON.stringify({ values: {}, problems: [] }), { status: 200 });
+    answers['DELETE /api/settings'] = () => new Response(JSON.stringify({ values: {}, problems: [] }), { status: 200 });
+    useSettings.setState({
+      values: {
+        'chat.visibleModels.claude': { value: ['opus', 'sonnet'], source: 'global' },
+        'chat.model.claude': { value: 'opus-old', source: 'global' },
+      },
+    });
+    useStore.getState().openSettings({ page: 'chat', row: 'chat.model.claude' });
+    await renderPage();
+    expect(q('.chat-settings-provider')?.dataset.provider).toBe('claude');
+    const sel = () => q<HTMLSelectElement>('.chat-start-model select')!;
+    const options = () => Array.from(sel().options).map((o) => [o.value, o.textContent, o.disabled]);
+    expect(sel().value).toBe('opus-old');
+    expect(options()).toEqual([
+      ['', t('chat.settings.startModel.agent'), false],
+      ['@last', t('chat.settings.startModel.last'), false],
+      ['opus-old', t('chat.settings.startModel.withdrawn', { model: 'opus-old' }), false],
+      ['default', t('chat.settings.startModel.hidden', { model: 'Default (recommended)' }), true],
+      ['opus', 'Opus', false],
+      ['sonnet', 'Sonnet', false],
+    ]);
+    expect(q('.chat-start-model-note')?.textContent).toBe(
+      t('chat.settings.startModel.unavailable', { model: 'opus-old', fallback: 'Opus' }),
+    );
+    const change = async (v: string) =>
+      act(async () => {
+        sel().value = v;
+        sel().dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    await change('@last');
+    await act(settle);
+    expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ key: 'chat.model.claude', value: '@last' });
+    await change('');
+    await act(settle);
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('chat.model.claude'))).toBe(true);
+  });
+
   it('toggles chat providers directly on the first-level list and filters offeredKinds', async () => {
     let savedSetting: Record<string, { value: unknown; source: string }> = {};
     answers['PUT /api/settings'] = (_url, body) => {

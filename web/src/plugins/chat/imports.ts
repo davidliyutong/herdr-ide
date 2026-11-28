@@ -24,7 +24,7 @@ import { useStore } from '../../state/store';
 import { ChatFailure, chatApi, isChatProviderEnabled, reasonText } from './api';
 import { chatWorkspaceFor, openChat, reportChatVault } from './ops';
 import type { ChatState, Session } from './protocol';
-import { chatGone, upsertState, useChats } from './state';
+import { chatGone, rememberAgents, upsertState, useChats } from './state';
 
 /** The most sessions of a kind kept from all the pages of its list. */
 export const MAX_SESSIONS = 1000;
@@ -42,6 +42,8 @@ export async function chatAgents(m: string, o?: { refresh?: boolean; signal?: Ab
     if (!(e instanceof ChatFailure && e.code === 'not_running') || useStore.getState().readOnly) throw e;
     list = await chatApi.startAgents(m, o);
   }
+  // The menus offer what it said too.
+  rememberAgents(m, list);
   const values = useSettings.getState().values;
   const out: string[] = [];
   for (const a of list)

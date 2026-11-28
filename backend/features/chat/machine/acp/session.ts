@@ -485,8 +485,12 @@ export class AcpSession implements Session {
    * each when the agent has it and it is not already set. A value the agent
    * does not offer is left (the host checks what it was asked). */
   private async applyOptions(o: chat.Options, signal: AbortSignal): Promise<void> {
+    // The model: the first of the chat's (Options.model, then Options.models) the agent offers.
+    const modelOpt = optionOf(this.config, chat.Category.Model);
+    const models = chat.startModels(o);
+    const model = (modelOpt && models.find((m) => hasValue(modelOpt, m))) || models[0];
     const wants: Array<[string, string | undefined]> = [
-      [chat.Category.Model, o.model],
+      [chat.Category.Model, model],
       [chat.Category.ThoughtLevel, o.effort],
       [chat.Category.Mode, o.mode],
     ];

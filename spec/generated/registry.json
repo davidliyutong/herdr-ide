@@ -460,6 +460,16 @@
       "when": "terminal"
     },
     {
+      "id": "view.panel.next",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.panel.previous",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
       "id": "view.panel.files",
       "section": "view",
       "when": "terminal"
@@ -603,6 +613,8 @@
     "command.view.panel.files",
     "command.view.panel.git",
     "command.view.panel.monitor",
+    "command.view.panel.next",
+    "command.view.panel.previous",
     "command.view.panel.search",
     "command.view.panel.usage",
     "command.view.panel.vault",
@@ -647,10 +659,20 @@
     "settings.chat.allowFullAccess",
     "settings.chat.handoffMaxKB",
     "settings.chat.idleStopMinutes",
+    "settings.chat.lastModel.agy",
+    "settings.chat.lastModel.claude",
+    "settings.chat.lastModel.codex",
+    "settings.chat.lastModel.grok",
+    "settings.chat.lastModel.kimi",
     "settings.chat.maxChatMB",
     "settings.chat.maxChats",
     "settings.chat.maxLive",
     "settings.chat.maxTotalMB",
+    "settings.chat.model.agy",
+    "settings.chat.model.claude",
+    "settings.chat.model.codex",
+    "settings.chat.model.grok",
+    "settings.chat.model.kimi",
     "settings.chat.permissionMode",
     "settings.chat.permissionMode.acceptEdits",
     "settings.chat.permissionMode.agy",
@@ -952,7 +974,7 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+shift+t",
+        "key": "ctrl+t",
         "command": "tab.new",
         "when": "terminal"
       },
@@ -1077,7 +1099,7 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+shift+z",
+        "key": "ctrl+shift+t",
         "command": "pane.undoClose",
         "when": "terminal"
       },
@@ -1321,7 +1343,7 @@
         "when": "terminal"
       },
       {
-        "key": "cmd+z",
+        "key": "cmd+shift+t",
         "command": "pane.undoClose",
         "when": "terminal"
       },
@@ -1455,7 +1477,7 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+shift+t",
+        "key": "ctrl+t",
         "command": "tab.new",
         "when": "terminal"
       },
@@ -1570,7 +1592,7 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+shift+z",
+        "key": "ctrl+shift+t",
         "command": "pane.undoClose",
         "when": "terminal"
       },
@@ -1655,10 +1677,20 @@
     "chat.allowFullAccess": false,
     "chat.handoffMaxKB": 96,
     "chat.idleStopMinutes": 30,
+    "chat.lastModel.agy": "",
+    "chat.lastModel.claude": "",
+    "chat.lastModel.codex": "",
+    "chat.lastModel.grok": "",
+    "chat.lastModel.kimi": "",
     "chat.maxChatMB": 64,
     "chat.maxChats": 500,
     "chat.maxLive": 8,
     "chat.maxTotalMB": 512,
+    "chat.model.agy": "",
+    "chat.model.claude": "",
+    "chat.model.codex": "",
+    "chat.model.grok": "",
+    "chat.model.kimi": "",
     "chat.permissionMode": "default",
     "chat.permissionMode.agy": "inherit",
     "chat.permissionMode.claude": "inherit",

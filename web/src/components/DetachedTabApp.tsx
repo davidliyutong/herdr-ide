@@ -15,7 +15,7 @@ import { CodeLayer } from './CodeLayer';
 import { ContextMenu } from './ContextMenu';
 import { quitDialog, useDialog } from '../dialog';
 import { setLeaving, warnOnUnload } from '../unsaved';
-import { closeWindowPane, handleKey, handlePaneLeaveKey, leaveWindowPane } from '../keymap';
+import { closeWindowPane, handleKey, handleEditorKey, leaveWindowPane } from '../keymap';
 import { runMenuCommand } from '../desktop';
 import { desktopShell } from '../shell';
 import { applySettings, loadSettings } from '../settings';
@@ -338,7 +338,7 @@ export function DetachedTabApp({ m, pane }: { m: string; pane: string }) {
     const onCaptureKey = (ev: KeyboardEvent) => {
       const el = ev.target as HTMLElement | null;
       if (!el || el.closest('.term-host') || el.closest('.pane-header') || el.closest('.inline-edit')) return;
-      if (el.closest('.pane')) handlePaneLeaveKey(ev);
+      if (el.closest('.pane')) handleEditorKey(ev);
     };
     const onKey = (ev: KeyboardEvent) => {
       const el = ev.target as HTMLElement | null;

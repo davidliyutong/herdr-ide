@@ -69,6 +69,7 @@ import { hexColor } from '../vt/renderer';
 import { appearanceOf } from '../appearance';
 import { getPrefs } from '../prefs';
 import { setPrelude } from '../state/preludes';
+import { draggedPathsText, endPathsDrag, startPathsDrag, takesPaths } from '../pathsDrag';
 import type { AttachOptions, StreamHandler } from '../term/connection';
 
 // Node's file system, without its types in the browser project; under jsdom
@@ -664,6 +665,83 @@ describe('a terminal’s pane', () => {
       p.dispose();
       link.release!();
       await settle();
+      expect(link.written).toEqual([]);
+    });
+  });
+
+  describe('the file explorer’s rows dragged over it', () => {
+    /** A drag's data, as the explorer's dragstart fills it. */
+    function rows(m: string, paths: string[], known = true) {
+      const data = new Map<string, string>();
+      const fake = {
+        types: [] as string[],
+        dropEffect: 'none',
+        items: [],
+        setData(type: string, value: string) {
+          data.set(type, value);
+          this.types = [...data.keys()];
+        },
+        getData: (type: string) => data.get(type) ?? '',
+      };
+      const dt = fake as unknown as DataTransfer;
+      startPathsDrag(dt, { m, paths });
+      // A drag from another window: its machine is known at the drop only.
+      if (!known) endPathsDrag();
+      return dt;
+    }
+    function fire(host: HTMLElement, type: string, dt: DataTransfer) {
+      const ev = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, 'dataTransfer', { value: dt });
+      host.dispatchEvent(ev);
+      return ev;
+    }
+    async function attachedPane(o: Partial<PaneOptions> = {}) {
+      const target = vi.fn();
+      const files = vi.fn(async () => 'uploaded ');
+      const made = pane(800, 400, {
+        takesPaths: (dt) => takesPaths(dt, 'a'),
+        onDropPaths: (dt) => draggedPathsText(dt, 'a'),
+        onDropFiles: files,
+        onDropTarget: target,
+        ...o,
+      });
+      await loadEmulator();
+      link.handler!.output(enc(NEW_SHELL));
+      await settle(120);
+      const host = document.body.lastElementChild as HTMLElement;
+      return { ...made, host, target, files };
+    }
+    afterEach(() => endPathsDrag());
+
+    it('of its machine: pastes their paths, shell-quoted, where they are, uploading nothing', async () => {
+      const { host, target, files } = await attachedPane();
+      const dt = rows('a', ['/home/u/a.txt', "/home/u/it's here", '/home/u/dir']);
+      expect(fire(host, 'dragover', dt).defaultPrevented).toBe(true);
+      expect(target).toHaveBeenLastCalledWith('paths');
+      expect(fire(host, 'drop', dt).defaultPrevented).toBe(true);
+      expect(target).toHaveBeenLastCalledWith(undefined);
+      expect(link.written).toEqual([`/home/u/a.txt '/home/u/it'\\''s here' /home/u/dir `]);
+      expect(files).not.toHaveBeenCalled();
+    });
+
+    it('of another machine: refused while dragged; dropped from another window, nothing is pasted', async () => {
+      const { host, target } = await attachedPane();
+      const dt = rows('b', ['/home/u/a.txt']);
+      expect(fire(host, 'dragover', dt).defaultPrevented).toBe(false);
+      expect(target).toHaveBeenLastCalledWith(undefined);
+      fire(host, 'drop', dt);
+      const elsewhere = rows('b', ['/home/u/a.txt'], false);
+      expect(fire(host, 'dragover', elsewhere).defaultPrevented).toBe(true);
+      fire(host, 'drop', elsewhere);
+      expect(link.written).toEqual([]);
+    });
+
+    it('read-only: refused', async () => {
+      const { host, target } = await attachedPane({ readOnly: () => true });
+      const dt = rows('a', ['/home/u/a.txt']);
+      expect(fire(host, 'dragover', dt).defaultPrevented).toBe(false);
+      expect(target).toHaveBeenLastCalledWith(undefined);
+      fire(host, 'drop', dt);
       expect(link.written).toEqual([]);
     });
   });

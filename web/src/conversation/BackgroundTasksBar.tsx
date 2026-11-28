@@ -3,7 +3,7 @@
 // snapshot merged with running background/subagent tool items from the
 // timeline, with jump-to-item navigation and one-click termination.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Activity, Bot, ChevronRight, Cpu, LoaderCircle, SquareTerminal, Workflow, X } from 'lucide-react';
 import { t } from '../i18n';
 import { commandOf, formatTokens, inputText } from './format';
@@ -110,9 +110,29 @@ export interface BackgroundTasksBarProps {
   hasItem?(itemId: string): boolean;
 }
 
-export function BackgroundTasksBar({ tasks, agent, readOnly, canStop, onStopTask, onJumpToItem, hasItem }: BackgroundTasksBarProps) {
+export function BackgroundTasksBar({
+  tasks: listed,
+  agent,
+  readOnly,
+  canStop,
+  onStopTask,
+  onJumpToItem,
+  hasItem,
+}: BackgroundTasksBarProps) {
   const [open, setOpen] = useState(true);
-  const [error, setError] = useState<string | undefined>(undefined);
+  /** The last stop that failed: its task, and why. */
+  const [failure, setFailure] = useState<{ task: string; message: string }>();
+  /** Tasks the user removed from the list after their stop failed (one the
+   * agent no longer runs, whose end it never said): this page lists them
+   * no more, as long as the agent lists them. */
+  const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    setRemoved((r) => {
+      const kept = [...r].filter((id) => listed.some((x) => x.id === id));
+      return kept.length === r.size ? r : new Set(kept);
+    });
+  }, [listed]);
+  const tasks = listed.filter((x) => !removed.has(x.id));
 
   if (!tasks.length) return null;
 
@@ -130,10 +150,23 @@ export function BackgroundTasksBar({ tasks, agent, readOnly, canStop, onStopTask
           </span>
         )}
       </button>
-      {error && (
+      {failure && (
         <div className="conv-tasks-error" role="alert">
-          <span>{error}</span>
-          <button type="button" className="icon sm" aria-label={t('conversation.dismiss')} onClick={() => setError(undefined)}>
+          <span>{failure.message}</span>
+          {tasks.some((x) => x.id === failure.task) && (
+            <button
+              type="button"
+              className="btn sm"
+              title={t('conversation.task.forgetHint')}
+              onClick={() => {
+                setRemoved((r) => new Set([...r, failure.task]));
+                setFailure(undefined);
+              }}
+            >
+              {t('conversation.task.forget')}
+            </button>
+          )}
+          <button type="button" className="icon sm" aria-label={t('conversation.dismiss')} onClick={() => setFailure(undefined)}>
             <X aria-hidden />
           </button>
         </div>
@@ -178,7 +211,15 @@ export function BackgroundTasksBar({ tasks, agent, readOnly, canStop, onStopTask
                   {task.durationMs !== undefined && task.durationMs > 0 && (
                     <span className="conv-task-stat">{formatDuration(task.durationMs)}</span>
                   )}
-                  {stoppable && <TaskStopButton taskId={task.id} name={title} agent={agent} stopTask={onStopTask!} onError={setError} />}
+                  {stoppable && (
+                    <TaskStopButton
+                      taskId={task.id}
+                      name={title}
+                      agent={agent}
+                      stopTask={onStopTask!}
+                      onError={(message) => setFailure(message === undefined ? undefined : { task: task.id, message })}
+                    />
+                  )}
                 </span>
               </li>
             );

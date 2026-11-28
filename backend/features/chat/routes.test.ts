@@ -121,6 +121,9 @@ describe('routes', () => {
       '{"kind":"claude","cwd":"/w","import":true}',
       '{"kind":"claude","cwd":"/w","options":{"mode":"yolo"}}',
       '{"kind":"claude","cwd":"/w","options":{"model":"a\\nb"}}',
+      '{"kind":"claude","cwd":"/w","options":{"models":["ok",""]}}',
+      '{"kind":"claude","cwd":"/w","options":{"models":"m"}}',
+      `{"kind":"claude","cwd":"/w","options":{"models":${JSON.stringify(Array.from({ length: chat.MAX_START_MODELS + 1 }, (_, i) => `m${i}`))}}}`,
       `{"kind":"claude","cwd":"/w","pad":"${'x'.repeat(64 << 10)}"}`,
     ])
       expect([body.slice(0, 60), ...(await r.call('POST', m('new'), body))]).toMatchObject([
@@ -134,7 +137,7 @@ describe('routes', () => {
     [code, out] = await r.call(
       'POST',
       m('new'),
-      '{"kind":"claude","cwd":"/w","resume":"5f0c","import":true,"options":{"model":"m","mode":"full"}}',
+      '{"kind":"claude","cwd":"/w","resume":"5f0c","import":true,"options":{"model":"m","mode":"full","models":["n","o"]}}',
     );
     const c = out.chat as chat.Chat;
     expect(code).toBe(200);
@@ -146,7 +149,7 @@ describe('routes', () => {
       cwd: '/w',
       resume: '5f0c',
       import: true,
-      options: { model: 'm', mode: 'full' },
+      options: { model: 'm', mode: 'full', models: ['n', 'o'] },
     });
     expect(r.lastAudit()).toMatchObject({
       event: 'chat.new',

@@ -554,6 +554,15 @@ describe('configuration, sign-in and threads', () => {
     expect([full.approval, full.sandbox.type]).toEqual(['never', 'dangerFullAccess']);
   });
 
+  test("a chat's models: the first Codex lists of Options.model, then Options.models", async () => {
+    const sc = new Script();
+    sc.begin();
+    const f = new FakeRun('', HANDSHAKE, sc.file());
+    const { s } = await start(f, { model: 'gpt-withdrawn', models: ['gpt-also-gone', 'gpt-6.2-sol', 'gpt-6-sol'] });
+    expect(s.st.model).toBe('gpt-6.2-sol');
+    await s.close(AbortSignal.timeout(PATIENCE));
+  });
+
   test('the mode option marks full access, which the host gates', () => {
     const cfg = new Models().configOptions({ model: '', effort: '', mode: chat.Mode.Default });
     const mode = cfg.at(-1)!;

@@ -406,7 +406,7 @@
   text-decoration: underline;
   z-index: 3;
 }
-/* Files from outside the page dragged over a terminal. */
+/* Files from outside the page, or the file explorer's rows, dragged over a terminal. */
 .pane-drop {
   position: absolute;
   inset: 0;

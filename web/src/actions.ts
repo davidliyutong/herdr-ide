@@ -6,7 +6,7 @@
 // they came from (docs/features/05-vscode-panes.md).
 
 import * as L from './term/layout';
-import { describeView, ensurePluginLoaded, isPluginOn, viewStatus, viewUnopened } from './plugins/registry';
+import { describeView, ensurePluginLoaded, isPluginOn, viewStatus, viewUnopened, workspaceCreated } from './plugins/registry';
 import {
   confirmDetachedTabs,
   detachedRecordForPane,
@@ -413,6 +413,7 @@ export const actions = {
         ? L.moveToNewTab(L.createWorkspace(l, ws, create.name, create.cwd), pane, ws)
         : L.moveToNewTab(l, pane, ws),
     );
+    if (moved && create) workspaceCreated(m, ws);
     if (moved) focusDom(m, pane);
   },
 
@@ -606,6 +607,7 @@ export const actions = {
       if (!at) return l;
       return L.moveTabsToWorkspace(create ? L.createWorkspace(l, target, create.name, create.cwd) : l, at.ws.id, at.indexes, target);
     });
+    if (moved && create) workspaceCreated(m, target);
     const layout = terms.layout(m);
     const focused = moved && layout && L.focusedPane(layout);
     if (focused) focusDom(m, focused);
@@ -860,6 +862,7 @@ export const actions = {
     const dir = cwd;
     await whenLoaded(m);
     terms.mutate(m, (l) => L.createWorkspace(l, id, own, dir));
+    workspaceCreated(m, id);
     if (presets?.length) {
       await ensureVaultReady();
       await saveWorkspacePresets(m, id, presets, passphrase).catch((e) =>
@@ -1084,8 +1087,9 @@ export const actions = {
   },
 
   /** Opens a file in the File Explorer plugin's editor/preview pane: in a tab
-   * of the workspace by default (or split beside from with side), reusing an
-   * existing editor for the same path or an unedited preview editor. */
+   * of the workspace by default (or split beside from with side, reusing
+   * only from's tab's editors), reusing an existing editor for the same path
+   * or an unedited preview editor. */
   async openEditor(
     m: string,
     path: string,
@@ -1101,7 +1105,7 @@ export const actions = {
     } = {},
   ) {
     await whenLoaded(m);
-    const preview = !!o.preview && !o.side;
+    const preview = !!o.preview;
     const hasLine = typeof o.line === 'number' && o.line > 0;
     const endLine = hasLine && typeof o.endLine === 'number' && o.endLine >= o.line! ? o.endLine : undefined;
     const endCol = endLine !== undefined && typeof o.endCol === 'number' && o.endCol > 0 ? o.endCol : undefined;
@@ -1130,20 +1134,34 @@ export const actions = {
     return actions.openView(m, { ...view, preview }, { reuse: replaceable, tab, from: o.from, focus: o.focus });
   },
 
-  /** Opens a path found in a pane (from; the focused pane by default): by
-   * default (files.openLinks = 'editor') in the File Explorer plugin's
-   * preview/editor pane (navigating to line/col/endLine when given); when
-   * files.openLinks is 'vscode' (or when the files plugin is off) non-media
-   * files open in VS Code when its plugin is on, falling back to Quick Look
-   * (openPreview). */
-  async openPath(m: string, path: string, line?: number, col?: number, from?: string, endLine?: number, endCol?: number) {
+  /** Opens a path found in a pane (from; the focused pane by default). A
+   * folder (with the File Explorer plugin on, which tells by asking the
+   * machine) is shown expanded in the explorer's tree. A file, by default
+   * (files.openLinks = 'editor'), in the File Explorer plugin's preview
+   * editor (at line/col/endLine/endCol when given): in a tab of the
+   * workspace, or with side split beside from, where the next link's
+   * preview replaces it. When files.openLinks is 'vscode' (or the files
+   * plugin is off) non-media files open in VS Code when its plugin is on,
+   * falling back to Quick Look (openPreview). */
+  async openPath(
+    m: string,
+    path: string,
+    o: { line?: number; col?: number; endLine?: number; endCol?: number; from?: string; side?: boolean } = {},
+  ) {
+    const { line, col, from } = o;
+    if (isPluginOn('files') && line === undefined) {
+      const files = await ensurePluginLoaded('files');
+      if (await files?.openFolder?.(m, path)) return;
+    }
+    const editor = () =>
+      actions.openEditor(m, path, { preview: true, side: o.side, line, col, endLine: o.endLine, endCol: o.endCol, from });
     const preferCode = settingValue('files.openLinks') === 'vscode';
     if (preferCode) {
       if (!mediaExt.test(path) && isPluginOn('vscode')) return actions.openInCode(m, path, line, col, from);
-      if (isPluginOn('files')) return actions.openEditor(m, path, { preview: true, line, col, endLine, endCol, from });
+      if (isPluginOn('files')) return editor();
       return actions.openPreview(m, path, from);
     }
-    if (isPluginOn('files')) return actions.openEditor(m, path, { preview: true, line, col, endLine, endCol, from });
+    if (isPluginOn('files')) return editor();
     // Without the files plugin (or VS Code), Quick Look shows text as well.
     if (mediaExt.test(path) || !isPluginOn('vscode')) return actions.openPreview(m, path, from);
     return actions.openInCode(m, path, line, col, from);

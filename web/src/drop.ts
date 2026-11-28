@@ -13,7 +13,7 @@
 // Browsers never tell a page where a dropped file is; the desktop shell's
 // bridge does (webUtils.getPathForFile). Drops of files nothing on the page
 // takes are refused, so a file dropped beside a target does not replace the
-// page.
+// page. Rows of the file explorer dragged inside the page are pathsDrag.ts's.
 
 import { actions } from './actions';
 import { desktopShell } from './shell';

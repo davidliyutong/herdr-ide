@@ -38,6 +38,7 @@ import {
   readLine,
   redactedChat,
   redactedEvent,
+  startModels,
   skipLine,
   stateOf,
   statusOf,
@@ -809,4 +810,11 @@ describe('chatproto', () => {
     const none = redactedEvent({ t: EventType.State });
     expect([none.error, none.chat, 'error' in none, 'chat' in none]).toEqual([undefined, undefined, false, false]);
   });
+});
+
+test("a new chat's models: Options.model, then Options.models, without repeats or empty values", () => {
+  expect(startModels({})).toEqual([]);
+  expect(startModels({ model: 'a' })).toEqual(['a']);
+  expect(startModels({ model: 'b', models: ['a', 'b', '', 'c'] })).toEqual(['b', 'a', 'c']);
+  expect(startModels({ models: ['a'] })).toEqual(['a']);
 });

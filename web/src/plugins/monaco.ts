@@ -72,6 +72,12 @@ async function load(): Promise<Monaco> {
     },
   };
   const m = monaco as unknown as Monaco;
+  // Cmd/Ctrl+[ and ] are Go Back and Go Forward (keymap.ts handleEditorKey),
+  // not Outdent and Indent Line: Tab and Shift+Tab indent.
+  m.editor.addKeybindingRules([
+    { keybinding: m.KeyMod.CtrlCmd | m.KeyCode.BracketLeft, command: '-editor.action.outdentLines' },
+    { keybinding: m.KeyMod.CtrlCmd | m.KeyCode.BracketRight, command: '-editor.action.indentLines' },
+  ]);
   registerLanguages(m);
   followTheme(m);
   return m;

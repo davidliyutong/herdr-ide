@@ -189,6 +189,24 @@ export function revealInExplorer(m: string, path: string) {
 /** Show in Explorer of the editor pane. */
 export const reveal = revealInExplorer;
 
+/** A link to path (PluginDef.openFolder): when the machine says it is a
+ * folder, the explorer reveals it and expands it, and this resolves true;
+ * a file, a path not there or a stat that fails resolves false, for the
+ * caller to open it as a file (whose pane then says what went wrong). */
+export async function openFolder(m: string, path: string): Promise<boolean> {
+  if (!isPluginOn('files')) return false;
+  let entry;
+  try {
+    [entry] = await filesApi.stat(m, [path]);
+  } catch {
+    return false;
+  }
+  if (!entry?.exists || !entry.is_dir || entry.error) return false;
+  revealInExplorer(m, entry.path);
+  setExpanded(entry.path, true);
+  return true;
+}
+
 /** Whether Reveal in Finder is offered for each machine's paths here, as
  * the hub said: only for its own machine, to a page on its computer
  * (backend/features/files revealable). Unknown until asked (loadRevealable). */

@@ -36,6 +36,7 @@ A plugin (`PluginDef`, `web/src/plugins/api.ts`) contributes sidebar panels, pan
 - Each pane body, the shown panel and each status item is inside an error boundary (`PluginBoundary`), so a throw shows the error and **Try Again** while the rest of the page goes on.
 - Only the selected tab's panes are mounted, so an editor's unsaved text is kept by machine and pane while it is not drawn (`unsaved.ts`): closing still asks, and Save works.
 - A panel dragged onto the panes, or **Open in Pane**, becomes a pane sharing the sidebar view's state (`web/src/panelPanes.ts`).
+- The sidebar's tools are switched in the rail's order by **Next / Previous Sidebar Tool** (`view.panel.next`, `view.panel.previous`, no keys) or by a vertical swipe with Cmd held (Alt on Windows and Linux, whose Ctrl with the wheel zooms) anywhere but a VS Code pane (`web/src/panelSwipe.ts`): one swipe, momentum included, is one step, so a long swipe does not run through every tool.
 
 ### Plugins
 

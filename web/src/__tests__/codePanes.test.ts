@@ -171,7 +171,7 @@ describe('changes and Git Graph', () => {
 describe('a path from a terminal', () => {
   it('opens in a VS Code pane of the workspace, the one of the tab holding the file first, else beside the terminal', async () => {
     // None yet: beside the terminal, for its directory, which holds the file.
-    await actions.openPath('a', '/home/u/w1/src/main.go', 12, 3, 's1');
+    await actions.openPath('a', '/home/u/w1/src/main.go', { line: 12, col: 3, from: 's1' });
     expect(codeIn(0).map((v) => v.view.folder)).toEqual(['/home/u/w1/src']);
     expect(posts[0].body).toEqual({
       cmd: 'openFile',
@@ -182,19 +182,19 @@ describe('a path from a terminal', () => {
       fresh: true,
     });
     // A file elsewhere in the project: the one pane of the workspace still takes it.
-    await actions.openPath('a', '/home/u/w1/README.md', undefined, undefined, 'g1');
+    await actions.openPath('a', '/home/u/w1/README.md', { from: 'g1' });
     expect(codeIn(0)).toHaveLength(1);
     // A pane in another tab holding the file wins over the tab's pane that does not.
     const other = { id: 'c9', folder: '/home/u/w1' };
     hub.model.mutate('a', (l) => L.openPane(l, { code: other }, 'w1'));
     hub.model.mutate('a', (l) => L.selectTab(l, 'w1', 0));
-    await actions.openPath('a', '/home/u/w1/README.md', 1, undefined, 'g1');
+    await actions.openPath('a', '/home/u/w1/README.md', { line: 1, from: 'g1' });
     expect(layout().workspaces[0].selected).toBe(1);
     expect(posts.at(-1)!.body).toMatchObject({ folder: '/home/u/w1', path: '/home/u/w1/README.md' });
   });
 
   it('opens media in a preview pane beside the terminal, then shows the next file there', async () => {
-    await actions.openPath('a', '/home/u/w1/plot.png', undefined, undefined, 'g1');
+    await actions.openPath('a', '/home/u/w1/plot.png', { from: 'g1' });
     const previews = () => L.previewViews(layout().workspaces[0]);
     expect(previews().map((v) => v.view.path)).toEqual(['/home/u/w1/plot.png']);
     expect(tabs()[0].root).toMatchObject({ children: [{ terminal: 's1' }, { split: 'horizontal', children: [{ terminal: 'g1' }, {}] }] });

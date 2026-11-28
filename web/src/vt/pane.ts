@@ -25,6 +25,7 @@ import { forgetProgramClipboard, programClipboard, programClipboardCopied, progr
 import { findResult, useFind } from './find';
 import { findPlace, noteScroll, takeScroll } from './scrollMemory';
 import { carriesFiles } from '../drop';
+import { carriesPaths } from '../pathsDrag';
 import { linksAround, linkTitle, safeUrl, selectedLink, type LinkContext, type RowText } from '../terminal/links';
 import { openLink } from '../terminal/openLink';
 import { mathAt } from '../terminal/math';
@@ -165,7 +166,14 @@ export interface PaneOptions {
   /** Files dropped from outside the page: the text to paste. The items are
    * read before anything is awaited. */
   onDropFiles?(items: DataTransferItemList): Promise<string | undefined>;
-  onDropTarget?(on: boolean): void;
+  /** Rows of the file explorer dragged over the pane: whether it takes
+   * them (until the drop only the drag's types are known). */
+  takesPaths?(dt: DataTransfer): boolean;
+  /** The explorer's rows dropped: the text to paste (their paths). */
+  onDropPaths?(dt: DataTransfer): string | undefined;
+  /** What a drop at the pointer would paste: files from outside the page,
+   * the explorer's paths, or nothing. */
+  onDropTarget?(what: 'files' | 'paths' | undefined): void;
   /** A tooltip for what is under the pointer (a link). */
   setTitle(title: string): void;
   onMath?(m: ShownMath | undefined): void;
@@ -1431,29 +1439,46 @@ export class TermPane {
 
   // ---- dropped files ----
 
-  private dropAllowed(ev: DragEvent): boolean {
-    return !!this.o.onDropFiles && !this.o.readOnly() && carriesFiles(ev.dataTransfer);
+  /** What a drop of this drag would paste: the explorer's paths (checked
+   * first: they are on the machine already), files from outside the page,
+   * or nothing. */
+  private dropKind(ev: DragEvent): 'files' | 'paths' | undefined {
+    const dt = ev.dataTransfer;
+    if (!dt || this.o.readOnly()) return undefined;
+    if (carriesPaths(dt)) return this.o.onDropPaths && this.o.takesPaths?.(dt) ? 'paths' : undefined;
+    return this.o.onDropFiles && carriesFiles(dt) ? 'files' : undefined;
   }
 
   private onDragOver = (ev: DragEvent) => {
-    const ok = this.dropAllowed(ev);
-    this.o.onDropTarget?.(ok);
-    if (!ok) return;
+    const kind = this.dropKind(ev);
+    this.o.onDropTarget?.(kind);
+    if (!kind) return;
     ev.preventDefault();
     ev.dataTransfer!.dropEffect = 'copy';
   };
 
   private onDragLeave = (ev: DragEvent) => {
-    if (!this.host.contains(ev.relatedTarget as Node | null)) this.o.onDropTarget?.(false);
+    if (!this.host.contains(ev.relatedTarget as Node | null)) this.o.onDropTarget?.(undefined);
   };
 
   private onDrop = (ev: DragEvent) => {
-    this.o.onDropTarget?.(false);
-    if (!this.dropAllowed(ev)) return;
+    this.o.onDropTarget?.(undefined);
+    const kind = this.dropKind(ev);
+    if (!kind) return;
     ev.preventDefault();
+    const dt = ev.dataTransfer!;
+    if (kind === 'paths') {
+      // Rows of another machine (a drag from another window) paste nothing.
+      const text = this.o.onDropPaths!(dt);
+      if (!text) return;
+      this.o.activate();
+      this.focus();
+      this.paste(text);
+      return;
+    }
     this.o.activate();
     this.focus();
-    void this.o.onDropFiles!(ev.dataTransfer!.items).then((text) => text && this.paste(text));
+    void this.o.onDropFiles!(dt.items).then((text) => text && this.paste(text));
   };
 
   // ---- links and formulas ----

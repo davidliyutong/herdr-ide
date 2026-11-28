@@ -136,12 +136,12 @@
       "results": [
         "run:app.commandPalette",
         "run:app.keyboardShortcuts",
-        "run:tab.new",
+        "run:pane.undoClose",
         "run:tab.close",
         "run:pane.splitRight",
         "run:pane.splitDown",
         "run:pane.back",
-        "none",
+        "run:tab.new",
         "none",
         "run:pane.leave"
       ]
@@ -168,13 +168,13 @@
       "results": [
         "run:app.commandPalette",
         "run:app.keyboardShortcuts",
-        "run:tab.new",
+        "run:pane.undoClose",
         "run:tab.close",
         "run:pane.splitRight",
         "run:pane.splitDown",
         "run:workspace.next",
         "run:pane.back",
-        "none",
+        "run:tab.new",
         "none",
         "run:pane.leave"
       ]

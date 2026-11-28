@@ -41,11 +41,12 @@ export function openWebLink(href: string, m: string, opts: { ask?: boolean } = {
   } else void forwardsAvailable().then(decide);
 }
 
-/** Opens a URL in a new tab, or a path in the File Explorer preview (default)
- * or VS Code (files.openLinks). */
+/** Opens a URL in a new tab, or a path (Cmd/Ctrl+click): a folder in the
+ * File Explorer's tree, a file in its preview editor split beside the pane
+ * (default) or in VS Code (files.openLinks). */
 export function openLink(l: { kind: FoundLink['kind']; text: string }, ctx: LinkContext) {
   // Targets come from pane output (OSC 8): web links only.
   if (l.kind === 'url') return openWebLink(l.text, ctx.m);
   const r = resolvePath(l.text, ctx);
-  void actions.openPath(ctx.m, r.path, r.line, r.col, ctx.pane, r.endLine, r.endCol);
+  void actions.openPath(ctx.m, r.path, { line: r.line, col: r.col, endLine: r.endLine, endCol: r.endCol, from: ctx.pane, side: true });
 }

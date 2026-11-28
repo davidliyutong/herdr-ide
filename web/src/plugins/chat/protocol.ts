@@ -331,6 +331,8 @@ export interface Options {
   model?: string;
   effort?: string;
   mode?: string;
+  /** Models to start with when the agent does not offer model, in order. */
+  models?: string[];
 }
 
 /** The operations of a command (chatproto.Op*), each answered by an ack. */

@@ -258,6 +258,19 @@ export function newTabGroups(m: string): NewTabItem[][] {
     .filter((items) => items.length > 0);
 }
 
+/** Tells the plugins that are on of a workspace the user made
+ * (PluginDef.workspaceCreated); one that throws is said in the console and
+ * keeps none of the others from hearing it. */
+export function workspaceCreated(m: string, ws: string) {
+  for (const p of activePlugins()) {
+    try {
+      p.workspaceCreated?.(m, ws);
+    } catch (e) {
+      console.warn(`plugin ${p.id}: workspaceCreated`, e);
+    }
+  }
+}
+
 /** Hands a message of a plugin's hub side to the plugin, when it is on. */
 export function pluginMessage(plugin: string, m: string, data: unknown) {
   const p = activePlugins().find((x) => x.id === plugin);

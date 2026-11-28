@@ -89,6 +89,8 @@ export const timelineZhCN: Record<keyof typeof timelineEn, string> = {
   'conversation.task.tokens': '{tokens} tok',
   'conversation.task.stop': '停止',
   'conversation.task.stopNamed': '停止 {name}',
+  'conversation.task.forget': '从列表中移除',
+  'conversation.task.forgetHint': '如果任务仍在运行，agent 会继续运行它；只是本页不再列出。',
   'conversation.task.stopping': '正在停止…',
   'conversation.task.pid': 'PID {pid}',
   'conversation.task.jumpHint': '跳转到对话中的对应项',

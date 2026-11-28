@@ -9,16 +9,7 @@ import sequenceVectors from '../../../spec/vectors/keys/sequences.json';
 import defaultVectors from '../../../spec/vectors/keys/defaults.json';
 import registry from '../../../spec/generated/registry.json';
 import { altOnly, KeyError, keyLabel, normalizeKeys, strokeOf } from '../keys';
-import {
-  commandEnabled,
-  feedStroke,
-  handleKey,
-  handlePaneLeaveKey,
-  keyHint,
-  REPEATING_COMMANDS,
-  withKey,
-  type KeyContext,
-} from '../keymap';
+import { commandEnabled, feedStroke, handleKey, handleEditorKey, keyHint, REPEATING_COMMANDS, withKey, type KeyContext } from '../keymap';
 import { commands } from '../commands';
 import { actions } from '../actions';
 import { useStore } from '../state/store';
@@ -175,29 +166,48 @@ describe('keybindings', () => {
     }
   });
 
-  it('escapes focus from pane inputs via handlePaneLeaveKey unless a dialog is open', () => {
+  it('escapes focus from pane inputs via handleEditorKey unless a dialog is open', () => {
     useKeys.setState({ effective: registry.keybindings.mac as Binding[] });
     const leaveSpy = vi.spyOn(commands['pane.leave'], 'run').mockImplementation(() => {});
     try {
       const ev = new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, cancelable: true });
-      expect(handlePaneLeaveKey(ev)).toBe(true);
+      expect(handleEditorKey(ev)).toBe(true);
       expect(ev.defaultPrevented).toBe(true);
       expect(leaveSpy).toHaveBeenCalledTimes(1);
 
-      // Non-escape keys (like Cmd+[ in Monaco) are left alone.
-      const outdent = new KeyboardEvent('keydown', { key: '[', code: 'BracketLeft', metaKey: true, cancelable: true });
-      expect(handlePaneLeaveKey(outdent)).toBe(false);
-      expect(outdent.defaultPrevented).toBe(false);
+      // Other keys (Cmd+D in Monaco) are left alone.
+      const nextMatch = new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', metaKey: true, cancelable: true });
+      expect(handleEditorKey(nextMatch)).toBe(false);
+      expect(nextMatch.defaultPrevented).toBe(false);
 
       // Dialogs keep Ctrl+B.
       const backdrop = document.createElement('div');
       backdrop.className = 'modal-backdrop';
       document.body.append(backdrop);
       const inDialog = new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, cancelable: true });
-      expect(handlePaneLeaveKey(inDialog)).toBe(false);
+      expect(handleEditorKey(inDialog)).toBe(false);
       backdrop.remove();
     } finally {
       leaveSpy.mockRestore();
+    }
+  });
+
+  it('Cmd+[ and Cmd+] go back and forward from editors instead of outdenting and indenting, also held', () => {
+    useKeys.setState({ effective: registry.keybindings.mac as Binding[] });
+    const back = vi.spyOn(commands['pane.back'], 'run').mockImplementation(() => {});
+    const forward = vi.spyOn(commands['pane.forward'], 'run').mockImplementation(() => {});
+    try {
+      const outdent = new KeyboardEvent('keydown', { key: '[', code: 'BracketLeft', metaKey: true, cancelable: true });
+      expect(handleEditorKey(outdent)).toBe(true);
+      expect(outdent.defaultPrevented).toBe(true);
+      const held = new KeyboardEvent('keydown', { key: '[', code: 'BracketLeft', metaKey: true, cancelable: true, repeat: true });
+      expect(handleEditorKey(held)).toBe(true);
+      expect(back).toHaveBeenCalledTimes(2);
+      expect(handleEditorKey(new KeyboardEvent('keydown', { key: ']', code: 'BracketRight', metaKey: true, cancelable: true }))).toBe(true);
+      expect(forward).toHaveBeenCalledTimes(1);
+    } finally {
+      back.mockRestore();
+      forward.mockRestore();
     }
   });
 
@@ -222,7 +232,7 @@ describe('keybindings', () => {
       expect(document.activeElement).toBe(ta);
       const ev = new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, cancelable: true, bubbles: true });
       Object.defineProperty(ev, 'target', { value: ta });
-      expect(handlePaneLeaveKey(ev)).toBe(true);
+      expect(handleEditorKey(ev)).toBe(true);
       expect(document.activeElement).toBe(header);
 
       // On the pane header, Ctrl+B again returns focus to the pane.

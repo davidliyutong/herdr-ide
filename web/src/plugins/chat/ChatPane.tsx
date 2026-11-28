@@ -18,7 +18,7 @@ import type { PluginView } from '../../term/layout';
 import type { PaneViewProps } from '../api';
 import { useRepo, useReposOf } from '../git/state';
 import { pluginOn, usePluginList } from '../registry';
-import { failureText, fullAccessAllowed, visibleModelsFor } from './api';
+import { failureText, fullAccessAllowed, rememberModel, visibleModelsFor } from './api';
 import { stateLabel, useChatKind } from './ChatHeader';
 import { agentName, brandKindIcon, forkChat, openChat, useChatUi } from './ops';
 import { useChatSource } from './source';
@@ -91,6 +91,7 @@ function ChatBody({ m, pane, view, chat, shown }: { m: string; pane: string; vie
     return {
       visibleModels: list,
       onManageModels: () => useStore.getState().openSettings({ page: 'chat', row: `chat.visibleModels.${kind}` }),
+      onModelChosen: (value) => void rememberModel(kind, value),
     };
   }, [kind, visibleModels]);
 
@@ -156,7 +157,7 @@ function ChatBody({ m, pane, view, chat, shown }: { m: string; pane: string; vie
             modelPicker={modelPicker}
             onFork={readOnly ? undefined : onFork}
             onOpenChat={onOpenChat}
-            onOpenFile={(path, line) => void actions.openPath(m, path, line, undefined, pane)}
+            onOpenFile={(path, line) => void actions.openPath(m, path, { line, from: pane })}
           />
         </div>
       )}

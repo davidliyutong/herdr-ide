@@ -10,7 +10,8 @@
 // protocol's shapes (protocol.ts), and lists are cut to their bounds.
 import { hasMessage, t, type MessageKey } from '../../i18n';
 import { answer, failureOf, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
-import { builtinDefaults } from '../../settings';
+import { builtinDefaults, setSetting, useSettings } from '../../settings';
+import { useStore } from '../../state/store';
 import {
   MODES,
   STATES_PATH,
@@ -486,6 +487,73 @@ export function visibleModelsFor(values: Values, kind: string | undefined): stri
   const key = `chat.visibleModels.${kind}`;
   const raw = values[key]?.value ?? builtinDefaults[key];
   return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+}
+
+/** chat.model.<kind>'s value for "the model chosen last" (chat.lastModel.<kind>). */
+export const LAST_MODEL = '@last';
+/** The most models a new chat is asked to try (chatproto MAX_START_MODELS). */
+export const MAX_START_MODELS = 64;
+
+const stringOf = (values: Values, key: string): string => {
+  const raw = values[key]?.value ?? builtinDefaults[key];
+  return typeof raw === 'string' ? raw : '';
+};
+
+/** What a new chat of agent kind starts with (chat.model.<kind>): '' for
+ * the agent's default, LAST_MODEL for the model chosen last, else a model. */
+export const startModelSetting = (values: Values, kind: string): string => stringOf(values, `chat.model.${kind}`);
+
+/** The model chosen last in a chat of agent kind (chat.lastModel.<kind>). */
+export const lastModelFor = (values: Values, kind: string): string => stringOf(values, `chat.lastModel.${kind}`);
+
+/** Why a model of agent kind cannot start a chat: (offered known) no longer
+ * listed by the agent, else hidden by the kind's visible models. */
+export function modelUnavailable(
+  values: Values,
+  kind: string,
+  model: string,
+  offered?: readonly string[],
+): 'hidden' | 'withdrawn' | undefined {
+  if (offered && offered.length > 0 && !offered.includes(model)) return 'withdrawn';
+  const visible = visibleModelsFor(values, kind);
+  if (visible.length > 0 && !visible.includes(model)) return 'hidden';
+  return undefined;
+}
+
+/**
+ * The models a new chat of agent kind asks to start with (chatproto
+ * Options.model and Options.models): the one chat.model.<kind> names (the
+ * model chosen last for LAST_MODEL), then, while the kind shows only some
+ * models (chat.visibleModels.<kind>), those in the agent's order. A model
+ * hidden there, or one the agent no longer lists (offered: its cached list,
+ * when known), is left out. The agent starts on the first it lists (the
+ * adapters check them against what it offers then); none asked leaves the
+ * agent's own default, which only a kind that shows every model gets.
+ */
+export function startModelOptions(values: Values, kind: string, offered?: readonly string[]): { model?: string; models?: string[] } {
+  const setting = startModelSetting(values, kind);
+  const pref = setting === LAST_MODEL ? lastModelFor(values, kind) : setting;
+  const visible = visibleModelsFor(values, kind);
+  const listed = offered && offered.length > 0 ? offered : undefined;
+  const fallbacks = visible.length === 0 ? [] : listed ? listed.filter((m) => visible.includes(m)) : visible;
+  const order: string[] = [];
+  for (const m of [pref, ...fallbacks]) {
+    if (m && !order.includes(m) && !modelUnavailable(values, kind, m, listed)) order.push(m);
+  }
+  const [model, ...models] = order.slice(0, MAX_START_MODELS);
+  if (!model) return {};
+  return models.length > 0 ? { model, models } : { model };
+}
+
+/** Remembers the model chosen in a chat of agent kind, for its new chats
+ * while chat.model.<kind> is LAST_MODEL (only then: a choice is no setting
+ * otherwise). Says nothing of a failure: the choice itself was made. */
+export async function rememberModel(kind: string, model: string): Promise<void> {
+  const values = useSettings.getState().values;
+  const key = `chat.lastModel.${kind}`;
+  if (startModelSetting(values, kind) !== LAST_MODEL || lastModelFor(values, kind) === model || values[key]?.locked) return;
+  if (useStore.getState().readOnly) return;
+  await setSetting(key, model);
 }
 
 /** Whether machine m's chats may give an agent full access: its setting

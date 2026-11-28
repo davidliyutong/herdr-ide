@@ -29,7 +29,9 @@ function parentPosix(p: string): string {
   return i > 0 ? clean.slice(0, i) : '/';
 }
 
-function relativePosix(root: string, p: string): string {
+/** p relative to root, as the picker labels what it attaches; p itself
+ * outside root. */
+export function relativePosix(root: string, p: string): string {
   const cleanRoot = normalizeDir(root);
   if (p === cleanRoot) return '.';
   const pre = cleanRoot === '/' ? '/' : `${cleanRoot}/`;

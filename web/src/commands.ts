@@ -20,6 +20,30 @@ import { findStep, openFind, useFind } from './vt/find';
 import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
 
 const store = () => useStore.getState();
+
+/** The right sidebar's tools in the rail's order: those the rail shows, or
+ * every one when the user hid them all. */
+function railPool() {
+  const s = store();
+  const ordered = orderRailItems(activePanels(), s.railOrder);
+  const visible = ordered.filter((p) => !s.hiddenRailPanels.includes(p.id));
+  return visible.length > 0 ? visible : ordered;
+}
+
+/** The tool the sidebar shows when opened: the one shown last, else the first. */
+const sidebarPanel = (pool: ReturnType<typeof railPool>) => (pool.find((p) => p.id === store().lastPanel) ?? pool[0])?.id;
+
+/** Shows the sidebar's next (1) or previous (-1) tool in the rail's order,
+ * from the last after the first and back; a hidden sidebar opens on the
+ * tool it showed last instead. */
+export function cyclePanel(step: 1 | -1) {
+  const s = store();
+  const pool = railPool();
+  if (!pool.length) return;
+  const at = pool.findIndex((p) => p.id === s.panel);
+  if (!s.panel || at < 0) return s.setPanel(sidebarPanel(pool));
+  s.setPanel(pool[(at + step + pool.length) % pool.length].id);
+}
 /** Whether the page may change things. */
 const changes = () => !store().readOnly;
 const focused = () => actions.focusedContext();
@@ -106,13 +130,12 @@ export const commands: Record<string, CommandDef> = {
     enabled: () => activePanels().length > 0,
     run() {
       const s = store();
-      const ordered = orderRailItems(activePanels(), s.railOrder);
-      const visible = ordered.filter((p) => !s.hiddenRailPanels.includes(p.id));
-      const pool = visible.length > 0 ? visible : ordered;
-      if (s.panel && ordered.some((p) => p.id === s.panel)) s.setPanel(undefined);
-      else s.setPanel((pool.find((p) => p.id === s.lastPanel) ?? pool[0])?.id);
+      if (s.panel && activePanels().some((p) => p.id === s.panel)) s.setPanel(undefined);
+      else s.setPanel(sidebarPanel(railPool()));
     },
   },
+  'view.panel.next': { enabled: () => activePanels().length > 0, run: () => cyclePanel(1) },
+  'view.panel.previous': { enabled: () => activePanels().length > 0, run: () => cyclePanel(-1) },
   'view.toggleSidebar': { run: () => actions.toggleSidebar() },
   'view.zoomIn': { enabled: () => zoomable() && currentZoom() < ZOOM_LEVELS[ZOOM_LEVELS.length - 1], run: () => zoom(1) },
   'view.zoomOut': { enabled: () => zoomable() && currentZoom() > ZOOM_LEVELS[0], run: () => zoom(-1) },

@@ -36,10 +36,11 @@ import {
   failureText,
   handoffMaxKB,
   permissionMode,
+  startModelOptions,
   type NewChatVault,
 } from './api';
 import { canContinueInTerminal, continueInTerminal } from './handoff';
-import { STATE_DELETED } from './protocol';
+import { STATE_DELETED, type Options } from './protocol';
 import { applyStates, chatGone, chatState, liveKey, loadAgents, offeredKinds, upsertState, useChats } from './state';
 import { CHAT_PLUGIN, CHAT_VIEW, chatPane, chatRef } from './view';
 
@@ -167,6 +168,26 @@ export function chatWorkspaceFor(m: string, explicit?: string, from?: string): s
   return (at ? layout.workspaces[at.workspace] : L.selectedWorkspace(layout))?.id;
 }
 
+/** How long a new chat waits for the machine's cached model list. */
+export const MODELS_WAIT_MS = 2000;
+
+/** What a new chat of agent kind on machine m starts with: the permission
+ * mode (permissionMode) and the models (startModelOptions), checked against
+ * the models the machine's chat host last listed for the kind when it has
+ * them at hand (a GET, which starts nothing); undefined for the agent's own. */
+export async function startOptions(m: string, kind: string): Promise<Options | undefined> {
+  let offered: string[] | undefined;
+  try {
+    offered = (await chatApi.models(m, kind, AbortSignal.timeout(MODELS_WAIT_MS))).models.map((x) => x.value);
+  } catch {
+    // No list at hand (no host running, an older host): the adapters check.
+  }
+  const values = useSettings.getState().values;
+  const mode = permissionMode(values, m, kind);
+  const o: Options = { ...(mode ? { mode } : {}), ...startModelOptions(values, kind, offered) };
+  return Object.keys(o).length > 0 ? o : undefined;
+}
+
 /** Makes a chat with an agent on machine m and shows it in a new tab.
  * Resolves to the pane's key; a failure is said in a toast. */
 export async function newChat(m: string, kind: string, o: { cwd?: string; workspace?: string } = {}): Promise<string | undefined> {
@@ -174,7 +195,7 @@ export async function newChat(m: string, kind: string, o: { cwd?: string; worksp
   if (useStore.getState().readOnly) return void toast(t('conversation.error.read_only'));
   const cwd = cleanDir(o.cwd) ?? defaultCwd(m);
   if (!cwd) return void toast(t('chat.noDirectory', { agent }));
-  const mode = permissionMode(useSettings.getState().values, m, kind);
+  const options = await startOptions(m, kind);
   const workspace = chatWorkspaceFor(m, o.workspace);
   let chat;
   let vault: NewChatVault | undefined;
@@ -182,7 +203,7 @@ export async function newChat(m: string, kind: string, o: { cwd?: string; worksp
     const res = await chatApi.createChat(m, {
       kind,
       cwd,
-      ...(mode ? { options: { mode } } : {}),
+      ...(options ? { options } : {}),
       ...(workspace ? { workspace } : {}),
     });
     chat = res.chat;
@@ -190,9 +211,11 @@ export async function newChat(m: string, kind: string, o: { cwd?: string; worksp
   } catch (e) {
     toast(failureText(e, agent, 'chat.newFailed'));
     // What it can start may have changed.
-    void loadAgents(m, true);
+    void loadAgents(m, { force: true, fresh: true });
     return undefined;
   }
+  // Its host serves now: what it can start, unless known.
+  void loadAgents(m);
   reportChatVault(vault);
   upsertState(m, chat);
   return openChat(m, chat.id, kind);
@@ -403,7 +426,7 @@ export async function switchChatAgent(
 ): Promise<string | undefined> {
   if (useStore.getState().readOnly) return void toast(t('conversation.error.read_only'));
   const targetName = agentName(targetKind);
-  const mode = permissionMode(useSettings.getState().values, m, targetKind);
+  const options = await startOptions(m, targetKind);
   const maxBytes = customHandoffBytes(o.maxBytes);
   const workspace = chatWorkspaceFor(m, o.workspace, o.from);
   let switched;
@@ -412,7 +435,7 @@ export async function switchChatAgent(
     const res = await chatApi.switchChatWithVault(m, {
       chat,
       targetKind,
-      ...(mode ? { options: { mode } } : {}),
+      ...(options ? { options } : {}),
       ...(o.upToSeq !== undefined ? { upToSeq: o.upToSeq } : {}),
       ...(maxBytes !== undefined ? { maxBytes } : {}),
       ...(workspace ? { workspace } : {}),

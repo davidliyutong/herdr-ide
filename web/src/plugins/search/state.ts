@@ -99,5 +99,5 @@ export function cancelSearch() {
  * (actions.openPath): in the file explorer's own preview editor by default,
  * in VS Code when files.openLinks says so, else in Quick Look. */
 export function openMatch(m: string, path: string, line?: number, col?: number) {
-  return actions.openPath(m, path, line, col);
+  return actions.openPath(m, path, { line, col });
 }

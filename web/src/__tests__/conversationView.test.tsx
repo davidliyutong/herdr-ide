@@ -961,6 +961,65 @@ describe('the conversation view’s list', () => {
     expect(q('.conv-jump')).toBeNull();
   });
 
+  it('leaves the end on the smallest move up, so new output no longer pulls a slow scroll back; a wheel up leaves it at once', async () => {
+    const s = new FakeSource();
+    s.emit(prompt('a'), say('b'));
+    await show(s);
+    const log = q('[role="log"]')!;
+    let height = 2000;
+    let top = 1500;
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => height });
+    Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 500 });
+    Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => (top = Math.min(v, height - 500)) });
+    const scrolled = () => act(async () => void log.dispatchEvent(new Event('scroll')));
+    await scrolled();
+    expect(q('.conv-jump')).toBeNull();
+    // Content that got shorter clamps the list at its end: still there.
+    height = 1990;
+    top = 1490;
+    await scrolled();
+    expect(q('.conv-jump')).toBeNull();
+    // Three pixels up, well within the slack: away, and output stays put.
+    top = 1487;
+    await scrolled();
+    expect(q('.conv-jump')).not.toBeNull();
+    height = 2400;
+    await emit(s, say('c'));
+    expect(top).toBe(1487);
+    // Back down near the end: it holds there again.
+    top = 1890;
+    await scrolled();
+    expect(q('.conv-jump')).toBeNull();
+    // A wheel up leaves the end before any scroll event says so.
+    await act(async () => void log.dispatchEvent(new WheelEvent('wheel', { deltaY: -4, bubbles: true })));
+    expect(q('.conv-jump')).not.toBeNull();
+    height = 2600;
+    await emit(s, say('d'));
+    expect(top).toBe(1890);
+  });
+
+  it('keeps the item read away from the end drawn while items come past the window', async () => {
+    const s = new FakeSource();
+    for (let i = 0; i < SHOWN_ITEMS; i++) s.emit(prompt(`p${i}`));
+    await show(s);
+    const log = q('[role="log"]')!;
+    let top = 0;
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 20000 });
+    Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 500 });
+    Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => (top = v) });
+    await act(async () => void log.dispatchEvent(new Event('scroll')));
+    expect(q('.conv-jump')).not.toBeNull();
+    expect(q('.conv-user-text')?.textContent).toBe('p0');
+    for (let i = SHOWN_ITEMS; i < SHOWN_ITEMS + 5; i++) await emit(s, prompt(`p${i}`));
+    // The reader's item stays; the window grew instead.
+    expect(q('.conv-user-text')?.textContent).toBe('p0');
+    expect(qa('.conv-item')).toHaveLength(SHOWN_ITEMS + 5);
+    // Back at the end the window holds the newest again.
+    await click(q('.conv-jump'));
+    expect(qa('.conv-item')).toHaveLength(SHOWN_ITEMS);
+    expect(q('.conv-user-text')?.textContent).toBe('p5');
+  });
+
   it('starts over when its source starts over', async () => {
     const s = new FakeSource();
     s.emit(prompt('old'));

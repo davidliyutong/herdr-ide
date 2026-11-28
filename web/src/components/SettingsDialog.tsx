@@ -432,7 +432,7 @@ function OpenFileButton({ file, which }: { file: string; which: 'settings' | 'ke
       onClick={() => {
         if (canOpen) {
           useStore.getState().openSettings(false);
-          void actions.openPath(local.id, file, 1);
+          void actions.openPath(local.id, file, { line: 1 });
         } else {
           void navigator.clipboard?.writeText(file).catch(() => {});
           useStore.getState().toast(t('transfers.copied', { path: file }));

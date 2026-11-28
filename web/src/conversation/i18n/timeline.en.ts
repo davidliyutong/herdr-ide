@@ -96,6 +96,8 @@ export const timelineEn = {
   'conversation.task.tokens': '{tokens} tok',
   'conversation.task.stop': 'Stop',
   'conversation.task.stopNamed': 'Stop {name}',
+  'conversation.task.forget': 'Remove from List',
+  'conversation.task.forgetHint': 'The task stays with the agent if it still runs; this page no longer lists it.',
   'conversation.task.stopping': 'Stopping…',
   'conversation.task.pid': 'PID {pid}',
   'conversation.task.jumpHint': 'Jump to item in conversation',

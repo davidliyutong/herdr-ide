@@ -19,6 +19,7 @@ import { Conversation } from '../conversation/Conversation';
 import { MAX_IMAGE, type ChatEvent, type ContentBlock, type SourceEvent } from '../conversation/model';
 import type { ChatSource, Delivery, FileSuggestion } from '../conversation/source';
 import { setLocale, t } from '../i18n';
+import { endPathsDrag, startPathsDrag } from '../pathsDrag';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -802,10 +803,11 @@ describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
         { value: 'claude-opus-5-5', name: 'Opus' },
       ],
     };
+    const onModelChosen = vi.fn();
     await renderComposer({
       source: s,
       chat: { config: [modelOption], commands: [], capabilities: caps({ model: true }) },
-      modelPicker: { visibleModels: ['claude-opus-5-5'] },
+      modelPicker: { visibleModels: ['claude-opus-5-5'], onModelChosen },
     });
     const btn = q<HTMLButtonElement>('button.conv-select[data-config="model"]')!;
     await click(btn);
@@ -814,6 +816,11 @@ describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
     // Current model (Haiku) stays visible alongside the allowlisted Opus; Sonnet is hidden; no "More models" footer.
     expect(labels).toEqual(['claude-haiku-5-5', 'claude-opus-5-5']);
     expect(menu.querySelector('.conv-select-manage')).toBeNull();
+    // A model chosen, once the chat took it, is told (for chat.lastModel.<kind>).
+    await click(menu.querySelector<HTMLElement>('[role="option"][data-value="claude-opus-5-5"]'));
+    await settle();
+    expect(s.setConfig).toHaveBeenCalledWith('model', 'claude-opus-5-5');
+    expect(onModelChosen).toHaveBeenCalledWith('claude-opus-5-5');
   });
 
   it('#4 supports Slack-style queue edit, steer, clear-all, and explicit steer/interrupt while working', async () => {
@@ -997,6 +1004,48 @@ describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('attaches the file explorer’s rows of its machine dropped on it as files (folders too), refusing rows of another machine', async () => {
+    const s = new FakeSource();
+    await renderComposer({ source: s, base: { m: 'local', dir: '/w' }, chat: { config: [], commands: [], capabilities: caps({}) } });
+    const box = q('.conv-box')!;
+    /** Drags rows of machine m from the explorer over the box and drops them. */
+    async function dropRows(m: string, paths: string[], dirs: string[] = []) {
+      const data = new Map<string, string>();
+      const dt = {
+        types: [] as string[],
+        dropEffect: 'none',
+        setData(type: string, value: string) {
+          data.set(type, value);
+          this.types = [...data.keys()];
+        },
+        getData: (type: string) => data.get(type) ?? '',
+      };
+      startPathsDrag(dt as unknown as DataTransfer, { m, paths, dirs });
+      const over = new Event('dragover', { bubbles: true, cancelable: true });
+      Object.defineProperty(over, 'dataTransfer', { value: dt });
+      await act(async () => void box.dispatchEvent(over));
+      const ev = new Event('drop', { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, 'dataTransfer', { value: dt });
+      await act(async () => void box.dispatchEvent(ev));
+      endPathsDrag();
+      return { over, ev };
+    }
+    const other = await dropRows('remote', ['/w/a.ts']);
+    expect([other.over.defaultPrevented, other.ev.defaultPrevented]).toEqual([false, false]);
+    expect(qa('.conv-file-chip')).toHaveLength(0);
+    const own = await dropRows('local', ['/w/src', '/w/my doc.md', '/etc/hosts'], ['/w/src']);
+    expect([own.over.defaultPrevented, own.ev.defaultPrevented]).toEqual([true, true]);
+    expect(qa('.conv-file-chip').map((c) => c.textContent)).toEqual(['src', 'my doc.md', '/etc/hosts']);
+    await type('look');
+    await key({ key: 'Enter' });
+    expect(s.send.mock.calls[0][0]).toEqual([
+      { type: 'resource_link', uri: 'file:///w/src', name: 'src' },
+      { type: 'resource_link', uri: 'file:///w/my%20doc.md', name: 'my doc.md' },
+      { type: 'resource_link', uri: 'file:///etc/hosts', name: '/etc/hosts' },
+      { type: 'text', text: 'look' },
+    ]);
   });
 
   it('#7 supports Markdown list continuation on Shift+Enter, bold shortcut, and Write/Preview toggle in the + menu', async () => {

@@ -923,6 +923,8 @@ export const zhCN: Messages = {
   'plugins.transfers.description': '拖到窗格上的文件和从机器下载的文件，进度显示在状态栏。',
   'settings.section.plugins': '插件',
   'command.view.togglePanel': '显示/隐藏右侧栏',
+  'command.view.panel.next': '下一个侧栏工具',
+  'command.view.panel.previous': '上一个侧栏工具',
   // files plugin
   'command.view.panel.files': '显示资源管理器',
   'settings.plugins.files.enabled': '文件资源管理器',

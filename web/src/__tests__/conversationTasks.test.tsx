@@ -316,8 +316,25 @@ describe('BackgroundTasksBar and inline task controls', () => {
     await settle();
     const err = q('.conv-tasks-error', bar)!;
     expect(err.textContent).toContain(t('conversation.error.offline'));
-    await click(q('button', err));
+    await click(q(`button[aria-label="${t('conversation.dismiss')}"]`, err));
     expect(q('.conv-tasks-error', bar)).toBeNull();
+    expect(q('.conv-task-row[data-task="proc-7"]', bar)).not.toBeNull();
+
+    // A stop that keeps failing (a task the agent no longer runs): Remove from
+    // List takes it off this page's list; the others stay.
+    s.stopTask.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('no such task'), { code: 'not_found' });
+    });
+    await click(q('.conv-task-row[data-task="proc-7"] .conv-task-stop', bar));
+    await settle();
+    const forget = [...(q('.conv-tasks-error', bar)?.querySelectorAll('button') ?? [])].find(
+      (b) => b.textContent === t('conversation.task.forget'),
+    );
+    expect(forget).toBeDefined();
+    await click(forget!);
+    expect(q('.conv-task-row[data-task="proc-7"]')).toBeNull();
+    expect(q('.conv-task-row[data-task="thr-1"]')).not.toBeNull();
+    expect(q('.conv-tasks-error')).toBeNull();
 
     // Read-only hides every stop button.
     await show(s, { kind: 'codex', readOnly: true });

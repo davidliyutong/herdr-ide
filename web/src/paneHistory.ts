@@ -7,6 +7,7 @@
 // already: closing a pane focuses one beside it, which is then both the
 // latest place and the one before the closed pane, and a step that went
 // "back" to where the user is would look like a key that does nothing.
+// A tab closed while shown gives way to the tab of the pane focused last.
 // The history lives in the page only.
 import * as L from './term/layout';
 
@@ -19,11 +20,15 @@ export const MAX_HISTORY = 100;
 
 let spots: Spot[] = [];
 let at = -1;
+/** The panes focused, the latest first, each once: going back and forward
+ * reorders them as any focus does, and nothing ahead is dropped. */
+let recent: Spot[] = [];
 
 const same = (a: Spot | undefined, b: Spot) => !!a && a.m === b.m && a.pane === b.pane;
 
 /** Records the pane focused now, unless it is where the history is. */
 export function noteFocus(spot: Spot) {
+  if (!same(recent[0], spot)) recent = [spot, ...recent.filter((s) => !same(s, spot))].slice(0, MAX_HISTORY);
   if (same(spots[at], spot)) return;
   spots = [...spots.slice(0, at + 1), spot].slice(-MAX_HISTORY);
   at = spots.length - 1;
@@ -40,6 +45,12 @@ function target(step: -1 | 1, open: (s: Spot) => boolean): number | undefined {
 /** The panes focused, the latest first. */
 export function recentSpots(): readonly Spot[] {
   return [...spots].reverse();
+}
+
+/** Machine m's panes focused, the latest first (a closed tab gives way to
+ * the tab of the first still open, layout.ts showRecentTab). */
+export function recentPanes(m: string): string[] {
+  return recent.filter((s) => s.m === m).map((s) => s.pane);
 }
 
 export function canGo(step: -1 | 1, open: (s: Spot) => boolean): boolean {
@@ -61,4 +72,5 @@ export const paneOpen = (layout: L.Layout | undefined, pane: string) => !!layout
 export function resetHistory() {
   spots = [];
   at = -1;
+  recent = [];
 }

@@ -136,6 +136,27 @@ function validateEnv(raw: Record<string, string> | undefined): Record<string, st
   }
   return out;
 }
+
+/** What a new chat starts with, as a request asked for it; undefined when
+ * a value is out of its bounds (Options.models: at most MAX_START_MODELS
+ * non-empty values). */
+export function startOptions(o: chat.Options | undefined): chat.Options | undefined {
+  const opts: chat.Options = {};
+  if (o?.model) opts.model = o.model;
+  if (o?.effort) opts.effort = o.effort;
+  if (o?.mode) opts.mode = o.mode;
+  if (o?.models?.length) opts.models = o.models;
+  if (
+    !validOption(opts.model ?? '') ||
+    !validOption(opts.effort ?? '') ||
+    (opts.mode !== undefined && !(chat.MODES as readonly string[]).includes(opts.mode))
+  )
+    return undefined;
+  if (opts.models && (!Array.isArray(opts.models) || opts.models.length > chat.MAX_START_MODELS)) return undefined;
+  if (opts.models?.some((m) => typeof m !== 'string' || m === '' || !validOption(m))) return undefined;
+  return opts;
+}
+
 /** How much of a line that is too long is read before the answer that
  * says so, for the answer to reach a client still writing. */
 const MAX_DISCARD = 4 * chat.MAX_LINE;
@@ -883,16 +904,8 @@ export class Host {
     const resume = req.resume ?? '';
     if (resume !== '' && !SESSION_ID.test(resume)) return refusal(chat.Code.BadRequest, 'resume is no session id');
     if (req.import && resume === '') return refusal(chat.Code.BadRequest, 'import needs a session to resume');
-    const opts: chat.Options = {};
-    if (req.options?.model) opts.model = req.options.model;
-    if (req.options?.effort) opts.effort = req.options.effort;
-    if (req.options?.mode) opts.mode = req.options.mode;
-    if (
-      !validOption(opts.model ?? '') ||
-      !validOption(opts.effort ?? '') ||
-      (opts.mode !== undefined && !(chat.MODES as readonly string[]).includes(opts.mode))
-    )
-      return refusal(chat.Code.BadRequest, 'options out of their bounds');
+    const opts = startOptions(req.options);
+    if (!opts) return refusal(chat.Code.BadRequest, 'options out of their bounds');
     if (opts.mode === chat.Mode.Full && !this.current.allowFull)
       return refusal(chat.Code.NotAllowed, 'full access is not allowed on this machine');
     const env = validateEnv(req.env);
@@ -1810,16 +1823,8 @@ export class Host {
     if (reqEnv === null) return refusal(chat.Code.BadRequest, 'env: invalid environment variables');
     const found = this.spec(req.targetKind);
     if ('code' in found) return { error: found };
-    const opts: chat.Options = {};
-    if (req.options?.model) opts.model = req.options.model;
-    if (req.options?.effort) opts.effort = req.options.effort;
-    if (req.options?.mode) opts.mode = req.options.mode;
-    if (
-      !validOption(opts.model ?? '') ||
-      !validOption(opts.effort ?? '') ||
-      (opts.mode !== undefined && !(chat.MODES as readonly string[]).includes(opts.mode))
-    )
-      return refusal(chat.Code.BadRequest, 'options out of their bounds');
+    const opts = startOptions(req.options);
+    if (!opts) return refusal(chat.Code.BadRequest, 'options out of their bounds');
     if (opts.mode === chat.Mode.Full && !this.current.allowFull)
       return refusal(chat.Code.NotAllowed, 'full access is not allowed on this machine');
     if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');

@@ -473,6 +473,33 @@ export function renameTab(layout: Layout, workspace: string, tab: number, name: 
   });
 }
 
+/** The layout after, which closed tabs of before: a workspace whose shown
+ * tab went shows the tab holding the pane focused most recently that it
+ * still has (recent: pane keys, the latest first), as a browser goes back
+ * to the tab it showed before; with none of them, the tab that closing
+ * left shown (its next, else the one before). A workspace that lost no tab
+ * keeps its selection, also when the shown tab's panes changed their keys. */
+export function showRecentTab(before: Layout, after: Layout, recent: readonly string[]): Layout {
+  if (!recent.length) return after;
+  let changed = false;
+  const workspaces = after.workspaces.map((ws) => {
+    const was = before.workspaces.find((w) => w.id === ws.id);
+    const shown = was?.tabs[was.selected];
+    if (!was || !shown || ws.tabs.length >= was.tabs.length) return ws;
+    const gone = new Set(tabPanes(shown));
+    if (ws.tabs.some((t) => tabPanes(t).some((p) => gone.has(p)))) return ws;
+    for (const key of recent) {
+      const i = ws.tabs.findIndex((t) => tabPanes(t).includes(key));
+      if (i < 0) continue;
+      if (i === ws.selected) return ws;
+      changed = true;
+      return { ...ws, selected: i };
+    }
+    return ws;
+  });
+  return changed ? { ...after, workspaces } : after;
+}
+
 /** Removes a tab; its terminals keep running until the caller ends them. */
 export function closeTab(layout: Layout, workspace: string, tab: number): Layout {
   return updateWorkspace(layout, workspace, (ws) =>

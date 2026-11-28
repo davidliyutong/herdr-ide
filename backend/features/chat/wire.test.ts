@@ -195,7 +195,7 @@ describe('settings', () => {
     expect(hostSettings(st, 'm')).toEqual(chat.defaultHostSettings());
     for (const d of st.defs()) {
       const wantScope =
-        d.key.startsWith('chat.visibleModels.') || d.key.startsWith('chat.providers.') || d.key === 'chat.handoffMaxKB' ? 'app' : 'machine';
+        /^chat\.(visibleModels|providers|model|lastModel)\./.test(d.key) || d.key === 'chat.handoffMaxKB' ? 'app' : 'machine';
       expect([d.key, d.scope, d.section]).toEqual([d.key, wantScope, 'chat']);
     }
     // Per-provider visible model allowlists default to empty (= show all),
@@ -207,6 +207,18 @@ describe('settings', () => {
     st.set('chat.visibleModels.claude', '', ['claude-sonnet-4-6', 'claude-opus-4-6']);
     expect(st.get('chat.visibleModels.claude', '')).toEqual(['claude-sonnet-4-6', 'claude-opus-4-6']);
     expect(() => st.set('chat.visibleModels.claude', '', [''])).toThrow();
+    // The model a new chat starts with: the agent's default (''), the one
+    // chosen last ('@last'), else a model id; no other '@' value.
+    for (const k of ['claude', 'codex', 'agy', 'kimi', 'grok']) {
+      expect([st.get(`chat.model.${k}`, ''), st.get(`chat.lastModel.${k}`, '')]).toEqual(['', '']);
+    }
+    st.set('chat.model.claude', '', '@last');
+    st.set('chat.model.codex', '', 'gpt-6-luna');
+    st.set('chat.lastModel.claude', '', 'opus');
+    expect(() => st.set('chat.model.claude', '', '@first')).toThrow();
+    expect(() => st.set('chat.model.claude', '', ' ')).toThrow();
+    expect(() => st.set('chat.lastModel.claude', '', 'x'.repeat(257))).toThrow();
+    expect(hostSettings(st, 'm')).toEqual(chat.defaultHostSettings());
     st.set('chat.permissionMode', 'gpu', chat.Mode.Full);
     expect(hostSettings(st, 'gpu')).toEqual(chat.defaultHostSettings());
     // Per-provider full access is clamped to default until allowFullAccess is enabled.

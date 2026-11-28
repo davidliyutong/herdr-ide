@@ -11,9 +11,9 @@ import { t } from '../../i18n';
 import { useStore } from '../../state/store';
 import type { PaneViewProps, PluginDef, PluginSettingsLayoutProps, PluginSettingsProps } from '../api';
 import { ChatHeader } from './ChatHeader';
-import { agentName, brandKindIcon, chatMenu, kindIcon, kindsMenu, newChat, newTabTitle, startRename } from './ops';
+import { agentName, brandKindIcon, chatMenu, kindIcon, kindsMenu, machineLabel, newChat, newTabTitle, startRename } from './ops';
 import { chatViewStatus } from './status';
-import { applyMessage, chatCwd, chatGone, follow, loadAgents, offeredKinds, useChats } from './state';
+import { agentsKnown, applyMessage, chatCwd, chatGone, follow, loadAgents, offeredKinds, probeAgents, useChats } from './state';
 import { watchHosts } from './hostReminder';
 import { CHAT_PLUGIN, CHAT_VIEW, chatRef } from './view';
 
@@ -26,12 +26,14 @@ export interface ChatPluginComponents {
 }
 
 /** Starts a chat on the focused pane's machine: with its agent when the
- * machine offers one, else from a menu of them at the focused pane. */
+ * machine offers one, else from a menu of them at the focused pane; a
+ * machine that said it can start none is told of in a toast. */
 function newChatCommand() {
   const c = actions.focusedContext();
   if (!c) return;
   const kinds = offeredKinds(c.m);
   if (kinds.length === 1) return void newChat(c.m, kinds[0].id);
+  if (!kinds.length && agentsKnown(c.m)) return void useStore.getState().toast(t('chat.noAgents', { machine: machineLabel(c.m) }));
   const header = c.pane ? document.querySelector(`.pane-header[data-m="${CSS.escape(c.m)}"][data-pane="${CSS.escape(c.pane)}"]`) : null;
   const r = header?.getBoundingClientRect();
   openMenu(
@@ -102,6 +104,11 @@ export function makeChatPlugin(ui: ChatPluginComponents): PluginDef {
         icon: kindIcon(k.id),
         run: (machine: string, ws: string) => void newChat(machine, k.id, { workspace: ws }),
       }));
+    },
+    // A new workspace's agents are known before the user picks one: its
+    // machine is asked, starting its chat host (which idles out).
+    workspaceCreated(m) {
+      void probeAgents(m);
     },
     onMessage(m, data) {
       // A host of another build than the hub's is reminded of.

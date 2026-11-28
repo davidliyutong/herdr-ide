@@ -20,7 +20,7 @@ import type { ChatInfo, Usage } from '../../conversation/model';
 import { isPluginOn } from '../registry';
 import { useSettings } from '../../settings';
 import { useStore } from '../../state/store';
-import { chatApi, isChatProviderEnabled, MAX_CHATS, readStates, type States } from './api';
+import { ChatFailure, chatApi, isChatProviderEnabled, MAX_CHATS, readStates, type States } from './api';
 import { CHAT_PLUGIN } from './view';
 import { STATE_DELETED, type AgentStatus, type ChatError, type ChatState } from './protocol';
 
@@ -267,9 +267,15 @@ function forgetMachines(gone: (m: string) => boolean) {
   });
 }
 
-/** Changes what an attached chat states (undefined: forgets it). */
+/** Changes what an attached chat states (undefined: forgets it). A chat
+ * that now failed as not_found (its agent's program gone since the machine
+ * said which it can start, or never asked) has the machine asked again,
+ * past the hub's cache, so that the menus stop offering it; the chat still
+ * says why it failed. */
 export function setLive(m: string, chat: string, patch: Partial<LiveChat> | undefined) {
   const k = liveKey(m, chat);
+  if (patch?.error?.code === 'not_found' && useChats.getState().live[k]?.error?.code !== 'not_found')
+    void loadAgents(m, { force: true, fresh: true });
   useChats.setState((s) => {
     if (!patch) {
       if (!(k in s.live)) return s;
@@ -286,25 +292,64 @@ export function setLive(m: string, chat: string, patch: Partial<LiveChat> | unde
 
 const asking = new Map<string, Promise<void>>();
 
+/** Keeps what machine m said it can start (GET or POST agents), whoever
+ * asked. */
+export function rememberAgents(m: string, list: AgentStatus[]) {
+  useChats.setState((s) => ({ agents: { ...s.agents, [m]: { list, at: Date.now() } } }));
+}
+
+/** How a page asks a machine for its agents (loadAgents). */
+export interface AgentsAsk {
+  /** Even when asked within AGENTS_TTL_MS. */
+  force?: boolean;
+  /** Past the hub's cache of the answer (?refresh=1). */
+  fresh?: boolean;
+  /** Starts the machine's chat host to ask when none serves. */
+  start?: boolean;
+}
+
 /** Reads the agents machine m can start, unless asked within
- * AGENTS_TTL_MS (force: anyway). */
-export function loadAgents(m: string, force = false): Promise<void> {
+ * AGENTS_TTL_MS. A GET starts no chat host: while none serves
+ * (not_running), what the page knew stays. With start, a page that may
+ * make changes then starts the machine's host to ask (POST agents), which
+ * a new workspace does (probeAgents); a read-only page asks none. A
+ * failure leaves what the page knew. */
+export function loadAgents(m: string, o: AgentsAsk = {}): Promise<void> {
   const known = useChats.getState().agents[m];
-  if (!force && known && Date.now() - known.at < AGENTS_TTL_MS) return Promise.resolve();
-  let p = asking.get(m);
+  if (!o.force && known && Date.now() - known.at < AGENTS_TTL_MS) return Promise.resolve();
+  const key = `${m}\0${o.start ? 'start' : 'peek'}\0${o.fresh ? 'fresh' : ''}`;
+  let p = asking.get(key);
   if (!p) {
-    p = chatApi
-      .agents(m)
-      .then((list) => useChats.setState((s) => ({ agents: { ...s.agents, [m]: { list, at: Date.now() } } })))
+    const opts = o.fresh ? { refresh: true } : undefined;
+    const ask = async () => {
+      try {
+        return await chatApi.agents(m, opts);
+      } catch (e) {
+        if (!o.start || !(e instanceof ChatFailure && e.code === 'not_running') || useStore.getState().readOnly) throw e;
+        return chatApi.startAgents(m, opts);
+      }
+    };
+    p = ask()
+      .then((list) => rememberAgents(m, list))
       .catch(() => {})
-      .finally(() => asking.delete(m));
-    asking.set(m, p);
+      .finally(() => asking.delete(key));
+    asking.set(key, p);
   }
   return p;
 }
 
+/** Asks machine m which agents it can start, starting its chat host to
+ * ask when none serves, so that the menus offer only those (offeredKinds)
+ * before the user picks one: when a workspace is made. Nothing while the
+ * plugin is off. */
+export function probeAgents(m: string): Promise<void> {
+  if (!isPluginOn(CHAT_PLUGIN)) return Promise.resolve();
+  return loadAgents(m, { force: true, fresh: true, start: true });
+}
+
 /** The chat kinds to offer on machine m: enabled providers that it can start
- * once it said which; every enabled kind with a chat until then. */
+ * once it said which; every enabled kind with a chat until then (an agent
+ * that is missing then fails its chat with not_found, which asks again). */
 export function offeredKinds(m: string): AgentKind[] {
   const values = useSettings.getState().values;
   const enabled = chatKinds().filter((k) => isChatProviderEnabled(values, k.id));
@@ -313,6 +358,9 @@ export function offeredKinds(m: string): AgentKind[] {
   const ok = new Set(known.list.filter((a) => a.available).map((a) => a.kind));
   return enabled.filter((k) => ok.has(k.id));
 }
+
+/** Whether machine m said which agents it can start. */
+export const agentsKnown = (m: string): boolean => !!useChats.getState().agents[m];
 
 // ---- following the page's connection and the machines ----
 
@@ -332,7 +380,7 @@ export function follow() {
       const now = on && st.status === 'ready';
       if (now && !ready.has(m)) {
         ready.add(m);
-        void loadAgents(m, true);
+        void loadAgents(m, { force: true });
       } else if (!now) ready.delete(m);
     }
     for (const m of [...ready]) if (!all[m]) ready.delete(m);

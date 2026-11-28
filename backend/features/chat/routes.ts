@@ -12,7 +12,7 @@
 //     an agent kept for a directory ({sessions, nextCursor}); a change, as
 //     listing them may run the agent; audited as chat.sessions;
 //   - POST   /api/m/{id}/p/chat/new: a new chat from the body {kind, cwd,
-//     resume?, import?, options?{model, effort, mode}} ({chat}), audited as
+//     resume?, import?, options?{model, effort, mode, models}} ({chat}), audited as
 //     chat.new;
 //   - POST   /api/m/{id}/p/chat/close?chat=: ends a chat's agent and keeps
 //     the chat ({}), audited as chat.close;
@@ -86,11 +86,23 @@ export function validCwd(s: string): boolean {
 
 /** Whether s may be the value of an option of a new chat. */
 const validOption = (s: string): boolean => Buffer.byteLength(s) <= 256 && !/[\x00-\x1f\x7f]/.test(s);
+/** Whether a body's options are in their bounds: valid model and effort,
+ * a mode of chatproto's, models non-empty valid values. */
+const validStartOptions = (o: { model: string; effort: string; mode: string; models?: string[] | null }): boolean =>
+  validOption(o.model) &&
+  validOption(o.effort) &&
+  (!o.mode || (chat.MODES as readonly string[]).includes(o.mode)) &&
+  (o.models ?? []).every((m) => m !== '' && validOption(m));
 
 const opt = z
   .string()
   .nullish()
   .transform((v) => v ?? '');
+
+/** What a new chat starts with (chatproto Options). */
+const startOptionsBody = z
+  .object({ model: opt, effort: opt, mode: opt, models: z.array(z.string()).max(chat.MAX_START_MODELS).nullish() })
+  .nullish();
 
 /** The body of POST new. */
 const newBody = z.object({
@@ -102,7 +114,7 @@ const newBody = z.object({
     .nullish()
     .transform((v) => v ?? false),
   workspace: opt,
-  options: z.object({ model: opt, effort: opt, mode: opt }).nullish(),
+  options: startOptionsBody,
 });
 
 const optSeq = z.number().int().positive().nullish();
@@ -133,7 +145,7 @@ const switchBody = z.object({
   upToSeq: optSeq,
   maxBytes: optMaxBytes,
   workspace: opt,
-  options: z.object({ model: opt, effort: opt, mode: opt }).nullish(),
+  options: startOptionsBody,
 });
 
 export interface WorkspaceEnvLookup {
@@ -287,8 +299,7 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
     if (b.resume && !SESSION_ID.test(b.resume)) throw badRequest('resume: a session id');
     if (b.import && !b.resume) throw badRequest('import needs a session to resume');
     const o = b.options;
-    if (o && (!validOption(o.model) || !validOption(o.effort) || (o.mode && !(chat.MODES as readonly string[]).includes(o.mode))))
-      throw badRequest('options: model, effort and a mode');
+    if (o && !validStartOptions(o)) throw badRequest('options: model, effort, a mode and models');
     const { env, vault } = await resolveWorkspaceEnv(c, b.workspace);
     c.var.audit.cwd = auditText(b.cwd);
     if (b.resume) Object.assign(c.var.audit, { resume: b.resume, import: b.import });
@@ -297,6 +308,7 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
       ...(o.model ? { model: o.model } : {}),
       ...(o.effort ? { effort: o.effort } : {}),
       ...(o.mode ? { mode: o.mode } : {}),
+      ...(o.models?.length ? { models: o.models } : {}),
     };
     // A Claude Code chat runs on Anthropic's Agent SDK, which the machine
     // gets first: asked again although it failed lately, the user asking.
@@ -504,8 +516,7 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
     if (!chat.validChatID(b.chat)) throw badRequest("chat: a chat's id");
     if (!chatKinds().includes(b.targetKind)) throw badRequest('targetKind: an agent kind with a chat');
     const o = b.options;
-    if (o && (!validOption(o.model) || !validOption(o.effort) || (o.mode && !(chat.MODES as readonly string[]).includes(o.mode))))
-      throw badRequest('options: model, effort and a mode');
+    if (o && !validStartOptions(o)) throw badRequest('options: model, effort, a mode and models');
     const { env, vault } = await resolveWorkspaceEnv(c, b.workspace);
     c.var.audit.chat = b.chat;
     c.var.audit.targetKind = b.targetKind;
@@ -515,6 +526,7 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
       ...(o.model ? { model: o.model } : {}),
       ...(o.effort ? { effort: o.effort } : {}),
       ...(o.mode ? { mode: o.mode } : {}),
+      ...(o.models?.length ? { models: o.models } : {}),
     };
     try {
       await board.ensureSdk(c.var.machine.id, b.targetKind, bounded(c, timing.sdkMs), {

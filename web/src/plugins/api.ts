@@ -261,6 +261,10 @@ export interface PluginDef {
   newTabItems?(m: string): NewTabItem[];
   /** A message of its hub side for machine m ("" for the hub's). */
   onMessage?(m: string, data: unknown): void;
+  /** The user made workspace ws on machine m (a new workspace, or one
+   * panes or tabs moved into): what the plugin needs to know before its
+   * use there (the chat plugin asks which agents m can start). */
+  workspaceCreated?(m: string, ws: string): void;
   /** Buttons in terminals' panes' headers (HeaderActionsComponent). */
   headerActions?: HeaderActionsComponent[];
   /** The agent status of its panes, which the app shows and counts as it
@@ -271,4 +275,9 @@ export interface PluginDef {
    * what the first plugin that is on with one says (the file explorer's);
    * with none on, nothing is marked. */
   useFileGone?(m: string, path: string): string | undefined;
+  /** A path of machine m that a text named (a link in a pane): when it is
+   * a folder, the plugin shows it (the file explorer expands it in its
+   * tree) and resolves true; false when it is no folder or its state is
+   * not known, for the app to open it as a file. */
+  openFolder?(m: string, path: string): Promise<boolean>;
 }

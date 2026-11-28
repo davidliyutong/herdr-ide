@@ -2,7 +2,8 @@
 // after AI Usage's SettingsPage (plugins/usage/SettingsPage.tsx): the general
 // chat settings, then a Providers list where each AI coding agent opens a
 // secondary sub-page with Model List Refresh and per-model visibility
-// checkboxes (persisted to chat.visibleModels.<kind>). The plugin's extra
+// checkboxes (persisted to chat.visibleModels.<kind>), and the model a new
+// chat starts with (chat.model.<kind>). The plugin's extra
 // section (Headless Chat Hosts & Trusted Folders) stays on the first page only.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ChevronRight, RefreshCw } from 'lucide-react';
@@ -13,7 +14,19 @@ import { resetSetting, setSetting, useSettings, type SettingDef } from '../../se
 import { useStore } from '../../state/store';
 import type { PluginSettingsLayoutProps } from '../api';
 import { ProviderLogo } from '../usage/logos';
-import { CHAT_PROVIDERS, ChatFailure, chatApi, failureText, isChatProviderEnabled, visibleModelsFor } from './api';
+import {
+  CHAT_PROVIDERS,
+  ChatFailure,
+  LAST_MODEL,
+  chatApi,
+  failureText,
+  isChatProviderEnabled,
+  lastModelFor,
+  modelUnavailable,
+  startModelOptions,
+  startModelSetting,
+  visibleModelsFor,
+} from './api';
 import { agentName } from './ops';
 import type { ModelOption } from './protocol';
 import { useChats } from './state';
@@ -21,6 +34,10 @@ import { useChats } from './state';
 const PROVIDER_PREFIX = 'chat.providers.';
 const VISIBLE_PREFIX = 'chat.visibleModels.';
 const MODE_PREFIX = 'chat.permissionMode.';
+const MODEL_PREFIX = 'chat.model.';
+const LAST_PREFIX = 'chat.lastModel.';
+/** The per-provider keys shown on a provider's page, not among the general rows. */
+const PROVIDER_PREFIXES = [VISIBLE_PREFIX, PROVIDER_PREFIX, MODEL_PREFIX, LAST_PREFIX];
 
 /** The chat providers shown on the settings page, in canonical order. */
 export function chatProviderIds(defs: readonly SettingDef[]): string[] {
@@ -42,10 +59,8 @@ export function chatProviderIds(defs: readonly SettingDef[]): string[] {
 }
 
 function providerOfRow(row?: string): string | undefined {
-  if (row?.startsWith(VISIBLE_PREFIX)) return row.slice(VISIBLE_PREFIX.length);
-  if (row?.startsWith(PROVIDER_PREFIX)) return row.slice(PROVIDER_PREFIX.length);
-  if (row?.startsWith(MODE_PREFIX)) return row.slice(MODE_PREFIX.length);
-  return undefined;
+  const prefix = row ? [...PROVIDER_PREFIXES, MODE_PREFIX].find((p) => row.startsWith(p)) : undefined;
+  return prefix ? row!.slice(prefix.length) : undefined;
 }
 
 function formatTime(iso?: string): string {
@@ -84,10 +99,7 @@ export function ChatSettingsPage({ defs, rows, lead, footer, machine, readOnly, 
   // User scope groups per-provider permission modes inside each provider's sub-page;
   // machine scope shows all machine-scoped rows including per-agent overrides.
   const generalDefs = useMemo(
-    () =>
-      defs.filter(
-        (d) => !d.key.startsWith(VISIBLE_PREFIX) && !d.key.startsWith(PROVIDER_PREFIX) && (machine ? true : !d.key.startsWith(MODE_PREFIX)),
-      ),
+    () => defs.filter((d) => !PROVIDER_PREFIXES.some((p) => d.key.startsWith(p)) && (machine ? true : !d.key.startsWith(MODE_PREFIX))),
     [defs, machine],
   );
 
@@ -108,6 +120,7 @@ export function ChatSettingsPage({ defs, rows, lead, footer, machine, readOnly, 
               const switchKey = `${PROVIDER_PREFIX}${id}`;
               const visibleKey = `${VISIBLE_PREFIX}${id}`;
               const modeKey = `${MODE_PREFIX}${id}`;
+              const modelKey = `${MODEL_PREFIX}${id}`;
               const on = isChatProviderEnabled(values, id);
               const switchLocked = !!values[switchKey]?.locked;
               const selected = visibleModelsFor(values, id);
@@ -116,7 +129,8 @@ export function ChatSettingsPage({ defs, rows, lead, footer, machine, readOnly, 
               const modified =
                 values[switchKey]?.source === 'global' ||
                 (values[visibleKey]?.source === 'global' && selected.length > 0) ||
-                (values[modeKey]?.source === 'global' && !!customMode);
+                (values[modeKey]?.source === 'global' && !!customMode) ||
+                (values[modelKey]?.source === 'global' && startModelSetting(values, id) !== '');
               const modelSummary =
                 selected.length > 0 ? t('chat.settings.modelsSelected', { n: selected.length }) : t('chat.settings.modelsAll');
               const modeSummaryKey = customMode ? `settings.${modeKey}.${customMode}` : '';
@@ -319,6 +333,7 @@ function ProviderModelsPage({
     return [...byId.values()];
   }, [cached, liveChats, chatStates, kind, saved]);
 
+  const cachedIds = useMemo(() => (cached.length > 0 ? cached.map((m) => m.value) : undefined), [cached]);
   const savedSet = useMemo(() => new Set(saved), [saved]);
   const allShown = !cleared && saved.length === 0;
   const isChecked = useCallback((id: string) => !cleared && (allShown || savedSet.has(id)), [cleared, allShown, savedSet]);
@@ -441,6 +456,7 @@ function ProviderModelsPage({
         <div className="setting-desc">{t('chat.settings.providerEnabledDesc', { agent })}</div>
       </div>
       {modeDef && <div className="chat-provider-mode-row">{rows([modeDef])}</div>}
+      <StartModelRow kind={kind} agent={agent} models={allModels} offered={cachedIds} readOnly={readOnly} />
       <div className="setting chat-models-section">
         <div className="setting-head">
           <span className="setting-title">{t('chat.settings.modelsTitle')}</span>
@@ -539,6 +555,86 @@ function ProviderModelsPage({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The model a new chat of kind starts with (chat.model.<kind>): the agent's
+ * default, the one chosen last, or a model of those known (models). A choice
+ * that cannot start a chat now (hidden from the picker, or no longer in the
+ * agent's list offered when it is known) stays chosen and says so, with the
+ * model new chats start with instead. */
+function StartModelRow({
+  kind,
+  agent,
+  models,
+  offered,
+  readOnly,
+}: {
+  kind: string;
+  agent: string;
+  models: readonly ModelOption[];
+  offered?: readonly string[];
+  readOnly: boolean;
+}) {
+  const values = useSettings((s) => s.values);
+  const [error, setError] = useState<string | undefined>();
+  const key = `${MODEL_PREFIX}${kind}`;
+  const disabled = readOnly || !!values[key]?.locked;
+  const setting = startModelSetting(values, kind);
+  const last = lastModelFor(values, kind);
+  const name = (id: string) => models.find((m) => m.value === id)?.name || id;
+  const why = (id: string) => modelUnavailable(values, kind, id, offered);
+  const label = (id: string) => {
+    const w = why(id);
+    return w ? t(w === 'hidden' ? 'chat.settings.startModel.hidden' : 'chat.settings.startModel.withdrawn', { model: name(id) }) : name(id);
+  };
+  const ids = models.map((m) => m.value);
+  if (setting !== '' && setting !== LAST_MODEL && !ids.includes(setting)) ids.unshift(setting);
+  const chosen = setting === LAST_MODEL ? last : setting;
+  const start = startModelOptions(values, kind, offered).model;
+  const fallback = start ? name(start) : t('chat.settings.startModel.agentDefault');
+  const note =
+    chosen !== '' && why(chosen)
+      ? t('chat.settings.startModel.unavailable', { model: name(chosen), fallback })
+      : chosen === '' && start
+        ? t('chat.settings.startModel.firstShown', { agent, fallback })
+        : undefined;
+  const change = async (v: string) => {
+    setError(undefined);
+    const err = v === '' ? await resetSetting(key) : await setSetting(key, v);
+    if (err) setError(err);
+  };
+  return (
+    <div className="setting chat-start-model" data-key={key}>
+      <div className="setting-head">
+        <span className="setting-title">{t('chat.settings.startModel')}</span>
+      </div>
+      <div className="setting-desc">{t('chat.settings.startModelDesc', { agent })}</div>
+      <div className="setting-control">
+        <select
+          value={setting}
+          disabled={disabled}
+          aria-label={t('chat.settings.startModel')}
+          onChange={(e) => void change(e.target.value)}
+        >
+          <option value="">{t('chat.settings.startModel.agent')}</option>
+          <option value={LAST_MODEL}>
+            {last ? t('chat.settings.startModel.lastIs', { model: label(last) }) : t('chat.settings.startModel.last')}
+          </option>
+          {ids.map((id) => (
+            <option key={id} value={id} disabled={id !== setting && why(id) === 'hidden'}>
+              {label(id)}
+            </option>
+          ))}
+        </select>
+      </div>
+      {note && <p className="muted small chat-start-model-note">{note}</p>}
+      {error && (
+        <p className="error small" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

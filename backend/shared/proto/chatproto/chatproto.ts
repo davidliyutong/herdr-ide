@@ -222,6 +222,22 @@ export interface Options {
   model?: string;
   effort?: string;
   mode?: string;
+  /** The models to start with when the agent does not offer model (or none
+   * is given), in the order they are tried (at most MAX_START_MODELS): the
+   * first the agent lists is used; none of them leaves the agent's own.
+   * A model the agent no longer offers never reaches it. */
+  models?: string[];
+}
+
+/** The most Options.models of a new chat. */
+export const MAX_START_MODELS = 64;
+
+/** The models a chat starts with, in the order to try them: Options.model,
+ * then Options.models, without repeats or empty values. */
+export function startModels(o: Options): string[] {
+  const out: string[] = [];
+  for (const m of [o.model ?? '', ...(o.models ?? [])]) if (m !== '' && !out.includes(m)) out.push(m);
+  return out;
 }
 
 /** The permission modes of the host's settings (HostSettings.defaultMode,

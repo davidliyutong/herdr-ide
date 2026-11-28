@@ -19,7 +19,7 @@ import {
   leaveWindowPane,
   commandLabel,
   handleKey,
-  handlePaneLeaveKey,
+  handleEditorKey,
   keyHint,
   onChordChange,
   pendingChord,
@@ -46,6 +46,7 @@ import './commands';
 import { actions, current, workspaceTitle } from './actions';
 import { initMainWindowSync } from './detachedWindow';
 import { noteFocus } from './paneHistory';
+import { followPanelSwipe } from './panelSwipe';
 import { loadConfig, retryFailedBootstrap, startBootstrap } from './bootstrap';
 
 // Lazy-loaded overlays and optional layers: none is visible on initial paint,
@@ -188,14 +189,16 @@ export function App() {
     const offFolders = takeOpenedFolders();
     const offWorkers = followVSCodeSwitch();
     const offWindows = initMainWindowSync({ onDock: (dm, dpane) => actions.focusPane(dm, dpane) });
+    const offSwipe = followPanelSwipe();
     const off = onChordChange(setChord);
-    // Ctrl+B escapes focus from editors and pane inputs before they consume it;
+    // Ctrl+B (leave) and Go Back/Forward reach the app from editors and pane
+    // inputs before they consume the keys (keymap.ts EDITOR_COMMANDS);
     // terminals route their own keys through TermPane -> appKey -> handleKey.
     const onCaptureKey = (ev: KeyboardEvent) => {
       const el = ev.target as HTMLElement | null;
       if (!el || el.closest('.term-host') || el.closest('.pane-header') || el.closest('.inline-edit')) return;
       if (el.closest('.pane') || (el.closest('.panel') && el.closest('input, textarea, [contenteditable]'))) {
-        handlePaneLeaveKey(ev);
+        handleEditorKey(ev);
       }
     };
     // Bindings also work when the focus is outside a terminal or Monaco editor.
@@ -216,6 +219,7 @@ export function App() {
       offFolders();
       offWorkers();
       offWindows();
+      offSwipe();
       window.removeEventListener('keydown', onCaptureKey, true);
       window.removeEventListener('keydown', onKey);
     };

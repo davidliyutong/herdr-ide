@@ -584,11 +584,13 @@ export class CodexSession implements Session {
       }
       let model = this.st.model;
       if (first) {
-        model = this.p.options.model ?? '';
-        if (model !== '' && ms.length > 0 && !ms.find(model)) {
-          this.logf(`the model ${JSON.stringify(model)} is not offered; the thread's own is used`);
-          model = '';
-        }
+        // The first of the chat's models the app-server lists; none: the thread's own.
+        const wants = chat.startModels(this.p.options);
+        model = ms.length > 0 ? (wants.find((w) => ms.find(w)) ?? '') : (wants[0] ?? '');
+        if (wants.length > 0 && model !== wants[0])
+          this.logf(
+            `the model ${JSON.stringify(wants[0])} is not offered; ${model !== '' ? JSON.stringify(model) : "the thread's own"} is used`,
+          );
       }
       const method = resume !== '' ? 'thread/resume' : 'thread/start';
       const res =

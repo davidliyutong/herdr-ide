@@ -62,6 +62,8 @@ export interface ModelPickerConfig {
   visibleModels?: readonly string[];
   /** Opens Chat Settings directly to this agent's provider sub-page. */
   onManageModels?(): void;
+  /** The user chose a model in the picker and the chat took it. */
+  onModelChosen?(value: string): void;
 }
 
 /** Shared optional props added to ConversationProps (Conversation.tsx) and

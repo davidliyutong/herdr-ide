@@ -15,6 +15,7 @@ import { useTerms } from '../../state/terms';
 import * as L from '../../term/layout';
 import { openMenu } from '../../contextMenu';
 import { carriesFiles } from '../../drop';
+import { carriesPaths, endPathsDrag, PATHS_TYPE, startPathsDrag } from '../../pathsDrag';
 import { InlineEdit } from '../../components/InlineEdit';
 import { APP_SLUG } from '../../brand';
 import { t } from '../../i18n';
@@ -88,8 +89,6 @@ import './files.css';
 
 /** How often the shown directories are checked for changes. */
 export const POLL_MS = 2000;
-/** The drag type of paths dragged inside the tree. */
-const DRAG_TYPE = `application/x-${APP_SLUG}-files`;
 /** Clipboard marker written on in-app copy/cut so an earlier OS file copy
  * does not shadow a more recent in-app copy/cut on paste. */
 const CLIP_TYPE = `application/x-${APP_SLUG}-clipboard`;
@@ -479,18 +478,20 @@ export function FilesPanel() {
     const paths = targets(row.path);
     const out = canDownload(m) ? dragOutUrl(m, paths, isDir) : undefined;
     if (readOnly && !out) return ev.preventDefault();
-    // Rows move or copy inside the tree; dropped on the computer (where
-    // the browser takes DownloadURL: Chromium's), they download.
-    if (!readOnly) ev.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ m, paths }));
+    // Rows move or copy inside the tree, and their paths go into a
+    // terminal or chat of the machine they are dropped on (drop.ts);
+    // dropped on the computer (where the browser takes DownloadURL:
+    // Chromium's), they download.
+    if (!readOnly) startPathsDrag(ev.dataTransfer, { m, paths, dirs: paths.filter(isDir) });
     if (out) ev.dataTransfer.setData('DownloadURL', out);
     ev.dataTransfer.effectAllowed = readOnly ? 'copy' : 'copyMove';
   };
-  const accepts = (dt: DataTransfer) => !readOnly && (Array.from(dt.types).includes(DRAG_TYPE) || carriesFiles(dt));
+  const accepts = (dt: DataTransfer) => !readOnly && (carriesPaths(dt) || carriesFiles(dt));
   const onDragOver = (ev: React.DragEvent, row?: Row) => {
     if (!accepts(ev.dataTransfer)) return;
     ev.preventDefault();
     ev.stopPropagation();
-    const internal = Array.from(ev.dataTransfer.types).includes(DRAG_TYPE);
+    const internal = carriesPaths(ev.dataTransfer);
     ev.dataTransfer.dropEffect = internal && !ev.altKey ? 'move' : 'copy';
     setDrop(dropDir(row));
   };
@@ -500,7 +501,7 @@ export function FilesPanel() {
     ev.stopPropagation();
     setDrop(undefined);
     const dir = dropDir(row);
-    const raw = ev.dataTransfer.getData(DRAG_TYPE);
+    const raw = ev.dataTransfer.getData(PATHS_TYPE);
     if (raw) {
       try {
         const d = JSON.parse(raw) as { m: string; paths: string[] };
@@ -597,6 +598,7 @@ export function FilesPanel() {
           openMenu(ev, menuFor(m, targets(row.path), isDir, treeRef.current));
         }}
         onDragStart={(ev) => onDragStart(ev, row)}
+        onDragEnd={endPathsDrag}
         onDragOver={(ev) => onDragOver(ev, row)}
         onDrop={(ev) => onDrop(ev, row)}
         editor={

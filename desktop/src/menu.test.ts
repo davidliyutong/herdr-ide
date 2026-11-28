@@ -98,9 +98,10 @@ test('items show the first single-stroke key of their command and run it', () =>
   assert.equal(byCommand('pane.focusLeft').accelerator, 'Super+Alt+Left');
   assert.equal(byCommand('pane.zoom').accelerator, 'Super+Shift+Enter');
   assert.equal(byCommand('pane.back').accelerator, 'Super+[');
-  assert.equal(byCommand('pane.back').registerAccelerator, false);
+  // Cmd+[ and Cmd+] only navigate, in editors too: the menu takes them.
+  assert.equal(byCommand('pane.back').registerAccelerator, true);
   assert.equal(byCommand('pane.forward').accelerator, 'Super+]');
-  assert.equal(byCommand('pane.forward').registerAccelerator, false);
+  assert.equal(byCommand('pane.forward').registerAccelerator, true);
   assert.equal(byCommand('pane.splitRight').accelerator, 'Super+D');
   assert.equal(byCommand('pane.splitRight').registerAccelerator, false);
   assert.equal(byCommand('find.open').accelerator, 'Super+F');
@@ -108,10 +109,9 @@ test('items show the first single-stroke key of their command and run it', () =>
   assert.equal(byCommand('app.keyboardShortcuts').registerAccelerator, false);
   assert.equal(byCommand('pane.leave').accelerator, 'Control+B');
   assert.equal(byCommand('pane.leave').registerAccelerator, false);
-  // Cmd+Z is Edit's Undo in text fields and VS Code: the item only shows it,
-  // and the page takes it in a terminal.
-  assert.equal(byCommand('pane.undoClose').accelerator, 'Super+Z');
-  assert.equal(byCommand('pane.undoClose').registerAccelerator, false);
+  // Cmd+Shift+T, as browsers reopen a closed tab: no editor's key.
+  assert.equal(byCommand('pane.undoClose').accelerator, 'Super+Shift+T');
+  assert.equal(byCommand('pane.undoClose').registerAccelerator, true);
   // The window's zoom, shown with the key it is known by (⌘+).
   assert.equal(byCommand('view.zoomIn').label, 'Zoom In');
   assert.equal(byCommand('view.zoomIn').accelerator, 'Super+Plus');
@@ -152,7 +152,8 @@ test('on Windows and Linux, File and Help menus; platform-native keys are shown 
       undefined,
     );
     assert.equal(byCommand('app.commandPalette').accelerator, 'Control+Shift+P');
-    assert.equal(byCommand('tab.new').accelerator, 'Control+Shift+T');
+    assert.equal(byCommand('tab.new').accelerator, 'Control+T');
+    assert.equal(byCommand('pane.undoClose').accelerator, 'Control+Shift+T');
     assert.equal(byCommand('pane.splitRight').accelerator, splitRight);
     assert.equal(byCommand('pane.back').accelerator, 'Alt+Left');
     assert.equal(byCommand('pane.leave').accelerator, 'Control+B');
