@@ -550,6 +550,7 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
   /** The text as loaded or saved, whose line endings a save keeps. */
   const raw = useRef('');
   const locked = readOnly || (mixed && eolMode === 'readOnly');
+  const rootRef = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const ed = useRef<{ editor: CodeEditor; monaco: Monaco }>(undefined);
@@ -594,6 +595,12 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
   const prevMachine = useRef({ m, status: machineStatus });
   const paneShownRef = useRef(paneShown);
   paneShownRef.current = paneShown;
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
+  const canFocusEditor = () => {
+    const active = document.activeElement;
+    return !active || active === document.body || active === document.documentElement || !!rootRef.current?.contains(active);
+  };
 
   const markClean = () => {
     const e = ed.current?.editor;
@@ -1003,7 +1010,7 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
         if (isMarkdown) setContent(model.getValue());
       });
       setEditorTick((n) => n + 1);
-      if (focused) editor.focus();
+      if (focusedRef.current && paneShownRef.current && canFocusEditor()) editor.focus();
     })();
     // Cleanup is driven by Effect 1 on (m, pane, path) change or unmount, NOT when
     // toggling mdMode between preview / split / source.
@@ -1098,7 +1105,7 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
   }, [place, status.kind, editorTick, isMarkdown, mdMode, view.line, view.col, view.endLine, view.endCol, clearRangeHighlight]);
 
   useEffect(() => {
-    if (focused && paneShown && showEditor) ed.current?.editor.focus();
+    if (focused && paneShown && showEditor && canFocusEditor()) ed.current?.editor.focus();
   }, [focused, paneShown, showEditor]);
 
   // When the pane's machine returns from offline/reboot/disable, reload an
@@ -1173,6 +1180,7 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
 
   return (
     <div
+      ref={rootRef}
       className="files-editor"
       data-autofocus
       tabIndex={-1}

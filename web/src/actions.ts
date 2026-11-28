@@ -1089,7 +1089,16 @@ export const actions = {
   async openEditor(
     m: string,
     path: string,
-    o: { preview?: boolean; side?: boolean; line?: number; col?: number; endLine?: number; endCol?: number; from?: string } = {},
+    o: {
+      preview?: boolean;
+      side?: boolean;
+      line?: number;
+      col?: number;
+      endLine?: number;
+      endCol?: number;
+      from?: string;
+      focus?: boolean;
+    } = {},
   ) {
     await whenLoaded(m);
     const preview = !!o.preview && !o.side;
@@ -1111,9 +1120,14 @@ export const actions = {
     const ws = layout ? originOf(m, layout, o.from).ws : undefined;
     const openEditors = ws ? L.pluginViews(ws, 'files', 'editor').map((v) => v.view) : [];
     if (openEditors.some((v) => v.path === path))
-      return actions.openView(m, preview ? view : { ...view, preview: false }, { reuse: (v) => v.path === path, tab, from: o.from });
+      return actions.openView(m, preview ? view : { ...view, preview: false }, {
+        reuse: (v) => v.path === path,
+        tab,
+        from: o.from,
+        focus: o.focus,
+      });
     const replaceable = (v: L.PluginView) => preview && v.preview === true && !unsavedPanes(m, [L.viewKey(v.id)]).length;
-    return actions.openView(m, { ...view, preview }, { reuse: replaceable, tab, from: o.from });
+    return actions.openView(m, { ...view, preview }, { reuse: replaceable, tab, from: o.from, focus: o.focus });
   },
 
   /** Opens a path found in a pane (from; the focused pane by default): by
@@ -1181,7 +1195,7 @@ export const actions = {
   async openView(
     m: string,
     view: { plugin: string; kind: string } & Record<string, unknown>,
-    opts: { from?: string; reuse?: (v: L.PluginView) => boolean; tab?: boolean } = {},
+    opts: { from?: string; reuse?: (v: L.PluginView) => boolean; tab?: boolean; focus?: boolean } = {},
   ) {
     await whenLoaded(m);
     const layout = terms.layout(m)!;
@@ -1193,13 +1207,13 @@ export const actions = {
     const found = views.find((v) => v.tab === o.tab) ?? (opts.tab ? views[0] : undefined);
     if (found) {
       terms.mutate(m, (l) => L.focusPane(L.setViewFields(l, found.key, view), found.key));
-      focusDom(m, found.key);
+      if (opts.focus !== false) focusDom(m, found.key);
       return found.key;
     }
     const id = L.newId();
     if (opts.tab) terms.mutate(m, (l) => L.openPane(l, { view: { ...view, id } }, o.ws?.id));
     else openBeside(m, { view: { ...view, id } }, o.ws, o.from);
-    focusDom(m, L.viewKey(id));
+    if (opts.focus !== false) focusDom(m, L.viewKey(id));
     return L.viewKey(id);
   },
 

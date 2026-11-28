@@ -108,7 +108,16 @@ export function badName(name: string): string | undefined {
 export function openEditor(
   m: string,
   path: string,
-  o: { preview?: boolean; side?: boolean; line?: number; col?: number; endLine?: number; endCol?: number; from?: string } = {},
+  o: {
+    preview?: boolean;
+    side?: boolean;
+    line?: number;
+    col?: number;
+    endLine?: number;
+    endCol?: number;
+    from?: string;
+    focus?: boolean;
+  } = {},
 ) {
   return actions.openEditor(m, path, o);
 }
@@ -139,7 +148,7 @@ export function openPath(m: string, path: string, dir: boolean, preview = false)
 
 /** Shows a file in the preview editor and gives the keyboard back to el. */
 export async function quickLook(m: string, path: string, el?: HTMLElement | null) {
-  await openEditor(m, path, { preview: true });
+  await openEditor(m, path, { preview: true, focus: false });
   el?.focus();
 }
 

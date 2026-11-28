@@ -1509,6 +1509,97 @@ describe('EditorPane', () => {
       expect(host.querySelector('.files-conflict')).toBeNull();
       expect(host.querySelector('.files-dirty')).toBeNull();
     });
+
+    it('does not steal DOM focus from an outside element when Monaco finishes lazy-loading, while focusing when focus is unassigned or inside the pane', async () => {
+      const { createEditor } = await import('../plugins/monaco');
+      const spy = vi.mocked(createEditor);
+      const orig = spy.getMockImplementation()!;
+
+      const outsideTree = document.createElement('div');
+      outsideTree.setAttribute('role', 'tree');
+      outsideTree.tabIndex = 0;
+      document.body.appendChild(outsideTree);
+      try {
+        // 1. Focus held by an outside element (e.g. File Explorer tree after quickLook):
+        //    async Monaco mount must NOT steal focus.
+        let releaseFirst!: () => void;
+        const firstGate = new Promise<void>((r) => (releaseFirst = r));
+        spy.mockImplementationOnce(async (el, o) => {
+          await firstGate;
+          return orig(el, o);
+        });
+        outsideTree.focus();
+        expect(document.activeElement).toBe(outsideTree);
+        focusSpy.mockClear();
+
+        file = { text: 'preview text\n', size: 13, mtime: 7000 };
+        await act(async () =>
+          root.render(
+            createElement(EditorPane, {
+              m: 'm',
+              pane: 'view:v1',
+              view: { id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/preview.txt', preview: true },
+              focused: true,
+            }),
+          ),
+        );
+        await flush();
+        releaseFirst();
+        await flush();
+        await flush();
+        expect(focusSpy).not.toHaveBeenCalled();
+        expect(document.activeElement).toBe(outsideTree);
+
+        // 2. Focus on document.body (unassigned): async Monaco mount focuses cleanly.
+        outsideTree.blur();
+        expect(document.activeElement).toBe(document.body);
+        focusSpy.mockClear();
+        file = { text: 'body text\n', size: 10, mtime: 8000 };
+        await act(async () =>
+          root.render(
+            createElement(EditorPane, {
+              m: 'm',
+              pane: 'view:v2',
+              view: { id: 'v2', plugin: 'files', kind: 'editor', path: '/home/u/body.txt' },
+              focused: true,
+            }),
+          ),
+        );
+        await flush();
+        await flush();
+        expect(focusSpy).toHaveBeenCalledTimes(1);
+
+        // 3. Focus inside the editor pane root (.files-editor): async Monaco mount focuses cleanly.
+        let releaseInside!: () => void;
+        const insideGate = new Promise<void>((r) => (releaseInside = r));
+        spy.mockImplementationOnce(async (el, o) => {
+          await insideGate;
+          return orig(el, o);
+        });
+        focusSpy.mockClear();
+        file = { text: 'inside text\n', size: 12, mtime: 9000 };
+        await act(async () =>
+          root.render(
+            createElement(EditorPane, {
+              m: 'm',
+              pane: 'view:v3',
+              view: { id: 'v3', plugin: 'files', kind: 'editor', path: '/home/u/inside.txt' },
+              focused: true,
+            }),
+          ),
+        );
+        await flush();
+        const paneRoot = host.querySelector<HTMLElement>('.files-editor')!;
+        paneRoot.focus();
+        expect(document.activeElement).toBe(paneRoot);
+        releaseInside();
+        await flush();
+        await flush();
+        expect(focusSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        outsideTree.remove();
+      }
+    });
   });
 });
 
