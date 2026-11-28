@@ -2,148 +2,80 @@
 
 ## Context
 
-Quick Look ([06](06-quick-look-and-files.md)) shows what a path in a pane names, and VS Code panes ([05](05-vscode-panes.md)) browse and edit a folder. But code-server takes a while to start on each machine and takes a pane's room. Looking around a project an agent works in, renaming a file, dropping in a few files or fixing a line of a config should need neither. The plugins' right sidebar ([27](27-plugins.md)) has room for a tree beside the panes; a file opened from it gets a pane of its own.
+Looking around a project an agent works in, renaming a file or fixing a line of a config should not need a VS Code pane ([05](05-vscode-panes.md)), slow to start and a pane's room. The plugins' right sidebar ([27](27-plugins.md)) has room for a tree.
 
 ## Goals / non-goals
 
 Goals:
 
-- A tree of the shown machine's files that follows the focused terminal's directory, with what VS Code's explorer does: keyboard, filter, hidden files, new files and folders, rename, trash, delete, cut/copy/paste, drag and drop, copy paths, download, open in a terminal or VS Code, and Reveal in Finder for the hub's own computer.
-- Uploads of files and folders from the computer, with their structure, asking about names taken; rows dragged out of the page download.
-- An editor pane (Monaco; media as Quick Look shows it) with VS Code's preview editors, that **never overwrites a change made on the machine since it loaded the file**, and marks files deleted or moved away.
+- A tree of the shown machine's files that follows the focused terminal's directory, with what VS Code's explorer does, and uploads of files and folders with their structure.
+- An editor pane (Monaco; media as Quick Look shows it, [06](06-quick-look-and-files.md)) with VS Code's preview editors, that **never overwrites a change made on the machine since it loaded the file**.
 - Version control status in the tree's colors and the editor's gutter.
 
-Non-goals: an IDE (language services beyond Monaco's JSON, CSS and HTML, search across files is Project Search, [41](41-project-search.md); version control is the Git plugin, [31](31-git.md)); a file-system watch on machines; restoring from the trash.
+Non-goals: an IDE (language services beyond Monaco's JSON, CSS and HTML; search in files is [41](41-project-search.md), version control [31](31-git.md)); a file-system watch on machines; restoring from the trash.
 
 ## Design
 
-Plugin `files`, on by default: a right-sidebar panel (**Show Explorer**, `view.panel.files`) and the pane kind `editor`. Code: `web/src/plugins/files`, `backend/features/files` (hub), `backend/features/files/machine.ts` (machine). Settings (`files.showHidden`, `files.exclude`, `files.sortOrder`, `files.followFocus`, `files.confirmTrash`, `files.openLinks`, `files.wordWrap`) are listed in [reference.md](../reference.md).
+Plugin `files`, on by default: a right-sidebar panel (`view.panel.files`) and the pane kind `editor`. Code: `web/src/plugins/files`, `backend/features/files/hub.ts`, `backend/features/files/machine.ts` and `machine/`. Its settings (`files.*`) and routes (below `/api/m/{id}/p/files/`) are in [reference.md](../reference.md).
 
 ### Tree
 
-- **Root.** The focused terminal's directory, a VS Code pane's folder, or the workspace's directory (`FilesPanel.tsx` `rootFor`). A terminal's directory (`web/src/term/place.ts`) comes from the terminal core's record of the foreground program:
-  - a shell's (or a terminal file manager's) directory is followed as it changes;
-  - another program's is taken only once it stayed put for 1.5 s (`SETTLE_MS`), so `cd project && claude` moves the tree there, while a program walking a tree (`tar`, `find`, a build) leaves it — and the Git panel, the status bar and new terminals' directory — where the shell was.
-
-  While an editor or preview has the focus the root stays put; another workspace or machine takes its own directory at once, before painting, so the panel never shows one machine's directory under another or asks a machine about another's paths. The **Follow** crosshair or a breadcrumb crumb turns following off.
-- **Listings** come from `GET /api/m/{id}/list` when a folder is expanded. Expanded folders are remembered by path (at most 500). A failed listing keeps what was shown and is retried by the next poll; the root shows an error only when nothing of it is listed or it failed twice in a row (`tree.ts` `shownError`), since a single failure is often a busy machine.
-- **View state per root.** Expanded folders, selection, cursor, filter (including regular-expression mode) and scroll position are remembered per machine and root (at most 32) and restored on return, across tabs, panels, workspaces and machines. The scroll position is recorded only from scroll events of the root they show (the browser clamps it while another root is listed) and restored once the rows are tall enough. An unvisited root starts without a selection, so a key never acts on rows the tree no longer shows.
-- **Reveal the focused editor.** When the focused pane is an editor whose file is under the root, the tree expands to that row, selects it and scrolls it into view; a file outside the root leaves the root alone.
-- **Polling, not watching** (`poller.ts`). While the panel is visible, every 2 s it stats the shown directories (at most 200) through `POST …/p/files/stat` and lists again those that changed. One poll at a time; after failures the wait doubles up to a minute. Nothing runs on the machine between requests or once the panel is hidden.
-- **Rows** are the shared virtualized tree rows ([27](27-plugins.md)) with file-type icons in the design tokens' hues ([24](24-design-tokens.md)), so thousands of entries scroll cheaply. Names sort naturally (`a2` before `a10`); the filter searches filenames across the whole project below the root through `GET …/p/files/find` (`match=name`, honoring `hidden` and `files.exclude`, capped at 50 000 visited entries / 5 s and 500 matches, never following symlinks, auto-expanding matching ancestor folders and supporting case-insensitive regular expressions via the regex toggle, in RE2's syntax and matched on the machine in linear time (`re2js`), so no pattern can stall the node by backtracking), falling back to listed folders while loading or against older agents.
-- **Keys** follow VS Code's explorer on each system (arrows, PgUp/PgDn, Home/End, type-ahead, Space for preview, Delete/⌘⌫ to trash, Shift for permanent delete, ⌘/Ctrl C/X/V, Escape): on macOS Enter renames and ⌘O or ⌘↓ opens; elsewhere Enter opens and F2 renames. A cut stays on the clipboard until its paths are moved.
-- **Editors open in tabs** of the workspace, never split into the shown tab. A click shows the file in the workspace's single **preview editor** (italic title), replaced by the next click; a double click, the open key, the pin button or a first edit keeps it. A preview with unsaved changes is never replaced.
-- **Context menu** and the panel's **…** menu hold the actions above plus Open to the Side, Open Changes (the Git plugin's diff), Upload Files/Folder…, Copy Relative Path, Download (a zip for folders and several rows, `download.ts`), Refresh and Collapse Folders. Several selected rows apply where it makes sense. The entries that open, copy and download paths are shared with other file lists (`ops.ts` `fileMenuEntries`, `revealInExplorer`), e.g. the Git panel's rows.
-- **Drags.** Rows dropped onto a folder move (Alt copies). Dropped out of the page they download through `DownloadURL` (Chromium and the desktop app; Firefox and Safari ignore it), not for the desktop app's own machine.
-- **Uploads** (`upload.ts`): dropped, chosen or pasted (from the system clipboard onto the focused tree) files and folders keep their structure (at most 10 000 entries). Each taken name is asked about once: **Replace** (a file written in place as a save is; a folder merged, never removed first), **Keep Both** (`name-1.ext`), **Skip**, **Cancel** (stops the whole upload). Folders are made first, then a folder's files go as one upload in the uploads panel. In the desktop app, files of its own machine are copied, not uploaded.
-- **Reveal in Finder** (Reveal in File Manager on Linux): only for the hub's own machine and only to a page on that computer (the desktop app, or a browser on the hub's loopback, the hub's `SameHost`). A window on a remote screen would help nobody. The page asks `GET …/p/files/reveal`; the hub checks again on `POST`.
-- **Decorations** (`decorations.ts`): `registerFileDecorations` lets another plugin color names and add badges per directory. The panel publishes the directories it shows (`useShownDirs`), so the Git plugin colors the tree without its own panel open ([31](31-git.md)).
+- **Root** (`FilesPanel.tsx` `rootFor`): the focused terminal's directory, a VS Code pane's folder or the workspace's. A terminal's directory (`web/src/term/place.ts`, shared with the Git panel, the status bar and new terminals) is a shell's as it changes and another program's only once it stayed there for `SETTLE_MS`: `cd project && claude` moves the tree, a build walking a tree does not. The panel never asks a machine about another's paths.
+- **Polling, not watching** (`poller.ts`): while the panel is visible it stats the shown directories (`POST …/stat`) and lists again (`GET /api/m/{id}/list`) those that changed, backing off after failures; nothing runs on the machine once it is hidden.
+- **Filter**: names across the project below the root (`GET …/find`, bounded, never following links); regular expressions in RE2's syntax are matched on the machine in linear time (`re2js`), so no pattern can stall the node.
+- **Editors** open from the tree in tabs of the workspace, split beside the pane with Open to the Side or from a terminal's link. A click shows the file in the workspace's single **preview editor**, replaced by the next unless kept (double click, pin, first edit) or holding unsaved changes.
+- **Drags** (`web/src/pathsDrag.ts`, carrying the machine and paths): onto a folder they move (Alt copies); onto a terminal of the same machine their paths are pasted shell-quoted; onto a chat's composer they attach as files ([37](37-agent-chats.md)); panes of another machine refuse them.
+- **Uploads** (`upload.ts`): each taken name is asked about once (**Replace** writes in place as a save does and merges folders, never removing first; **Keep Both**, **Skip**, **Cancel**). The desktop app copies files of its own machine instead.
+- **Reveal in Finder**: only for the hub's own machine and a page on that computer (the hub's `SameHost`).
+- **Decorations** (`decorations.ts`): the panel publishes the directories it shows, so the Git plugin colors them without its own panel open.
 
 ### Changes on the machine
 
-Every change is a plugin route, refused in read-only mode (the UI offers none there) and audited as `files.<action>` with its paths (first 50) and outcome. The agent's actions:
+Every change is a mutating plugin route, refused in read-only mode and audited as `files.<action>`. The agent never replaces a name: `rename` and `move` use `renameNoReplace` (`backend/machine/sys/fs.ts`), a taken name fails with `exists` or gets a free one. `trash` (`machine/trash.ts`) uses macOS's `~/.Trash` or the freedesktop.org trash, a mount's only when it is the user's own and closed to others, else `trash_unavailable` and the panel offers to delete for good. `remove` does not follow links. Uploads are received in full into the agent's private `staging/` directory before they are written, so a cut-short upload leaves nothing at the path. `reveal` runs `open -R` or `xdg-open` from fixed system directories, never `PATH` or a shell.
 
-| Action | What it does |
-| --- | --- |
-| `mkdir`, `create`, `mkdirs` | A folder, an empty file, folders with parents. A taken name fails with `exists`; `unique` picks `name-1`… |
-| `rename`, `move` | Never replace (`renameat2`/`RENAME_NOREPLACE` on Linux, `renamex_np`/`RENAME_EXCL` on macOS, a check first elsewhere). Across file systems: copy, then remove the original. |
-| `copy` | Files with modes, folders with contents, links as links; taken names become `name copy.ext`. Never into itself, also through a link. |
-| `trash` | macOS `~/.Trash`; elsewhere the freedesktop.org trash, or the top-of-mount trash for another file system. A mount's trash is used only if it is the user's own, not a link and closed to others (as gio checks). Otherwise `trash_unavailable`, and the panel offers to delete for good. |
-| `remove` | Deletes for good without following links (`removeTree` in `machine/tree.ts`, opening each directory relative to its parent). |
-| `write` | An editor's save, below. |
-| `upload` | Up to 4 GiB, received in full into the agent's private `staging/` directory, then written under a free name, or in place with `replace`. A cut-short upload leaves nothing at the path. |
-| `reveal` | `/usr/bin/open -R <path>` on macOS; `xdg-open <folder>/` elsewhere, found in fixed system directories, never `PATH`. No shell, standard streams on `/dev/null`, answers within 10 s, at most 4 waited for. |
-| `stat` | Up to 200 paths. Paths in a batch are checked concurrently, with at most 8 stats in flight per node. Requests on a dead mount can answer `busy` or `timeout` within 10 s. |
-
-Copies and removals stop between entries (and between 1 MiB chunks) once the hub's request ends; a partial copy is removed.
-
-**Refused paths.** Paths expand as every agent operation's (`~`, relative to home). The agent refuses (`refused`) the root, any directory holding the home directory, the home directory itself, and its own data directory (`~/.<slug>[-<instance>]`) with everything in it. It compares by name and by file identity (device and inode, `machine/guard.ts`) after following links in the path's directories, so a home reached through a link or another letter case on a case-insensitive volume is refused too. Lists of paths hold at most 1000.
+**Refused paths** (`machine/guard.ts`): the root, any directory holding the home directory, home itself and the agent's data directory, compared by device and inode after following links, so a link or another letter case does not reach them.
 
 ### Editor pane
 
-`EditorPane.tsx`, view `{plugin: 'files', kind: 'editor', path, preview}`; one per file per workspace. Images, video, audio and PDFs show as in Quick Look (`MediaView`).
+`EditorPane.tsx`, one per file per workspace.
 
-- **Markdown preview.** Markdown files (`.md`, `.mdx`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`) open in rendered **Preview** mode by default (or **Source** when opened at a specific line/range), with toolbar buttons and a preview context menu to switch between **Preview**, **Split** (side-by-side Monaco source and live rendered preview), and **Source**, copy selections or links, copy paths, and reveal in the explorer. Rendered output uses the unified `web/src/markdown` component (`variant="document"`: GFM tables, task lists, GitHub-style alerts, YAML frontmatter card, hidden single- and multi-line HTML comments, sanitized safe GFM/VS Code HTML including `<details>`/`<summary>`, `<kbd>`, `<mark>`, aligned blocks, HTML tables and safe relative `<img>` resolution, syntax-highlighted code blocks with copy buttons, KaTeX formulas, deduplicated heading anchors and relative file links) through `rehype-raw` + strict allowlist `rehype-sanitize` (`web/src/markdown/sanitize.ts`) and URL validation for XSS safety. Editing in Split/Source mode or reloading from disk updates the preview live; Preview-only opens skip initializing Monaco until the user switches to Split or Source.
-- **Soft wrap.** The editor toolbar offers a **Toggle Word Wrap** button (`Alt+Z` inside Monaco), persisted per browser and falling back to the `files.wordWrap` setting.
-- **Monaco context menus.** `web/src/plugins/monaco.ts` sets `useShadowDOM: false` alongside `fixedOverflowWidgets: true` and defines menu theme tokens and layout variables (`monaco.css`) so right-click menus stay inside `.monaco-editor`'s theme scope instead of mounting an unstyled shadow root on `document.body`.
-- **Loading and tab-switch caching.** Plain `GET /api/m/{id}/file?path=…&max_size=…` reads stat and bytes in a single agent `fs.read` round-trip (rejecting files over 8 MiB with `413` before streaming). Binary files (a NUL in the first 8000 bytes) and invalid UTF-8 are not opened — a save could change what the editor did not show — and are offered for download; a directory offers **Show in Explorer**. A missing path (404) opens empty and the first save creates it; any other read error is shown, never an empty file. A UTF-8 BOM is preserved. Recently viewed file editor panes stay mounted hidden across tab switches (`web/src/keptPanes.ts`, up to 8 panes, pausing disk polling while hidden), and loaded text/metadata are cached in a bounded LRU (`fileCache.ts`, 64 files / 32 MiB) with silent background `stat` revalidation on return so switching tabs never flashes "Loading…".
-- **Line and line-range navigation.** Opening a file with `line` (and optional `col`, `endLine`, `endCol`, e.g. from a ⌘/Ctrl-clicked terminal link `path:17-20`) centers the target in Monaco, selects the range and highlights its lines until the next edit.
-- **Mixed line endings.** Monaco normalizes endings, so a save would rewrite every line. `git.mixedLineEndings` ([31](31-git.md)) chooses `keep` (default: each line keeps its ending, `web/src/eol.ts`), `unify` or `readOnly`.
-- **Quick diff** (`quickDiff.ts`): the gutter marks lines that differ from what a provider (`registerQuickDiff`; the Git plugin's index text) gives, unsaved changes included; **Open Changes** opens the provider's diff.
-- **Saving.** ⌘S/Ctrl+S is handled per editor (`plugins/saveKey.ts`), not app-wide, so Ctrl+S still reaches terminals. The save is `POST …/p/files/write?path=&mtime=&size=` (`new=1`, `force=1`). The agent receives the whole text and checks the file is as loaded before touching it; a change since is `409 conflict`, and the pane offers **Load Theirs**, **Overwrite**, **Keep Editing**. The Git diff pane saves through the same route.
-- **Writing in place** (`machine/save.ts`), as VS Code writes a user's file: open without following links anywhere on the real path (`O_NOFOLLOW_ANY` on macOS, `openat2` `RESOLVE_NO_SYMLINKS` on Linux) and without blocking; require a regular file; re-check the precondition on that descriptor; truncate, write, sync. Through a symbolic link the target is written and the link stays. The inode, hard links, owner, mode, xattrs and ACLs stay; no temporary file or backup is written. A read-only file is refused (`denied`). A new file gets `0666` minus the umask. The node serializes writes to the same inode, including hard links. Truncation and the disk flush run asynchronously.
-- **Partial writes.** A write failing after truncation (disk full) answers `partial_write` with the cause; the pane keeps the text and offers **Save Again**. A new file whose write failed is removed. Readers of the file during the write may see part of it, as with VS Code.
-- **External changes.** Every 5 s while shown, the pane checks the file. Unchanged text reloads as one undoable edit (the cursor stays), a change of line ends as another; text with unsaved changes gets the conflict bar at once. **Keep Editing** dismisses the bar until the next change.
-- **Files gone** (`gone.ts`): an editor whose file was deleted or moved away has its title struck through ("Deleted"), as VS Code does; the text stays and a save makes the file again. The shown editors' and preview panes' paths are stat'ed together, one request per machine every 5 s; the explorer's own changes mark at once.
-- Closing with unsaved changes asks **Save / Don't Save / Cancel** ([04](04-layout-and-keyboard.md)). Unsaved text and Monaco's view state (cursor, selection, scroll, folding) survive the pane not being drawn ([27](27-plugins.md)); closing the pane drops them.
-- **Undo history** outlives the editor as in VS Code: a model's URI is the file's (`file://<path>?m=<machine>`, with `&pane=<pane>` for a second pane of a file shown at once), and it is made with the file's text, so Monaco gives a file opened again with the text it closed with the history it had (20 MB of closed files' history at most). A file changed meanwhile starts without one. Never `setValue` a model that shows text: that drops its history.
-- **Show in Explorer** reveals the file in the tree; outside its root the tree stops following and shows the file's folder.
+- **Loading** (`GET /api/m/{id}/file`): binary files and invalid UTF-8 are offered for download, not opened, since a save could change what the editor did not show; a missing path opens empty; any other read error is shown, never an empty file.
+- **Markdown** opens rendered (`web/src/markdown`), with Split and Source modes.
+- **Links**: a path a pane links without a line is stat'ed first (`PluginDef.openFolder`); a folder is revealed in the tree instead of opening an editor.
+- **Saving**: ⌘S/Ctrl+S is handled per editor (`plugins/saveKey.ts`), so Ctrl+S still reaches terminals. `POST …/write` carries the size and modification time the editor loaded; the agent receives the whole text, then checks the file is still as loaded. A change since is `409 conflict` and the pane offers **Load Theirs**, **Overwrite**, **Keep Editing**. The Git diff pane saves the same way.
+- **Writing in place** (`machine/save.ts`), as VS Code does: open without following links, re-check the precondition on that descriptor, truncate, write, sync. The inode, hard links, owner, mode, xattrs and ACLs stay; nothing is created beside the file. A write failing after truncation answers `partial_write`; the pane keeps the text.
+- **Mixed line endings**: Monaco normalizes them, so `git.mixedLineEndings` chooses `keep` (each line keeps its ending, `web/src/eol.ts`), `unify` or `readOnly`.
+- **External changes**: the shown file is checked periodically; without unsaved changes a change reloads as one undoable edit, with them the conflict bar appears. A file deleted or moved away is struck through (`gone.ts`) and a save makes it again.
+- **Quick diff** (`quickDiff.ts`): the gutter marks lines that differ from a provider's text (the Git plugin's index).
+- **Undo history** outlives the pane: a model's URI is the file's (`file://<path>?m=<machine>`). Never `setValue` a model that shows text: that drops its history.
 
-### Monaco and code colors
-
-**Monaco** (`web/src/plugins/monaco.ts`) is loaded on first use with the JSON, CSS and HTML services; TypeScript's service is left out (larger than the rest together; VS Code panes have it). Its theme is built from the design tokens and its font is the terminal's. `createEditor` and `createDiffEditor` serve other plugins.
-
-**Code colors** (`web/src/highlight`) are shared by editors, diffs, the preview pane and Markdown code blocks:
-
-- TextMate grammars from Shiki, about 125 languages (`languages.ts`), each a lazily loaded chunk, run by the browser's regex engine.
-- `languageOf` tells a language by whole name, name prefix, extension or shebang line.
-- Tokens are colored by **role** (`roles.ts`: comment, keyword, string…), and the design tokens' `syntax` colors give each role its color ([24](24-design-tokens.md)). Text is tokenized once; switching themes only recolors.
-- Code over 300 000 characters or lines over 20 000 stay plain.
-- Package-only chunks ship without source maps (`vite.config.ts`); notices are in `licenses.md`.
-
-### Routes
-
-All below `/api/m/{id}/p/files/`; each is listed in [reference.md](../reference.md).
-
-| Route | Purpose |
-| --- | --- |
-| `POST stat` | Up to 200 paths. A POST because 200 paths overflow a URL; read-only, not audited. |
-| `GET find` | Bounded recursive search below `?dir=` (`match=fuzzy\|name`, `regex=1`, `hidden=1`, `exclude=`, `limit=` 1–500); read-only, never follows symlinks. |
-| `POST mkdir`, `mkdirs`, `create`, `rename`, `move`, `copy`, `trash`, `remove` | The actions above. |
-| `POST write` | A save (body at most 8 MiB); `409 {"error": "conflict", "current"}`. |
-| `POST upload` | Body streamed (at most 4 GiB) to a free name, or in place with `&replace=1`. |
-| `GET reveal` / `POST reveal` | Whether Reveal is offered / do it; `400 remote_machine`, `403 local_only`. |
-
-Changes answer `{"paths": [made], "failed": {path: code}}`; failures `{"error": code}` (`not_found`, `exists`, `refused`, `denied`, `trash_unavailable`, `too_large`, `no_space`, `partial_write`, `offline`, …).
+Monaco (`web/src/plugins/monaco.ts`) loads on first use with the JSON, CSS and HTML services; TypeScript's is left out (larger than the rest together). Code colors (`web/src/highlight`, shared with diffs, previews and Markdown) come from Shiki's TextMate grammars, colored by token role with the design tokens' `syntax` colors ([24](24-design-tokens.md)).
 
 ## Alternatives considered
 
 | Alternative | Why not |
 | --- | --- |
-| A file-system watch (inotify, FSEvents) pushed over `/ws` | Watchers need an owner, per-user limits and per-OS code; polling what is on screen costs one stat per folder and stops with the panel. |
-| Saving with the agent's `fs.write` | It replaces without looking; a save must not overwrite a change made since loading. |
-| Atomic save (write a temporary file, rename over) | Gives the path another inode: hard links keep the old text, ownership, xattrs, ACLs and macOS tags are lost, `tail -f` and single-file bind mounts lose it, and it needs a writable directory and leaves a temporary file other users could swap. |
-| Rename or write-in-place by case (Vim's `backupcopy=auto`), or a backup before writing | Two code paths and staged files to protect; a backup only helps a failed write, which the editor survives by keeping the text. |
-| Uploading through the hub's `/upload` | It cannot replace or make folders and lacks the explorer's guard. |
-| Asking about each file of a merged folder; replacing a folder by removing it | Hundreds of questions; removal loses what the upload does not hold. |
-| Deleting without a trash | A mistaken Delete is easy; the trash keeps the file where the system's tools find it. |
-| CodeMirror | The Git plugin's diffs want Monaco's diff editor; one editor for both. |
-| Monaco's Monarch grammars; Shiki's themes or Oniguruma engine | Too few languages (no Makefile, TOML, `.env`); themes would need re-tokenizing; a second WebAssembly module. |
-| Opening files only in VS Code | Slow to start and a pane's room for a small fix. |
+| A file-system watch pushed over `/ws` | Watchers need an owner, per-user limits and per-OS code; polling what is on screen stops with the panel. |
+| Saving with the agent's `fs.write` | It replaces without looking. |
+| Atomic save (temporary file, rename over) | Gives the path another inode: hard links keep the old text, ownership, xattrs and ACLs are lost, and the temporary file needs a writable directory others could exploit. |
+| Replacing a folder on upload by removing it | Loses what the upload does not hold. |
+| CodeMirror | The Git plugin's diffs want Monaco's diff editor. |
+| Monaco's Monarch grammars | Too few languages (no Makefile, TOML, `.env`). |
 
 ## Failure modes
 
-- **Machine offline:** listings show the error at the root, changes fail with `offline`, polls back off up to a minute.
-- **A mount that does not answer:** stats answer `busy`/`timeout` within 10 s; the tree keeps what it shows.
-- **Huge directories:** listings are capped at 20 000 entries.
-- **Conflicting save:** `409`, nothing written. **Save cut short** before the text arrived: file unchanged. **Write failing midway:** `partial_write`, file possibly truncated, text kept in the pane.
-- **Upload cut short:** nothing at the target; a replaced file is as it was. If the agent is killed, the staged file stays in `~/.<slug>/staging/` for 7 days ([deployment](../deployment.md#remote-resources)).
-- **No trash for a location:** `trash_unavailable`, the panel offers permanent deletion.
-- **Reveal without a display:** `xdg-open` fails and the menu says so.
-- **Plugin off:** routes answer `404 plugin_disabled`; editor panes say so. An older agent answers `unknown_plugin`.
+- Machine offline: the root shows the error, changes fail with `offline`, polls back off.
+- A mount that does not answer: stats answer `busy` or `timeout`; the tree keeps what it shows.
+- Conflicting save: `409`, nothing written. Write failing midway: `partial_write`, text kept in the pane.
+- Upload cut short: nothing at the target; a staged file a killed agent leaves is removed later ([deployment](../deployment.md#remote-resources)).
+- No trash for a location: `trash_unavailable`, permanent deletion offered.
 
 ## Security
 
-- Every change is a mutating route: Origin-checked, refused in read-only mode, audited.
-- The agent refuses the root, directories above home, home itself and its own data directory, by name and file identity, so the explorer cannot delete the machine's or its own state wholesale. Otherwise it acts with the user's permissions, as a terminal does.
-- A top-of-mount trash is used only when it is the user's own and closed to others, so trashed files never go into a directory another user planted.
-- A save writes only the named file (a link's target), in place, through the descriptor it checked, and creates nothing beside it. A forced save (Overwrite, Save Again, Replace) writes whatever regular file is at the path then; a user who can write the directory and hard-link the user's files could redirect it ([SECURITY.md](../../SECURITY.md)).
-- Uploads are staged in the agent's `0700` `staging/` directory and pass the same guard.
-- Reveal in Finder runs a program on the hub's host: only for the hub's own machine and a client on that host (`SameHost`), the path as its own argument, never shell text. A browser reaching the hub through an ssh forward counts as on the host and opens the window there.
-- Bounds: saves 8 MiB, uploads 4 GiB, path lists 1000, stats 200 paths and 8 concurrent, reveals 4.
+[SECURITY.md](../../SECURITY.md) lists the explorer's guardrails (mutating routes, the guard above, the `0700` staging directory, Reveal's limits); otherwise the agent acts with the user's permissions, as a terminal does. A forced save (Overwrite, Save Again, Replace) writes whatever regular file is at the path then, so a user who can write the directory and hard-link the user's files could redirect it. Bounds: saves 8 MiB, uploads 4 GiB, path lists 1000, stats 200 paths.
 
 ## Testing
 
-- `backend/features/files/machine.test.ts` (each action through the wire, no-replace renames and moves also across file systems, copies through links, both trash layouts and planted mount trashes, refused paths through links and case, in-place saves keeping inode, links and mode, FIFOs refused, uploads, removals, reveals) and `machine/units.test.ts`.
-- `backend/features/files/`: `explorer.test.ts` (routes, audit records, `reveal gate`, `the routes that change things are guarded`), `settings.test.ts`, `transfers.test.ts` (`list`: large listings; downloads).
-- `web/src/__tests__/`: `files.test.ts` (rows, keys, menus, polling, settings, decorations), `filesUpload.test.ts`, `filesEditor.test.ts` (versions, conflicts, line endings, reloads), `filesGone.test.ts`, `filesFollow.test.ts`, `termPlace.test.ts`, `editorPlacement.test.ts`, `highlight.test.ts` (languages, roles, 4.5:1 contrast of syntax colors).
+- `backend/features/files/machine.test.ts`, `machine/units.test.ts`, `machine/find.test.ts`: every action through the wire against real files (no-replace renames, trash layouts, refused paths, in-place saves, uploads, reveals, the filter).
+- `backend/features/files/explorer.test.ts` (routes, audit, guards), `settings.test.ts`, `transfers.test.ts`.
+- `web/src/__tests__/`: `files*.test.ts`, `termPlace.test.ts`, `editorPlacement.test.ts`, `quickDiff.test.ts`, `highlight.test.ts`; drags in `termPane.test.ts` and `conversationComposer.test.tsx`.
