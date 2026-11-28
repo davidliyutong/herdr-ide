@@ -68,7 +68,7 @@ make test-remote SUITE=doctor
 
 1. **QEMU CoW overlay (`--base <windows-base.qcow2>`)**: boots a disposable overlay over a read-only golden Windows disk image using **macOS HVF** (ARM64 Windows 11/Server on Apple Silicon, or x64 on Intel Mac) or **Linux KVM** (`x86_64` or `arm64`). Loopback-only SSH (`127.0.0.1:<port> -> :22`), optional loopback RDP (`--rdp`), optional `swtpm` TPM 2.0 auto-detection, and TTL watchdog.
 2. **Ephemeral Linux KVM container (`--dockur`)**: on Linux with `/dev/kvm` and Docker, starts a temporary `dockurr/windows` container bound only to `127.0.0.1`, injects `/oem/install.bat` to provision OpenSSH + throwaway SSH key + Git for Windows + Node + pnpm + Bun, runs the test suite, and removes the container.
-3. **Remote Windows SSH host (`--host <ssh-alias>` or `WIN_TEST_HOST`)**: runs the same test workflow from macOS or Linux against an existing Proxmox/lab Windows VM with OpenSSH Server and Git for Windows.
+3. **Remote Windows SSH host (`--host <ssh-alias>` or `WIN_TEST_HOST`)**: runs the same test workflow from macOS or Linux against an existing Proxmox/lab Windows VM with OpenSSH Server and Git for Windows, or a Google Compute Engine host that `winvm.py gce` makes (below).
 
 ```sh
 # 1. One-time bootstrap of a golden Windows qcow2 base image (macOS HVF arm64 or Linux KVM x64/arm64)
@@ -82,6 +82,22 @@ make test-win WIN_ARGS='--dockur --suite all'
 
 # 4. Existing remote Windows VM (e.g. Proxmox)
 WIN_TEST_HOST=my-win-vm make test-win
+```
+
+### A Windows host on Google Compute Engine (`winvm.py gce`)
+
+With `WINVM_GCE_PROJECT`, `WINVM_GCE_ZONE` and `WINVM_GCE_INSTANCE` in `.env` (and the local `gcloud` signed in), `winvm.py gce create` makes a Windows Server host (`WINVM_GCE_IMAGE_FAMILY`, `windows-2025` as CI's runners; `WINVM_GCE_MACHINE_TYPE`, `e2-standard-4`; `WINVM_GCE_DISK_GB`, 100) that prepares itself, then checks it:
+
+- **Network.** No external address (an organization may forbid one, and none is needed): downloads leave through a Cloud NAT `<instance>-nat`, made unless the region has one; ssh and RDP come only through IAP (`<instance>-allow-iap` admits `35.235.240.0/20`, and `<instance>-deny-public` refuses everyone else, outranking default rules that admit `0.0.0.0/0` to every instance). It enables the Compute Engine and IAP APIs.
+- **Access.** A key of its own (`WINVM_GCE_KEY`, `~/.ssh/<instance>_ed25519`) in the instance's metadata, for a local administrator (`WINVM_USER`, `runner`); `create` writes the host's block (ssh through `gcloud compute start-iap-tunnel`, a known_hosts of its own, emptied of the name's old key) into `WINVM_GCE_SSH_CONFIG` (`~/.config/test-hosts/ssh.config`), which `WINVM_SSH_OPTS="-F …"` names, with `WIN_TEST_HOST` the instance's name.
+- **Preparation.** `winvm-gce-startup.ps1` runs as SYSTEM at every boot: OpenSSH Server (key-only, its firewall rule enabled on every profile), long paths, PowerShell 7, Git for Windows, Node of CI's major, pnpm through corepack at `backend/package.json`'s version, every user's default through a machine-wide `COREPACK_HOME` (no download prompt), Bun at `BUN_VERSION`, Defender skipping the test user's home. Every step checks for itself, so a step added later reaches a prepared host at its next boot (`gce update-script` sends it; `gce start` does too). `create` and `start` wait for the boot's script and fail with its errors; `gce check` verifies each tool and version over ssh.
+- **Lifetime and cost.** `make test-win` starts the host when it is stopped and stops it after the tests (`--keep` leaves it running); a host left running stops itself after `WINVM_GCE_MAX_RUN` (4 hours) of running time. Stopped, only its disk is billed. `gce delete` removes the host, its firewall rules and the NAT it made; its key and ssh block stay.
+
+```sh
+./e2e/machines/winvm.py gce create     # make and prepare the host, then check it (15-20 minutes)
+make test-win WIN_ARGS='--suite hub'   # start it, run the hub's tests, stop it
+./e2e/machines/winvm.py gce status     # RUNNING, TERMINATED (stopped) or absent
+./e2e/machines/winvm.py gce delete
 ```
 
 ## Adding an image

@@ -631,7 +631,7 @@ describe('groups, presets and workspace links', () => {
     expect(s.get('AWS_KEY')?.group).toBe(g1.id);
     await s.set('AWS_KEY', { group: '' });
     expect(s.get('AWS_KEY')?.group).toBeUndefined();
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
   test('presets, workspace links, rename/delete tracking, locked state, and tamper fail-closed', async () => {

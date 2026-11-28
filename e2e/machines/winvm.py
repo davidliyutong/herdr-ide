@@ -15,19 +15,24 @@ behind. Three backends share one interface:
        container with loopback-only ports and automated OpenSSH + toolchain
        provisioning via /oem/install.bat, destroyed on exit.
   3. Remote Windows SSH host (--host <ssh-alias> or $WIN_TEST_HOST):
-     - works from macOS or Linux against an existing Proxmox/lab Windows VM.
+     - works from macOS or Linux against an existing Proxmox/lab Windows VM;
+     - or one on Google Compute Engine that `gce create` makes and prepares
+       (winvm-gce-startup.ps1), reached through IAP, started for `test` when
+       stopped and stopped again after.
 
 Commands:
   winvm.py bootstrap --iso WIN.iso [--virtio VIRTIO.iso] [--out BASE.qcow2] [--arch amd64|arm64]
   winvm.py up (--base BASE.qcow2 | --dockur) [--arch amd64|arm64] [--rdp] [--display]
   winvm.py ssh [--host ALIAS] [-- CMD...]
   winvm.py test [--base BASE.qcow2 | --dockur | --host ALIAS] [--suite all|hub|web|desktop|app] [--dist] [--keep]
+  winvm.py gce create|check|start|stop|status|update-script|delete
   winvm.py status
   winvm.py down
   winvm.py clean [--keep-cache]
 """
 import argparse
 import atexit
+import base64
 import importlib.util
 import json
 import os
@@ -717,6 +722,307 @@ def run_windows_tests(ssh_base, suite, dist):
     return rc
 
 
+# ---------------------------------------------------------------- GCE Windows host
+
+GCE_PROJECT = os.environ.get('WINVM_GCE_PROJECT') or ''
+GCE_ZONE = os.environ.get('WINVM_GCE_ZONE') or ''
+GCE_INSTANCE = os.environ.get('WINVM_GCE_INSTANCE') or ''
+GCE_MACHINE = os.environ.get('WINVM_GCE_MACHINE_TYPE') or 'e2-standard-4'
+GCE_IMAGE_FAMILY = os.environ.get('WINVM_GCE_IMAGE_FAMILY') or 'windows-2025'
+GCE_DISK_GB = os.environ.get('WINVM_GCE_DISK_GB') or '100'
+# A host left running stops by itself after this much running time.
+GCE_MAX_RUN = os.environ.get('WINVM_GCE_MAX_RUN') or '4h'
+GCE_SSH_CONFIG = os.path.expanduser(os.environ.get('WINVM_GCE_SSH_CONFIG') or '~/.config/test-hosts/ssh.config')
+# Google's IAP TCP forwarding range: the only source admitted to ssh and RDP.
+IAP_RANGE = '35.235.240.0/20'
+GCE_STARTUP = os.path.join(HERE, 'winvm-gce-startup.ps1')
+
+
+def gce_cfg():
+    missing = [k for k, v in (('WINVM_GCE_PROJECT', GCE_PROJECT), ('WINVM_GCE_ZONE', GCE_ZONE), ('WINVM_GCE_INSTANCE', GCE_INSTANCE)) if not v]
+    if missing:
+        raise Fail(f'set {", ".join(missing)} (in .env) for a GCE Windows host')
+    if not shutil.which('gcloud'):
+        raise Fail('gcloud (Google Cloud SDK) is not on PATH')
+    return GCE_PROJECT, GCE_ZONE, GCE_INSTANCE
+
+
+def gcloud(*args, check=True, capture=False, quiet=False):
+    argv = ['gcloud', *args, f'--project={GCE_PROJECT}', '--quiet']
+    r = subprocess.run(argv, env=ENV, text=True,
+                       stdout=subprocess.PIPE if capture else (DEVNULL if quiet else None),
+                       stderr=subprocess.PIPE if (capture or quiet) else None)
+    if check and r.returncode != 0:
+        raise Fail(f'{shlex.join(argv)}: exit {r.returncode}{": " + r.stderr.strip()[-600:] if r.stderr else ""}')
+    return r
+
+
+def gce_key():
+    return os.path.expanduser(os.environ.get('WINVM_GCE_KEY') or f'~/.ssh/{GCE_INSTANCE}_ed25519')
+
+
+def repo_versions():
+    """The Node major of the CI workflow, the pnpm of backend/package.json,
+    and BUN_VERSION: the host gets what CI's Windows runners get."""
+    with open(os.path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml')) as f:
+        m = re.search(r'node-version:\s*["\']?(\d+)', f.read())
+    node = m.group(1) if m else '22'
+    with open(os.path.join(REPO_ROOT, 'backend', 'package.json')) as f:
+        pm = json.load(f).get('packageManager', '')
+    pnpm = pm.split('@', 1)[1] if pm.startswith('pnpm@') else ''
+    if not pnpm:
+        raise Fail('backend/package.json names no pnpm in packageManager')
+    return node, pnpm, BUN_VERSION
+
+
+def gce_startup_script():
+    node, pnpm, bun = repo_versions()
+    with open(GCE_STARTUP) as f:
+        text = f.read()
+    return (text.replace('PLACEHOLDER_USER', WIN_USER).replace('PLACEHOLDER_NODE_MAJOR', node)
+            .replace('PLACEHOLDER_PNPM', pnpm).replace('PLACEHOLDER_BUN', bun))
+
+
+def gce_status():
+    r = gcloud('compute', 'instances', 'describe', GCE_INSTANCE, f'--zone={GCE_ZONE}', '--format=value(status)',
+               check=False, capture=True)
+    return r.stdout.strip() if r.returncode == 0 else ''
+
+
+def gce_ssh_block():
+    """The ssh config of the host: through IAP (it has no external
+    address), with its own key and known_hosts."""
+    known = os.path.join(os.path.dirname(GCE_SSH_CONFIG), 'known_hosts')
+    proxy = (f'{shutil.which("gcloud")} compute start-iap-tunnel {GCE_INSTANCE} 22 --listen-on-stdin '
+             f'--project {GCE_PROJECT} --zone {GCE_ZONE} --verbosity=warning')
+    return (f'# {PREFIX} gce: {GCE_INSTANCE} ({GCE_PROJECT}, {GCE_ZONE}), ssh through IAP\n'
+            f'Host {GCE_INSTANCE}\n  HostName {GCE_INSTANCE}\n  User {WIN_USER}\n  IdentityFile {gce_key()}\n'
+            f'  IdentitiesOnly yes\n  ProxyCommand {proxy}\n  StrictHostKeyChecking accept-new\n'
+            f'  UserKnownHostsFile {known}\n  ServerAliveInterval 30\n')
+
+
+def gce_write_ssh_config():
+    """Puts the host's block into GCE_SSH_CONFIG in place of any earlier
+    block for it (ssh takes the first that matches)."""
+    os.makedirs(os.path.dirname(GCE_SSH_CONFIG), mode=0o700, exist_ok=True)
+    old = open(GCE_SSH_CONFIG).read() if os.path.exists(GCE_SSH_CONFIG) else ''
+    kept, inside = [], False
+    for line in old.splitlines(keepends=True):
+        if line.startswith(f'# {PREFIX} gce: {GCE_INSTANCE} '):
+            continue
+        if line.split()[:2] == ['Host', GCE_INSTANCE] and len(line.split()) == 2:
+            inside = True
+            continue
+        if inside and (line[:1] in (' ', '\t') or not line.strip()):
+            continue
+        inside = False
+        kept.append(line)
+    text = ''.join(kept).rstrip('\n')
+    with open(GCE_SSH_CONFIG, 'w') as f:
+        f.write((text + '\n\n' if text else '') + gce_ssh_block())
+    os.chmod(GCE_SSH_CONFIG, 0o600)
+    opts = os.environ.get('WINVM_SSH_OPTS', '')
+    if os.path.expanduser(GCE_SSH_CONFIG) not in [os.path.expanduser(t) for t in shlex.split(opts)]:
+        log(f'add to .env: WIN_TEST_HOST={GCE_INSTANCE} and WINVM_SSH_OPTS="-F {GCE_SSH_CONFIG}"')
+
+
+def gce_serial_since(since):
+    """The startup script's lines of the serial console after since (UTC,
+    ISO seconds), and whether it finished."""
+    r = gcloud('compute', 'instances', 'get-serial-port-output', GCE_INSTANCE, f'--zone={GCE_ZONE}', check=False, capture=True)
+    lines = [l for l in r.stdout.splitlines() if l[:19] > since and ('startup-script' in l or 'startup scripts' in l)]
+    return lines, any('Finished running startup scripts' in l for l in lines)
+
+
+def gce_wait_prepared(since, timeout):
+    """Waits for the boot's startup script; its errors fail the wait."""
+    log(f'waiting for {GCE_INSTANCE} to prepare itself (first boot takes 10-15 minutes)')
+    end = time.time() + timeout
+    while time.time() < end:
+        lines, done = gce_serial_since(since)
+        if done:
+            errors = [l for l in lines if '[ERROR]' in l or 'failed with error' in l]
+            if errors:
+                raise Fail('the startup script failed (C:\\winvm-provision.log on the host):\n' + '\n'.join(errors[-20:]))
+            return
+        time.sleep(20)
+    raise Fail(f'{GCE_INSTANCE} did not finish its startup script within {timeout}s')
+
+
+def gce_ssh_argv():
+    return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=60', '-F', GCE_SSH_CONFIG, GCE_INSTANCE]
+
+
+def gce_wait_ssh(timeout=600):
+    end = time.time() + timeout
+    while time.time() < end:
+        if subprocess.run(gce_ssh_argv() + ['cmd /c exit 0'], stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL, env=ENV).returncode == 0:
+            return
+        time.sleep(10)
+    raise Fail(f'no ssh to {GCE_INSTANCE} within {timeout}s')
+
+
+GCE_CHECK_PS1 = r"""$ErrorActionPreference = 'Continue'
+function V($cmd, $arg) { try { ((& $cmd $arg) | Select-Object -First 1).ToString().Trim() } catch { '' } }
+$o = [ordered]@{
+  git = V git --version
+  bash = Test-Path "$env:ProgramFiles\Git\bin\bash.exe"
+  node = V node --version
+  corepack = V corepack --version
+  pnpm = V pnpm --version
+  bun = V bun --version
+  pwsh = V pwsh -v
+  longPaths = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem').LongPathsEnabled
+  corepackPrompt = [Environment]::GetEnvironmentVariable('COREPACK_ENABLE_DOWNLOAD_PROMPT', 'Machine')
+  ready = Test-Path 'C:\winvm-ready'
+}
+$o | ConvertTo-Json -Compress
+"""
+
+
+def gce_check():
+    """Checks over ssh that the host has what the suites need, at the
+    versions of the repository."""
+    node, pnpm, bun = repo_versions()
+    # As one argument (UTF-16LE in base64): Windows PowerShell runs nothing
+    # of a script piped to `-Command -` over ssh, and says nothing either;
+    # and with its input left open it waits for that input's end.
+    encoded = base64.b64encode(GCE_CHECK_PS1.encode('utf-16-le')).decode()
+    r = subprocess.run(gce_ssh_argv() + [f'powershell -NoProfile -NonInteractive -EncodedCommand {encoded}'],
+                       stdin=DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=ENV, timeout=300)
+    if r.returncode != 0:
+        raise Fail(f'ssh to {GCE_INSTANCE} failed: {r.stderr.strip()[-600:]}')
+    try:
+        got = json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        raise Fail(f'unexpected answer from {GCE_INSTANCE}: {r.stdout[-600:]}')
+    wants = [
+        ('git', bool(got.get('git'))), ('bash', got.get('bash') is True),
+        (f'node v{node}', str(got.get('node', '')).startswith(f'v{node}.')),
+        ('corepack', bool(got.get('corepack'))),
+        # Where no package.json pins it: the suites run `pnpm -C <dir>` at the root.
+        (f'pnpm {pnpm} by default', got.get('pnpm') == pnpm),
+        (f'bun {bun}', got.get('bun') == bun),
+        ('pwsh 7', str(got.get('pwsh', '')).startswith('PowerShell 7')),
+        ('long paths', got.get('longPaths') == 1), ('corepack without prompt', got.get('corepackPrompt') == '0'),
+        ('prepared', got.get('ready') is True),
+    ]
+    for name, ok in wants:
+        log(f'  {"ok  " if ok else "MISS"} {name}')
+    bad = [n for n, ok in wants if not ok]
+    if bad:
+        raise Fail(f'{GCE_INSTANCE} lacks: {", ".join(bad)} ({json.dumps(got)})')
+
+
+def gce_create(timeout):
+    project, zone, name = gce_cfg()
+    region = zone.rsplit('-', 1)[0]
+    if gce_status():
+        raise Fail(f'{name} exists already (`winvm.py gce delete` first, or `gce start`)')
+    log('enabling the Compute Engine and IAP APIs')
+    gcloud('services', 'enable', 'compute.googleapis.com', 'iap.googleapis.com', quiet=True)
+    # Ssh and RDP only through IAP. A tag-scoped deny of everything else
+    # outranks default rules that admit 0.0.0.0/0 to every instance.
+    rules = gcloud('compute', 'firewall-rules', 'list', '--format=value(name)', capture=True).stdout.split()
+    if f'{name}-allow-iap' not in rules:
+        gcloud('compute', 'firewall-rules', 'create', f'{name}-allow-iap', '--network=default', '--direction=INGRESS',
+               '--priority=800', '--action=ALLOW', '--rules=tcp:22,tcp:3389', f'--source-ranges={IAP_RANGE}',
+               f'--target-tags={name}', quiet=True)
+    if f'{name}-deny-public' not in rules:
+        gcloud('compute', 'firewall-rules', 'create', f'{name}-deny-public', '--network=default', '--direction=INGRESS',
+               '--priority=900', '--action=DENY', '--rules=tcp:22,tcp:3389', '--source-ranges=0.0.0.0/0',
+               f'--target-tags={name}', quiet=True)
+    # No external address (an organization may forbid one, and none is
+    # needed): the downloads leave through Cloud NAT, unless the region has
+    # one already.
+    nats = gcloud('compute', 'routers', 'list', f'--regions={region}', '--format=value(nats[].name)', capture=True).stdout.split()
+    if not any(nats):
+        log(f'creating Cloud NAT {name}-nat in {region} for the host\'s downloads')
+        gcloud('compute', 'routers', 'create', f'{name}-router', '--network=default', f'--region={region}', quiet=True)
+        gcloud('compute', 'routers', 'nats', 'create', f'{name}-nat', f'--router={name}-router', f'--region={region}',
+               '--auto-allocate-nat-external-ips', '--nat-all-subnet-ip-ranges', quiet=True)
+    key = gce_key()
+    if not os.path.exists(key):
+        os.makedirs(os.path.dirname(key), mode=0o700, exist_ok=True)
+        run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', name, '-f', key])
+    with tempfile.TemporaryDirectory() as d:
+        script = os.path.join(d, 'startup.ps1')
+        with open(script, 'w', newline='\r\n') as f:
+            f.write(gce_startup_script())
+        since = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime())
+        log(f'creating {name} ({GCE_MACHINE}, {GCE_IMAGE_FAMILY}, {zone}; stops itself after {GCE_MAX_RUN} running)')
+        gcloud('compute', 'instances', 'create', name, f'--zone={zone}', f'--machine-type={GCE_MACHINE}',
+               f'--image-family={GCE_IMAGE_FAMILY}', '--image-project=windows-cloud',
+               f'--boot-disk-size={GCE_DISK_GB}GB', '--boot-disk-type=pd-balanced', '--no-address', f'--tags={name}',
+               '--shielded-secure-boot', '--shielded-vtpm', '--shielded-integrity-monitoring',
+               f'--max-run-duration={GCE_MAX_RUN}', '--instance-termination-action=STOP',
+               f'--metadata-from-file=windows-startup-script-ps1={script},winvm-ssh-key={key}.pub',
+               f'--labels=purpose={PREFIX}-windows-tests', quiet=True)
+    gce_write_ssh_config()
+    # A host made anew under the name has another host key.
+    known = os.path.join(os.path.dirname(GCE_SSH_CONFIG), 'known_hosts')
+    if os.path.exists(known):
+        subprocess.run(['ssh-keygen', '-R', name, '-f', known], stdout=DEVNULL, stderr=DEVNULL, env=ENV)
+    gce_wait_prepared(since, timeout)
+    gce_wait_ssh()
+    gce_check()
+    log(f'{name} is ready; `winvm.py gce stop` stops it (only its disk is billed then)')
+
+
+def gce_update_script():
+    """Sends the startup script of the working tree to the host: it runs at
+    the next boot."""
+    gce_cfg()
+    with tempfile.TemporaryDirectory() as d:
+        script = os.path.join(d, 'startup.ps1')
+        with open(script, 'w', newline='\r\n') as f:
+            f.write(gce_startup_script())
+        gcloud('compute', 'instances', 'add-metadata', GCE_INSTANCE, f'--zone={GCE_ZONE}',
+               f'--metadata-from-file=windows-startup-script-ps1={script}', quiet=True)
+
+
+def gce_start(timeout):
+    """Starts the host with the startup script of the working tree and waits
+    until it has prepared itself and answers ssh. True when it was stopped."""
+    gce_cfg()
+    st = gce_status()
+    if not st:
+        raise Fail(f'no instance {GCE_INSTANCE} (`winvm.py gce create`)')
+    if st == 'RUNNING':
+        return False
+    gce_update_script()
+    since = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime())
+    log(f'starting {GCE_INSTANCE}')
+    gcloud('compute', 'instances', 'start', GCE_INSTANCE, f'--zone={GCE_ZONE}', quiet=True)
+    gce_wait_prepared(since, timeout)
+    gce_wait_ssh()
+    return True
+
+
+def gce_stop():
+    gce_cfg()
+    if gce_status() in ('RUNNING', 'STAGING', 'PROVISIONING'):
+        log(f'stopping {GCE_INSTANCE}')
+        gcloud('compute', 'instances', 'stop', GCE_INSTANCE, f'--zone={GCE_ZONE}', quiet=True)
+
+
+def gce_delete():
+    """Deletes the host and what `gce create` made for it (its firewall
+    rules, and its Cloud NAT when it made one)."""
+    _project, zone, name = gce_cfg()
+    region = zone.rsplit('-', 1)[0]
+    if gce_status():
+        gcloud('compute', 'instances', 'delete', name, f'--zone={zone}', quiet=True)
+    rules = gcloud('compute', 'firewall-rules', 'list', '--format=value(name)', capture=True).stdout.split()
+    for rule in (f'{name}-allow-iap', f'{name}-deny-public'):
+        if rule in rules:
+            gcloud('compute', 'firewall-rules', 'delete', rule, quiet=True)
+    routers = gcloud('compute', 'routers', 'list', f'--regions={region}', '--format=value(name)', capture=True).stdout.split()
+    if f'{name}-router' in routers:
+        gcloud('compute', 'routers', 'delete', f'{name}-router', f'--region={region}', quiet=True)
+    log(f'deleted {name}; its key {gce_key()} and the ssh config stay')
+
+
 # ---------------------------------------------------------------- lifecycle
 
 def down():
@@ -829,6 +1135,10 @@ def main():
     p.add_argument('--emulate', action='store_true')
     p.add_argument('--timeout', type=int, default=1200)
 
+    p = sub.add_parser('gce', help='a Windows test host on Google Compute Engine (WINVM_GCE_* in .env)')
+    p.add_argument('action', choices=['create', 'check', 'start', 'stop', 'status', 'update-script', 'delete'])
+    p.add_argument('--timeout', type=int, default=1800)
+
     sub.add_parser('status')
     sub.add_parser('down')
     p = sub.add_parser('clean')
@@ -854,7 +1164,8 @@ def main():
     elif a.cmd == 'ssh':
         cmd = a.command[1:] if a.command[:1] == ['--'] else a.command
         if a.host:
-            ssh_base = ['ssh', '-t' if not cmd else '-T', a.host]
+            ssh_opts = [os.path.expanduser(t) for t in shlex.split(os.environ.get('WINVM_SSH_OPTS', ''))]
+            ssh_base = ['ssh', '-t' if not cmd else '-T', *ssh_opts, a.host]
         else:
             st_path = os.path.join(WORK, 'state.json')
             if not os.path.exists(st_path):
@@ -863,7 +1174,16 @@ def main():
         return subprocess.run(ssh_base + ([' '.join(cmd)] if cmd else [])).returncode
     elif a.cmd == 'test':
         if a.host:
-            return run_windows_tests(win_ssh_prefix(host=a.host), a.suite, a.dist)
+            # The GCE host (WINVM_GCE_INSTANCE) is started when stopped, and
+            # stopped again after the tests unless --keep.
+            started = a.host == GCE_INSTANCE and gce_start(a.timeout)
+            try:
+                if a.host == GCE_INSTANCE:
+                    gce_check()
+                return run_windows_tests(win_ssh_prefix(host=a.host), a.suite, a.dist)
+            finally:
+                if started and not a.keep:
+                    gce_stop()
         st = None
         if a.dockur:
             st = up_dockur(a.memory, a.cpus, a.rdp, a.version, a.timeout)
@@ -880,6 +1200,25 @@ def main():
         finally:
             if a.keep:
                 _started_kind = None
+    elif a.cmd == 'gce':
+        if a.action == 'create':
+            gce_create(a.timeout)
+        elif a.action == 'check':
+            gce_cfg()
+            gce_check()
+        elif a.action == 'start':
+            gce_start(a.timeout)
+            gce_check()
+        elif a.action == 'stop':
+            gce_stop()
+        elif a.action == 'status':
+            gce_cfg()
+            print(f'{GCE_INSTANCE} {gce_status() or "absent"}')
+        elif a.action == 'update-script':
+            gce_update_script()
+            log('the startup script runs at the next boot')
+        elif a.action == 'delete':
+            gce_delete()
     elif a.cmd == 'status':
         status()
     elif a.cmd == 'down':
