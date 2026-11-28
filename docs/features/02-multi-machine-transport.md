@@ -32,7 +32,11 @@ ssh runs with `BatchMode=yes`, keepalives and a ControlMaster in a private per-i
 
 ### Machines
 
-The local machine, the stored SSH machines and this run's `--ssh` targets (`--local-only`, `--machine` select among them; `selectSpecs` in `backend/hosts/common/compose.ts`). They are stored in `machines[-<instance>].json` ([reference](../reference.md#files-and-directories), `backend/kernel/machines/registry.ts`): random ids (they appear in URLs and settings), written whole and atomically after every change, unknown fields kept, not re-read while the hub runs; a file that is not a machines file is left alone.
+The local machine, the stored SSH machines and this run's `--ssh` targets (`--local-only`, `--machine` select among them; `selectSpecs` in `backend/hosts/common/compose.ts`). They are stored in `machines.json` beside the settings file, in the data directory of the hub's namespace on its host ([reference](../reference.md#files-and-directories), `backend/kernel/machines/registry.ts`): random ids (they appear in URLs and settings), written whole and atomically after every change, unknown fields kept. Every hub of the namespace there shares the file (the desktop app and `veldr` without `--instance`):
+
+- a change first reads the file again when another hub changed it, so it applies to what the other wrote;
+- each hub polls it every 2 s (`Registry.watch`) and follows it (`Machines.sync`): machines added elsewhere are connected, removed ones end their session and leave (the features forget them), a machine whose target changed is removed and added, labels, enabled flags and the order follow, the local machine stays; `--local-only`, `--machine` and `--ssh` select among them as at the start;
+- a file that is not a machines file is left alone: the hub keeps the list read before, logs it once and refuses changes until it is fixed; a removed file removes no machine, and the next change writes the list again.
 
 The UI adds (suggesting the hub host's ssh aliases with only their `HostName` and `User`, `sshconfig.ts`), orders, renames (unique labels), removes (nothing on the machine is touched), enables and disables machines, refused read-only and audited (`backend/features/machines/hub.ts`).
 
@@ -42,7 +46,7 @@ The UI adds (suggesting the hub host's ssh aliases with only their `HostName` an
 
 Connecting starts only the node. The first `/api/v1/term` subscription installs this build's herdr-core where it differs and starts it detached from the agent ([21](21-terminal-core.md), [22](22-terminal-protocol.md); `backend/features/terminals/lifecycle.ts`); a read-only hub installs and starts nothing. The machine's menu starts, restarts or stops it.
 
-`--instance` gives a hub its own files and, unless `--node-instance` says otherwise, its own namespace on machines, so daily and development hubs share machines safely ([39](39-nodes.md#namespaces), [40](40-shared-homes.md)).
+`--instance` gives a hub its own namespace unless `--node-instance` says otherwise: its own files on its host and its own state on machines, so daily and development hubs share machines safely ([39](39-nodes.md#namespaces), [40](40-shared-homes.md)).
 
 ## Alternatives considered
 
@@ -65,6 +69,6 @@ Connecting starts only the node. The first `/api/v1/term` subscription installs 
 ## Testing
 
 - `backend/kernel/machines/transport/` (`transport.test.ts`, `deploy.test.ts`, `release.test.ts`): ssh arguments, error classification, control directory, deployment over ssh and locally.
-- `backend/kernel/machines/machines.test.ts`, `backend/features/machines/hub.test.ts`, `sshconfig.test.ts`: the machines file, targets from the shared vectors, the endpoints and their guards.
+- `backend/kernel/machines/machines.test.ts`, `backend/features/machines/hub.test.ts`, `sshconfig.test.ts`: the machines file and another hub's changes to it (`another hub of the namespace writes the file`, `watch reads what another hub writes`, `sync follows the machines file`), targets from the shared vectors, the endpoints and their guards.
 - `backend/machine/agent.test.ts`, `backend/features/terminals/terminals.test.ts`: the terminal core's lifecycle.
 - `make e2e` (`e2e/tests/ssh.spec.ts`): an OpenSSH container added from the dialog, dropping and coming back, nothing of the instance left after it stops.

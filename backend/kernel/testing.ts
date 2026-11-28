@@ -176,10 +176,17 @@ export const localSpec = (label = 'local', enabled = true): Spec => ({ id: LOCAL
 /** Machines over specs and a registry (in memory by default). */
 export function testMachines(
   specs: readonly Spec[],
-  o: { registry?: Registry; dial?: Dialer; logger?: Logger; localSupported?: boolean } = {},
+  o: {
+    registry?: Registry;
+    select?: (stored: readonly Spec[]) => Spec[];
+    dial?: Dialer;
+    logger?: Logger;
+    localSupported?: boolean;
+  } = {},
 ): Machines {
   return new Machines({
     specs,
+    select: o.select,
     registry: o.registry ?? Registry.memory(),
     dial: o.dial ?? noDial,
     logger: o.logger ?? discard,

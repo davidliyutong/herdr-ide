@@ -1,7 +1,7 @@
 // The access log records every request of a machine's MCP server and every
 // value a page took (a reveal, an export): names only, never values. It is
-// kept in the hub's database (hub[-<instance>]-<host>[-<id>].db beside the
-// settings file, named for this host), table vault_access, and read back at
+// kept in the hub's database (hub-<host>[-<id>].db beside the settings
+// file, named for this host), table vault_access, and read back at
 // the first use, so the panel shows what happened before a restart too. A
 // record that lets values out is committed to disk before they leave; one
 // that cannot be written refuses the release (log_failed). Lists and
@@ -99,10 +99,9 @@ const MIGRATIONS = [
 	CREATE INDEX vault_access_class ON vault_access (released, id);`,
 ];
 
-/** The hub's database beside the vault's file: vault[-<instance>].json
- * beside settings[-<instance>].json, whose database is
- * hub[-<instance>]-<host>[-<id>].db, named for this host (hostFile;
- * #shared/store/hubdb.ts). "" for "". */
+/** The hub's database beside the vault's file: vault.json beside
+ * settings.json, whose database is hub-<host>[-<id>].db, named for this
+ * host (hostFile; #shared/store/hubdb.ts). "" for "". */
 export function hubDBBeside(vaultFile: string): string {
   return hubDBOf(vaultFile, 'vault');
 }

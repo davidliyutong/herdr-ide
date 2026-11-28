@@ -6,7 +6,7 @@
 import { hostname } from 'node:os';
 import { NAME, SLUG } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
-import { userConfigDir, userHomeDir } from '#shared/host/hostdirs.ts';
+import { userHomeDir } from '#shared/host/hostdirs.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
 import type { Audit } from '#kernel/audit.ts';
 import { Keybindings } from '#kernel/config/keybindings/index.ts';
@@ -134,9 +134,9 @@ export function selectSpecs(specs: Spec[], localOnly: boolean, extraSSH: readonl
 }
 
 export interface ComposeOptions {
-  /** The hub's instance: its settings, machines and database files. */
-  instance: string;
-  /** The instance of the machines' nodes. */
+  /** The namespace of the machines' nodes, whose data directory on the
+   * hub host holds the hub's files (settingsPath), shared with every hub
+   * of the namespace. */
   nodeInstance: string;
   features: FeatureDef[];
   /** The settings given on the command line (settingFlags). */
@@ -173,11 +173,11 @@ export interface Composed {
  * a host binds what it serves on first, so that a failed launch starts no
  * agent. */
 export function composeHub(o: ComposeOptions): Composed {
-  const { logger, instance, nodeInstance, payloads, controlDir } = o;
+  const { logger, nodeInstance, payloads, controlDir } = o;
   const modules = hubModules(o.features);
   let settingsFile = '';
   try {
-    settingsFile = settingsPath(userConfigDir(), instance);
+    settingsFile = settingsPath(userHomeDir(), nodeInstance);
   } catch (e) {
     logger(`settings are not saved: ${(e as Error).message}`);
   }
@@ -209,12 +209,14 @@ export function composeHub(o: ComposeOptions): Composed {
       logger(`machine ${s.id}: its ssh target is refused (invalid_target); it is shown in error and never connected`);
   const ssh = o.ssh ?? [];
   const extra = ssh.map((t) => ({ id: t, label: t, target: t, enabled: true }));
-  const specs = selectSpecs(loadSpecs(registry.specs(), extra, hostname()), o.localOnly, ssh, o.only ?? []);
+  const select = (stored: readonly Spec[]) => selectSpecs(loadSpecs(stored, extra, hostname()), o.localOnly, ssh, o.only ?? []);
+  const specs = select(registry.specs());
 
   const builds = payloads.machine.bind(payloads);
   const downloadFailures = new DownloadFailures();
   const machines = new Machines({
     specs,
+    select,
     registry,
     logger,
     dial: async (spec, signal, progress) => {
@@ -293,8 +295,13 @@ export function composeHub(o: ComposeOptions): Composed {
             }
           })()
         : undefined;
-      // Edits of the files by hand apply without a restart.
-      const watching = Promise.all([settings.watch(signal), keybindings.watch(signal)]).catch(() => {});
+      // Edits of the files by hand, and by the other hubs of the namespace,
+      // apply without a restart.
+      const watching = Promise.all([
+        settings.watch(signal),
+        keybindings.watch(signal),
+        registry.watch(signal, () => machines.sync(), logger),
+      ]).catch(() => {});
       const running = hub.run(signal);
       await new Promise<void>((r) => (signal.aborted ? r() : signal.addEventListener('abort', () => r(), { once: true })));
       let timer: ReturnType<typeof setTimeout> | undefined;

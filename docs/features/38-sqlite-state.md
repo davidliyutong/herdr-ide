@@ -16,11 +16,11 @@ Goals: private databases with versioned schemas, per-host files on shared homes,
 - **Connections.** WAL, a busy timeout, `synchronous` NORMAL (a power loss may lose the last transactions, never the database), `IMMEDIATE` transactions; `DB.durable` syncs on return (the vault's release records, history snapshots).
 - **Schema.** `PRAGMA user_version` counts migrations, each applied once; released ones never change. A newer database opens read-only (`NewerError`). Several features of one owner share a database through `openShared`, each versioning its prefixed tables with `DB.migrate`.
 
-`node:sqlite` is synchronous, so statements run in worker threads (`backend/hosts/bun/state-worker.ts` on machines, `backend/hosts/common/hub-state-worker.ts` in the hub). The databases: the hub's `hub[-<instance>]-<host>[-<id>].db` beside its settings file (access log, usage history; [reference](../reference.md#files-and-directories)); in a machine's data directory `machine-<host>[-<id>].db` (terminal history, usage cost cache) and the chat host's `chat-<host>[-<id>].db`. A hub without a settings file keeps its state in memory.
+`node:sqlite` is synchronous, so statements run in worker threads (`backend/hosts/bun/state-worker.ts` on machines, `backend/hosts/common/hub-state-worker.ts` in the hub). The databases: the hub's `hub-<host>[-<id>].db` beside its settings file in its namespace's data directory, which every hub of the namespace on that host opens (access log, usage history; [reference](../reference.md#files-and-directories)); in a machine's data directory `machine-<host>[-<id>].db` (terminal history, usage cost cache) and the chat host's `chat-<host>[-<id>].db`. A hub without a settings file keeps its state in memory.
 
 ### Per-host names
 
-Each database is named after its host's key (`hostFile`, [40](40-shared-homes.md)): the sanitized full host name and 8 hex digits of a hash of the machine id (`/etc/machine-id`, macOS's platform UUID, Windows's `MachineGuid`), so clones and equal names on two clusters get separate files; the chat host's logs alike. `pruneHostFiles` removes, at each owner's start, other hosts' databases unused for 30 days, only under SQLite's writer lock taken without waiting, never another instance's, nothing on Windows. The hub also removes this host's database of the old name `core[-<instance>]-<host>[-<id>].db` unread, unless a process holds it (`tidyHubDBs`).
+Each database is named after its host's key (`hostFile`, [40](40-shared-homes.md)): the sanitized full host name and 8 hex digits of a hash of the machine id (`/etc/machine-id`, macOS's platform UUID, Windows's `MachineGuid`), so clones and equal names on two clusters get separate files; the chat host's logs alike. `pruneHostFiles` removes, at each owner's start, other hosts' databases unused for 30 days, only under SQLite's writer lock taken without waiting, never another instance's, nothing on Windows. The hub also removes this host's database of the old name beside it, `core-<host>[-<id>].db`, unread, unless a process holds it (`tidyHubDBs`).
 
 ## Alternatives considered
 
@@ -32,6 +32,7 @@ Each database is named after its host's key (`hostFile`, [40](40-shared-homes.md
 
 - **Newer database or unsafe file** → history changes answer `io`, the vault refuses releases (`log_failed`), usage stays in memory, a chat host does not serve.
 - **Two agents of one instance** → SQLite's locks; history writers take turns through a lease, a capture without it answers `busy`.
+- **Several hubs of one namespace on a host** → one hub database, SQLite's locks and busy timeout.
 - **File system without locks** → per-host names keep each database to one host; pruning removes nothing it cannot lock.
 
 ## Security

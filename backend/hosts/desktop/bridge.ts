@@ -111,9 +111,12 @@ function once(fn: () => void): () => void {
 /** What the hub of the desktop app is started with: what the command
  * line's hub gets as flags, and what the app holds for it. */
 export interface HubStart {
-  /** The hub's instance (`desktop`, or a development one). */
+  /** The hub's instance (`desktop`, or a development one): its ssh
+   * control directory. */
   instance: string;
-  /** The instance of the machines' nodes. */
+  /** The namespace of the machines' nodes, whose data directory on this
+   * host holds the hub's files (settings, machines, vault, database),
+   * shared with every hub of the namespace. */
   nodeInstance: string;
   /** Connects the local machine only (development). */
   localOnly: boolean;

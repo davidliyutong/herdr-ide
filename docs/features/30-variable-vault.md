@@ -22,7 +22,7 @@ Non-goals: injecting the vault into every terminal (every program would get ever
 
 ### Store (`backend/features/vault/store.ts`, `crypto.ts`)
 
-`vault[-<instance>].json` beside the settings file, 0600, written atomically and durably (`backend/shared/host/userfile.ts`).
+`vault.json` beside the settings file, in the data directory of the hub's namespace on the hub host ([13](13-settings-and-appearance.md)), 0600, written atomically and durably (`backend/shared/host/userfile.ts`); every hub of the namespace there opens it ([below](#hubs-of-a-namespace)).
 
 - **Key.** Argon2id of the passphrase (at least 8 characters), its parameters in the file and refused outside fixed bounds, so an edited file can neither weaken the derivation nor exhaust memory. The vault is locked after every start; a lock forgets the key, and a locked vault gives out and changes nothing (`vault_locked`). Unlocked, the key is a non-exportable WebCrypto `CryptoKey` ([42](42-typescript-backend.md#security)).
 - **Values** are sealed one by one with AES-256-GCM, the additional data binding the file version, the name, the machines and the inject-only flag: a ciphertext moved to another entry, or machines widened or the flag dropped in the file, does not open (`corrupt`). **Inject-only** variables go only to `run_with_env` and linked presets, which keeps them out of the conversation by accident, not against a command written to print them.
@@ -82,6 +82,16 @@ Requests arrive as op `vault` streams: a header with the requesting process and 
 
 Each MCP request, injection, reveal and export is a record in the hub's database (table `vault_access`, [38](38-sqlite-state.md)) with names, result and the process chain, never a value; reading it needs a session. A record that lets values out is committed durably first, and one that cannot be written stops the release (`log_failed`). Releases and other records are bounded apart, so repeated refusals (merged into one record with a count) never push a release out. `--audit-log` audits every record too.
 
+### Hubs of a namespace
+
+Every hub of the namespace on one host (the desktop app and `veldr` without `--instance`, [39](39-nodes.md#namespaces)) opens the same `vault.json` (`store.ts`, `vault.ts`). Each keeps its own unlock (the key only in its own memory), sessions, automatic lock and waiting approvals: unlocking in one unlocks nothing in another.
+
+- Each store operation takes the file as it is then, reading it again first when another hub wrote it.
+- A write over a file another hub wrote during the operation is refused (`409 vault_changed`; the panel asks to try again), and the next operation takes the file. A file that does not open keeps what was read before and is not written over.
+- A passphrase changed in another hub (the file's mode, derivation or check differ) drops the key: the vault locks in this hub and its sessions end (audited `vault.locked`, reason `passphrase_elsewhere`).
+- Every 2 s the hub looks at the file and, when another hub changed it, tells its pages to load the vault again.
+- The desktop app's unlock entries are in the shared file. A hub without the desktop shell (the command line's) cannot use them and never removes them: it refuses such an unlock with a proof error before anything that removes an entry.
+
 ### Export and import (`exportfile.ts`, `hub.ts`)
 
 An export file is sealed with AES-256-GCM under Argon2id of its own passphrase (at least 12 characters: it is attacked offline); the hub seals and opens it, the browser holds only ciphertext.
@@ -96,7 +106,7 @@ The plugin's page **Variable Vault**, ending with Biometrics and Import/Export (
 
 ### Machines
 
-Every node listens on `<run>/vault.sock` (0600, own user only by peer credentials; `backend/machine/vault.ts`) and asks each hub it serves ([39](39-nodes.md)): the first hub to grant answers and the others' questions are withdrawn; `list` merges every hub's variables; each hub logs what it released. The newest node of the instance serves the socket.
+Every node listens on `<run>/vault.sock` (0600, own user only by peer credentials; `backend/machine/vault.ts`) and asks each hub it serves ([39](39-nodes.md)): the first hub to grant answers and the others' questions are withdrawn; `list` merges every hub's variables; each hub logs what it released. Hubs that share a vault file answer from the same vault, each under its own unlock and the user's answer in it; a hub on another host answers from its own. The newest node of the instance serves the socket.
 
 The MCP server is the executable's `mcp` command (`backend/features/vault/machine/mcp.ts`, `backend/hosts/machine/mcp.ts`) on the official SDK (`@modelcontextprotocol/server`, pinned), its tools handlers of the low-level `Server` so unknown arguments are refused (`-32602`) before anything runs. Agents' configurations name `<data dir>/bin/<slug>-mcp`, a script running the link of the host's platform beside it, which each agent points at its own executable, so the path survives updates and shared homes ([40](40-shared-homes.md)). A cancelled call denies its waiting approval or kills its command. Tools:
 
@@ -128,6 +138,7 @@ The panel **Variable Vault** of the right sidebar (`view.panel.vault`): the gate
 - **Biometric key gone, unlock store lost, older vault file put back**: `409 unlock_stale`, the entry removed; set biometrics up again.
 - **New macOS build**: one prompt for `security`; refused, that launch unlocks with the passphrase only.
 - **File of another version or damaged**: `503 version` / `invalid`; move it away and Retry. **File edited**: `corrupt`, nothing released from it.
+- **Another hub of the namespace wrote meanwhile**: `409 vault_changed`, nothing written; the next request takes the file. **Its passphrase changed there**: locked here, sessions ended; unlock with the new one.
 - **Agent or hub gone**: the MCP server answers `unavailable` and connects again at the next call; killed, even with SIGKILL, its commands' groups die with it.
 - **Access log not writable**: no value leaves (`log_failed`).
 - **Export file with a wrong passphrase or changed**: `file_passphrase` (also `bad_file`, `file_version`, `too_large`); nothing imported.
@@ -144,8 +155,8 @@ The panel **Variable Vault** of the right sidebar (`view.panel.vault`): the gate
 
 ## Testing
 
-- `backend/features/vault/store.test.ts`: the vectors, fixtures of files earlier releases wrote (`testdata/`), every binding of sealed content, unlock entries, presets and `#policy` tampering.
-- `backend/features/vault/hub.test.ts`: the gate, requests and approvals, exemptions, authenticators, Verify every Allow under concurrent edits, the automatic lock on driven clocks, export and import, `workspaceEnv`'s record; `webauthn.test.ts`, `accesslog.test.ts`, `backend/shared/host/userfile.test.ts`.
+- `backend/features/vault/store.test.ts`: the vectors, fixtures of files earlier releases wrote (`testdata/`), every binding of sealed content, unlock entries, presets and `#policy` tampering, a file another store writes (`a file the hubs of a namespace share`).
+- `backend/features/vault/hub.test.ts`: the gate, requests and approvals, exemptions, authenticators, Verify every Allow under concurrent edits, the automatic lock on driven clocks, export and import, `workspaceEnv`'s record, another hub's writes and passphrase (`hubs of a namespace`, extended); `webauthn.test.ts`, `accesslog.test.ts`, `backend/shared/host/userfile.test.ts`.
 - Injection: `backend/machine/termenv.test.ts`, `backend/features/terminals/terminals.test.ts` and `integration.test.ts`, `backend/features/chat/routes.test.ts`, `backend/features/chat/machine/host/host.test.ts`.
 - The MCP server: `backend/features/vault/machine/mcp.test.ts`, `run.test.ts`, `backend/hosts/machine/mcp.test.ts` (signals, SIGKILL), `backend/machine/vault.test.ts` (the link, the socket).
 - The desktop shell: `desktop/src/verify.test.ts`, `enclave.test.ts`, `relay.test.ts`, `unlockStore.test.ts`, `keychain.test.ts`, `windowsHello.test.ts`, `preload.test.ts` (the page's `verifyUser` bridge).

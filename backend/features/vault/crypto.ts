@@ -36,6 +36,7 @@ const STATUS: Record<string, number> = {
   no_passphrase: 409,
   has_passphrase: 409,
   unlock_stale: 409,
+  vault_changed: 409,
   wrong_passphrase: 403,
   passphrase_due: 403,
   vault_proof: 401,

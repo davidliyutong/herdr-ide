@@ -14,7 +14,7 @@ Goals: hosts share one home without seeing each other's sockets, locks, processe
 
 - **Runtime, host-local, 0700**: sockets, locks, pid files, the display's files, in `/run/user/<uid>/<data dir name without its dot>-<hash of its real path>` when that directory is the user's and private (looked up itself, not through `XDG_RUNTIME_DIR`, which non-login processes lack), else `<data>/run-<hostid.id>`, or under `/tmp` when socket paths would be too long.
 - **This host's**, `<data>/hosts/<hostid.key>/`: the terminal core's executable, code-server's user data and extensions, logs, Xvfb packages.
-- **Shared**, `<data>/`: databases named per host ([38](38-sqlite-state.md)), agent builds by content hash, code-server per version and platform, uploads with unique names, and the vault's MCP command `<data>/bin/veldr-mcp`, a script running the link for the host's `uname -s`/`uname -m`.
+- **Shared**, `<data>/`: databases named per host ([38](38-sqlite-state.md)), agent builds by content hash, code-server per version and platform, uploads with unique names, the vault's MCP command `<data>/bin/veldr-mcp`, a script running the link for the host's `uname -s`/`uname -m`, and the files of hubs run on these hosts (settings, keybindings, machines list, vault; [39](39-nodes.md#namespaces)), which the namespace's hubs on every host of the home share as they do on one host.
 
 The terminal core's session is `veldr[-<instance>]-<hostid.id>`, so herdr-core's state and service are per host. Retention (`backend/machine/housekeeping.ts`): the agent touches its host's directory and build daily; another host's directory unused for 30 days loses its files except the terminal core's executable (a core may still run from it), and goes whole after 180 days.
 

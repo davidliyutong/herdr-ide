@@ -26,7 +26,7 @@ The main process spawns the hub executable as a child (`<slug> desktop`) speakin
 
 - A per-launch verify key in the start message lets the shell sign the vault's presence prompts (Touch ID, Windows Hello), whose text comes from the hub, never the page ([30](30-variable-vault.md)).
 - A crashed hub restarts with the windows kept, a bounded number of times a minute; then the app reports it and quits. Quitting asks the hub to stop and kills it after a deadline, never holding up a logout; the hub also stops when its stdin closes, so it never outlives the shell.
-- Production is instance `desktop` in the default namespace on machines ([39](39-nodes.md#namespaces)); development runs are local-only instances (`dev`, or the one `VELDR_DESKTOP_DEV` names, never `desktop`), each with its own Electron profile ([reference](../reference.md#environment-variables)).
+- Production is instance `desktop` (its ssh control directory and Electron profile) in the default namespace ([39](39-nodes.md#namespaces)): on machines it shares the terminals and chats of the default namespace, and on its own host the settings, keybindings, machines list, vault and hub database in `~/.veldr/` with `veldr` run without `--instance`. Development runs are local-only instances (`dev`, or the one `VELDR_DESKTOP_DEV` names, never `desktop`), each with its own namespace and Electron profile ([reference](../reference.md#environment-variables)).
 - On macOS and Linux the hub's PATH gains `~/.local/bin`, Homebrew's and the system directories, since launchers load no shell startup files.
 
 ### Windows and menus

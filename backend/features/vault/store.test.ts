@@ -772,3 +772,60 @@ describe('groups, presets and workspace links', () => {
     });
   });
 });
+
+describe('a file the hubs of a namespace share', () => {
+  // Each operation takes the file as it is then: what another hub's store
+  // wrote is kept and seen, a write over a file changed during the
+  // operation is refused (vault_changed) and the next operation takes the
+  // file, and a passphrase changed elsewhere locks the vault here.
+  test('another store writes the file', async () => {
+    const path = join(temp(), 'vault.json');
+    const a = Store.open(path, { kdf: FAST });
+    await a.setPassphrase('correct horse', WINDOW);
+    const b = Store.open(path, { kdf: FAST });
+    await b.unlock('correct horse', WINDOW);
+    await a.set('A', { value: 'a' });
+    await b.set('B', { value: 'b' });
+    expect(
+      Store.open(path)
+        .list()
+        .map((i) => i.name),
+    ).toEqual(['A', 'B']);
+    expect(a.list().map((i) => i.name)).toEqual(['A']);
+    expect(await a.reload()).toBe(true);
+    expect(await a.reload()).toBe(false);
+    expect(a.list().map((i) => i.name)).toEqual(['A', 'B']);
+    expect(await a.value('B')).toBe('b');
+
+    const meanwhile = () => {
+      const f = JSON.parse(readFileSync(path, 'utf8'));
+      f.elsewhere = true;
+      writeFileSync(path, JSON.stringify(f));
+    };
+    await expect(a.updateGuard(() => meanwhile())).rejects.toMatchObject({ code: 'vault_changed', status: 409 });
+    expect(JSON.parse(readFileSync(path, 'utf8')).elsewhere).toBe(true);
+    await a.set('C', { value: 'c' });
+    const f = JSON.parse(readFileSync(path, 'utf8'));
+    expect([f.elsewhere, f.entries.map((e: { name: string }) => e.name)]).toEqual([true, ['A', 'B', 'C']]);
+
+    await b.changePassphrase('correct horse', 'new passphrase', WINDOW);
+    await expect(a.value('A')).rejects.toMatchObject({ code: 'vault_locked' });
+    expect(a.status().locked).toBe(true);
+    await a.unlock('new passphrase', WINDOW);
+    expect(await a.value('C')).toBe('c');
+  });
+
+  // A file that no longer opens keeps what was read before, and nothing
+  // is written over it.
+  test('a file that does not open is not written over', async () => {
+    const path = join(temp(), 'vault.json');
+    const a = Store.open(path, { kdf: FAST });
+    await a.setPassphrase('correct horse', WINDOW);
+    await a.set('A', { value: 'a' });
+    writeFileSync(path, '{');
+    expect(await a.reload()).toBe(false);
+    expect(a.list().map((i) => i.name)).toEqual(['A']);
+    await expect(a.set('B', { value: 'b' })).rejects.toMatchObject({ code: 'vault_changed' });
+    expect(readFileSync(path, 'utf8')).toBe('{');
+  });
+});

@@ -13,6 +13,7 @@ import type { Spec } from '#kernel/machines/spec.ts';
 import { openShared } from '#shared/store/index.ts';
 import { readLine, type VaultResponse } from '#shared/proto/agentproto/index.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import { hubDBBeside } from './accesslog.ts';
 import { relayKey } from './desktop.ts';
 import { openExport, sealExport } from './exportfile.ts';
@@ -1135,5 +1136,31 @@ describe('groups, presets and workspace env injection routes', () => {
       locked: false,
       logFailed: true,
     });
+  });
+});
+
+describe('hubs of a namespace', () => {
+  // The hubs of a namespace share the vault's file: what one writes
+  // reaches the other and its pages, and a passphrase changed in one locks
+  // the vault in the other and ends its sessions.
+  extended('another hub writes the vault', async () => {
+    const a = await vault({ fileCheckMs: 10 });
+    const b = await vault({ fileCheckMs: 10, path: a.opts.path }, false);
+    b.token = (await b.call('POST', '/session', { passphrase: PASS })).json.session;
+    expect((await a.call('PUT', '/vars/TOKEN', { value: 's3cret' })).status).toBe(200);
+    let names: string[] = [];
+    const look = async () => (names = (await b.call('GET', '')).json.variables.map((x: { name: string }) => x.name));
+    for (const deadline = Date.now() + 5000; (await look()).length === 0 && Date.now() < deadline;) await sleep(20);
+    expect(names).toEqual(['TOKEN']);
+    expect((await b.call('POST', '/vars/TOKEN/reveal')).json).toEqual({ value: 's3cret' });
+
+    expect((await a.call('POST', '/passphrase', { old: PASS, passphrase: 'new passphrase' })).status).toBe(200);
+    let st: { locked?: boolean } = {};
+    for (const deadline = Date.now() + 5000; !st.locked && Date.now() < deadline;) {
+      st = (await b.call('GET', '')).json.status;
+      if (!st.locked) await sleep(20);
+    }
+    expect(st.locked).toBe(true);
+    expect((await b.call('POST', '/vars/TOKEN/reveal')).json.error).toBe('vault_session');
   });
 });

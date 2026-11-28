@@ -57,70 +57,90 @@
 
 ## 截图
 
-**VS Code 就在终端旁边**：将 `files.openLinks` 设为 `vscode` 时，agent 输出里的 `路径:行号` 会在窗格所在机器的 VS Code 里打开；
-窗格标题栏上的按钮可以打开它的文件夹、diff 或 Git Graph。
+点击截图可查看原图。
 
-![固定的 nanoGPT 项目，VS Code 窗格中打开了 train.py](docs/images/vscode.zh-CN.png)
-
-**程序窗口**：远端 Linux 机器上 matplotlib 打开的窗口，会出现在单独的浏览器窗口里，支持鼠标和键盘。
-
-![GPU 服务器上固定的双源干涉图，合成在启动它的终端画面上](docs/images/windows.zh-CN.png)
-
-**快速查看**：不用离开工作区即可预览图片、视频、音频、PDF、代码、Markdown 或目录。
-
-![从文件资源管理器里预览一张训练 loss 曲线](docs/images/quicklook.zh-CN.png)
-
-**智能体对话**：不经终端运行的智能体把 Markdown、公式、工具结果和 diff 流式写入与终端相同的布局，权限请求在卡片中回答。
-
-![训练审查对话，包含 diff 和修改文件的权限请求](docs/images/chat.zh-CN.png)
-
-**文件资源管理器**：跟随当前终端的目录，在编辑器中安全保存，不覆盖机器上同时发生的修改。
-
-![nanoGPT 文件树和编辑器里的 train.py](docs/images/files.zh-CN.png)
-
-**Git**：不用 VS Code 也能使用源代码管理、分支与标签图和 Monaco diff。
-
-![源代码管理面板、固定的提交图和 train.py 的 diff](docs/images/git.zh-CN.png)
-
-**系统监控与任务管理器**：实时机器资源和可搜索的进程树显示在同一个窗格里。
-
-![GPU 服务器的 CPU、内存、两块 GPU、网络、磁盘和训练进程](docs/images/monitor.zh-CN.png)
-
-**设置**：搜索设置，选择外观和主题，配置插件和快捷键。
-
-![外观设置里的配色主题，以及插件和快捷键导航](docs/images/settings.zh-CN.png)
-
-**明确的浏览器安全确认**：在浏览器中启用 VS Code 前，需要确认其扩展和 webview 能访问什么。
-
-![VS Code 浏览器风险确认，已勾选了解风险](docs/images/security.zh-CN.png)
-
-**浏览器与端口转发**：通过回环端口转发打开机器 localhost 上的服务，并查看监听和已转发的端口。
-
-![浏览器窗格里的远端训练仪表盘和端口转发列表](docs/images/browser.zh-CN.png)
-
-**项目搜索**：使用筛选条件搜索，并在编辑器里打开匹配项。
-
-![Python 文件中的 learning_rate 搜索结果和匹配的源码](docs/images/search.zh-CN.png)
-
-**变量库**：加密保存变量并按机器授权，变量值保持隐藏。
-
-![已解锁的变量库，包含三个演示变量，未显示变量值](docs/images/vault.zh-CN.png)
-
-**AI 用量**：比较不同服务商和机器上的订阅窗口、重置时间、余额和按 API 价格折算的费用。
-
-![固定的 Claude、Codex、Kimi Code 和 Grok 用量，以及每日费用图](docs/images/usage.zh-CN.png)
-
-**终端历史**：恢复的工作区保留分屏布局，并在每个新 shell 上方显示保存的输出。
-
-![两个恢复后的终端，以及保存的训练和 GPU 输出](docs/images/terminal-history.zh-CN.png)
-
-**公式**：鼠标停在终端里的 LaTeX 公式上，即可查看排版并复制源码。
-
-![终端里的学习率公式和 KaTeX 弹出预览](docs/images/formula.zh-CN.png)
-
-**桌面应用**：同一套工作区和功能在 Electron 外壳中运行，hub 在应用内运行。
-
-![隔离的桌面应用，显示终端、文件资源管理器和 train.py](docs/images/desktop.zh-CN.png)
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/vscode.zh-CN.png"><img src="docs/images/vscode.zh-CN.png" width="100%" alt="固定的 nanoGPT 项目，VS Code 窗格中打开了 train.py"></a>
+      <br><b>VS Code 就在终端旁边：</b>将 <code>files.openLinks</code> 设为 <code>vscode</code> 时，agent 输出里的 <code>路径:行号</code> 会在窗格所在机器的 VS Code 里打开；窗格标题栏上的按钮可以打开它的文件夹、diff 或 Git Graph。
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/windows.zh-CN.png"><img src="docs/images/windows.zh-CN.png" width="100%" alt="GPU 服务器上固定的双源干涉图，合成在启动它的终端画面上"></a>
+      <br><b>程序窗口：</b>远端 Linux 机器上 matplotlib 打开的窗口，会出现在单独的浏览器窗口里，支持鼠标和键盘。
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/quicklook.zh-CN.png"><img src="docs/images/quicklook.zh-CN.png" width="100%" alt="从文件资源管理器里预览一张训练 loss 曲线"></a>
+      <br><b>快速查看：</b>不用离开工作区即可预览图片、视频、音频、PDF、代码、Markdown 或目录。
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/chat.zh-CN.png"><img src="docs/images/chat.zh-CN.png" width="100%" alt="训练审查对话，包含 diff 和修改文件的权限请求"></a>
+      <br><b>智能体对话：</b>不经终端运行的智能体把 Markdown、公式、工具结果和 diff 流式写入与终端相同的布局，权限请求在卡片中回答。
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/files.zh-CN.png"><img src="docs/images/files.zh-CN.png" width="100%" alt="nanoGPT 文件树和编辑器里的 train.py"></a>
+      <br><b>文件资源管理器：</b>跟随当前终端的目录，在编辑器中安全保存，不覆盖机器上同时发生的修改。
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/git.zh-CN.png"><img src="docs/images/git.zh-CN.png" width="100%" alt="源代码管理面板、固定的提交图和 train.py 的 diff"></a>
+      <br><b>Git：</b>不用 VS Code 也能使用源代码管理、分支与标签图和 Monaco diff。
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/monitor.zh-CN.png"><img src="docs/images/monitor.zh-CN.png" width="100%" alt="GPU 服务器的 CPU、内存、两块 GPU、网络、磁盘和训练进程"></a>
+      <br><b>系统监控与任务管理器：</b>实时机器资源和可搜索的进程树显示在同一个窗格里。
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/settings.zh-CN.png"><img src="docs/images/settings.zh-CN.png" width="100%" alt="外观设置里的配色主题，以及插件和快捷键导航"></a>
+      <br><b>设置：</b>搜索设置，选择外观和主题，配置插件和快捷键。
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/security.zh-CN.png"><img src="docs/images/security.zh-CN.png" width="100%" alt="VS Code 浏览器风险确认，已勾选了解风险"></a>
+      <br><b>明确的浏览器安全确认：</b>在浏览器中启用 VS Code 前，需要确认其扩展和 webview 能访问什么。
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/browser.zh-CN.png"><img src="docs/images/browser.zh-CN.png" width="100%" alt="浏览器窗格里的远端训练仪表盘和端口转发列表"></a>
+      <br><b>浏览器与端口转发：</b>通过回环端口转发打开机器 localhost 上的服务，并查看监听和已转发的端口。
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/search.zh-CN.png"><img src="docs/images/search.zh-CN.png" width="100%" alt="Python 文件中的 learning_rate 搜索结果和匹配的源码"></a>
+      <br><b>项目搜索：</b>使用筛选条件搜索，并在编辑器里打开匹配项。
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/vault.zh-CN.png"><img src="docs/images/vault.zh-CN.png" width="100%" alt="已解锁的变量库，包含三个演示变量，未显示变量值"></a>
+      <br><b>变量库：</b>加密保存变量并按机器授权，变量值保持隐藏。
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/usage.zh-CN.png"><img src="docs/images/usage.zh-CN.png" width="100%" alt="固定的 Claude、Codex、Kimi Code 和 Grok 用量，以及每日费用图"></a>
+      <br><b>AI 用量：</b>比较不同服务商和机器上的订阅窗口、重置时间、余额和按 API 价格折算的费用。
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/terminal-history.zh-CN.png"><img src="docs/images/terminal-history.zh-CN.png" width="100%" alt="两个恢复后的终端，以及保存的训练和 GPU 输出"></a>
+      <br><b>终端历史：</b>恢复的工作区保留分屏布局，并在每个新 shell 上方显示保存的输出。
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/formula.zh-CN.png"><img src="docs/images/formula.zh-CN.png" width="100%" alt="终端里的学习率公式和 KaTeX 弹出预览"></a>
+      <br><b>公式：</b>鼠标停在终端里的 LaTeX 公式上，即可查看排版并复制源码。
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/desktop.zh-CN.png"><img src="docs/images/desktop.zh-CN.png" width="100%" alt="隔离的桌面应用，显示终端、文件资源管理器和 train.py"></a>
+      <br><b>桌面应用：</b>同一套工作区和功能在 Electron 外壳中运行，hub 在应用内运行。
+    </td>
+  </tr>
+</table>
 
 ## 快速开始
 
@@ -142,7 +162,7 @@ cd dist/packages/veldr-$(scripts/platform.sh)
 ./veldr
 ```
 
-也可以解压 `dist/release/` 或 GitHub Releases 中对应平台的压缩包，运行 `./veldr`。
+也可以解压 `dist/release/` 中对应平台的压缩包，运行 `./veldr`；手动下载发布版本见[从 GitHub Releases 下载](#从-github-releases-下载)。
 SSH 机器用侧栏的「添加机器…」添加。
 从 GitHub Releases 下载的 hub 会让每台机器自行下载对应平台的程序。
 自己构建的 hub 只能服务与它平台相同的机器；要服务其他平台的机器，请连同本机平台一起构建（`TARGETS="linux/amd64 linux/arm64 …" make build`），再用 `--agent-dir dist/release` 启动。
@@ -151,9 +171,44 @@ SSH 机器用侧栏的「添加机器…」添加。
 状态栏可以打开命令面板和快捷键列表。
 全部参数见 [docs/reference.md](docs/reference.md)。
 
+## 从 GitHub Releases 下载
+
+[GitHub Releases](https://github.com/davidliyutong/veldr/releases) 上的每个版本都包含 Linux 和 macOS 的命令行程序、macOS、Windows 和 Linux 的桌面应用，以及覆盖所有文件的 `SHA256SUMS`。
+按你的系统选择文件：
+
+| 系统 | 命令行程序（hub 和机器端） | 桌面应用 |
+| --- | --- | --- |
+| macOS，Apple Silicon | `veldr-darwin-arm64.tar.gz` | `veldr-<version>-mac-arm64.dmg` 或 `.zip` |
+| macOS，Intel | `veldr-darwin-amd64.tar.gz` | `veldr-<version>-mac-x64.dmg` 或 `.zip` |
+| Linux x86-64 | `veldr-linux-amd64.tar.gz` | `veldr-<version>-linux-amd64.deb`、`veldr-<version>-linux-x86_64.AppImage` |
+| Linux ARM64 | `veldr-linux-arm64.tar.gz` | `veldr-<version>-linux-arm64.deb`、`veldr-<version>-linux-arm64.AppImage` |
+| 使用 musl 的 Linux（Alpine） | `veldr-linux-amd64-musl.tar.gz`、`veldr-linux-arm64-musl.tar.gz` | – |
+| Windows x64 | –（hub 在桌面应用内运行） | `veldr-<version>-win-x64.exe` |
+
+手动安装命令行程序：下载压缩包和 `SHA256SUMS`，校验压缩包，再运行其中的可执行文件：
+
+```bash
+name=veldr-linux-amd64        # 你的压缩包名，不含 .tar.gz
+base=https://github.com/davidliyutong/veldr/releases/latest/download
+curl -fL -O "$base/$name.tar.gz" -O "$base/SHA256SUMS"
+sha256sum -c --ignore-missing SHA256SUMS    # macOS：shasum -a 256 -c --ignore-missing SHA256SUMS
+tar -xzf "$name.tar.gz"
+"./$name/veldr"
+```
+
+- 要安装指定版本，把 `latest/download` 换成 `download/v0.6.0`（该版本的 tag）。
+  也可以用 GitHub CLI：`gh release download --repo davidliyutong/veldr -p "$name.tar.gz" -p SHA256SUMS`。
+- 想在任意目录下运行，把 `$name/veldr` 复制到 `PATH` 中的目录，例如 `~/.local/bin`；[快速开始](#快速开始)里的安装脚本做的正是这件事。
+- 在 macOS 上，用浏览器下载的压缩包会被加上隔离标记，Gatekeeper 会拒绝运行其中的程序：请像上面一样用 `curl` 下载，或在解压前运行 `xattr -d com.apple.quarantine "$name.tar.gz"`。
+- musl 版本需要 `libstdc++` 和 `libgcc`（Alpine：`apk add libstdc++ libgcc`）。
+- 升级时把新版本安装到旧版本上即可；hub 下次连接各台机器时，它们会换成相同的版本。
+
+桌面应用请从同一个版本中下载对应系统的安装包，再按[桌面应用](#桌面应用)一节操作。
+
 ## 桌面应用
 
 同一套界面也提供 Electron 桌面应用，自带一个 hub（在应用内运行，不监听任何端口，instance 为 `desktop`），支持 macOS、Windows 和 Linux。
+它与不带 `--instance` 运行的 `veldr` 共用设置、快捷键、机器列表和变量库（位于 `~/.veldr/`），并与默认命名空间的所有 hub 共用各机器上的终端和对话。
 可从 GitHub Releases 下载：
 
 | | macOS | Windows | Linux |

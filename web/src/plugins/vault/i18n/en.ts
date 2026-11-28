@@ -232,6 +232,7 @@ export const en = {
   'vault.error.wrong_passphrase': 'Wrong passphrase.',
   'vault.error.weak_passphrase': 'The passphrase needs at least 8 characters.',
   'vault.error.vault_locked': 'The vault is locked.',
+  'vault.error.vault_changed': 'The vault was just changed elsewhere (another window or app using it). Try again.',
   'vault.error.not_found': 'The variable no longer exists.',
   'vault.error.group_not_found': 'The group no longer exists.',
   'vault.error.preset_not_found': 'The preset no longer exists.',

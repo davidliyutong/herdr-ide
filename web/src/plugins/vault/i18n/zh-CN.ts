@@ -225,6 +225,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'vault.error.wrong_passphrase': '主口令错误。',
   'vault.error.weak_passphrase': '主口令至少需要 8 个字符。',
   'vault.error.vault_locked': '变量库已锁定。',
+  'vault.error.vault_changed': '变量库刚在别处（使用它的另一个窗口或应用）被修改，请重试。',
   'vault.error.not_found': '该变量已不存在。',
   'vault.error.group_not_found': '该分组已不存在。',
   'vault.error.preset_not_found': '该预设已不存在。',

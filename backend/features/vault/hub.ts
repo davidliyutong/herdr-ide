@@ -52,6 +52,10 @@ import {
 } from './vault.ts';
 import { verifyAssertion, verifyRegistration } from './webauthn.ts';
 
+/** How often the vault's file is looked at for what the other hubs of the
+ * namespace wrote, in ms. */
+const FILE_CHECK_MS = 2000;
+
 const str = z.string().nullish();
 const proof = z.object({
   nonce: z.string().default(''),
@@ -800,7 +804,11 @@ export function vaultFeature(opts: VaultOptions = {}): VaultFeature {
       ctx.agentStream(Op.Vault, (m, conn, h) => void v.serveAgent(m.id, conn, h));
       ctx.onForget((id) => void v.forgetMachine(id));
       ctx.service('timers', async (signal) => {
+        // The other hubs of the namespace share the vault's file: what they
+        // write reaches this hub and its pages.
+        const reload = setInterval(() => void v.reload(), v.o.fileCheckMs ?? FILE_CHECK_MS);
         await new Promise((r) => (signal.aborted ? r(null) : signal.addEventListener('abort', r, { once: true })));
+        clearInterval(reload);
         await v.stop();
       });
     },

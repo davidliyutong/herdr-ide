@@ -91,6 +91,9 @@ export interface VaultOptions {
   lockCheckMs?: number;
   noisyEveryMs?: number;
   changedEveryMs?: number;
+  /** How often the file is looked at for what other hubs of the namespace
+   * wrote (Vault.reload). */
+  fileCheckMs?: number;
   accessLog?: Partial<AccessLogOptions>;
   keyStep?: () => void | Promise<void>;
   /** Run inside the key's lock between an authenticator's write and its
@@ -193,8 +196,9 @@ export class Vault {
 
   // ---- the store and the settings
 
-  /** The vault's file: the option, or vault[-<instance>].json beside the
-   * settings file; "" when the hub keeps none. */
+  /** The vault's file: the option, or vault.json beside the settings
+   * file, shared with the other hubs of the namespace; "" when the hub
+   * keeps none. */
   path(): string {
     if (this.o.path) return this.o.path;
     const sp = this.ctx.settings.path;
@@ -208,7 +212,7 @@ export class Vault {
     const path = this.path();
     if (!path) throw new Fail('unavailable', 503, 'the vault has no file (the hub keeps no settings)');
     try {
-      this.#store = Store.open(path, this.o.store);
+      this.#store = Store.open(path, { ...this.o.store, lockedElsewhere: () => this.#lockedElsewhere() });
     } catch (e) {
       const oe = e instanceof OpenError ? e : new OpenError('failed', String(e));
       this.ctx.logger(`vault: ${oe.message}`);
@@ -579,6 +583,27 @@ export class Vault {
     await s.lock();
     this.gate.endAll();
     this.#lockCap = undefined;
+  }
+
+  /** Takes the file as another hub of the namespace left it
+   * (Store.reload): the pages load the vault again. */
+  async reload(): Promise<void> {
+    const s = this.#store;
+    if (!s || this.#stopped) return;
+    try {
+      if (await s.reload()) this.changed();
+    } catch (e) {
+      this.ctx.logger(`vault: rereading the file: ${(e as Error).message}`);
+    }
+  }
+
+  /** The store took a file another hub of the namespace wrote with another
+   * passphrase, which locked it: this hub's sessions end as a lock's do. */
+  #lockedElsewhere(): void {
+    this.gate.endAll();
+    this.#lockCap = undefined;
+    this.audit(null, 'vault.locked', { reason: 'passphrase_elsewhere' });
+    this.changed();
   }
 
   // ---- the automatic lock: a use is an unlock, a page's action through

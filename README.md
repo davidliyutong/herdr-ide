@@ -36,69 +36,90 @@ A terminal-first, multi-machine, agent-native web IDE built on the [herdr-core](
 
 ## Screenshots
 
-**VS Code beside the terminals.** Open an agent's `path:line` in VS Code on the machine where the pane runs (when `files.openLinks` is set to `vscode`); the pane header opens its folder, its diff or Git Graph.
+Click a screenshot to see it at full size.
 
-![The fixed nanoGPT project with train.py open in a VS Code pane](docs/images/vscode.png)
-
-**Program windows.** A matplotlib window on a remote Linux machine opens in a browser window of its own, with mouse and keyboard.
-
-![A fixed two-source interference plot from the GPU server, composed over the terminal that started it](docs/images/windows.png)
-
-**Quick Look.** Preview images, video, audio, PDFs, code, Markdown or directories without leaving the workspace.
-
-![A training loss curve previewed from the file explorer](docs/images/quicklook.png)
-
-**Agent chats.** Headless agents stream Markdown, formulas, tool results and diffs into the same layout as the terminals, with permissions answered in cards.
-
-![A training review with a diff and a file-change permission request in an agent chat](docs/images/chat.png)
-
-**File explorer.** Follow the focused terminal's directory and edit code with conflict-safe saves.
-
-![The nanoGPT file tree beside train.py in the editor](docs/images/files.png)
-
-**Git.** Source Control, a branch and tag graph, and Monaco diffs work without VS Code.
-
-![Source Control beside a fixed commit graph and a train.py diff](docs/images/git.png)
-
-**System monitor and task manager.** Live machine resources and a searchable process tree share a pane.
-
-![CPU, memory, two GPUs, network, disk and training processes on the GPU server](docs/images/monitor.png)
-
-**Settings.** Search settings, choose appearance and themes, and configure plugins and keybindings.
-
-![The appearance settings with color themes and the plugin and keyboard navigation](docs/images/settings.png)
-
-**Explicit browser security.** Enabling VS Code in a browser requires acknowledging what its extensions and webviews can access.
-
-![The VS Code browser risk confirmation with its acknowledgement checked](docs/images/security.png)
-
-**Browser and port forwards.** Open a machine's localhost service through a loopback forward and inspect its listening and forwarded ports.
-
-![The remote training dashboard in a browser pane with its port-forward list](docs/images/browser.png)
-
-**Project search.** Search with filters and open a match in the editor.
-
-![learning_rate results in Python files beside the matched source](docs/images/search.png)
-
-**Variable vault.** Keep encrypted variables with per-machine access while their values stay hidden.
-
-![The unlocked variable vault with three demonstration variables and no values shown](docs/images/vault.png)
-
-**AI usage.** Compare subscription windows, resets, balances and API-equivalent spend across providers and machines.
-
-![Fixed Claude, Codex, Kimi Code and Grok usage with daily cost charts](docs/images/usage.png)
-
-**Terminal history.** Restored workspaces keep their split layout and show saved output above each new shell.
-
-![Two restored terminals with their saved training and GPU output](docs/images/terminal-history.png)
-
-**Formulas.** Rest the pointer on a LaTeX formula in a terminal to see it typeset and copy its source.
-
-![A learning-rate formula in a terminal with its KaTeX popover](docs/images/formula.png)
-
-**Desktop app.** The same workspaces and features run in the Electron shell with an in-process hub.
-
-![The isolated desktop app showing a terminal, the file explorer and train.py](docs/images/desktop.png)
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/vscode.png"><img src="docs/images/vscode.png" width="100%" alt="The fixed nanoGPT project with train.py open in a VS Code pane"></a>
+      <br><b>VS Code beside the terminals.</b> Open an agent's <code>path:line</code> in VS Code on the machine where the pane runs (when <code>files.openLinks</code> is <code>vscode</code>); the pane header opens its folder, its diff or Git Graph.
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/windows.png"><img src="docs/images/windows.png" width="100%" alt="A fixed two-source interference plot from the GPU server, composed over the terminal that started it"></a>
+      <br><b>Program windows.</b> A matplotlib window on a remote Linux machine opens in a browser window of its own, with mouse and keyboard.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/quicklook.png"><img src="docs/images/quicklook.png" width="100%" alt="A training loss curve previewed from the file explorer"></a>
+      <br><b>Quick Look.</b> Preview images, video, audio, PDFs, code, Markdown or directories without leaving the workspace.
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/chat.png"><img src="docs/images/chat.png" width="100%" alt="A training review with a diff and a file-change permission request in an agent chat"></a>
+      <br><b>Agent chats.</b> Headless agents stream Markdown, formulas, tool results and diffs into the same layout as the terminals, with permissions answered in cards.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/files.png"><img src="docs/images/files.png" width="100%" alt="The nanoGPT file tree beside train.py in the editor"></a>
+      <br><b>File explorer.</b> Follow the focused terminal's directory and edit code with conflict-safe saves.
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/git.png"><img src="docs/images/git.png" width="100%" alt="Source Control beside a fixed commit graph and a train.py diff"></a>
+      <br><b>Git.</b> Source Control, a branch and tag graph, and Monaco diffs work without VS Code.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/monitor.png"><img src="docs/images/monitor.png" width="100%" alt="CPU, memory, two GPUs, network, disk and training processes on the GPU server"></a>
+      <br><b>System monitor and task manager.</b> Live machine resources and a searchable process tree share a pane.
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/settings.png"><img src="docs/images/settings.png" width="100%" alt="The appearance settings with color themes and the plugin and keyboard navigation"></a>
+      <br><b>Settings.</b> Search settings, choose appearance and themes, and configure plugins and keybindings.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/security.png"><img src="docs/images/security.png" width="100%" alt="The VS Code browser risk confirmation with its acknowledgement checked"></a>
+      <br><b>Explicit browser security.</b> Enabling VS Code in a browser requires acknowledging what its extensions and webviews can access.
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/browser.png"><img src="docs/images/browser.png" width="100%" alt="The remote training dashboard in a browser pane with its port-forward list"></a>
+      <br><b>Browser and port forwards.</b> Open a machine's localhost service through a loopback forward and inspect its listening and forwarded ports.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/search.png"><img src="docs/images/search.png" width="100%" alt="learning_rate results in Python files beside the matched source"></a>
+      <br><b>Project search.</b> Search with filters and open a match in the editor.
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/vault.png"><img src="docs/images/vault.png" width="100%" alt="The unlocked variable vault with three demonstration variables and no values shown"></a>
+      <br><b>Variable vault.</b> Keep encrypted variables with per-machine access while their values stay hidden.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/usage.png"><img src="docs/images/usage.png" width="100%" alt="Fixed Claude, Codex, Kimi Code and Grok usage with daily cost charts"></a>
+      <br><b>AI usage.</b> Compare subscription windows, resets, balances and API-equivalent spend across providers and machines.
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/terminal-history.png"><img src="docs/images/terminal-history.png" width="100%" alt="Two restored terminals with their saved training and GPU output"></a>
+      <br><b>Terminal history.</b> Restored workspaces keep their split layout and show saved output above each new shell.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/formula.png"><img src="docs/images/formula.png" width="100%" alt="A learning-rate formula in a terminal with its KaTeX popover"></a>
+      <br><b>Formulas.</b> Rest the pointer on a LaTeX formula in a terminal to see it typeset and copy its source.
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/desktop.png"><img src="docs/images/desktop.png" width="100%" alt="The isolated desktop app showing a terminal, the file explorer and train.py"></a>
+      <br><b>Desktop app.</b> The same workspaces and features run in the Electron shell with an in-process hub.
+    </td>
+  </tr>
+</table>
 
 ## Quick start
 
@@ -120,13 +141,45 @@ cd dist/packages/veldr-$(scripts/platform.sh)
 ./veldr
 ```
 
-Or extract the matching archive from `dist/release/` (or GitHub Releases) and run `./veldr`. Add SSH machines with **Add Machine…** in the sidebar. A hub from GitHub Releases has each machine download its platform's build. One built here serves machines of its own platform only, unless you build the others too (`TARGETS="linux/amd64 linux/arm64 …" make build`, its own among them) and start it with `--agent-dir dist/release`.
+Or extract the matching archive from `dist/release/` and run `./veldr`; to download a release by hand, see [Download from GitHub Releases](#download-from-github-releases). Add SSH machines with **Add Machine…** in the sidebar. A hub from GitHub Releases has each machine download its platform's build. One built here serves machines of its own platform only, unless you build the others too (`TARGETS="linux/amd64 linux/arm64 …" make build`, its own among them) and start it with `--agent-dir dist/release`.
 
 Open <http://127.0.0.1:7780>. The status bar opens the command palette and the list of shortcuts. All flags are listed in [docs/reference.md](docs/reference.md).
 
+## Download from GitHub Releases
+
+Each release on [GitHub Releases](https://github.com/davidliyutong/veldr/releases) has the command line for Linux and macOS, the desktop app for macOS, Windows and Linux, and a `SHA256SUMS` file covering all of them. Pick the files for your system:
+
+| System | Command line (hub and machine side) | Desktop app |
+| --- | --- | --- |
+| macOS, Apple Silicon | `veldr-darwin-arm64.tar.gz` | `veldr-<version>-mac-arm64.dmg` or `.zip` |
+| macOS, Intel | `veldr-darwin-amd64.tar.gz` | `veldr-<version>-mac-x64.dmg` or `.zip` |
+| Linux x86-64 | `veldr-linux-amd64.tar.gz` | `veldr-<version>-linux-amd64.deb`, `veldr-<version>-linux-x86_64.AppImage` |
+| Linux ARM64 | `veldr-linux-arm64.tar.gz` | `veldr-<version>-linux-arm64.deb`, `veldr-<version>-linux-arm64.AppImage` |
+| Linux with musl (Alpine) | `veldr-linux-amd64-musl.tar.gz`, `veldr-linux-arm64-musl.tar.gz` | – |
+| Windows x64 | – (the hub runs inside the desktop app) | `veldr-<version>-win-x64.exe` |
+
+To install the command line by hand, download the archive and `SHA256SUMS`, check the archive, and run the executable inside it:
+
+```bash
+name=veldr-linux-amd64        # your archive's name without .tar.gz
+base=https://github.com/davidliyutong/veldr/releases/latest/download
+curl -fL -O "$base/$name.tar.gz" -O "$base/SHA256SUMS"
+sha256sum -c --ignore-missing SHA256SUMS    # macOS: shasum -a 256 -c --ignore-missing SHA256SUMS
+tar -xzf "$name.tar.gz"
+"./$name/veldr"
+```
+
+- For a particular release, replace `latest/download` with `download/v0.6.0` (its tag). With the GitHub CLI: `gh release download --repo davidliyutong/veldr -p "$name.tar.gz" -p SHA256SUMS`.
+- To run it from anywhere, copy `$name/veldr` into a directory on your `PATH`, such as `~/.local/bin`; the install script in [Quick start](#quick-start) does exactly that.
+- On macOS, an archive downloaded with a browser is quarantined and Gatekeeper refuses its executable: download it with `curl` as above, or run `xattr -d com.apple.quarantine "$name.tar.gz"` before extracting it.
+- Musl builds need `libstdc++` and `libgcc` (Alpine: `apk add libstdc++ libgcc`).
+- To update, install a newer release over the old one; the machines get the same version when the hub next connects to them.
+
+For the desktop app, download its package for your system from the same release and follow [Desktop app](#desktop-app).
+
 ## Desktop app
 
-The same UI in an Electron app with a hub of its own, which runs inside the app and listens on no port (instance `desktop`), for macOS, Windows and Linux. Download it from GitHub Releases:
+The same UI in an Electron app with a hub of its own, which runs inside the app and listens on no port (instance `desktop`), for macOS, Windows and Linux. It shares its settings, keybindings, machines and variable vault with `veldr` run without `--instance` (in `~/.veldr/`), and the machines' terminals and chats with every hub of the default namespace. Download it from GitHub Releases:
 
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |

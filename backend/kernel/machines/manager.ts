@@ -1,6 +1,7 @@
 // The hub's machines: their order, the changes the UI makes (add, remove,
-// rename, enable, reorder), stored in the machines file, and the states and
-// agent events the pages follow.
+// rename, enable, reorder), stored in the machines file, the changes other
+// hubs of the namespace make to that file (sync), and the states and agent
+// events the pages follow.
 import type { Logger } from '#shared/lib/log.ts';
 import { Fail, unknownMachine } from '../fail.ts';
 import { Machine, type Dialer, type StreamHandler, type Timing } from './machine.ts';
@@ -16,6 +17,9 @@ export interface AgentEvent {
 
 export interface MachinesOptions {
   specs: readonly Spec[];
+  /** The machines this run connects of those stored (with the local
+   * machine and the --ssh ones): what sync follows. */
+  select?: (stored: readonly Spec[]) => Spec[];
   registry: Registry;
   dial: Dialer;
   logger: Logger;
@@ -28,6 +32,8 @@ export interface MachinesOptions {
 export interface MachinesListener {
   state?(st: State): void;
   agent?(ev: AgentEvent): void;
+  /** The list changed by sync; removed are the machines that left it. */
+  list?(removed: readonly string[]): void;
 }
 
 export class Machines {
@@ -161,11 +167,54 @@ export class Machines {
     const m = this.must(id);
     if (m.local) throw new Fail('local', 400, 'the local machine cannot be removed');
     this.o.registry.delete(id);
+    await this.drop(id);
+  }
+
+  /** Takes machine id out of the list and ends its session. */
+  private drop(id: string): Promise<void> {
     this.byId.delete(id);
     this.order = this.order.filter((x) => x !== id);
     const stop = this.stops.get(id);
     this.stops.delete(id);
-    await stop?.();
+    return stop?.() ?? Promise.resolve();
+  }
+
+  /** Follows the machines file after another hub of the namespace changed
+   * it (Registry.watch): starts the machines it gained, ends the sessions
+   * of those it lost (an ssh machine whose target changed is both), takes
+   * the labels, flags and order it has, and tells the listeners when the
+   * list changed. The local machine stays. */
+  sync(): void {
+    if (!this.o.select) return;
+    const want = new Map(this.o.select(this.o.registry.specs()).map((s) => [s.id, s]));
+    const removed: string[] = [];
+    for (const id of [...this.order]) {
+      const m = this.byId.get(id)!;
+      const s = want.get(id);
+      if (m.local || (s && s.kind === m.kind && (s.target ?? '') === m.target)) continue;
+      void this.drop(id);
+      removed.push(id);
+    }
+    let changed = removed.length > 0;
+    for (const s of want.values()) {
+      const m = this.byId.get(s.id);
+      if (m) {
+        if (m.setLabel(s.label)) changed = true;
+        if (m.setEnabled(s.enabled)) changed = true;
+        continue;
+      }
+      const n = this.create(s);
+      this.order.push(s.id);
+      this.byId.set(s.id, n);
+      this.start(n);
+      changed = true;
+    }
+    const order = sortByOrder(this.order, this.o.registry.getOrder());
+    if (order.some((id, i) => id !== this.order[i])) {
+      this.order = order;
+      changed = true;
+    }
+    if (changed) for (const l of this.listeners) l.list?.(removed);
   }
 
   setLabel(id: string, label: string): void {

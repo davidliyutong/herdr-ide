@@ -59,8 +59,8 @@ export const hooks = {
  * or partial one (the vault's file holds the only copy of its values). Its
  * directory is created with 0700; one that exists, is a directory (not a
  * link) and belongs to this user is made 0700 when others may access it.
- * The directory is the product's own configuration directory, which holds
- * nothing for other users. */
+ * The directory is the namespace's data directory (~/.veldr[-<instance>]),
+ * which holds nothing for other users. */
 export function write(path: string, data: string | Uint8Array): Sig {
   const dir = dirname(path);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -107,9 +107,9 @@ function createTemp(dir: string, prefix: string): { fd: number; tmp: string } {
 
 /** Takes group and other access away from dir when it is a directory of
  * this user; a link or another user's directory is left as it is. On
- * Windows it leaves dir as it is: the configuration directory under
- * %AppData% is the user's own by its access control list, and Windows has
- * no group and other mode bits. */
+ * Windows it leaves dir as it is: the data directory in the user's profile
+ * is the user's own by its access control list, and Windows has no group
+ * and other mode bits. */
 function makePrivate(dir: string): void {
   if (process.platform === 'win32') return;
   const st = fs.lstatSync(dir);

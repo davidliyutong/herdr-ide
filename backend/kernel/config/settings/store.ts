@@ -7,11 +7,14 @@
 // also for every machine), the machine's own value for settings whose scope
 // allows one, the file's global value, the default.
 //
-// The file (settings[-<instance>].json) holds global values as top-level
-// "key": value members and a machine's own values under "[machine:<id>]".
-// Keys it does not know and values that do not validate stay in it and are
-// reported as problems; such a value counts as unset. A file that is not
-// JSON keeps the values read before and refuses changes until it is fixed.
+// The file (settings.json in the namespace's data directory, which every
+// hub of the namespace shares: kernel/config/paths.ts) holds global values
+// as top-level "key": value members and a machine's own values under
+// "[machine:<id>]". Keys it does not know and values that do not validate
+// stay in it and are reported as problems; such a value counts as unset. A
+// file that is not JSON keeps the values read before and refuses changes
+// until it is fixed. A change applies to the file as it is then, and
+// watch reads what the other hubs change.
 import type { Node } from 'jsonc-parser';
 import { getNodeValue, parseTree } from 'jsonc-parser';
 import { ConfigFail, detailed, saveFailed } from '../fail.ts';

@@ -8,7 +8,7 @@ A machine's work lives on the machine: terminals in a terminal core ([21](21-ter
 
 Goals: one program in two roles, a **node** (the machine's service, on a local socket) and a **UI** (serves the web UI, a client of nodes); a UI reaches its own machine's node as it reaches another's; several UIs share a node's terminals, workspaces and chats, as tmux clients share a server; upgrades never interrupt panes.
 
-Non-goals: a node on Windows; sharing settings, machines or vault between UIs; a node reachable without ssh.
+Non-goals: a node on Windows; settings, machines or vault on the node or shared between UI hosts; a node reachable without ssh.
 
 ## Design
 
@@ -24,11 +24,11 @@ One executable, the hub's, is also its platform's machine build ([42](42-typescr
 
 ### Several UIs
 
-What concerns the machine runs once, in the node: one code-server (a UI's idle release stops it only while no other client uses it), history captures and AI usage fetches shared between the UIs' schedules, one window manager with one client in control ([14](14-gui-windows.md)). Settings, machines, vault and port forwards stay on each UI's host, and each UI enforces its own read-only mode. A vault request from the machine goes to every attached UI, and the first value one releases answers it ([30](30-variable-vault.md)); a VS Code bridge connection goes to the UI that last opened code-server.
+What concerns the machine runs once, in the node: one code-server (a UI's idle release stops it only while no other client uses it), history captures and AI usage fetches shared between the UIs' schedules, one window manager with one client in control ([14](14-gui-windows.md)). Settings, keybindings, machines, vault and the hub database stay on each UI's host, in the data directory of its namespace there, which the UIs of that namespace on that host share (each rereads what another wrote; [02](02-multi-machine-transport.md#machines), [13](13-settings-and-appearance.md), [30](30-variable-vault.md#hubs-of-a-namespace)); port forwards are each UI's, and each UI enforces its own read-only mode. A vault request from the machine goes to every attached UI, and the first value one releases answers it ([30](30-variable-vault.md)); a VS Code bridge connection goes to the UI that last opened code-server.
 
 ### Namespaces
 
-A node's namespace is the data directory and terminal core session (`~/.veldr`, `veldr-<host id>` by default). A hub's `--instance` also names its namespace on machines unless `--node-instance` says otherwise, keeping `dev` and `e2e-<random>` hubs apart from the user's. The desktop app is instance `desktop` in the default namespace, sharing terminals with a server's hubs; a `desktop` namespace left by earlier desktop builds is not touched, its terminal core running until stopped.
+A node's namespace is the data directory and terminal core session (`~/.veldr`, `veldr-<host id>` by default). A hub's namespace is `--node-instance`, by default its `--instance` (which otherwise names only its ssh control directory and, in the desktop app, its Electron profile), keeping `dev` and `e2e-<random>` hubs apart from the user's. On the hub's own host the namespace's data directory also holds the hub's files (`backend/kernel/config/paths.ts`): settings, keybindings, machines list, vault and hub database, shared by every hub of the namespace there. The desktop app is instance `desktop` in the default namespace, sharing terminals with a server's hubs and, on its host, those files with `veldr` run without `--instance`; a `desktop` namespace left by earlier desktop builds is not touched, its terminal core running until stopped.
 
 ### Upgrades without interruption
 

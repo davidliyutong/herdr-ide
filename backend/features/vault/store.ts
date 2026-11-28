@@ -1,6 +1,8 @@
 // The variable vault's store on the hub host: named values encrypted one
-// by one with AES-256-GCM in vault[-<instance>].json beside the settings
-// file, under a master key derived from the user's passphrase with
+// by one with AES-256-GCM in vault.json beside the settings file, which
+// every hub of the namespace shares (each operation takes the file as it
+// is then, and one written meanwhile is not written over), under a master
+// key derived from the user's passphrase with
 // Argon2id and kept, while the vault is unlocked, as a CryptoKey that
 // cannot be exported (crypto.ts); a lock forgets it. Names, descriptions
 // and the machines allowed to read a variable are in the clear; each
@@ -116,6 +118,7 @@ const err = {
   proof: (why = '') => new VaultError('vault_proof', "the authenticator's unlock did not open or verify", { why }),
   stale: (why = '') => new VaultError('unlock_stale', 'the unlock entry or its authenticator is gone', { why }),
   due: () => new VaultError('passphrase_due', 'the passphrase is due: unlock with it'),
+  changed: () => new VaultError('vault_changed', 'the vault was changed elsewhere meanwhile: try again'),
 };
 
 export const validName = (n: unknown): n is string => typeof n === 'string' && n.length <= MAX_NAME && /^[A-Za-z_][A-Za-z0-9_]*$/.test(n);
@@ -456,6 +459,9 @@ export interface StoreOptions {
   now?: () => Date;
   /** Test hook run right before acquiring the store mutex for an operation. */
   beforeLock?: (op: string) => void | Promise<void>;
+  /** Called, with the store's lock held, when the file someone else wrote
+   * has another passphrase: the key went, the vault is locked here. */
+  lockedElsewhere?: () => void;
 }
 
 /** Lock-held verification helpers exposed to authorize callbacks running
@@ -484,34 +490,56 @@ export class Store {
   kdf: { time: number; memory: number; threads: number };
   now: () => Date;
   #beforeLock?: (op: string) => void | Promise<void>;
+  #lockedElsewhere?: () => void;
   #f: FileState;
+  /** The version of the file #f was read from or written as. */
+  #sig: userfile.Sig;
   #key: Key | null = null;
   readonly #mu = new Mutex();
 
-  private constructor(path: string, f: FileState, o: StoreOptions) {
+  private constructor(path: string, f: FileState, sig: userfile.Sig, o: StoreOptions) {
     this.path = path;
     this.#f = f;
+    this.#sig = sig;
     this.kdf = o.kdf ?? DEFAULT_KDF;
     this.now = o.now ?? (() => new Date());
     this.#beforeLock = o.beforeLock;
+    this.#lockedElsewhere = o.lockedElsewhere;
   }
 
   /** Reads the vault at path (none yet: an empty vault without a
    * passphrase). It is locked until an unlock. */
   static open(path: string, o: StoreOptions = {}): Store {
+    const { f, sig } = Store.#read(path);
+    return new Store(path, f, sig, o);
+  }
+
+  /** The vault's file at path as it is now; OpenError when it does not
+   * open. */
+  static #read(path: string): { f: FileState; sig: userfile.Sig } {
     let data: Buffer | null;
+    let sig: userfile.Sig;
     try {
-      data = userfile.read(path).data;
+      ({ data, sig } = userfile.read(path));
     } catch (e) {
       throw new OpenError('failed', `${path}: ${(e as Error).message}`);
     }
     const invalid = (why: string) => new OpenError('invalid', `${path}: invalid: ${why}`);
     if (!data)
-      return new Store(
-        path,
-        { version: FILE_VERSION, mode: '', entries: [], groups: [], presets: [], workspaceLinks: [], forgotten: [], unlock: [], rest: {} },
-        o,
-      );
+      return {
+        f: {
+          version: FILE_VERSION,
+          mode: '',
+          entries: [],
+          groups: [],
+          presets: [],
+          workspaceLinks: [],
+          forgotten: [],
+          unlock: [],
+          rest: {},
+        },
+        sig,
+      };
     let raw: unknown;
     try {
       raw = JSON.parse(data.toString('utf8'));
@@ -582,7 +610,49 @@ export class Store {
       f.version = FILE_VERSION;
     }
     f.unlock = keptEntries(p.unlock, f.check, MAX_AUTHENTICATORS);
-    return new Store(path, f, o);
+    return { f, sig };
+  }
+
+  /** Runs fn with the store's lock held, on the file as it is now
+   * (#fresh). */
+  #run<T>(fn: () => Promise<T> | T): Promise<T> {
+    return this.#mu.run(() => {
+      this.#fresh();
+      return fn();
+    });
+  }
+
+  /** Takes the file as it is now when someone else wrote it since this
+   * store last read or wrote it (another hub of the namespace shares it);
+   * true when it did. The key stays only while the file's passphrase is
+   * the one it came from (the same mode, derivation and check): a
+   * passphrase changed elsewhere locks the vault here (lockedElsewhere).
+   * A file that does
+   * not open keeps the state read before, and #commit refuses to write
+   * over it. */
+  #fresh(): boolean {
+    if (userfile.sameSig(userfile.stat(this.path), this.#sig)) return false;
+    let next: { f: FileState; sig: userfile.Sig };
+    try {
+      next = Store.#read(this.path);
+    } catch {
+      return false;
+    }
+    const prev = this.#f;
+    this.#f = next.f;
+    this.#sig = next.sig;
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    if (this.#key && (next.f.mode !== prev.mode || !same(next.f.kdf, prev.kdf) || !same(next.f.check, prev.check))) {
+      this.#key = null;
+      this.#lockedElsewhere?.();
+    }
+    return true;
+  }
+
+  /** Takes the file as someone else left it (#fresh), with the store's
+   * lock held; true when it changed. */
+  reload(): Promise<boolean> {
+    return this.#mu.run(() => this.#fresh());
   }
 
   status(): Status {
@@ -619,7 +689,7 @@ export class Store {
    * verification runs atomically inside #mu before decryption. */
   async value(name: string, authorize?: (v: StoreVerifier) => Promise<void>): Promise<string> {
     if (authorize) await this.#beforeLock?.('value');
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       if (authorize && this.#key && (await this.#strictWith(this.#key))) {
         await authorize(this.#verifier(this.#key));
       }
@@ -648,7 +718,7 @@ export class Store {
     if (u.machines && !validMachines(u.machines)) throw err.invalid('machines');
     if (u.group !== undefined && u.group !== '' && !validEntityId(u.group)) throw err.invalid('group');
     await this.#beforeLock?.('set');
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       let e = this.#find(name);
       if (!e && to !== name) throw err.notFound();
       if (!e && u.value === undefined) throw new VaultError('value_required', 'a new variable needs a value');
@@ -698,7 +768,7 @@ export class Store {
   /** Lets machine m read name without asking. */
   async allow(name: string, m: string): Promise<void> {
     if (!validMachineID(m)) throw err.invalid('machine');
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       let e = this.#find(name);
       if (!e) throw err.notFound();
       if (allows(info(e, this.#f.forgotten), m)) return;
@@ -723,7 +793,7 @@ export class Store {
    * the names it left. Without the key it is forgotten: no list lets it
    * read, and it leaves them at the next unlock or change. */
   forgetMachine(m: string): Promise<string[]> {
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       if (m === '' || m === ALL_MACHINES) return [];
       const names = this.#f.entries.filter((e) => e.machines.includes(m)).map((e) => e.name);
       const linked = this.#f.workspaceLinks.some((l) => l.machine === m);
@@ -778,7 +848,7 @@ export class Store {
    * a corrupt entry), while grouped variables require the key and a verified
    * policy so deleting one never desyncs or blesses #policy. */
   delete(name: string): Promise<void> {
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const cur = this.#find(name);
       if (!cur) throw err.notFound();
       const entries = this.#f.entries.filter((e) => e.name !== name);
@@ -819,7 +889,7 @@ export class Store {
     const description = input.description?.trim() ?? '';
     if (!validLabel(name)) throw err.invalid('group name');
     if (Buffer.byteLength(description) > MAX_DESCRIPTION) throw err.invalid(`description longer than ${MAX_DESCRIPTION} bytes`);
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       if (this.#f.groups.length >= MAX_GROUPS) throw err.tooManyGroups();
       if (this.#f.groups.some((g) => g.name.toLowerCase() === name.toLowerCase())) throw err.groupExists();
@@ -845,7 +915,7 @@ export class Store {
     if (name !== undefined && !validLabel(name)) throw err.invalid('group name');
     if (description !== undefined && Buffer.byteLength(description) > MAX_DESCRIPTION)
       throw err.invalid(`description longer than ${MAX_DESCRIPTION} bytes`);
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       const cur = this.#findGroup(id);
       if (!cur) throw err.groupNotFound();
@@ -867,7 +937,7 @@ export class Store {
   /** Deletes a group: its variables fall back to ungrouped, and presets drop it. */
   async deleteGroup(id: string): Promise<void> {
     if (!validEntityId(id)) throw err.groupNotFound();
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       if (!this.#findGroup(id)) throw err.groupNotFound();
       await this.#verifyPolicy(k);
@@ -893,7 +963,7 @@ export class Store {
     if (!uniq.length || uniq.length > MAX_ENTRIES || !uniq.every(validName)) throw err.invalid('names');
     if (groupId !== '' && !validEntityId(groupId)) throw err.invalid('group');
     await this.#beforeLock?.('assignGroup');
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       if (groupId !== '' && !this.#findGroup(groupId)) throw err.groupNotFound();
       for (const n of uniq) if (!this.#find(n)) throw err.notFound(n);
@@ -942,7 +1012,7 @@ export class Store {
     if (Buffer.byteLength(description) > MAX_DESCRIPTION) throw err.invalid(`description longer than ${MAX_DESCRIPTION} bytes`);
     if (variables.length > MAX_ENTRIES || !variables.every(validName)) throw err.invalid('variables');
     if (groups.length > MAX_GROUPS || !groups.every(validEntityId)) throw err.invalid('groups');
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       if (this.#f.presets.length >= MAX_PRESETS) throw err.tooManyPresets();
       if (this.#f.presets.some((p) => p.name.toLowerCase() === name.toLowerCase())) throw err.presetExists();
@@ -979,7 +1049,7 @@ export class Store {
     if (variables !== undefined && (variables.length > MAX_ENTRIES || !variables.every(validName))) throw err.invalid('variables');
     if (groups !== undefined && (groups.length > MAX_GROUPS || !groups.every(validEntityId))) throw err.invalid('groups');
     await this.#beforeLock?.('updatePreset');
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       const cur = this.#findPreset(id);
       if (!cur) throw err.presetNotFound();
@@ -1011,7 +1081,7 @@ export class Store {
   /** Deletes a preset and unlinks it from all workspaces. */
   async deletePreset(id: string): Promise<void> {
     if (!validEntityId(id)) throw err.presetNotFound();
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       if (!this.#findPreset(id)) throw err.presetNotFound();
       await this.#verifyPolicy(k);
@@ -1083,7 +1153,7 @@ export class Store {
     const presets = dedupe(presetIds);
     if (presets.length > MAX_PRESETS_PER_WORKSPACE || !presets.every(validEntityId)) throw err.invalid('presets');
     await this.#beforeLock?.('setWorkspacePresets');
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       for (const pid of presets) if (!this.#findPreset(pid)) throw err.presetNotFound();
       await this.#verifyPolicy(k);
@@ -1109,7 +1179,7 @@ export class Store {
    * presets are linked but the vault is locked. Missing variables are
    * reported without failing resolution of the remaining variables. */
   resolveWorkspaceEnv(machine: string, workspace: string): Promise<ResolvedWorkspaceEnv> {
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const empty: ResolvedWorkspaceEnv = { presets: [], env: {}, names: [], missing: [], locked: false };
       if (!machine || !workspace || this.#f.forgotten.includes(machine)) return empty;
       if (!this.#key) {
@@ -1191,7 +1261,7 @@ export class Store {
    * #mu so strict-mode toggles or locks cannot interleave with verification. */
   async authorizeAllow<T>(fn: (v: StoreVerifier) => Promise<T>): Promise<T> {
     await this.#beforeLock?.('authorizeAllow');
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       if (!this.#key) {
         const closed = () => Promise.reject(this.#f.mode === '' ? err.noPassphrase() : err.locked());
         return fn({
@@ -1208,7 +1278,7 @@ export class Store {
 
   /** What guards the vault; vault_locked while it is locked. */
   guard(): Promise<Guard> {
-    return this.#mu.run(() => this.#guardWith(this.#need()));
+    return this.#run(() => this.#guardWith(this.#need()));
   }
 
   /** The user's change of the guard: fn changes it (its error leaves it as
@@ -1216,7 +1286,7 @@ export class Store {
    * fn removed. Exemptions of forgotten machines go first. */
   async updateGuard(fn: (g: Guard) => void, authorize?: (v: StoreVerifier, strict: boolean) => Promise<void>): Promise<void> {
     if (authorize) await this.#beforeLock?.('updateGuard');
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       if (authorize) await authorize(this.#verifier(k), await this.#strictWith(k));
       await this.#guardWith(k);
@@ -1236,7 +1306,7 @@ export class Store {
 
   /** Notes authenticator id's proof at at, with the counter it signed. */
   recordProof(id: string, at: Date, count?: number): Promise<void> {
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       await this.#recordProof(k, await this.#guardWith(k), id, at, count);
     });
@@ -1254,7 +1324,7 @@ export class Store {
    * names them, the machine was not forgotten, the vault is unlocked. */
   async exempt(m: string, app: string): Promise<boolean> {
     if (!m || !app) return false;
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       if (!this.#key || this.#f.forgotten.includes(m)) return false;
       const g = await this.#guardWith(this.#key).catch(() => null);
       return !!g?.exempt?.some((x) => x.machine === m && x.app === app);
@@ -1263,7 +1333,7 @@ export class Store {
 
   /** Forgets the key until an unlock. */
   lock(): Promise<void> {
-    return this.#mu.run(() => {
+    return this.#run(() => {
       this.#key = null;
     });
   }
@@ -1271,7 +1341,7 @@ export class Store {
   /** Takes the key of the passphrase (an unlocked vault only checks it),
    * and starts the window w of unlocks without it. */
   unlock(passphrase: string, w: Window): Promise<void> {
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = await this.#checked(passphrase);
       this.#key ??= k;
       await this.#passphraseChecked(this.#key, w);
@@ -1282,7 +1352,7 @@ export class Store {
   /** Checks a passphrase; with w, of an unlocked vault, it also starts the
    * window w. */
   verify(passphrase: string, w?: Window): Promise<void> {
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       await this.#checked(passphrase);
       if (w && this.#key) await this.#passphraseChecked(this.#key, w);
     });
@@ -1306,7 +1376,7 @@ export class Store {
    * it and starts the window w. */
   async setPassphrase(passphrase: string, w: Window): Promise<void> {
     if (runes(passphrase) < 8) throw err.weak();
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       if (this.#f.mode !== '') throw new VaultError('has_passphrase', 'the vault has a passphrase; change it with the current one');
       await this.#rekey(null, passphrase, w);
     });
@@ -1316,7 +1386,7 @@ export class Store {
    * is sealed again under the new key, which then unlocks the vault. */
   async changePassphrase(old: string, passphrase: string, w: Window): Promise<void> {
     if (runes(passphrase) < 8) throw err.weak();
-    return this.#mu.run(async () => this.#rekey(await this.#checked(old), passphrase, w));
+    return this.#run(async () => this.#rekey(await this.#checked(old), passphrase, w));
   }
 
   /** Seals every value, the check and the window under the key of
@@ -1420,7 +1490,7 @@ export class Store {
 
   /** Ends the window: the next unlock needs the passphrase. No key needed. */
   forgetPassphrase(): Promise<void> {
-    return this.#mu.run(() => {
+    return this.#run(() => {
       if (!this.#f.passphraseAt && !this.#f.passphraseHint) return;
       this.#commit({ passphraseAt: undefined, passphraseHint: undefined });
     });
@@ -1507,7 +1577,7 @@ export class Store {
   async #addUnlock(e: Omit<UnlockEntry, 'id' | 'created' | 'check' | 'wrapped'>, kekRaw: Buffer, passphrase: string): Promise<UnlockEntry> {
     try {
       if (!validText(e.authenticator, MAX_AUTH_ID)) throw new VaultError('invalid', 'invalid: authenticator');
-      return await this.#mu.run(async () => {
+      return await this.#run(async () => {
         const k = this.#need();
         const entry: UnlockEntry = {
           id: randomBytes(16).toString('base64url'),
@@ -1533,7 +1603,7 @@ export class Store {
 
   /** Removes an unlock entry; no key needed. */
   removeUnlock(id: string): Promise<void> {
-    return this.#mu.run(() => {
+    return this.#run(() => {
       if (!VALID_UNLOCK_ID.test(id) || !this.#f.unlock.some((e) => e.id === id)) throw new VaultError('not_found', 'no such unlock entry');
       this.#commit({ unlock: this.#f.unlock.filter((e) => e.id !== id) });
     });
@@ -1549,7 +1619,7 @@ export class Store {
    * It returns the window sealed with the passphrase. */
   async unlockWith(id: string, kekRaw: Buffer, days: number, verify?: (a: Authenticator) => Promise<number | undefined>): Promise<Window> {
     try {
-      return await this.#mu.run(async () => {
+      return await this.#run(async () => {
         if (this.#f.mode !== MODE_PASSPHRASE) throw err.noPassphrase();
         const e = this.#f.unlock.find((x) => x.id === id);
         if (!VALID_UNLOCK_ID.test(id) || !e) throw err.stale();
@@ -1587,7 +1657,7 @@ export class Store {
    * those forgotten; a name not there or a value that does not open fails
    * it all. */
   exportVariables(names: readonly string[]): Promise<ExportVariable[]> {
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       const out: ExportVariable[] = [];
       for (const n of names) {
@@ -1622,7 +1692,7 @@ export class Store {
       if (seen.has(im.name)) throw err.exists(im.name);
       seen.add(im.name);
     }
-    return this.#mu.run(async () => {
+    return this.#run(async () => {
       const k = this.#need();
       await this.#verifyPolicy(k);
       await this.#applyForgotten(k);
@@ -1660,8 +1730,11 @@ export class Store {
   }
 
   /** Applies a change of the file's state and writes it; a write that
-   * fails leaves the state as it was and throws. */
+   * fails leaves the state as it was and throws. A file someone else wrote
+   * since the operation took it (#run) is not written over: vault_changed,
+   * and the next operation takes it. */
   #commit(change: Partial<FileState>): void {
+    if (!userfile.sameSig(userfile.stat(this.path), this.#sig)) throw err.changed();
     const prev = this.#f;
     this.#f = { ...prev, ...change };
     try {
@@ -1689,7 +1762,7 @@ export class Store {
     if (f.passphraseAt) out.passphraseAt = f.passphraseAt;
     if (f.passphraseHint) out.passphraseHint = f.passphraseHint;
     const sorted = Object.fromEntries(Object.entries(out).sort(([a], [b]) => (a < b ? -1 : 1)));
-    userfile.write(this.path, JSON.stringify(sorted, null, 2) + '\n');
+    this.#sig = userfile.write(this.path, JSON.stringify(sorted, null, 2) + '\n');
   }
 }
 

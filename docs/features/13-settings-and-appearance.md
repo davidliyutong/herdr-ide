@@ -26,10 +26,10 @@ Non-goals: per-user settings on a shared hub (the hub has no users); settings pe
 
 ### File and precedence
 
-- `settings[-<instance>].json` lies beside `keybindings[-<instance>].json` on the hub host ([reference](../reference.md#files-and-directories)): global values at the top level, a machine's own under `"[machine:<id>]"`.
+- `settings.json` lies beside `keybindings.json` in the data directory of the hub's namespace on the hub host, `~/.veldr[-<node instance>]` (`backend/kernel/config/paths.ts`, [reference](../reference.md#files-and-directories)): global values at the top level, a machine's own under `"[machine:<id>]"`. Every hub of the namespace there shares both files, so the desktop app and `veldr` without `--instance` show the same settings and keys.
 - The file is JSONC; a change edits only its value, keeping the user's comments and layout (`backend/kernel/config/jsonc.ts`), and is written atomically, mode 0600.
 - Unknown keys and invalid values are kept on rewrite (another version may know them) and reported as problems. While the file is not JSON, the values read before stay and changes are refused, so an edit in progress is never overwritten.
-- The hub polls the file for hand edits; an API change first reads a pending hand edit so it is not lost.
+- The hub polls the file every 2 s for hand edits and other hubs' changes, which reach its clients (and, for the chat host's settings, the machines' chat hosts) as its own do; an API change first reads what changed meanwhile so it is not lost.
 - Precedence: command-line flag → the machine's own value → the global value → the default. A flag locks its setting in the UI (`locked`).
 
 ### API

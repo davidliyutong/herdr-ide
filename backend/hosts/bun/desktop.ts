@@ -37,7 +37,6 @@ async function startDesktopHub(s: HubStart, logger: Logger): Promise<Composed> {
     chatSdk: { seedDirs: s.seedDirs ?? [] },
   });
   return composeHub({
-    instance: s.instance,
     nodeInstance: s.nodeInstance,
     features,
     payloads,

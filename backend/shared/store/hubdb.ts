@@ -1,6 +1,8 @@
-// The hub's database: hub[-<instance>]-<host>.db beside the instance's
-// settings file, which the features that keep state there share (usage,
-// the vault's access log), named for this host (hostFile). Releases before
+// The hub's database: hub-<host>.db beside the settings file in the
+// namespace's data directory (kernel/config/paths.ts), which the features
+// that keep state there share (usage, the vault's access log) and every hub
+// of the namespace on this host opens, named for this host (hostFile), as
+// a home shared by several hosts holds one for each. Releases before
 // the rename of the core to the hub named it core[-<instance>]-<host>.db;
 // its records are not carried over: when the hub starts it removes this
 // host's old database of its instance, and the old databases other hosts
@@ -16,9 +18,8 @@ export const HUB_DB = 'hub';
 /** The stem releases before the rename gave the hub's database. */
 export const OLD_HUB_DB = 'core';
 
-/** The name of the hub's database of the instance whose file of kind
- * (settings[-<instance>].json, vault[-<instance>].json) is file, before
- * hostFile: hub[-<instance>].db; stem gives another stem. */
+/** The name of the hub's database beside the file of kind (settings.json,
+ * vault.json), before hostFile: hub.db; stem gives another stem. */
 export function hubDBName(file: string, kind: string, stem = HUB_DB): string {
   const name = basename(file).replace(kind, stem);
   return name.slice(0, name.length - extname(name).length) + '.db';
