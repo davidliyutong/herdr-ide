@@ -95,7 +95,7 @@ export async function serveSocket(
   name: string,
   path: string,
   accept: (c: Socket) => void,
-  o: { signal: AbortSignal; logger: Logger; everyMs?: number },
+  o: { signal: AbortSignal; logger: Logger; everyMs?: number; listening?: () => void },
 ): Promise<void> {
   const every = o.everyMs ?? SOCKET_WATCH_MS;
   let failed = false;
@@ -109,6 +109,7 @@ export async function serveSocket(
       failed = true;
     }
     if (served) {
+      o.listening?.();
       let lost = false;
       while (!o.signal.aborted) {
         await sleep(every, o.signal);

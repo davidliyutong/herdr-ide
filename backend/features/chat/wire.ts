@@ -72,9 +72,12 @@ export const COMMAND_OPS: ReadonlySet<string> = new Set([
   chat.CommandOp.Answer,
   chat.CommandOp.SetConfig,
   chat.CommandOp.CancelQueued,
+  chat.CommandOp.SteerQueued,
   chat.CommandOp.Compact,
   chat.CommandOp.Rename,
   chat.CommandOp.Handoff,
+  chat.CommandOp.StopTask,
+  chat.CommandOp.Rewind,
 ]);
 
 // Members a Go decoder takes: absent or null is the zero value.
@@ -107,7 +110,12 @@ const command = z.object({
   config: str,
   value: str,
   message: str,
+  delivery: str,
   title: str,
+  task: str,
+  seq: uint,
+  restoreFiles: flag,
+  instructions: str,
 });
 export type PageCommand = z.output<typeof command>;
 
@@ -142,12 +150,17 @@ export function commandLine(c: PageCommand, id: string): string {
     ...(c.clientId ? { clientId: c.clientId } : {}),
     ...(c.request ? { request: c.request } : {}),
     ...(c.option ? { option: c.option } : {}),
-    ...(c.answers && Object.keys(c.answers).length ? { answers: c.answers } : {}),
+    ...(c.answers != null && (c.op === chat.CommandOp.Answer || Object.keys(c.answers).length > 0) ? { answers: c.answers } : {}),
     ...(c.cancelled ? { cancelled: true } : {}),
     ...(c.config ? { config: c.config } : {}),
     ...(c.value ? { value: c.value } : {}),
     ...(c.message ? { message: c.message } : {}),
+    ...(c.delivery ? { delivery: c.delivery } : {}),
     ...(c.title ? { title: c.title } : {}),
+    ...(c.task ? { task: c.task } : {}),
+    ...(c.seq ? { seq: c.seq } : {}),
+    ...(c.restoreFiles ? { restoreFiles: true } : {}),
+    ...(c.instructions ? { instructions: c.instructions } : {}),
   });
 }
 

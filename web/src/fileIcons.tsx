@@ -185,6 +185,7 @@ const NAMES: Record<string, Entry> = {
   'workspace.bazel': K.build,
   'module.bazel': K.build,
   'meson.build': K.build,
+  dockerfile: K.docker,
   containerfile: K.docker,
   '.dockerignore': K.docker,
   '.gitignore': K.git,
@@ -194,6 +195,8 @@ const NAMES: Record<string, Entry> = {
   '.git-blame-ignore-revs': K.git,
   '.mailmap': K.git,
   '.editorconfig': K.config,
+  '.prettierignore': K.config,
+  '.eslintignore': K.config,
   '.npmrc': K.npm,
   '.yarnrc': K.npm,
   '.yarnrc.yml': K.npm,
@@ -227,33 +230,90 @@ const NAMES: Record<string, Entry> = {
   'jsconfig.json': ['jsconfig', FileCog, 'yellow'],
 };
 
-/** Names by their start (lower case): README.md, LICENSE-MIT, .env.local,
- * docker-compose.dev.yml, tsconfig.node.json, vite.config.ts. */
-const PREFIXES: ReadonlyArray<readonly [RegExp, Entry]> = [
-  [/^readme([._-]|$)/, K.readme],
-  [/^(license|licence|copying|unlicense)([.-]|$)/, K.license],
-  [/^(changelog|changes|history)(\.|$)/, K.changelog],
-  [/^(contributing|code_of_conduct)(\.|$)/, ['contributing', FileUser, 'blue']],
-  [/^security(\.|$)/, K.security],
-  [/^\.env(\.|$)/, K.env],
-  [/^(dockerfile|containerfile)([.-]|$)/, K.docker],
-  [/^(docker-)?compose([.-].*)?\.ya?ml$/, K.docker],
-  [/^makefile\./, K.make],
-  [/^requirements.*\.(txt|in)$/, K.pythonPackage],
-  [/^tsconfig\..*json$/, ['tsconfig', FileCog, 'blue']],
-  [/^vite\.config\./, ['vite', FileCog, 'purple']],
-  [/^vitest\.(config|workspace)\./, ['vitest', FileCog, 'green']],
-  [/^webpack\.config\./, ['webpack', FileCog, 'sky']],
-  [/^rollup\.config\./, ['rollup', FileCog, 'red']],
-  [/^(eslint\.config\.|\.eslintrc)/, ['eslint', FileCog, 'purple']],
-  [/^(prettier\.config\.|\.prettierrc)/, ['prettier', FileCog, 'pink']],
-  [/^\.prettierignore$|^\.eslintignore$/, K.config],
-  [/^(babel\.config\.|\.babelrc)/, ['babel', FileCog, 'yellow']],
-  [/^jest\.config\./, ['jest', FileCog, 'red']],
-  [/^playwright\.config\./, ['playwright', FileCog, 'green']],
-  [/^tailwind\.config\./, ['tailwind', FileCog, 'sky']],
-  [/^postcss\.config\./, ['postcss', FileCog, 'orange']],
-  [/^(next|nuxt|svelte|astro|remix)\.config\./, ['framework', FileCog, 'teal']],
+/** Extensions treated as documentation / plain prose when matching special
+ * document prefixes (README, LICENSE, CHANGELOG, HISTORY, SECURITY, ...). */
+const DOC_EXTS = new Set(['md', 'markdown', 'mdx', 'txt', 'rst', 'adoc', 'asciidoc', 'org', 'pdf', 'rtf', 'doc', 'docx']);
+
+/** Final extension after the last dot (past any leading dot run), else ''. */
+function lastExtension(n: string): string {
+  let start = 0;
+  while (start < n.length && n[start] === '.') start++;
+  const dot = n.lastIndexOf('.');
+  return dot > start && dot < n.length - 1 ? n.slice(dot + 1) : '';
+}
+
+const isPlainOrDoc = (n: string): boolean => {
+  const ext = lastExtension(n);
+  return !ext || DOC_EXTS.has(ext);
+};
+
+const isPlainOrDocOrUnknown = (n: string): boolean => {
+  const ext = lastExtension(n);
+  return !ext || DOC_EXTS.has(ext) || !EXT_MAP.has(ext);
+};
+
+const isDockerVariant = (n: string): boolean => {
+  const ext = lastExtension(n);
+  return !ext || ext === 'dockerfile' || ext === 'containerfile' || !EXT_MAP.has(ext);
+};
+
+const isMakeVariant = (n: string): boolean => {
+  const ext = lastExtension(n);
+  return !ext || ext === 'mk' || ext === 'mak' || !EXT_MAP.has(ext);
+};
+
+const isEnvVariant = (n: string): boolean => {
+  if (/\.(?:d\.[mc]?ts|(?:test|spec)\.[mc]?[jt]sx?)$/.test(n)) return false;
+  const ext = lastExtension(n);
+  return !ext || ext === 'env' || !EXT_MAP.has(ext);
+};
+
+const JS_TS_EXT = '(?:[mc]?[jt]s)';
+const DATA_OR_JS_EXT = '(?:[mc]?[jt]s|jsonc?|ya?ml|toml)';
+const RC_EXT = '(?:jsonc?|ya?ml|[mc]?js|toml)';
+
+const VITE_CFG = new RegExp(`^vite\\.config\\.${JS_TS_EXT}$`);
+const VITEST_CFG = new RegExp(`^vitest\\.(?:config|workspace)\\.${JS_TS_EXT}$`);
+const WEBPACK_CFG = new RegExp(`^webpack\\.config\\.${JS_TS_EXT}$`);
+const ROLLUP_CFG = new RegExp(`^rollup\\.config\\.${JS_TS_EXT}$`);
+const ESLINT_CFG = new RegExp(`^(?:eslint\\.config\\.${JS_TS_EXT}|\\.eslintrc(?:\\.${RC_EXT})?)$`);
+const PRETTIER_CFG = new RegExp(`^(?:prettier\\.config\\.${DATA_OR_JS_EXT}|\\.prettierrc(?:\\.${RC_EXT})?)$`);
+const BABEL_CFG = new RegExp(`^(?:babel\\.config\\.${DATA_OR_JS_EXT}|\\.babelrc(?:\\.${RC_EXT})?)$`);
+const JEST_CFG = new RegExp(`^jest\\.config\\.${DATA_OR_JS_EXT}$`);
+const PLAYWRIGHT_CFG = new RegExp(`^playwright(?:\\.[^.]+)?\\.config\\.${JS_TS_EXT}$`);
+const TAILWIND_CFG = new RegExp(`^tailwind\\.config\\.${JS_TS_EXT}$`);
+const POSTCSS_CFG = new RegExp(`^postcss\\.config\\.${DATA_OR_JS_EXT}$`);
+const FRAMEWORK_CFG = new RegExp(`^(?:next|nuxt|svelte|astro|remix)\\.config\\.${JS_TS_EXT}$`);
+
+/** Names matched by prefix/pattern (lower case), scoped so source code and
+ * test files (e.g. History.tsx, security.ts, dockerfile.sh, vite.config.test.ts)
+ * fall through to their real extension icons. */
+const PREFIXES: ReadonlyArray<readonly [(n: string) => boolean, Entry]> = [
+  [(n) => /^readme(?:[._-]|$)/.test(n) && isPlainOrDocOrUnknown(n), K.readme],
+  [(n) => /^(?:license|licence|copying|unlicense)(?:[._-]|$)/.test(n) && isPlainOrDocOrUnknown(n), K.license],
+  [(n) => /^(?:changelog|changes|history)(?:[._-]|$)/.test(n) && isPlainOrDoc(n), K.changelog],
+  [(n) => /^(?:contributing|code[_-]of[_-]conduct)(?:[._-]|$)/.test(n) && isPlainOrDoc(n), ['contributing', FileUser, 'blue']],
+  [(n) => /^security(?:[._-]|$)/.test(n) && isPlainOrDoc(n), K.security],
+  [(n) => /^(?:authors|contributors|maintainers)(?:[._-]|$)/.test(n) && isPlainOrDoc(n), K.people],
+  [(n) => /^\.env(?:\.|$)/.test(n) && isEnvVariant(n), K.env],
+  [(n) => /^(?:dockerfile|containerfile)(?:[._-]|$)/.test(n) && isDockerVariant(n), K.docker],
+  [(n) => /^(?:(?:docker|podman)-)?compose(?:[._-].*)?\.ya?ml$/.test(n), K.docker],
+  [(n) => /^(?:gnu)?makefile\./.test(n) && isMakeVariant(n), K.make],
+  [(n) => /^requirements(?:[._-].*)?\.(?:txt|in)$/.test(n), K.pythonPackage],
+  [(n) => /^tsconfig(?:\.[^.]+)+\.jsonc?$/.test(n), ['tsconfig', FileCog, 'blue']],
+  [(n) => /^jsconfig(?:\.[^.]+)+\.jsonc?$/.test(n), ['jsconfig', FileCog, 'yellow']],
+  [(n) => VITE_CFG.test(n), ['vite', FileCog, 'purple']],
+  [(n) => VITEST_CFG.test(n), ['vitest', FileCog, 'green']],
+  [(n) => WEBPACK_CFG.test(n), ['webpack', FileCog, 'sky']],
+  [(n) => ROLLUP_CFG.test(n), ['rollup', FileCog, 'red']],
+  [(n) => ESLINT_CFG.test(n), ['eslint', FileCog, 'purple']],
+  [(n) => PRETTIER_CFG.test(n), ['prettier', FileCog, 'pink']],
+  [(n) => BABEL_CFG.test(n), ['babel', FileCog, 'yellow']],
+  [(n) => JEST_CFG.test(n), ['jest', FileCog, 'red']],
+  [(n) => PLAYWRIGHT_CFG.test(n), ['playwright', FileCog, 'green']],
+  [(n) => TAILWIND_CFG.test(n), ['tailwind', FileCog, 'sky']],
+  [(n) => POSTCSS_CFG.test(n), ['postcss', FileCog, 'orange']],
+  [(n) => FRAMEWORK_CFG.test(n), ['framework', FileCog, 'teal']],
 ];
 
 /** Extensions (lower case, without the first dot), compound ones too:
@@ -272,11 +332,22 @@ const EXTENSIONS: Record<string, Entry> = {
   'd.mts': K.declaration,
   'd.cts': K.declaration,
   'min.js': ['javascript.minified', FileCode, 'grey'],
+  'min.mjs': ['javascript.minified', FileCode, 'grey'],
+  'min.cjs': ['javascript.minified', FileCode, 'grey'],
   'min.css': ['css.minified', FileCode, 'grey'],
+  'd.ts.map': ['sourcemap', FileCode, 'grey'],
+  'ts.map': ['sourcemap', FileCode, 'grey'],
   'js.map': ['sourcemap', FileCode, 'grey'],
+  'mjs.map': ['sourcemap', FileCode, 'grey'],
+  'cjs.map': ['sourcemap', FileCode, 'grey'],
   'css.map': ['sourcemap', FileCode, 'grey'],
+  map: ['sourcemap', FileCode, 'grey'],
   'test.ts': ['test.typescript', FlaskConical, 'blue'],
   'spec.ts': ['test.typescript', FlaskConical, 'blue'],
+  'test.mts': ['test.typescript', FlaskConical, 'blue'],
+  'spec.mts': ['test.typescript', FlaskConical, 'blue'],
+  'test.cts': ['test.typescript', FlaskConical, 'blue'],
+  'spec.cts': ['test.typescript', FlaskConical, 'blue'],
   'test.tsx': ['test.react', FlaskConical, 'sky'],
   'spec.tsx': ['test.react', FlaskConical, 'sky'],
   'test.js': ['test.javascript', FlaskConical, 'yellow'],
@@ -284,7 +355,9 @@ const EXTENSIONS: Record<string, Entry> = {
   'test.jsx': ['test.react', FlaskConical, 'sky'],
   'spec.jsx': ['test.react', FlaskConical, 'sky'],
   'test.mjs': ['test.javascript', FlaskConical, 'yellow'],
+  'spec.mjs': ['test.javascript', FlaskConical, 'yellow'],
   'test.cjs': ['test.javascript', FlaskConical, 'yellow'],
+  'spec.cjs': ['test.javascript', FlaskConical, 'yellow'],
   'stories.tsx': ['stories', FileCode, 'pink'],
   'stories.ts': ['stories', FileCode, 'pink'],
   'stories.jsx': ['stories', FileCode, 'pink'],
@@ -483,6 +556,9 @@ const EXTENSIONS: Record<string, Entry> = {
   'tar.bz2': K.archive,
   'tar.xz': K.archive,
   'tar.zst': K.archive,
+  'tar.lz4': K.archive,
+  'tar.lz': K.archive,
+  'tar.br': K.archive,
   jar: K.archive,
   war: K.archive,
   ear: K.archive,
@@ -566,6 +642,7 @@ const EXTENSIONS: Record<string, Entry> = {
   cmake: K.cmake,
   bzl: K.build,
   dockerfile: K.docker,
+  containerfile: K.docker,
 };
 
 /** Folders by name (lower case). */
@@ -645,20 +722,38 @@ const FILE: Entry = ['file', File];
 const FOLDER: Entry = ['folder', Folder];
 const DOT_FOLDER: Entry = ['folder.hidden', FolderDot, 'grey'];
 
+/** Map-backed tables avoid Object.prototype collisions (constructor, toString, ...). */
+const NAME_MAP = new Map<string, Entry>(Object.entries(NAMES));
+const EXT_MAP = new Map<string, Entry>(Object.entries(EXTENSIONS));
+const FOLDER_MAP = new Map<string, Entry>(Object.entries(FOLDERS));
+
+/** Normalizes a filename or path to its lower-case basename. */
+function baseLower(name: string): string {
+  const trimmed = name.trim().replace(/[\\/]+$/, '');
+  const slash = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return (slash >= 0 ? trimmed.slice(slash + 1) : trimmed).toLowerCase();
+}
+
 /** The icon of a file or folder named name; open folders get the open
  * folder's shape in their color. */
 export function fileIcon(name: string, kind: 'file' | 'dir', open = false): FileIconDef {
-  const n = name.toLowerCase();
+  const n = baseLower(name);
   if (kind === 'dir') {
-    const e = FOLDERS[n] ?? (n.startsWith('.') && n.length > 1 ? DOT_FOLDER : FOLDER);
+    const e = FOLDER_MAP.get(n) ?? (n.startsWith('.') && n.length > 1 && n !== '..' ? DOT_FOLDER : FOLDER);
     return open ? { id: e[0], icon: FolderOpen, color: e[2] } : def(e);
   }
-  const named = NAMES[n] ?? PREFIXES.find(([re]) => re.test(n))?.[1];
+  if (!n) return def(FILE);
+  const named = NAME_MAP.get(n) ?? PREFIXES.find(([match]) => match(n))?.[1];
   if (named) return def(named);
-  // Extensions from the longest: a.test.ts tries test.ts, then ts. A name
-  // starting with a dot (.bashrc) has no extension but what follows.
-  for (let i = n.indexOf('.', 1); i >= 0; i = n.indexOf('.', i + 1)) {
-    const e = EXTENSIONS[n.slice(i + 1)];
+  // Extensions from the longest: a.test.ts tries test.ts, then ts. Skip any
+  // leading dot run so dotfiles like .hidden or .json are not treated as bare
+  // extensions, while .foo.json and .foo.test.ts still resolve their extensions.
+  let start = 0;
+  while (start < n.length && n[start] === '.') start++;
+  for (let i = n.indexOf('.', start + 1); i >= 0; i = n.indexOf('.', i + 1)) {
+    const ext = n.slice(i + 1);
+    if (!ext) break;
+    const e = EXT_MAP.get(ext);
     if (e) return def(e);
   }
   return def(FILE);

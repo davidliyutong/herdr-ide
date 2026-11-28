@@ -17,15 +17,17 @@
 // sources of chats no pane shows are kept KEEP_MS (a tab shown again finds
 // its chat as it was), at most KEEP_IDLE of them.
 import { useEffect, useMemo } from 'react';
-import { readChat, readUsage, type ContentBlock, type SourceEvent, type Usage } from '../../conversation/model';
-import type { ChatSource, FileSuggestion, PermissionReply, QuestionReply } from '../../conversation/source';
+import { blocksText, readChat, readUsage, type ContentBlock, type SourceEvent, type Usage } from '../../conversation/model';
+import type { ChatSource, Delivery, FileSuggestion, PermissionReply, QuestionReply, RewindOptions } from '../../conversation/source';
 import { listDir } from '../../lib/files';
 import { RETRY_RESET_MS, retryDelay } from '../../lib/retry';
 import { useStore } from '../../state/store';
 import { chatApi } from './api';
 import { chatConnection, CLOSED, CommandError, readError, type ChatConnection, type Subscription } from './connection';
-import { chatState, liveKey, setLive, useChats, type LiveChat } from './state';
+import { chatCwd, setLive, type LiveChat } from './state';
 import type { Command, Event } from './protocol';
+
+export { chatCwd };
 
 /** How long a source no pane shows is kept. */
 export const KEEP_MS = 30_000;
@@ -77,8 +79,14 @@ export class ChatSourceImpl implements ChatSource {
   /** The hub said there is no such chat. */
   private gone = false;
   private usage?: Usage;
+  /** The chat's last observed host state (working/waiting/starting/idle/…). */
+  private lastState?: string;
   /** Its next subscription attaches again (a reattach first). */
   private again = false;
+  /** Number of commands currently awaiting an ack on this subscription. */
+  private inFlight = 0;
+  /** A reset event arrived while a command (e.g. rewind) was awaiting its ack. */
+  private deferredReset = false;
 
   constructor(
     readonly m: string,
@@ -94,6 +102,51 @@ export class ChatSourceImpl implements ChatSource {
     return useStore.getState().readOnly;
   }
 
+  /** Whether this chat's agent is currently active (working, waiting, or starting). */
+  get active(): boolean {
+    return this.lastState === 'working' || this.lastState === 'waiting' || this.lastState === 'starting';
+  }
+
+  /** Stored user turns (User or Queued(taken)) in order, with their sequence
+   * numbers and plain text previews (used by header rewind turn pickers). */
+  userTurns(): Array<{ seq: number; text: string }> {
+    const out: Array<{ seq: number; text: string }> = [];
+    const seenClient = new Set<string>();
+    const waitingContent = new Map<string, ContentBlock[]>();
+    for (const raw of this.stored) {
+      if (!isObject(raw)) continue;
+      const ev = raw as unknown as Event;
+      if (
+        ev.t === 'queued' &&
+        ev.state === 'waiting' &&
+        typeof ev.message === 'string' &&
+        ev.message &&
+        Array.isArray(ev.content) &&
+        ev.content.length > 0
+      ) {
+        waitingContent.set(ev.message, ev.content as ContentBlock[]);
+        continue;
+      }
+      const isUser = ev.t === 'user' || (ev.t === 'queued' && ev.state === 'taken');
+      if (!isUser || typeof ev.seq !== 'number') continue;
+      const cid = typeof ev.clientId === 'string' && ev.clientId ? ev.clientId : '';
+      if (cid) {
+        if (seenClient.has(cid)) continue;
+        seenClient.add(cid);
+      }
+      const rawContent = Array.isArray(ev.content) ? (ev.content as ContentBlock[]) : [];
+      const content =
+        rawContent.length > 0
+          ? rawContent
+          : ev.t === 'queued' && typeof ev.message === 'string'
+            ? (waitingContent.get(ev.message) ?? [])
+            : [];
+      const text = blocksText(content).replace(/\s+/g, ' ').trim();
+      out.push({ seq: ev.seq, text });
+    }
+    return out;
+  }
+
   subscribe(fn: (ev: SourceEvent) => void): () => void {
     this.fns.add(fn);
     for (const ev of this.stored) fn(ev);
@@ -101,8 +154,8 @@ export class ChatSourceImpl implements ChatSource {
     return () => void this.fns.delete(fn);
   }
 
-  send(content: ContentBlock[], clientId: string): Promise<void> {
-    return this.command({ op: 'prompt', content, clientId });
+  send(content: ContentBlock[], clientId: string, delivery?: Delivery): Promise<void> {
+    return this.command({ op: 'prompt', content, clientId, ...(delivery ? { delivery } : {}) });
   }
   cancel(): Promise<void> {
     return this.command({ op: 'cancel' });
@@ -127,8 +180,23 @@ export class ChatSourceImpl implements ChatSource {
   cancelQueued(message: string): Promise<void> {
     return this.command({ op: 'cancel_queued', message });
   }
-  compact(): Promise<void> {
-    return this.command({ op: 'compact' });
+  steerQueued(message: string, delivery: 'steer' | 'interrupt' = 'steer'): Promise<void> {
+    return this.command({ op: 'steer_queued', message, delivery });
+  }
+  compact(instructions?: string): Promise<void> {
+    return this.command({ op: 'compact', ...(instructions ? { instructions } : {}) });
+  }
+  stopTask(taskId: string): Promise<void> {
+    return this.command({ op: 'stop_task', task: taskId });
+  }
+  rewind(seq: number, opts: RewindOptions = {}): Promise<void> {
+    return this.command({
+      op: 'rewind',
+      seq,
+      ...(opts.content ? { content: opts.content } : {}),
+      ...(opts.clientId ? { clientId: opts.clientId } : {}),
+      ...(opts.restoreFiles ? { restoreFiles: true } : {}),
+    });
   }
   /** Sets the chat's title. */
   rename(title: string): Promise<void> {
@@ -153,29 +221,66 @@ export class ChatSourceImpl implements ChatSource {
     await ask(this.m, cwd);
   }
 
+  private suggestAbort?: AbortController;
+
   /** The files and folders of the chat's directory that match what the
-   * user typed after `@`: a path relative to it, whose last part is
-   * matched against the names of the folder before it (names that start
-   * with it first). Names with white space cannot be written after `@`
-   * and are left out. */
-  async suggestFiles(query: string): Promise<FileSuggestion[]> {
+   * user typed after `@`. For non-empty relative queries that do not end in
+   * `/`, tries the machine's recursive `/p/files/find` endpoint first and
+   * falls back gracefully to `listDir` on the folder before the last `/`. */
+  async suggestFiles(query: string, callerSignal?: AbortSignal): Promise<FileSuggestion[]> {
     const cwd = chatCwd(this.m, this.chat);
     if (!cwd?.startsWith('/') || /\s/.test(query)) return [];
-    const cut = query.lastIndexOf('/');
-    const head = cut >= 0 ? query.slice(0, cut + 1) : '';
-    const tail = (cut >= 0 ? query.slice(cut + 1) : query).toLowerCase();
-    const dir = head.startsWith('/') ? head : `${cwd.replace(/\/+$/, '')}/${head}`;
-    const listing = await listDir(this.m, dir.length > 1 ? dir.replace(/\/+$/, '') : dir);
-    const entries = (Array.isArray(listing?.entries) ? listing.entries : []).filter(
-      (e) => e && typeof e.name === 'string' && e.name && !/\s/.test(e.name) && (tail.startsWith('.') || !e.name.startsWith('.')),
-    );
-    const starts = entries.filter((e) => e.name.toLowerCase().startsWith(tail));
-    const within = entries.filter((e) => !e.name.toLowerCase().startsWith(tail) && e.name.toLowerCase().includes(tail));
-    const base = dir.endsWith('/') ? dir : `${dir}/`;
-    return [...starts, ...within].slice(0, 50).map((e) => ({
-      path: base + e.name,
-      label: head + e.name + (e.is_dir ? '/' : ''),
-    }));
+    if (callerSignal?.aborted) return [];
+    this.suggestAbort?.abort();
+    const ac = new AbortController();
+    this.suggestAbort = ac;
+    const onCallerAbort = () => ac.abort();
+    callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+    const signal = ac.signal;
+    try {
+      if (query !== '' && !query.startsWith('/') && !query.endsWith('/')) {
+        try {
+          const params = new URLSearchParams({ dir: cwd, query, limit: '50' });
+          const r = await fetch(`/api/m/${encodeURIComponent(this.m)}/p/files/find?${params}`, { cache: 'no-store', signal });
+          if (r.ok) {
+            const j: unknown = await r.json();
+            if (isObject(j) && Array.isArray(j.matches)) {
+              const out: FileSuggestion[] = [];
+              for (const m of j.matches.slice(0, 50)) {
+                if (!isObject(m) || typeof m.path !== 'string' || !m.path || typeof m.rel !== 'string' || !m.rel) continue;
+                const isDir = m.is_dir === true;
+                const label = isDir && !m.rel.endsWith('/') ? `${m.rel}/` : m.rel;
+                out.push(isDir ? { path: m.path, label, isDir: true } : { path: m.path, label });
+              }
+              return out;
+            }
+          }
+        } catch {
+          if (signal.aborted) return [];
+          // Fall through to directory listing.
+        }
+      }
+      if (signal.aborted) return [];
+      const cut = query.lastIndexOf('/');
+      const head = cut >= 0 ? query.slice(0, cut + 1) : '';
+      const tail = (cut >= 0 ? query.slice(cut + 1) : query).toLowerCase();
+      const dir = head.startsWith('/') ? head : `${cwd.replace(/\/+$/, '')}/${head}`;
+      const listing = await listDir(this.m, dir.length > 1 ? dir.replace(/\/+$/, '') : dir, signal);
+      const entries = (Array.isArray(listing?.entries) ? listing.entries : []).filter(
+        (e) => e && typeof e.name === 'string' && e.name && !/\s/.test(e.name) && (tail.startsWith('.') || !e.name.startsWith('.')),
+      );
+      const starts = entries.filter((e) => e.name.toLowerCase().startsWith(tail));
+      const within = entries.filter((e) => !e.name.toLowerCase().startsWith(tail) && e.name.toLowerCase().includes(tail));
+      const base = dir.endsWith('/') ? dir : `${dir}/`;
+      return [...starts, ...within].slice(0, 50).map((e) => ({
+        path: base + e.name,
+        label: head + e.name + (e.is_dir ? '/' : ''),
+        ...(e.is_dir ? { isDir: true } : {}),
+      }));
+    } finally {
+      callerSignal?.removeEventListener('abort', onCallerAbort);
+      if (this.suggestAbort === ac) this.suggestAbort = undefined;
+    }
   }
 
   /** Attaches again now if the chat is not attached (a pane shows it
@@ -191,6 +296,7 @@ export class ChatSourceImpl implements ChatSource {
   /** Ends the subscription for good. */
   stop() {
     this.stopped = true;
+    this.deferredReset = false;
     clearTimeout(this.retryTimer);
     this.cur?.sub?.detach();
     this.cur = undefined;
@@ -241,6 +347,8 @@ export class ChatSourceImpl implements ChatSource {
       this.stored = [];
       this.liveEvents = [];
       this.last = 0;
+      this.usage = undefined;
+      this.live({ usage: undefined });
       this.emit({ t: 'reset' });
       this.cur = undefined;
       queueMicrotask(() => {
@@ -256,6 +364,7 @@ export class ChatSourceImpl implements ChatSource {
     this.attachedNow = true;
     const info = readChat(chat);
     this.usage = info?.usage ?? this.usage;
+    if (info?.state) this.lastState = info.state;
     this.live({ link: 'attached', linkError: undefined, info, state: info?.state, error: info?.error, usage: this.usage });
     this.keep({ t: 'info', chat });
     for (const w of this.waiters.splice(0)) {
@@ -272,7 +381,9 @@ export class ChatSourceImpl implements ChatSource {
       this.fail(new CommandError(code, error.message));
       return;
     }
-    this.live({ link: code === 'offline' || code === 'lost' ? 'offline' : 'failed', linkError: error });
+    const ms = useStore.getState().machines[this.m];
+    const transientCore = code === 'no_terminal_core' && !!ms && (ms.status !== 'ready' || ms.hc?.state === 'starting');
+    this.live({ link: code === 'offline' || code === 'lost' || transientCore ? 'offline' : 'failed', linkError: error });
     if (FINAL.has(code)) {
       this.fail(new CommandError(code, error.message));
       return;
@@ -282,6 +393,9 @@ export class ChatSourceImpl implements ChatSource {
     this.again = true;
     if (this.attachedAt !== undefined && performance.now() - this.attachedAt >= RETRY_RESET_MS) this.retry = RETRY_MIN_MS;
     this.attachedAt = undefined;
+    // Pause retry timers while the machine is disabled; re-enabling wakes held
+    // sources immediately via syncMachineWatch().
+    if (ms?.status === 'disabled') return;
     const wait = code === 'lost' && this.retry === RETRY_MIN_MS ? 0 : retryDelay(this.retry);
     this.retry = Math.min(this.retry * 2, RETRY_MAX_MS);
     this.retryTimer = setTimeout(() => {
@@ -290,7 +404,37 @@ export class ChatSourceImpl implements ChatSource {
     }, wait);
   }
 
+  private performReset() {
+    const prev = this.cur;
+    this.stored = [];
+    this.liveEvents = [];
+    this.last = 0;
+    this.usage = undefined;
+    this.live({ usage: undefined });
+    this.attachedNow = false;
+    this.emit({ t: 'reset' });
+    this.cur = undefined;
+    queueMicrotask(() => {
+      prev?.sub?.detach();
+      if (!this.stopped && !this.cur) this.attach();
+    });
+  }
+
   private event(ev: Event) {
+    // Rewind broadcasts a reset event whose seq is the new truncated head
+    // (lower than this.last): clear local log and re-attach from 0 so live
+    // subscribers reload the truncated history cleanly. Guard against replaying
+    // a stored reset immediately after attach from 0, and defer detaching while
+    // an in-flight command (such as rewind itself) is still awaiting its ack.
+    if ((ev as { t: string }).t === 'reset') {
+      if (this.last === 0 && this.stored.length <= 1 && ev.live !== true) return;
+      if (this.inFlight > 0) {
+        this.deferredReset = true;
+        return;
+      }
+      this.performReset();
+      return;
+    }
     const stored = ev.live !== true && typeof ev.seq === 'number';
     if (stored) {
       if (ev.seq! <= this.last) return;
@@ -315,8 +459,10 @@ export class ChatSourceImpl implements ChatSource {
       const info = readChat(ev.chat);
       if (!info) return;
       this.usage = info.usage ?? this.usage;
+      if (info.state) this.lastState = info.state;
       this.live({ info, state: info.state, error: info.error, usage: this.usage });
     } else if (ev.t === 'state' && typeof ev.state === 'string') {
+      this.lastState = ev.state;
       this.live({ state: ev.state, error: ev.state === 'failed' ? readError(ev.error) : undefined });
     } else if (ev.t === 'update' && isObject(ev.update) && ev.update.sessionUpdate === 'usage_update') {
       const usage = usageAfter(this.usage, ev.update);
@@ -375,13 +521,17 @@ export class ChatSourceImpl implements ChatSource {
   private async command(cmd: Omit<Command, 'id'>): Promise<void> {
     if (this.readOnly) throw new CommandError('read_only');
     await this.ready();
-    await this.conn.command(this.m, this.chat, cmd as Command);
+    this.inFlight++;
+    try {
+      await this.conn.command(this.m, this.chat, cmd as Command);
+    } finally {
+      this.inFlight--;
+      if (this.inFlight === 0 && this.deferredReset && !this.stopped) {
+        this.deferredReset = false;
+        this.performReset();
+      }
+    }
   }
-}
-
-/** A chat's directory: what its attached source states, else its state. */
-export function chatCwd(m: string, chat: string): string | undefined {
-  return useChats.getState().live[liveKey(m, chat)]?.info?.cwd || chatState(m, chat)?.cwd || undefined;
 }
 
 // ---- the sources the page has ----
@@ -396,6 +546,25 @@ interface Held {
 
 const held = new Map<string, Held>();
 const keyOf = (m: string, chat: string) => `${m}\n${chat}`;
+let unwatchMachines: (() => void) | undefined;
+
+function syncMachineWatch() {
+  if (held.size > 0) {
+    unwatchMachines ??= useStore.subscribe((st, prev) => {
+      if (st.machines === prev.machines) return;
+      for (const [m, info] of Object.entries(st.machines)) {
+        const was = prev.machines[m];
+        const machineUp = info.status === 'ready' && was?.status !== 'ready';
+        const hcUp = info.hc?.state === 'ready' && was?.hc?.state !== 'ready';
+        if (!machineUp && !hcUp) continue;
+        for (const h of held.values()) if (h.source.m === m) h.source.wake();
+      }
+    });
+  } else {
+    unwatchMachines?.();
+    unwatchMachines = undefined;
+  }
+}
 
 function drop(k: string) {
   const h = held.get(k);
@@ -403,16 +572,25 @@ function drop(k: string) {
   clearTimeout(h.timer);
   held.delete(k);
   h.source.stop();
+  syncMachineWatch();
 }
 
 /** Lets go of h: kept KEEP_MS, the sources kept longest going first past
- * KEEP_IDLE. */
+ * KEEP_IDLE. Idle (non-working) unreferenced sources are always evicted before
+ * actively working ones so an active agent's subscription is protected. */
 function idle(k: string, h: Held) {
   h.idleSince = Date.now();
   clearTimeout(h.timer);
   h.timer = setTimeout(() => drop(k), KEEP_MS);
-  const idleOnes = [...held.entries()].filter(([, x]) => x.refs === 0).sort((a, b) => a[1].idleSince - b[1].idleSince);
+  const idleOnes = [...held.entries()]
+    .filter(([, x]) => x.refs === 0)
+    .sort((a, b) => Number(a[1].source.active) - Number(b[1].source.active) || a[1].idleSince - b[1].idleSince);
   for (const [key] of idleOnes.slice(0, Math.max(0, idleOnes.length - KEEP_IDLE))) drop(key);
+}
+
+/** Stored user turns of a currently held chat source (empty when not attached). */
+export function chatUserTurns(m: string, chat: string): Array<{ seq: number; text: string }> {
+  return held.get(keyOf(m, chat))?.source.userTurns() ?? [];
 }
 
 /** The page's source of a chat, made when there is none; it is kept
@@ -423,6 +601,7 @@ export function chatSource(m: string, chat: string): ChatSourceImpl {
   if (!h) {
     h = { source: new ChatSourceImpl(m, chat), refs: 0, idleSince: Date.now() };
     held.set(k, h);
+    syncMachineWatch();
     idle(k, h);
   }
   return h.source;

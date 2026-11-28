@@ -13,6 +13,7 @@ import type { Spec } from '#kernel/machines/spec.ts';
 import { openShared } from '#shared/store/index.ts';
 import { readLine, type VaultResponse } from '#shared/proto/agentproto/index.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import { hubDBBeside } from './accesslog.ts';
 import { relayKey } from './desktop.ts';
 import { openExport, sealExport } from './exportfile.ts';
@@ -71,7 +72,12 @@ async function vault(o: VaultOptions = {}, setup = true, specs: Spec[] = [sshSpe
   dirs.push(dir);
   const dial = agentDialer();
   const machines = testMachines(specs, { dial });
-  const opts: VaultOptions = { path: join(dir, 'vault.json'), store: { kdf: FAST }, approvalTimeoutMs: 2000, ...o };
+  const opts: VaultOptions = {
+    path: join(dir, 'vault.json'),
+    approvalTimeoutMs: 2000,
+    ...o,
+    store: { kdf: FAST, ...o.store },
+  };
   const t = testHub({
     features: [vaultFeature(opts)],
     machines,
@@ -324,7 +330,7 @@ describe('the gate', () => {
     });
     const { problems, checked } = await checkGuarded(rw.t, ro, { machine: 'm1' });
     expect(problems).toEqual([]);
-    expect(checked.length).toBe(17);
+    expect(checked.length).toBe(25);
   });
 });
 
@@ -890,5 +896,271 @@ describe('export and import', () => {
     const imp = await w.call('POST', '/import', { file, passphrase: FILE, choices: [{ i: 0, action: 'import' }] });
     expect(imp.json).toEqual({ imported: ['A'] });
     expect((await w.call('GET', '')).json.variables).toMatchObject([{ name: 'A', machines: ['m1'] }]);
+  });
+});
+
+describe('groups, presets and workspace env injection routes', () => {
+  test('CRUD routes, session gate, verifyEachAllow widening, and no secret values in audit', async () => {
+    const v = await vault();
+    const gRes = await v.call('POST', '/groups', { name: 'LLM', description: 'Model API keys' });
+    expect(gRes.status).toBe(200);
+    const gid = gRes.json.id as string;
+
+    await v.call('PUT', '/vars/LLM_KEY', { value: 'super-secret-llm', group: gid });
+    await v.call('PUT', '/vars/OTHER_KEY', { value: 'super-secret-other' });
+
+    const pRes = await v.call('POST', '/presets', { name: 'Dev', description: 'Dev env', groups: [gid], variables: ['OTHER_KEY'] });
+    expect(pRes.status).toBe(200);
+    const pid = pRes.json.id as string;
+
+    const linkRes = await v.call('PUT', '/workspaces/m1/ws-1', { presets: [pid] });
+    expect(linkRes.status).toBe(200);
+    expect(linkRes.json.link).toMatchObject({ machine: 'm1', workspace: 'ws-1', presets: [pid] });
+
+    // GET / exposes metadata for groups, presets and workspaceLinks without values.
+    const list = await v.call('GET', '');
+    expect(list.json.groups).toMatchObject([{ id: gid, name: 'LLM', description: 'Model API keys' }]);
+    expect(list.json.presets).toMatchObject([{ id: pid, name: 'Dev', groups: [gid], variables: ['OTHER_KEY'] }]);
+    expect(list.json.workspaceLinks).toMatchObject([{ machine: 'm1', workspace: 'ws-1', presets: [pid] }]);
+    expect(JSON.stringify(list.json)).not.toContain('super-secret');
+
+    // Without a session, mutations are refused.
+    expect((await v.call('POST', '/groups', { name: 'NoAuth' }, { token: '' })).status).toBe(401);
+    expect((await v.call('POST', '/presets', { name: 'NoAuth' }, { token: '' })).status).toBe(401);
+    expect((await v.call('PUT', '/workspaces/m1/ws-1', { presets: [] }, { token: '' })).status).toBe(401);
+
+    // verifyEachAllow guards widening of workspace links, linked presets, and group moves into linked presets.
+    expect((await v.call('POST', '/guard', { verifyEachAllow: true })).status).toBe(200);
+    await v.call('PUT', '/vars/THIRD_KEY', { value: 'super-secret-third' });
+    expect((await v.call('PUT', '/workspaces/m1/ws-2', { presets: [pid] })).json.error).toBe('vault_proof');
+    expect((await v.call('PUT', '/workspaces/m1/ws-2', { presets: [pid], passphrase: PASS })).status).toBe(200);
+    expect((await v.call('PUT', `/presets/${pid}`, { variables: ['OTHER_KEY', 'THIRD_KEY'] })).json.error).toBe('vault_proof');
+    expect((await v.call('PUT', `/presets/${pid}`, { variables: ['OTHER_KEY', 'THIRD_KEY'], passphrase: PASS })).status).toBe(200);
+    expect((await v.call('POST', '/groups/assign', { names: ['THIRD_KEY'], group: gid })).json.error).toBe('vault_proof');
+    expect((await v.call('POST', '/groups/assign', { names: ['THIRD_KEY'], group: gid, passphrase: PASS })).status).toBe(200);
+    // Creating a new variable directly into a linked group needs passphrase (not POST /proof, which 404s for non-existent vars).
+    expect((await v.call('PUT', '/vars/FOURTH_KEY', { value: 'super-secret-fourth', group: gid })).json.error).toBe('vault_proof');
+    expect((await v.call('PUT', '/vars/FOURTH_KEY', { value: 'super-secret-fourth', group: gid, passphrase: PASS })).status).toBe(200);
+    // Deleting a variable referenced by a linked preset, then renaming an unlinked variable
+    // or creating a new variable with that referenced name, also requires fresh verification.
+    expect((await v.call('DELETE', '/vars/OTHER_KEY')).status).toBe(200);
+    expect((await v.call('PUT', '/vars/UNLINKED_KEY', { value: 'super-secret-unlinked' })).status).toBe(200);
+    expect((await v.call('PUT', '/vars/UNLINKED_KEY', { to: 'OTHER_KEY' })).json.error).toBe('vault_proof');
+    expect((await v.call('PUT', '/vars/UNLINKED_KEY', { to: 'OTHER_KEY', passphrase: PASS })).status).toBe(200);
+    expect((await v.call('DELETE', '/vars/OTHER_KEY')).status).toBe(200);
+    expect((await v.call('PUT', '/vars/OTHER_KEY', { value: 'super-secret-recreated' })).json.error).toBe('vault_proof');
+    expect((await v.call('PUT', '/vars/OTHER_KEY', { value: 'super-secret-recreated', passphrase: PASS })).status).toBe(200);
+    // Narrowing / unlinking requires no extra passphrase.
+    expect((await v.call('PUT', '/workspaces/m1/ws-2', { presets: [] })).status).toBe(200);
+
+    // Rename & delete group/preset routes.
+    expect((await v.call('PUT', `/groups/${gid}`, { name: 'AI' })).json.name).toBe('AI');
+    expect((await v.call('DELETE', `/groups/${gid}`)).status).toBe(200);
+    expect((await v.call('DELETE', `/presets/${pid}`)).status).toBe(200);
+    expect((await v.call('GET', '')).json.workspaceLinks).toEqual([]);
+
+    // Audit log never leaks secret values.
+    expect(v.t.audit.text()).not.toContain('super-secret');
+  });
+
+  test('concurrent modifications cannot bypass verifyEachAllow across presets, links, groups, vars or guard', async () => {
+    let hook: ((op: string) => void | Promise<void>) | undefined;
+    const v = await vault({ store: { beforeLock: (op) => hook?.(op) } });
+
+    const gid = (await v.call('POST', '/groups', { name: 'Backend' })).json.id as string;
+    await v.call('PUT', '/vars/SAFE_KEY', { value: 'safe-1' });
+    await v.call('PUT', '/vars/RACE_SECRET', { value: 'race-secret-val' });
+    await v.call('PUT', '/vars/GROUP_MEMBER', { value: 'member-val', group: gid });
+    const pid = (await v.call('POST', '/presets', { name: 'Prod', variables: ['SAFE_KEY'] })).json.id as string;
+    expect((await v.call('POST', '/guard', { verifyEachAllow: true })).status).toBe(200);
+
+    // 1. Unverified preset widening racing with a verified workspace link:
+    // preset is unlinked when PUT /presets/:id enters the route, then linked before #mu.
+    hook = async (op) => {
+      if (op !== 'updatePreset') return;
+      hook = undefined;
+      expect((await v.call('PUT', '/workspaces/m1/ws-race', { presets: [pid], passphrase: PASS })).status).toBe(200);
+    };
+    const presetRace = await v.call('PUT', `/presets/${pid}`, { variables: ['SAFE_KEY', 'RACE_SECRET'] });
+    expect([presetRace.status, presetRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('GET', '')).json.presets.find((p: any) => p.id === pid).variables).toEqual(['SAFE_KEY']);
+
+    // 2. Unverified workspace link racing with concurrent unlink:
+    // ws-race is linked when unverified PUT /workspaces enters the route, then unlinked before #mu.
+    hook = async (op) => {
+      if (op !== 'setWorkspacePresets') return;
+      hook = undefined;
+      expect((await v.call('PUT', '/workspaces/m1/ws-race', { presets: [] })).status).toBe(200);
+    };
+    const relinkRace = await v.call('PUT', '/workspaces/m1/ws-race', { presets: [pid] });
+    expect([relinkRace.status, relinkRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('GET', '')).json.workspaceLinks).toEqual([]);
+
+    // Re-link ws-race with passphrase for group & variable races.
+    expect((await v.call('PUT', '/workspaces/m1/ws-race', { presets: [pid], passphrase: PASS })).status).toBe(200);
+
+    // 3. Unverified group assignment racing with linking that group into the active preset.
+    hook = async (op) => {
+      if (op !== 'assignGroup') return;
+      hook = undefined;
+      expect((await v.call('PUT', `/presets/${pid}`, { variables: ['SAFE_KEY'], groups: [gid], passphrase: PASS })).status).toBe(200);
+    };
+    const assignRace = await v.call('POST', '/groups/assign', { names: ['RACE_SECRET'], group: gid });
+    expect([assignRace.status, assignRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('GET', '')).json.variables.find((x: any) => x.name === 'RACE_SECRET').group).toBeUndefined();
+
+    // 4. Unverified no-op group assignment racing with concurrent removal from the linked group.
+    hook = async (op) => {
+      if (op !== 'assignGroup') return;
+      hook = undefined;
+      expect((await v.call('POST', '/groups/assign', { names: ['GROUP_MEMBER'], group: '' })).status).toBe(200);
+    };
+    const reassignRace = await v.call('POST', '/groups/assign', { names: ['GROUP_MEMBER'], group: gid });
+    expect([reassignRace.status, reassignRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('GET', '')).json.variables.find((x: any) => x.name === 'GROUP_MEMBER').group).toBeUndefined();
+
+    // 5. Unverified PUT /vars/CREATED_LATE { machines: ['m1'] } (started before CREATED_LATE existed)
+    // racing with creation of CREATED_LATE (machines: []).
+    hook = async (op) => {
+      if (op !== 'set') return;
+      hook = undefined;
+      expect((await v.call('PUT', '/vars/CREATED_LATE', { value: 'late-secret', machines: [] })).status).toBe(200);
+    };
+    const createWidenRace = await v.call('PUT', '/vars/CREATED_LATE', { machines: ['m1'] });
+    expect([createWidenRace.status, createWidenRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('GET', '')).json.variables.find((x: any) => x.name === 'CREATED_LATE').machines).toEqual([]);
+
+    // 6. Unverified reveal and MCP request approval racing with enabling verifyEachAllow.
+    expect((await v.call('POST', '/guard', { verifyEachAllow: false, passphrase: PASS })).status).toBe(200);
+    hook = async (op) => {
+      if (op !== 'value') return;
+      hook = undefined;
+      expect((await v.call('POST', '/guard', { verifyEachAllow: true })).status).toBe(200);
+    };
+    const revealRace = await v.call('POST', '/vars/RACE_SECRET/reveal');
+    expect([revealRace.status, revealRace.json.error]).toEqual([401, 'vault_proof']);
+
+    expect((await v.call('POST', '/guard', { verifyEachAllow: false, passphrase: PASS })).status).toBe(200);
+    const pendingAsk = v.ask({ tool: 'get', names: ['RACE_SECRET'] });
+    const reqId = await firstRequest(v);
+    hook = async (op) => {
+      if (op !== 'authorizeAllow') return;
+      hook = undefined;
+      expect((await v.call('POST', '/guard', { verifyEachAllow: true })).status).toBe(200);
+    };
+    const allowRace = await v.call('POST', `/requests/${reqId}`, { answer: 'always' });
+    expect([allowRace.status, allowRace.json.error]).toEqual([401, 'vault_proof']);
+    expect((await v.call('POST', `/requests/${reqId}`, { answer: 'deny' })).status).toBe(200);
+    expect((await pendingAsk).ok).toBe(false);
+
+    // 7. Parallel Promise.all burst: unlinking + unverified preset widening + unverified group assign.
+    hook = undefined;
+    const p2 = (await v.call('POST', '/presets', { name: 'Burst', variables: ['SAFE_KEY'] })).json.id as string;
+    const [rLink, rEdit] = await Promise.all([
+      v.call('PUT', '/workspaces/m1/ws-burst', { presets: [p2], passphrase: PASS }),
+      v.call('PUT', `/presets/${p2}`, { variables: ['SAFE_KEY', 'RACE_SECRET'] }),
+    ]);
+    expect(rLink.status).toBe(200);
+    // Either rEdit ran before p2 was linked (so rLink's passphrase authorized linking p2 as-is),
+    // or rLink acquired #mu first and rEdit was rejected with 401 vault_proof while Argon2id ran!
+    if (rEdit.status !== 200) expect(rEdit.json.error).toBe('vault_proof');
+  });
+
+  test('workspaceEnv: injects when unlocked, records access log, refuses when locked, disabled, or log fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vault-ws-'));
+    dirs.push(dir);
+    const feat = vaultFeature({ path: join(dir, 'vault.json'), store: { kdf: FAST }, changedEveryMs: 1 });
+    const t = testHub({
+      features: [feat],
+      machines: testMachines([sshSpec('m1', 'm1', 'gpu')]),
+      settings: { 'plugins.vault.enabled': true },
+      guard: { allowedOrigins: [ORIGIN] },
+    });
+    const call = async (method: string, path: string, body?: unknown, token?: string) => {
+      const r = await t.request(method, `/api/p/vault${path}`, {
+        host: HOST,
+        origin: ORIGIN,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(token ? { headers: { 'X-Vault-Session': token } } : {}),
+      });
+      return { status: r.status, json: (await r.json().catch(() => ({}))) as any };
+    };
+    const tok = (await call('POST', '/passphrase', { passphrase: PASS })).json.session as string;
+    await call('PUT', '/vars/API_KEY', { value: 'val-1' }, tok);
+    await call('PUT', '/vars/GONE_VAR', { value: 'val-2' }, tok);
+    const pid = (await call('POST', '/presets', { name: 'Work', variables: ['API_KEY', 'GONE_VAR'] }, tok)).json.id as string;
+    await call('PUT', '/workspaces/m1/ws-1', { presets: [pid] }, tok);
+    await call('DELETE', '/vars/GONE_VAR', undefined, tok);
+
+    // Unlocked: resolves values and durably records Result.Injected in access log.
+    const ok = await feat.workspaceEnv('m1', 'ws-1', 'terminal', 'desktop');
+    expect(ok).toEqual({
+      env: { API_KEY: 'val-1' },
+      names: ['API_KEY'],
+      presets: [pid],
+      missing: ['GONE_VAR'],
+      locked: false,
+    });
+    const log = (await call('GET', '/log', undefined, tok)).json.log as any[];
+    expect(log[0]).toMatchObject({ m: 'm1', tool: 'terminal', names: ['API_KEY'], result: 'injected' });
+
+    // Locked: returns locked=true and empty env, records vault_locked.
+    await call('POST', '/lock', undefined, tok);
+    const locked = await feat.workspaceEnv('m1', 'ws-1', 'chat', 'desktop');
+    expect(locked).toEqual({ env: {}, names: [], presets: [pid], missing: [], locked: true });
+
+    // Unlock again, then disable the vault plugin: refuses injection.
+    const tok2 = (await call('POST', '/session', { passphrase: PASS })).json.session as string;
+    t.settings['plugins.vault.enabled'] = false;
+    expect(await feat.workspaceEnv('m1', 'ws-1', 'terminal', 'desktop')).toEqual({
+      env: {},
+      names: [],
+      presets: [],
+      missing: [],
+      locked: false,
+    });
+    t.settings['plugins.vault.enabled'] = true;
+    const log2 = (await call('GET', '/log', undefined, tok2)).json.log as any[];
+    expect(log2.some((e) => e.tool === 'chat' && e.result === 'vault_locked')).toBe(true);
+
+    // Access log write failure refuses release and wipes env.
+    const db = openShared(hubDBBeside(join(dir, 'vault.json')));
+    db.run(`CREATE TRIGGER ws_disk_fails AFTER INSERT ON vault_access BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`);
+    db.close();
+    const failed = await feat.workspaceEnv('m1', 'ws-1', 'terminal', 'desktop');
+    expect(failed).toEqual({
+      env: {},
+      names: [],
+      presets: [pid],
+      missing: ['GONE_VAR'],
+      locked: false,
+      logFailed: true,
+    });
+  });
+});
+
+describe('hubs of a namespace', () => {
+  // The hubs of a namespace share the vault's file: what one writes
+  // reaches the other and its pages, and a passphrase changed in one locks
+  // the vault in the other and ends its sessions.
+  extended('another hub writes the vault', async () => {
+    const a = await vault({ fileCheckMs: 10 });
+    const b = await vault({ fileCheckMs: 10, path: a.opts.path }, false);
+    b.token = (await b.call('POST', '/session', { passphrase: PASS })).json.session;
+    expect((await a.call('PUT', '/vars/TOKEN', { value: 's3cret' })).status).toBe(200);
+    let names: string[] = [];
+    const look = async () => (names = (await b.call('GET', '')).json.variables.map((x: { name: string }) => x.name));
+    for (const deadline = Date.now() + 5000; (await look()).length === 0 && Date.now() < deadline;) await sleep(20);
+    expect(names).toEqual(['TOKEN']);
+    expect((await b.call('POST', '/vars/TOKEN/reveal')).json).toEqual({ value: 's3cret' });
+
+    expect((await a.call('POST', '/passphrase', { old: PASS, passphrase: 'new passphrase' })).status).toBe(200);
+    let st: { locked?: boolean } = {};
+    for (const deadline = Date.now() + 5000; !st.locked && Date.now() < deadline;) {
+      st = (await b.call('GET', '')).json.status;
+      if (!st.locked) await sleep(20);
+    }
+    expect(st.locked).toBe(true);
+    expect((await b.call('POST', '/vars/TOKEN/reveal')).json.error).toBe('vault_session');
   });
 });

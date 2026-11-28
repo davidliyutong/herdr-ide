@@ -11,7 +11,7 @@ import { formatSize } from '../../lib/files';
 import { useStore } from '../../state/store';
 import type { PluginSettingsProps } from '../api';
 import { ChatFailure, chatApi, reasonText } from './api';
-import { stateLabel } from './ChatPane';
+import { stateLabel } from './ChatHeader';
 import { agentName, kindIcon, openChat } from './ops';
 import type { ChatHostOverview, TrustedFolder } from './protocol';
 

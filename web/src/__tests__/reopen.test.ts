@@ -98,6 +98,31 @@ describe('layout.reopen', () => {
   });
 });
 
+describe('layout.showRecentTab', () => {
+  const tab = (a: string): L.Tab => ({ root: t(a), focused: a });
+  const four = { ...layoutWith(tab('a'), tab('b'), tab('c'), tab('d')) };
+  const shown = (l: L.Layout, i: number): L.Layout => L.selectTab(l, 'wwwwwwww', i);
+
+  it('a closed tab that was shown gives way to the tab seen before it, not its neighbor', () => {
+    const before = shown(four, 1);
+    const after = L.closeTab(before, 'wwwwwwww', 1);
+    expect(after.workspaces[0].selected).toBe(1); // c, its next
+    const back = L.showRecentTab(before, after, ['b', 'd', 'a']);
+    expect(L.tabPanes(back.workspaces[0].tabs[back.workspaces[0].selected])).toEqual(['d']);
+  });
+
+  it('keeps the selection when the closed tab was not shown, when nothing seen is left, and when no tab went', () => {
+    const before = shown(four, 2);
+    const other = L.closeTab(before, 'wwwwwwww', 0);
+    expect(L.showRecentTab(before, other, ['c', 'd'])).toBe(other);
+    const shownGone = L.closeTab(before, 'wwwwwwww', 2);
+    expect(L.showRecentTab(before, shownGone, ['c', 'zz'])).toBe(shownGone);
+    // The shown tab's terminal got another address: no tab closed.
+    const moved = L.mapTerminals(before, (leaf) => (leaf.terminal === 'c' ? { ...leaf, terminal: 'c2' } : leaf));
+    expect(L.showRecentTab(before, moved, ['d'])).toBe(moved);
+  });
+});
+
 describe('closing with a way back, and going back, with a terminal core', () => {
   let hub: FakeHub;
   const running = (address: string, cwd: string, extra = {}) =>
@@ -185,6 +210,25 @@ describe('closing with a way back, and going back, with a terminal core', () => 
     await tick(350);
     expect(killed().sort()).toEqual(['t1', 't2']);
     expect(commandEnabled('pane.undoClose')).toBe(false);
+  });
+
+  it('closing the shown tab shows the tab seen before it', async () => {
+    await setup([running('t3', '/srv/c'), running('t4', '/srv/d')]);
+    hub.model.mutate('m', (l) => L.openTerminal(L.openTerminal(l, 't3', 'wwwwwwww'), 't4', 'wwwwwwww'));
+    await tick();
+    // Seen: the third tab, the first, then the second, whose next is the third.
+    for (const [i, pane] of [
+      [2, 't4'],
+      [0, 't2'],
+      [1, 't3'],
+    ] as const) {
+      hub.model.mutate('m', (l) => L.selectTab(l, 'wwwwwwww', i));
+      noteFocus({ m: 'm', pane });
+    }
+    await actions.closeTab('m', 'wwwwwwww', 1);
+    await tick();
+    const ws = hub.layout('m')!.workspaces[0];
+    expect(L.tabPanes(ws.tabs[ws.selected])).toEqual(['t1', 't2']);
   });
 
   it('closes a workspace at once and puts it back with its tabs and terminals', async () => {

@@ -25,14 +25,28 @@
   },
   {
    "t": "update",
+   "update": {
+    "sessionUpdate": "agent_thought_chunk",
+    "content": {
+     "type": "text",
+     "text": ""
+    },
+    "messageId": "msg_0001"
+   },
    "item": "msg_0001/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000016"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0001/1",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "",
-     "type": "text"
+     "type": "text",
+     "text": "1"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_thought_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
@@ -40,12 +54,12 @@
    "live": true,
    "item": "msg_0001/1",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "1",
-     "type": "text"
+     "type": "text",
+     "text": "\n2\n3\n4\n5"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
@@ -53,43 +67,31 @@
    "live": true,
    "item": "msg_0001/1",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "\n2\n3\n4\n5",
-     "type": "text"
+     "type": "text",
+     "text": "\n6\n7\n8\n9"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0001/1",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "\n6\n7\n8\n9",
-     "type": "text"
+     "type": "text",
+     "text": "1\n2\n3\n4\n5\n6\n7\n8\n9"
     },
     "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0001/1",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "1\n2\n3\n4\n5\n6\n7\n8\n9",
-     "type": "text"
-    },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0001/1",
+   "entryUuid": "00000000-0000-4000-8000-000000000022"
   },
   {
    "t": "turn",
@@ -303,15 +305,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -331,7 +333,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 0,

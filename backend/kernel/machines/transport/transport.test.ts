@@ -12,10 +12,13 @@ import { checkPrivateDir, controlName } from './controldir.ts';
 import { Session, setReplyTimeout } from './session.ts';
 import {
   AuthRequiredError,
+  SSHTimeoutError,
   authCommand,
   classifySSHError,
+  dialSSH,
   normArch,
   remoteSh,
+  run,
   runArgs,
   shQuote,
   sshArgs,
@@ -95,14 +98,25 @@ describe('session', () => {
 });
 
 describe('ssh', () => {
-  test('errors that need the user', () => {
+  test('errors that need the user or timed out', () => {
     for (const s of [
       'user@host: Permission denied (publickey,password).',
       'Host key verification failed.',
       "The authenticity of host 'x' can't be established.",
     ])
       expect(classifySSHError(s)).toBeInstanceOf(AuthRequiredError);
-    expect(classifySSHError('ssh: connect to host x port 22: Connection refused')).not.toBeInstanceOf(AuthRequiredError);
+    for (const s of [
+      'ssh: connect to host x port 22: Operation timed out',
+      'ssh: connect to host x port 22: Connection timed out',
+      'Connection timed out during banner exchange',
+    ]) {
+      const e = classifySSHError(s);
+      expect(e).toBeInstanceOf(SSHTimeoutError);
+      expect((e as SSHTimeoutError).timedOut).toBe(false);
+    }
+    const refused = classifySSHError('ssh: connect to host x port 22: Connection refused');
+    expect(refused).not.toBeInstanceOf(AuthRequiredError);
+    expect(refused).not.toBeInstanceOf(SSHTimeoutError);
   });
 
   test('normArch', () => {
@@ -172,6 +186,122 @@ describe('ssh', () => {
     await stopMasterIfStuck(new Promise(() => {}), 10, () => void stops++)();
     expect(stops).toBe(1);
   });
+
+  test.skipIf(process.platform === 'win32')(
+    'run stops the control master on timeout and installTS rethrows SSHTimeoutError on download timeout',
+    async () => {
+      const bin = mkdtempSync(join(tmpdir(), 'ssh-timeout-'));
+      const log = join(bin, 'calls.log');
+      // Fake ssh:
+      // - "-O stop" logs STOP
+      // - probe prints linux/amd64
+      // - "[ -x ..." returns empty (not installed)
+      // - download/sleep commands either hang (when cmd contains HANG) or exit 255 with timed out
+      writeFileSync(
+        join(bin, 'ssh'),
+        `#!/bin/sh
+case "$*" in
+  *"-O stop"*) echo STOP >> ${log}; exit 0 ;;
+esac
+cmd=""
+for a in "$@"; do cmd="$a"; done
+case "$cmd" in
+  *HANG*) echo RUN >> ${log}; exec sleep 10 ;;
+  *@os=*) echo "@os=Linux"; echo "@arch=x86_64"; echo "@home=/home/u"; echo "@gnulibc=glibc 2.39"; echo "@libs=yes"; echo "@sse42=yes"; exit 0 ;;
+  *"echo @build"*) exit 0 ;;
+  *example.invalid*) echo "ssh: connect to host gpu port 22: Operation timed out" >&2; exit 255 ;;
+  *"node dial"*) echo DIAL >> ${log}; exec sleep 10 ;;
+esac
+exit 0
+`,
+      );
+      chmodSync(join(bin, 'ssh'), 0o755);
+      // Warm up the newly written script so macOS assessment doesn't race with short timeouts.
+      Bun.spawnSync([join(bin, 'ssh'), 'noop']);
+      const prevPath = process.env.PATH;
+      process.env.PATH = `${bin}:${prevPath}`;
+      try {
+        const baseOpts = {
+          target: 'user@gpu',
+          controlDir: '/tmp/ctl',
+          logger: discard,
+          builds: async () => {
+            throw new Error('no build');
+          },
+          instance: 'dev',
+        };
+
+        // (1) run() timing out stops the control master and throws SSHTimeoutError(timedOut=true).
+        const err = await run(baseOpts, 'HANG', { timeoutMs: 200 }).catch((e) => e);
+        expect(err).toBeInstanceOf(SSHTimeoutError);
+        expect((err as SSHTimeoutError).timedOut).toBe(true);
+        expect(readFileSync(log, 'utf8').trim().split('\n')).toEqual(['RUN', 'STOP']);
+
+        // (2) Caller abort does NOT stop the control master.
+        writeFileSync(log, '');
+        const ac = new AbortController();
+        const pending = run(baseOpts, 'HANG', { timeoutMs: 5000, signal: ac.signal });
+        const started = Date.now() + 2000;
+        while (Date.now() < started && !readFileSync(log, 'utf8').includes('RUN')) await Bun.sleep(10);
+        ac.abort(new Error('cancelled'));
+        await expect(pending).rejects.toThrow('cancelled');
+        expect(readFileSync(log, 'utf8').trim().split('\n')).toEqual(['RUN']);
+
+        // (3) installTS download() rethrows SSHTimeoutError instead of falling through to upload (b.load).
+        let loaded = 0;
+        const dlErr = await dialSSH({
+          ...baseOpts,
+          builds: async () => ({
+            kind: 'ts',
+            key: 'linux-amd64',
+            url: 'https://example.invalid/build.tar.gz',
+            digests: async () => ({ exe: 'a'.repeat(64), archive: 'b'.repeat(64), source: 'test' }),
+            load: async () => {
+              loaded++;
+              return { kind: 'archive', bytes: Buffer.alloc(0) };
+            },
+          }),
+        }).catch((e) => e);
+        expect(dlErr).toBeInstanceOf(SSHTimeoutError);
+        expect(loaded).toBe(0);
+
+        // (4) Closing a dialSSH session with SSHTimeoutError (Op.Hello timeout) stops the control master.
+        writeFileSync(log, '');
+        writeFileSync(
+          join(bin, 'ssh'),
+          `#!/bin/sh
+case "$*" in
+  *"-O stop"*) echo STOP >> ${log}; exit 0 ;;
+esac
+cmd=""
+for a in "$@"; do cmd="$a"; done
+case "$cmd" in
+  *@os=*) echo "@os=Linux"; echo "@arch=x86_64"; echo "@home=/home/u"; echo "@gnulibc=glibc 2.39"; echo "@libs=yes"; echo "@sse42=yes"; exit 0 ;;
+  *"echo @build"*) echo "@build"; exit 0 ;;
+  *"node dial"*) exec sleep 10 ;;
+esac
+exit 0
+`,
+        );
+        chmodSync(join(bin, 'ssh'), 0o755);
+        const { session } = await dialSSH({
+          ...baseOpts,
+          builds: async () => ({
+            kind: 'ts',
+            key: 'linux-amd64',
+            digests: async () => ({ exe: 'a'.repeat(64), source: 'test' }),
+            load: async () => ({ kind: 'gz', bytes: Buffer.alloc(0) }),
+          }),
+        });
+        await session.finish(new SSHTimeoutError('hello: no reply in time'));
+        const deadline = Date.now() + 2000;
+        while (Date.now() < deadline && !readFileSync(log, 'utf8').includes('STOP')) await Bun.sleep(20);
+        expect(readFileSync(log, 'utf8').trim()).toBe('STOP');
+      } finally {
+        process.env.PATH = prevPath;
+      }
+    },
+  );
 });
 
 describe.skipIf(process.platform === 'win32')('control directory', () => {

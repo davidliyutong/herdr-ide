@@ -121,9 +121,18 @@ export interface ClientRequests {
   'account/read': { params: GetAccountParams; result: GetAccountResponse };
   'thread/start': { params: ThreadStartParams; result: ThreadStartResponse };
   'thread/resume': { params: ThreadResumeParams; result: ThreadResumeResponse };
+  'thread/fork': { params: ThreadForkParams; result: ThreadForkResponse };
+  'thread/revert': { params: ThreadRevertParams; result: ThreadRevertResponse };
   'thread/list': { params: ThreadListParams; result: ThreadListResponse };
   'thread/turns/list': { params: ThreadTurnsListParams; result: ThreadTurnsListResponse };
   'thread/compact/start': { params: ThreadCompactStartParams; result: ThreadCompactStartResponse };
+  'thread/backgroundTerminals/list': { params: ThreadBackgroundTerminalsListParams; result: ThreadBackgroundTerminalsListResponse };
+  'thread/backgroundTerminals/terminate': {
+    params: ThreadBackgroundTerminalsTerminateParams;
+    result: ThreadBackgroundTerminalsTerminateResponse;
+  };
+  'thread/backgroundTerminals/clean': { params: ThreadBackgroundTerminalsCleanParams; result: ThreadBackgroundTerminalsCleanResponse };
+  'thread/inject_items': { params: ThreadInjectItemsParams; result: ThreadInjectItemsResponse };
   'turn/start': { params: TurnStartParams; result: TurnStartResponse };
   'turn/steer': { params: TurnSteerParams; result: TurnSteerResponse };
   'turn/interrupt': { params: TurnInterruptParams; result: TurnInterruptResponse };
@@ -157,6 +166,9 @@ export interface ServerNotifications {
   'item/reasoning/summaryTextDelta': ReasoningSummaryTextDeltaNotification;
   'item/reasoning/summaryPartAdded': ReasoningSummaryPartAddedNotification;
   'item/commandExecution/outputDelta': CommandExecutionOutputDeltaNotification;
+  'item/commandExecution/terminalInteraction': TerminalInteractionNotification;
+  'process/exited': ProcessExitedNotification;
+  'thread/reverted': ThreadRevertedNotification;
   'thread/tokenUsage/updated': ThreadTokenUsageUpdatedNotification;
   'account/rateLimits/updated': AccountRateLimitsUpdatedNotification;
   'thread/name/updated': ThreadNameUpdatedNotification;
@@ -1536,6 +1548,48 @@ export type PlanType =
   | 'sci_plus'
   | 'unknown';
 
+/**
+ * Final process exit notification for `process/spawn`.
+ */
+export type ProcessExitedNotification = {
+  /**
+   * Process exit code.
+   */
+  exitCode: number;
+  /**
+   * Whether output collection hit its post-exit deadline before seeing EOF or reaching the requested byte cap on either stream. Older servers omit this field.
+   */
+  outputDrainTimedOut?: boolean | null;
+  /**
+   * Client-supplied, connection-scoped `processHandle` from `process/spawn`.
+   */
+  processHandle: string;
+  /**
+   * Buffered stderr capture.
+   *
+   * Empty when stderr was streamed via `process/outputDelta`.
+   */
+  stderr: string;
+  /**
+   * Whether stderr reached `outputBytesCap`.
+   *
+   * In streaming mode, stderr is empty and cap state is also reported on the final stderr `process/outputDelta` notification.
+   */
+  stderrCapReached: boolean;
+  /**
+   * Buffered stdout capture.
+   *
+   * Empty when stdout was streamed via `process/outputDelta`.
+   */
+  stdout: string;
+  /**
+   * Whether stdout reached `outputBytesCap`.
+   *
+   * In streaming mode, stdout is empty and cap state is also reported on the final stdout `process/outputDelta` notification.
+   */
+  stdoutCapReached: boolean;
+};
+
 export type RateLimitReachedType =
   | 'rate_limit_reached'
   | 'workspace_owner_credits_depleted'
@@ -1902,6 +1956,14 @@ export type SubAgentSource =
       other: string;
     };
 
+export type TerminalInteractionNotification = {
+  itemId: string;
+  processId: string;
+  stdin: string;
+  threadId: string;
+  turnId: string;
+};
+
 export type TextElement = {
   /**
    * Byte range in the parent `text` buffer that this element occupies.
@@ -2050,6 +2112,53 @@ export type Thread = {
 
 export type ThreadActiveFlag = 'waitingOnApproval' | 'waitingOnUserInput';
 
+export type ThreadBackgroundTerminal = {
+  command: string;
+  cpuPercent?: number | null;
+  cwd: LegacyAppPathString;
+  itemId: string;
+  osPid?: number | null;
+  processId: string;
+  rssKb?: number | null;
+};
+
+export type ThreadBackgroundTerminalsCleanParams = {
+  threadId: string;
+};
+
+export type ThreadBackgroundTerminalsCleanResponse = {
+  [key: string]: unknown;
+};
+
+export type ThreadBackgroundTerminalsListParams = {
+  /**
+   * Opaque pagination cursor returned by a previous call.
+   */
+  cursor?: string | null;
+  /**
+   * Optional page size.
+   */
+  limit?: number | null;
+  threadId: string;
+};
+
+export type ThreadBackgroundTerminalsListResponse = {
+  data: Array<ThreadBackgroundTerminal>;
+  /**
+   * Opaque cursor to pass to the next call to continue after the last item. If None, there are no more items to return.
+   */
+  nextCursor?: string | null;
+};
+
+export type ThreadBackgroundTerminalsTerminateParams = {
+  processId: string;
+  threadId: string;
+};
+
+export type ThreadBackgroundTerminalsTerminateResponse = {
+  terminated: boolean;
+};
+
 export type ThreadCompactStartParams = {
   threadId: string;
 };
@@ -2074,9 +2183,135 @@ export type ThreadExtra = {
   [key: string]: unknown;
 };
 
+/**
+ * There are two ways to fork a thread: 1. By thread_id: load the thread from disk by thread_id and fork it into a new thread. 2. By path: load the thread from disk by path and fork it into a new thread.
+ *
+ * If using a non-empty path, the thread_id param will be ignored. Empty string path values are treated as absent.
+ *
+ * Prefer using thread_id whenever possible.
+ */
+export type ThreadForkParams = {
+  approvalPolicy?: AskForApproval | null;
+  /**
+   * Override where approval requests are routed for review on this thread and subsequent turns.
+   */
+  approvalsReviewer?: ApprovalsReviewer | null;
+  /**
+   * Persist the fork as an attached thread of its resolved source, hidden from ordinary lists. The source cannot be deleted while attached threads exist. Requires a paginated source and local storage; incompatible with ephemeral and deferGoalContinuation. Omitted or false creates an ordinary fork.
+   */
+  attachToSource?: boolean;
+  baseInstructions?: string | null;
+  /**
+   * Optional turn id to fork before, excluding that turn and all later turns. Cannot be combined with `last_turn_id`.
+   */
+  beforeTurnId?: string | null;
+  config?: {
+    [key: string]: unknown;
+  } | null;
+  cwd?: string | null;
+  /**
+   * When true, carry the source thread's current goal into the fork without starting its initial automatic continuation. The next explicit turn owns the goal lifecycle, and normal automatic continuation resumes after it.
+   */
+  deferGoalContinuation?: boolean;
+  developerInstructions?: string | null;
+  ephemeral?: boolean;
+  /**
+   * When true, return only thread metadata and live fork state without populating `thread.turns`. This is useful when the client plans to call `thread/turns/list` immediately after forking. Full-history hydration is deprecated for paginated threads; use this with `thread/turns/list` and `thread/items/list` instead.
+   */
+  excludeTurns?: boolean;
+  /**
+   * Disable MCP servers in prediction mode when the inherited window uses incremental tools on Responses Lite. Requires `experimentalPredictionMode: true`.
+   */
+  experimentalDisablePredictionMcp?: boolean;
+  /**
+   * Start from the loaded parent's effective config, tools, environments, and persisted history to maximize prompt-cache reuse. Requires a loaded, persisted parent and `ephemeral: true`. Enables `features.reasoning_effort_override` on the fork. Only `config.thread_unload_delay_secs` may override the inherited config. Cannot be combined with `path`, `lastTurnId`, or `beforeTurnId`.
+   */
+  experimentalPredictionMode?: boolean;
+  /**
+   * Optional last turn id to fork through, inclusive.
+   *
+   * When specified, turns after `last_turn_id` are omitted from the fork. The referenced turn cannot be in progress.
+   */
+  lastTurnId?: string | null;
+  /**
+   * Configuration overrides for the forked thread, if any.
+   */
+  model?: string | null;
+  modelProvider?: string | null;
+  /**
+   * [UNSTABLE] Specify the rollout path to fork from. If specified, the thread_id param will be ignored.
+   */
+  path?: string | null;
+  /**
+   * Named profile id for the forked thread. Cannot be combined with `sandbox`.
+   */
+  permissions?: string | null;
+  /**
+   * Replace the thread's runtime workspace roots. Paths must be absolute.
+   */
+  runtimeWorkspaceRoots?: Array<AbsolutePathBuf> | null;
+  sandbox?: SandboxMode | null;
+  serviceTier?: string | null;
+  threadId: string;
+  /**
+   * Optional client-supplied analytics source classification for this forked thread.
+   */
+  threadSource?: ThreadSource | null;
+};
+
+export type ThreadForkResponse = {
+  /**
+   * Named or implicit built-in profile that produced the active permissions, when known.
+   */
+  activePermissionProfile?: ActivePermissionProfile | null;
+  approvalPolicy: AskForApproval;
+  /**
+   * Reviewer currently used for approval requests on this thread.
+   */
+  approvalsReviewer: ApprovalsReviewer;
+  cwd: AbsolutePathBuf;
+  /**
+   * Saved list of disabled plugin IDs. Does not yet filter plugin capabilities.
+   */
+  disabledPluginIds?: Array<string>;
+  /**
+   * Environment-native paths to instruction source files currently loaded for this thread.
+   */
+  instructionSources?: Array<LegacyAppPathString>;
+  model: string;
+  modelProvider: string;
+  /**
+   * @deprecated Always `explicitRequestOnly`. Use `reasoningEffort` for Ultra behavior.
+   */
+  multiAgentMode?: MultiAgentMode;
+  reasoningEffort?: ReasoningEffort | null;
+  /**
+   * Thread-scoped runtime workspace roots used to materialize `:workspace_roots`.
+   */
+  runtimeWorkspaceRoots?: Array<AbsolutePathBuf>;
+  /**
+   * Legacy sandbox policy retained for compatibility. Experimental clients should prefer `activePermissionProfile` for profile provenance.
+   */
+  sandbox: SandboxPolicy;
+  serviceTier?: string | null;
+  thread: Thread;
+};
+
 export type ThreadHistoryMode = 'legacy' | 'paginated';
 
 export type ThreadId = string;
+
+export type ThreadInjectItemsParams = {
+  /**
+   * Raw Responses API items to append to the thread's model-visible history.
+   */
+  items: Array<unknown>;
+  threadId: string;
+};
+
+export type ThreadInjectItemsResponse = {
+  [key: string]: unknown;
+};
 
 /**
  * A thread item and its recorded lifecycle times. The payload stays flat on the wire.
@@ -2585,6 +2820,42 @@ export type ThreadResumeResponse = {
    * Pass this as `cursor` to `thread/turns/list` with `sortDirection: "desc"`. The first page includes the turn identified by the cursor.
    */
   turnsBackwardsCursor?: string | null;
+};
+
+/**
+ * Replace a paginated thread's durable history with the prefix before one turn.
+ *
+ * This only changes persisted conversation history. It does not revert local file changes.
+ */
+export type ThreadRevertParams = {
+  /**
+   * Turn excluded from the replacement history, together with every later turn.
+   */
+  beforeTurnId: string;
+  threadId: string;
+};
+
+export type ThreadRevertResponse = {
+  /**
+   * Opaque cursor for hydrating paginated items backwards.
+   *
+   * Pass this as `cursor` to `thread/items/list` with `sortDirection: "desc"`. The first page includes the item identified by the cursor.
+   */
+  itemsBackwardsCursor?: string | null;
+  /**
+   * Updated loaded thread metadata. `turns` is always empty; hydrate retained history through `thread/turns/list`.
+   */
+  thread: Thread;
+  /**
+   * Opaque cursor for hydrating paginated turns backwards.
+   *
+   * Pass this as `cursor` to `thread/turns/list` with `sortDirection: "desc"`. The first page includes the turn identified by the cursor.
+   */
+  turnsBackwardsCursor?: string | null;
+};
+
+export type ThreadRevertedNotification = {
+  threadId: string;
 };
 
 /**

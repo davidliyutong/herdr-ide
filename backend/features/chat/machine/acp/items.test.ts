@@ -158,6 +158,27 @@ describe('items', () => {
     expect([it.toolCount, s.evs.length]).toEqual([MAX_TOOLS, MAX_TOOLS + 2]);
   });
 
+  test('cancels only unfinished tools when a turn aborts, including tools with a null status update', () => {
+    const s = new Stream();
+    const it = new Items('p', true, s.store);
+    feed(
+      it,
+      { sessionUpdate: 'tool_call', toolCallId: 'open', status: 'in_progress' },
+      { sessionUpdate: 'tool_call_update', toolCallId: 'open', status: null, title: 'Still running' },
+      { sessionUpdate: 'tool_call', toolCallId: 'done', status: 'completed' },
+      { sessionUpdate: 'tool_call', toolCallId: 'detached', status: 'in_progress' },
+    );
+    it.endTurn((id) => id !== 'detached');
+    expect(s.lines()).toEqual([
+      'open tool_call in_progress',
+      'open tool_call in_progress',
+      'done tool_call completed',
+      'detached tool_call in_progress',
+      'open tool_call cancelled',
+    ]);
+    expect(s.evs.at(-1)?.update).toMatchObject({ title: 'Still running' });
+  });
+
   test('a replayed user message: its chunks are its blocks, without what the agent added for the model', () => {
     const got: unknown[][] = [];
     const it = new Items('h', false, () => {});
@@ -237,6 +258,24 @@ describe('what a chat states', () => {
       ['nope', ''],
     ]) {
       expect([mode, modeValue(kimi, mode!)]).toEqual([mode, want]);
+    }
+
+    // Antigravity (agy) exposes ['default', 'accept-edits', 'auto', 'plan']:
+    // global Full must map to 'auto' (not fall back to default or accept-edits).
+    const agy: chat.ConfigOption = {
+      id: 'mode',
+      name: 'Mode',
+      type: 'select',
+      currentValue: 'default',
+      options: ['default', 'accept-edits', 'auto', 'plan'].map((value) => ({ value, name: value })),
+    };
+    for (const [mode, want] of [
+      [chat.Mode.Default, 'default'],
+      [chat.Mode.AcceptEdits, 'accept-edits'],
+      [chat.Mode.Plan, 'plan'],
+      [chat.Mode.Full, 'auto'],
+    ]) {
+      expect([mode, modeValue(agy, mode!)]).toEqual([mode, want]);
     }
   });
 

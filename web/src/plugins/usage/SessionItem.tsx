@@ -25,7 +25,7 @@ import {
   tokens,
   type SessionUsage,
 } from './model';
-import { sessionKey, useSessionReads, type SessionTarget } from './session';
+import { targetKey, useSessionReads, type SessionTarget } from './session';
 import { AccountLine, useCardOnScreen, useWarnAt } from './StatusItem';
 import { ProviderLogo } from './logos';
 
@@ -33,8 +33,11 @@ import { ProviderLogo } from './logos';
  * (useFocusedAgent); undefined without one. */
 function useFocusedSession(): { target: SessionTarget; provider: string } | undefined {
   const a = useFocusedAgent();
-  if (!a?.session) return undefined;
-  return { target: { m: a.m, kind: a.kind, session: a.session, status: a.status }, provider: a.provider };
+  if (!a || a.source !== 'terminal' || (!a.session && !a.cwd)) return undefined;
+  return {
+    target: { m: a.m, kind: a.kind, session: a.session, cwd: a.cwd, pid: a.pid, terminal: a.terminal, status: a.status },
+    provider: a.provider,
+  };
 }
 
 /** The context in use in words: of the window and its share, else the
@@ -43,6 +46,12 @@ function contextLong(u: SessionUsage): string {
   const pct = contextPct(u);
   if (pct !== undefined) return t('usage.session.contextOf', { used: tokens(u.contextUsed), size: tokens(u.contextSize), pct });
   return u.contextUsed > 0 ? tokens(u.contextUsed) : '—';
+}
+
+/** A session id shortened for the hover card (8 hex chars for UUIDs). */
+function shortSessionId(id: string): string {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)) return id.slice(0, 8);
+  return id.length > 14 ? `${id.slice(0, 12)}…` : id;
 }
 
 function Fact({ name, children }: { name: string; children: React.ReactNode }) {
@@ -58,9 +67,10 @@ export function UsageSessionItem() {
   const focused = useFocusedSession();
   const target = focused?.target;
   useSessionReads(target);
-  const key = target ? sessionKey(target.m, target.kind, target.session) : undefined;
+  const key = target ? targetKey(target) : undefined;
   const entry = useUsage((s) => (key ? s.sessions[key] : undefined));
   const snapshot = useUsage((s) => s.snapshot);
+  const costReport = useUsage((s) => s.cost);
   const remaining = useUsage((s) => s.remaining);
   const warnAt = useWarnAt();
   const [open, setOpen] = useState(false);
@@ -88,8 +98,8 @@ export function UsageSessionItem() {
   const cost = sessionCost(u);
   const ctx = contextShort(u);
   const nowSec = Date.now() / 1000;
-  const counted = tightestFor(snapshot, provider, target.m, u.model, nowSec);
-  const account = counted?.account ?? sessionAccount(snapshot, provider, target.m);
+  const counted = tightestFor(snapshot, provider, target.m, u.model, nowSec, costReport);
+  const account = counted?.account ?? sessionAccount(snapshot, provider, target.m, nowSec, costReport);
   const limit = counted?.window ?? (account && tightestWindow(account, nowSec));
   const accounts = (snapshot?.accounts ?? []).filter((a) => a.provider === provider).length;
   return (
@@ -119,6 +129,13 @@ export function UsageSessionItem() {
             <span className="muted">{t('usage.session.heading')}</span>
           </div>
           <dl className="usage-session-facts">
+            {target.session && (
+              <Fact name={t('usage.session.session')}>
+                <span className="mono" title={target.session}>
+                  {shortSessionId(target.session)}
+                </span>
+              </Fact>
+            )}
             {u.model && <Fact name={t('usage.session.model')}>{u.model}</Fact>}
             <Fact name={t('usage.session.cost')}>
               {cost}
@@ -134,7 +151,15 @@ export function UsageSessionItem() {
           </dl>
           {account && limit && (
             <div className="usage-session-account">
-              <AccountLine account={account} window={limit} email={accounts > 1} remaining={remaining} warnAt={warnAt} nowSec={nowSec} />
+              <AccountLine
+                account={account}
+                window={limit}
+                email={accounts > 1}
+                remaining={remaining}
+                warnAt={warnAt}
+                nowSec={nowSec}
+                cost={costReport}
+              />
             </div>
           )}
         </div>

@@ -6,7 +6,7 @@
 import { hostname } from 'node:os';
 import { NAME, SLUG } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
-import { userConfigDir, userHomeDir } from '#shared/host/hostdirs.ts';
+import { userHomeDir } from '#shared/host/hostdirs.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
 import type { Audit } from '#kernel/audit.ts';
 import { Keybindings } from '#kernel/config/keybindings/index.ts';
@@ -66,12 +66,15 @@ export interface FeatureInputs {
  * (kernel/config/registry.ts hubModules). */
 export function hubFeatures(o: FeatureInputs): FeatureDef[] {
   const { payloads } = o;
+  // Variable vault provides workspace-linked presets for new terminals and chats.
+  const vault = vaultFeature({ verifyKey: o.verifyKey });
   // Program windows give new terminals their display and follow the
   // terminal cores; they type into the terminals' shells.
   const gui = guiFeature({ encoder: (os, arch) => payloads.encoder(os, arch), shells: (m) => terminals.shells(m) });
   const terminals = terminalsFeature({
     embeddedHC: (os, arch) => payloads.embeddedHC(os, arch),
     paneEnv: gui.paneEnv,
+    workspaceEnv: (m, ws, client) => vault.workspaceEnv(m.id, ws, 'terminal', client),
     onReady: gui.terminalReady,
   });
   return [
@@ -86,9 +89,9 @@ export function hubFeatures(o: FeatureInputs): FeatureDef[] {
     gitFeature(),
     monitorFeature(),
     usageFeature(),
-    vaultFeature({ verifyKey: o.verifyKey }),
+    vault,
     agentsFeature(),
-    chatFeature({ sdk: o.chatSdk }),
+    chatFeature({ sdk: o.chatSdk, workspaceEnv: (m, ws, client) => vault.workspaceEnv(m, ws, 'chat', client) }),
     historyFeature(),
   ];
 }
@@ -131,9 +134,9 @@ export function selectSpecs(specs: Spec[], localOnly: boolean, extraSSH: readonl
 }
 
 export interface ComposeOptions {
-  /** The hub's instance: its settings, machines and database files. */
-  instance: string;
-  /** The instance of the machines' nodes. */
+  /** The namespace of the machines' nodes, whose data directory on the
+   * hub host holds the hub's files (settingsPath), shared with every hub
+   * of the namespace. */
   nodeInstance: string;
   features: FeatureDef[];
   /** The settings given on the command line (settingFlags). */
@@ -150,6 +153,9 @@ export interface ComposeOptions {
   audit: Audit;
   readOnly: boolean;
   userHeader?: string;
+  /** Delay before running one-off old-database maintenance in a worker thread
+   * so it does not compete with startup I/O and CPU (default 5000 ms). */
+  maintenanceDelayMs?: number;
   logger: Logger;
 }
 
@@ -167,11 +173,11 @@ export interface Composed {
  * a host binds what it serves on first, so that a failed launch starts no
  * agent. */
 export function composeHub(o: ComposeOptions): Composed {
-  const { logger, instance, nodeInstance, payloads, controlDir } = o;
+  const { logger, nodeInstance, payloads, controlDir } = o;
   const modules = hubModules(o.features);
   let settingsFile = '';
   try {
-    settingsFile = settingsPath(userConfigDir(), instance);
+    settingsFile = settingsPath(userHomeDir(), nodeInstance);
   } catch (e) {
     logger(`settings are not saved: ${(e as Error).message}`);
   }
@@ -203,12 +209,14 @@ export function composeHub(o: ComposeOptions): Composed {
       logger(`machine ${s.id}: its ssh target is refused (invalid_target); it is shown in error and never connected`);
   const ssh = o.ssh ?? [];
   const extra = ssh.map((t) => ({ id: t, label: t, target: t, enabled: true }));
-  const specs = selectSpecs(loadSpecs(registry.specs(), extra, hostname()), o.localOnly, ssh, o.only ?? []);
+  const select = (stored: readonly Spec[]) => selectSpecs(loadSpecs(stored, extra, hostname()), o.localOnly, ssh, o.only ?? []);
+  const specs = select(registry.specs());
 
   const builds = payloads.machine.bind(payloads);
   const downloadFailures = new DownloadFailures();
   const machines = new Machines({
     specs,
+    select,
     registry,
     logger,
     dial: async (spec, signal, progress) => {
@@ -256,17 +264,44 @@ export function composeHub(o: ComposeOptions): Composed {
     settings,
     specs,
     async run(signal) {
-      const cleanup = new StateWorker<typeof maintenance>(() => hubWorker({ kind: 'maintenance' }), logger);
+      // Defer one-off database maintenance so spawning a worker thread and
+      // scanning SQLite files does not compete with initial UI hydration.
+      const delayMs = o.maintenanceDelayMs ?? 5_000;
       const tidying = settingsFile
-        ? cleanup
-            .request('tidy', signal, settingsFile)
-            .catch((e) => {
+        ? (async () => {
+            if (delayMs > 0) {
+              const aborted = await new Promise<boolean>((resolve) => {
+                if (signal.aborted) return resolve(true);
+                const onAbort = () => {
+                  clearTimeout(t);
+                  resolve(true);
+                };
+                const t = setTimeout(() => {
+                  signal.removeEventListener('abort', onAbort);
+                  resolve(false);
+                }, delayMs);
+                t.unref?.();
+                signal.addEventListener('abort', onAbort, { once: true });
+              });
+              if (aborted) return;
+            }
+            const cleanup = new StateWorker<typeof maintenance>(() => hubWorker({ kind: 'maintenance' }), logger);
+            try {
+              await cleanup.request('tidy', signal, settingsFile);
+            } catch (e) {
               if (!signal.aborted) logger(`databases of earlier releases or other hosts: ${(e as Error).message}`);
-            })
-            .finally(() => cleanup.close())
+            } finally {
+              await cleanup.close();
+            }
+          })()
         : undefined;
-      // Edits of the files by hand apply without a restart.
-      const watching = Promise.all([settings.watch(signal), keybindings.watch(signal)]).catch(() => {});
+      // Edits of the files by hand, and by the other hubs of the namespace,
+      // apply without a restart.
+      const watching = Promise.all([
+        settings.watch(signal),
+        keybindings.watch(signal),
+        registry.watch(signal, () => machines.sync(), logger),
+      ]).catch(() => {});
       const running = hub.run(signal);
       await new Promise<void>((r) => (signal.aborted ? r() : signal.addEventListener('abort', () => r(), { once: true })));
       let timer: ReturnType<typeof setTimeout> | undefined;

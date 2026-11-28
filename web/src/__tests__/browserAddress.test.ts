@@ -6,16 +6,21 @@
 // takes: never the hub's own address (the UI is on 127.0.0.1:5173 here).
 
 import { describe, expect, it } from 'vitest';
-import { isOwnAddress } from '../lib/webUrl';
+import { isLoopbackName, isOwnAddress, safeWebUrl } from '../lib/webUrl';
 import { canFrame, forwardedSrc, hostPort, loopbackSrc, meantUrl, otherHost, parseAddress } from '../plugins/browser/api';
 
 describe('the address rule', () => {
-  it('frames from the loopback name the UI is not on', () => {
+  it('frames from the loopback name the UI is not on, and uses localhost in desktop webviews', () => {
     expect(otherHost('127.0.0.1')).toBe('localhost');
     expect(otherHost('localhost')).toBe('127.0.0.1');
     expect(otherHost('LocalHost')).toBe('127.0.0.1');
-    // Any other host: no forwards.
-    for (const h of ['example.com', '192.168.1.5', '[::1]', '0.0.0.0', '']) expect(otherHost(h)).toBeUndefined();
+    // Any other host in a browser: no forwards.
+    for (const h of ['app.localhost', 'example.com', '192.168.1.5', '[::1]', '0.0.0.0', '']) expect(otherHost(h)).toBeUndefined();
+    // In the desktop app (<webview> in persist:browser), localhost is always used.
+    expect(otherHost('app.localhost', true)).toBe('localhost');
+    expect(otherHost('localhost', true)).toBe('localhost');
+    expect(forwardedSrc('http://localhost:3000/docs', 41000, 'app.localhost', true)).toBe('http://localhost:41000/docs');
+    expect(loopbackSrc('http://127.0.0.1:8080/x', 'app.localhost', true)).toBe('http://localhost:8080/x');
   });
 
   it('puts a forwarded page on the forward’s local port, over http', () => {
@@ -142,6 +147,54 @@ describe('a machine’s own loopback with the hub’s port number', () => {
   it('stays refused under the page’s own origin when the page is not on loopback', () => {
     const own = { origin: 'https://ide.example.com', hostname: 'ide.example.com', port: '', protocol: 'https:' };
     expect(isOwnAddress(new URL('https://ide.example.com/api/x'), own)).toBe(true);
+    expect(isOwnAddress(new URL('https://ide.example.com./api/x'), own)).toBe(true);
     expect(isOwnAddress(new URL('http://localhost:443/'), own)).toBe(false);
+  });
+
+  it('normalizes trailing dots and treats 0.0.0.0 and [::] as own loopback addresses on the hub port', () => {
+    for (const host of ['localhost.', 'LOCALHOST..', 'app.localhost.', 'sub.localhost..']) {
+      expect(isLoopbackName(host), host).toBe(true);
+    }
+    const browserHub = { origin: 'http://127.0.0.1:5173', hostname: '127.0.0.1', port: '5173', protocol: 'http:' };
+    for (const own of [
+      'http://localhost.:5173/',
+      'https://app.localhost.:5173/api/x',
+      'http://0.0.0.0:5173/',
+      'https://0.0.0.0:5173/api/x',
+      'http://[::]:5173/',
+      'https://[::]:5173/',
+      'http://[::ffff:0:0]:5173/',
+    ]) {
+      expect(isOwnAddress(new URL(own), browserHub, false), own).toBe(true);
+      expect(safeWebUrl(own), own).toBeUndefined();
+    }
+    for (const other of ['http://0.0.0.0:5174/', 'http://[::]:5174/', 'http://localhost.:5174/']) {
+      expect(isOwnAddress(new URL(other), browserHub, false), other).toBe(false);
+    }
+  });
+
+  it('matches only the desktop app’s intercepted .localhost host, not other loopback port-443 services', () => {
+    const desktop = { origin: 'https://app.localhost', hostname: 'app.localhost', port: '', protocol: 'https:' };
+    for (const own of [
+      'https://app.localhost/',
+      'http://app.localhost/',
+      'https://app.localhost:8443/api/x',
+      'https://app.localhost./',
+      'http://app.localhost.:8443/api/x',
+      'https://APP.LOCALHOST../',
+    ]) {
+      expect(isOwnAddress(new URL(own), desktop, true), own).toBe(true);
+    }
+    for (const other of [
+      'https://localhost/',
+      'https://localhost./',
+      'https://127.0.0.1/',
+      'http://localhost:443/',
+      'http://localhost:3000/',
+      'https://other.localhost/',
+      'https://other.localhost./',
+    ]) {
+      expect(isOwnAddress(new URL(other), desktop, true), other).toBe(false);
+    }
   });
 });

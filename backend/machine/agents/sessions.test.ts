@@ -3,16 +3,33 @@
 // and what it refuses to open. Every test has a home, an environment, a
 // process table and a clock of its own; nothing of the user's is read.
 import { afterEach, describe, expect, test } from 'bun:test';
-import { chmodSync, linkSync, mkdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { posix } from 'node:path';
 import type { FileHandle } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import { SessionFrom } from '#shared/proto/agentproto/index.ts';
+import { ReadOnlySQLiteWorker } from './sqlworker.ts';
 import {
   CLAUDE_MAX_NAME,
   LIMITS,
   SessionError,
   TIMING,
+  agyArgv,
+  agyConvId,
+  agyResumedArgv,
   claudeArgv,
   claudeEscape,
   codexArgv,
@@ -370,6 +387,16 @@ describe('Claude Code', () => {
       const f = (await e.r.resolve('claude', p))!;
       expect(await e.r.stamp('claude', p, f)).toBe(s1);
     });
+    test('symlinked working directory matches real path', async () => {
+      const e = setup();
+      const base = e.tempDir();
+      const real = posix.join(base, 'real-proj');
+      const link = posix.join(base, 'link-proj');
+      mkdirSync(real, { recursive: true });
+      symlinkSync(real, link);
+      e.claudeTranscript('', real, sid(1), start, start + MIN);
+      expect(await e.r.resolve('claude', { pid: 100, argv: ['claude'], cwd: link })).toEqual(guess(sid(1)));
+    });
   });
 
   test('escaped directory names', () => {
@@ -458,7 +485,7 @@ test('kinds without sessions', async () => {
   const e = newEnv();
   e.procs.set(100, { ppid: 1, pgid: 100, start: e.now });
   e.record('', 100, sid(1), cwd, e.now);
-  for (const k of ['gemini', 'agy', '', 'nope', 'Claude']) {
+  for (const k of ['gemini', 'opencode', '', 'nope', 'Claude']) {
     expect(await e.r.resolve(k, { pid: 100, argv: ['claude', '--session-id', sid(1)], cwd })).toBeNull();
     expect(await e.r.stamp(k, { pid: 100, argv: [], cwd: '' }, found('', ''))).toBe('');
   }
@@ -537,6 +564,31 @@ describe('Codex', () => {
     unlinkSync(f);
     symlinkSync(posix.join(e.home, 'elsewhere.jsonl'), f);
     expect(await e.r.resolve('codex', p)).toBeNull();
+  });
+
+  test('symlinked working directory and codex resume --last fallback', async () => {
+    const e = setup();
+    const base = e.tempDir();
+    const real = posix.join(base, 'real-codex');
+    const link = posix.join(base, 'link-codex');
+    mkdirSync(real, { recursive: true });
+    symlinkSync(real, link);
+    e.rollout('', sid(1), real, start + 10_000, start + MIN);
+    expect(await e.r.resolve('codex', { pid: 100, argv: ['codex'], cwd: link })).toEqual(found(sid(1), SessionFrom.Start));
+    // codex resume --last updates an older rollout created before process start.
+    const e2 = setup();
+    e2.rollout('', sid(2), real, start - 2 * HOUR, start + MIN);
+    expect(await e2.r.resolve('codex', { pid: 100, argv: ['codex', 'resume', '--last'], cwd: link })).toEqual(
+      found(sid(2), SessionFrom.Start),
+    );
+  });
+
+  test('locate accepts extra Codex homes', async () => {
+    const e = setup();
+    const alt = posix.join(e.tempDir(), 'codex-extra');
+    const f = e.rollout(alt, sid(3), cwd, start, start);
+    expect(await code(e.r.locate('codex', sid(3)))).toBe('not_found');
+    expect((await e.r.locate('codex', sid(3), [alt])).path).toBe(f);
   });
 
   test('the stamp', async () => {
@@ -722,7 +774,7 @@ describe('locate', () => {
         expect([id, kind, await code(e.r.locate(kind, id))]).toEqual([id, kind, 'bad_id']);
         expect([id, kind, await code(e.r.describe(kind, id))]).toEqual([id, kind, 'bad_id']);
       }
-    for (const kind of ['gemini', 'agy', '', 'Claude']) expect(await code(e.r.locate(kind, sid(1)))).toBe('unknown_kind');
+    for (const kind of ['gemini', 'opencode', '', 'Claude']) expect(await code(e.r.locate(kind, sid(1)))).toBe('unknown_kind');
     expect(e.take().length).toBe(0);
   });
 
@@ -1243,5 +1295,208 @@ describe('processes', () => {
     expect(table.some((x) => x.pid === process.pid && x.ppid === process.ppid)).toBe(true);
     expect((await r.candidates(process.pid))[0]).toBe(process.pid);
     expect(await r.startOf(2 ** 30)).toBeNull();
+  });
+});
+
+describe('Antigravity (agy)', () => {
+  const start = local(2026, 11, 22, 14, 55);
+
+  function writeSummaries(
+    e: TestEnv,
+    rows: Array<{
+      id: string;
+      workspaces: string[];
+      parent?: string;
+      depth?: number;
+      status?: string;
+      notIdle?: number;
+      killed?: number;
+      modified: string;
+    }>,
+    sub = '.gemini/antigravity-cli',
+  ) {
+    const dbPath = posix.join(e.home, sub, 'conversation_summaries.db');
+    e.write(dbPath, '');
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE conversation_summaries (
+        conversation_id text PRIMARY KEY,
+        workspace_uris text NOT NULL,
+        parent_conversation_id text NOT NULL DEFAULT '',
+        nesting_depth integer NOT NULL DEFAULT 0,
+        status text NOT NULL DEFAULT '',
+        not_fully_idle numeric NOT NULL DEFAULT 0,
+        killed numeric NOT NULL DEFAULT 0,
+        last_modified_time datetime NOT NULL
+      )
+    `);
+    const ins = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const r of rows) {
+      ins.run(r.id, JSON.stringify(r.workspaces), r.parent ?? '', r.depth ?? 0, r.status ?? '', r.notIdle ?? 0, r.killed ?? 0, r.modified);
+    }
+    db.close();
+  }
+
+  function writeConvDb(e: TestEnv, id: string, modMs?: number, sub = '.gemini/antigravity-cli'): string {
+    const p = posix.join(e.home, sub, 'conversations', `${id}.db`);
+    e.write(p, '');
+    const db = new DatabaseSync(p);
+    db.exec('CREATE TABLE trajectory_metadata_blob (id text PRIMARY KEY, data blob)');
+    db.close();
+    if (modMs !== undefined) utimesSync(p, modMs / 1000, modMs / 1000);
+    return p;
+  }
+
+  test('command lines and conversation db names', () => {
+    const a = sid(1);
+    expect(agyArgv(['agy', '--conversation', a])).toBe(a);
+    expect(agyArgv(['agy', `--conversation=${a}`])).toBe(a);
+    expect(agyArgv(['agy', '--resume', a])).toBe(a);
+    expect(agyArgv(['agy', `--resume=${a}`])).toBe(a);
+    expect(agyArgv(['agy', '-r', a])).toBe(a);
+    expect(agyArgv(['agy', '--', '--resume', a])).toBe('');
+    expect(agyArgv(['agy', '--resume', a.toUpperCase()])).toBe('');
+    expect(agyResumedArgv(['agy', '--continue'])).toBe(true);
+    expect(agyResumedArgv(['agy', '-c'])).toBe(true);
+    expect(agyResumedArgv(['agy'])).toBe(false);
+    expect(agyConvId(`${a}.db`)).toBe(a);
+    expect(agyConvId(`${a}.db-wal`)).toBe(a);
+    expect(agyConvId(`${a}.db-shm`)).toBe(a);
+    expect(agyConvId('other.db')).toBe('');
+  });
+
+  test('resolves via argv, open /proc fd (mapping subagent to parent), conversation_summaries.db start/guess/resumed, locate and describe', async () => {
+    const e = newEnv();
+    e.procs.set(100, { ppid: 1, pgid: 100, start });
+    const s1 = sid(1);
+    const s2 = sid(2);
+    const sSub = sid(3);
+
+    // Argv wins immediately.
+    expect(await e.r.resolve('agy', { pid: 100, argv: ['agy', '--resume', s1], cwd })).toEqual(found(s1, SessionFrom.Argv));
+
+    // conversation_summaries.db: single fresh root session -> SessionFrom.Start; subagents & killed skipped.
+    const db1 = writeConvDb(e, s1, start + 1000);
+    writeConvDb(e, sSub, start + 2000);
+    writeSummaries(e, [
+      { id: s1, workspaces: [`file://${cwd}`], modified: new Date(start + 1000).toISOString().replace('T', ' ').replace('Z', '+00:00') },
+      { id: sSub, workspaces: [`file://${cwd}`], parent: s1, depth: 1, modified: new Date(start + 2000).toISOString() },
+      { id: sid(9), workspaces: [`file://${cwd}`], killed: 1, modified: new Date(start + 3000).toISOString() },
+    ]);
+    const stampBefore = await e.r.stamp('agy', { pid: 100, argv: ['agy'], cwd }, found('', ''));
+    expect(stampBefore).not.toBe('');
+    expect(await e.r.resolve('agy', { pid: 100, argv: ['agy'], cwd })).toEqual(found(s1, SessionFrom.Start));
+
+    // locate & describe work for agy via conversation_summaries.db (even with empty trajectory_metadata_blob).
+    const located = await e.r.locate('agy', s1);
+    expect(located.path).toBe(db1);
+    const info = await e.r.describe('agy', s1);
+    expect(info.cwd).toBe(cwd);
+    expect(info.started).toBeGreaterThan(0);
+
+    // Older session before start: ignored for plain `agy`, matched as Guess for `agy --continue`.
+    const oldTime = start - 2 * HOUR;
+    const e2 = newEnv();
+    e2.procs.set(100, { ppid: 1, pgid: 100, start });
+    writeConvDb(e2, s2, oldTime);
+    writeSummaries(e2, [{ id: s2, workspaces: [`file://${cwd}`], modified: new Date(oldTime).toISOString() }]);
+    expect(await e2.r.resolve('agy', { pid: 100, argv: ['agy'], cwd })).toBeNull();
+    expect(await e2.r.resolve('agy', { pid: 100, argv: ['agy', '--continue'], cwd })).toEqual(found(s2, SessionFrom.Guess));
+
+    // Open FD on Linux (/proc/<pid>/fd) maps a subagent DB back to its root parent conversation.
+    const pf = newProcfs(start - HOUR);
+    const e3 = newEnv();
+    e3.procRoot = pf.root;
+    const subDb = writeConvDb(e3, sSub, start);
+    writeConvDb(e3, s1, start);
+    writeSummaries(e3, [
+      { id: s1, workspaces: [`file://${cwd}`], modified: new Date(start).toISOString() },
+      { id: sSub, workspaces: [`file://${cwd}`], parent: s1, depth: 1, modified: new Date(start).toISOString() },
+    ]);
+    pf.add(200, 1, 200, 'agy', start, [], { '5': `${subDb}-wal` });
+    expect(await e3.r.resolve('agy', { pid: 200, argv: ['agy'], cwd })).toEqual(found(s1, SessionFrom.FD));
+
+    // A symlinked conversation_summaries.db file itself is refused by safeOpenDb.
+    const e4 = newEnv();
+    e4.procs.set(100, { ppid: 1, pgid: 100, start });
+    const outsideDir = e4.tempDir();
+    writeSummaries(e4, [{ id: s1, workspaces: [`file://${cwd}`], modified: new Date(start + 1000).toISOString() }], outsideDir);
+    const agyDir = posix.join(e4.home, '.gemini/antigravity-cli');
+    mkdirSync(agyDir, { recursive: true, mode: 0o700 });
+    symlinkSync(posix.join(outsideDir, 'conversation_summaries.db'), posix.join(agyDir, 'conversation_summaries.db'));
+    expect(await e4.r.resolve('agy', { pid: 100, argv: ['agy'], cwd })).toBeNull();
+  });
+
+  test('Claude Code readRecord succeeds when ~/.claude is a symlink to a private directory, but still rejects a symlinked record file', async () => {
+    const e = newEnv();
+    const startT = e.now - MIN;
+    e.procs.set(100, { ppid: 1, pgid: 100, start: startT });
+    const target = posix.join(e.tempDir(), 'real-claude');
+    e.record(target, 100, sid(5), cwd, startT);
+    symlinkSync(target, posix.join(e.home, '.claude'));
+    expect(await e.r.resolve('claude', { pid: 100, argv: ['claude'], cwd })).toEqual(found(sid(5), SessionFrom.PID));
+
+    // Replacing the record file itself with a symlink must still be refused.
+    const recPath = posix.join(target, 'sessions', '100.json');
+    const outside = e.write(posix.join(e.tempDir(), 'outside.json'), readFileSync(recPath, 'utf8'));
+    unlinkSync(recPath);
+    symlinkSync(outside, recPath);
+    expect(await e.r.resolve('claude', { pid: 100, argv: ['claude'], cwd })).toBeNull();
+  });
+
+  test('Antigravity deduplicates open .db/-wal/-shm FDs and isolates SQLite reads in ReadOnlySQLiteWorker', async () => {
+    const pf = newProcfs(start - HOUR);
+    const e = newEnv();
+    e.procRoot = pf.root;
+    const sParent = sid(10);
+    const sChild = sid(11);
+    const childDb = writeConvDb(e, sChild, start);
+    const parentDb = writeConvDb(e, sParent, start);
+    writeSummaries(e, [
+      { id: sParent, workspaces: [`file://${cwd}`], modified: new Date(start).toISOString() },
+      { id: sChild, workspaces: [`file://${cwd}`], parent: sParent, depth: 1, modified: new Date(start).toISOString() },
+    ]);
+    // Simulate a process holding .db, .db-wal, and .db-shm open for the same subagent DB
+    // alongside a child process holding the same FDs.
+    pf.add(300, 1, 300, 'agy', start, [], {
+      '5': childDb,
+      '6': `${childDb}-wal`,
+      '7': `${childDb}-shm`,
+    });
+    pf.add(301, 300, 300, 'agy-helper', start + 50, [], {
+      '3': childDb,
+      '4': `${childDb}-wal`,
+    });
+    expect(await e.r.resolve('agy', { pid: 300, argv: ['agy'], cwd })).toEqual(found(sParent, SessionFrom.FD));
+    expect((await e.r.locate('agy', sParent)).path).toBe(parentDb);
+    // Worker closes cleanly without hanging.
+    e.r.close();
+  });
+
+  test('ReadOnlySQLiteWorker.close() never respawns mid-withDb or on queued calls', async () => {
+    const e = newEnv();
+    const dbPath = posix.join(e.tempDir(), 'worker-close.db');
+    const db = new DatabaseSync(dbPath);
+    db.exec('CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (1);');
+    db.close();
+
+    const worker = new ReadOnlySQLiteWorker(2000, 10_000);
+    let secondRows: unknown = 'unset';
+    const first = worker.withDb({ path: dbPath }, async (all) => {
+      const r1 = await all('SELECT n FROM t');
+      expect(r1).toEqual([{ n: 1 }]);
+      expect(worker.running).toBe(true);
+      worker.close();
+      expect(worker.running).toBe(false);
+      secondRows = await all('SELECT n FROM t');
+      return secondRows;
+    });
+    const queued = worker.withDb({ path: dbPath }, async () => 'ran');
+    expect(await first).toBeNull();
+    expect(secondRows).toBeNull();
+    expect(await queued).toBeNull();
+    expect(worker.running).toBe(false);
+    expect(await worker.withDb({ path: dbPath }, async () => 'after')).toBeNull();
+    expect(worker.running).toBe(false);
   });
 });

@@ -61,6 +61,10 @@ export const CAPTURE_WAITS = 3;
  * first failure, twice as long after each next one, at most RETRY_MAX_MS. */
 export const RETRY_MIN_MS = 2000;
 export const RETRY_MAX_MS = 60_000;
+/** Maximum concurrent snapshot reads / adoptions per machine so a restart
+ * with many terminals does not burst-fetch every snapshot simultaneously. */
+export const MAX_CONCURRENT_READS = 4;
+export const MAX_CONCURRENT_ADOPTIONS = 4;
 
 /** How long the nth failure in a row waits before the next try. */
 export const retryAfter = (failures: number): number => Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** Math.max(0, failures - 1));
@@ -192,6 +196,16 @@ interface Saved {
 }
 
 interface Watched {
+  /** Monotonic counter bumped on pause/forget so pre-disconnect completions
+   * are ignored and never clobber post-reconnect state. */
+  epoch: number;
+  /** Aborts in-flight requests when paused or forgotten. */
+  ac: AbortController;
+  /** Whether the machine's backend was ready on the last sync. */
+  wasReady: boolean;
+  /** The cached list predates a disconnect/reconnect: keep shown preludes
+   * until the fresh post-reconnect list arrives. */
+  staleList: boolean;
   list?: HistoryList;
   /** The pids of the live terminals last seen. */
   pids: Map<string, number>;
@@ -227,6 +241,7 @@ let starts = 0;
 let stopFollowing: (() => void) | undefined;
 
 const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+const backendReady = (m: string) => useTerms.getState().machines[m]?.backend?.phase === 'ready';
 
 /** Codes of failures a later try may not have: the machine away or busy,
  * the network, a reply not understood, the hub's own failure. */
@@ -269,7 +284,7 @@ function snapshotKey(w: Watched, c: Choice): string {
  * while the page is hidden, once it is shown. */
 function askList(m: string, w: Watched) {
   w.due = true;
-  if (w.timer !== undefined || w.listing || hidden()) return;
+  if (w.timer !== undefined || w.listing || hidden() || !backendReady(m)) return;
   const wait = Math.max(LIST_SETTLE_MS, w.listedAt + LIST_GAP_MS - Date.now());
   w.timer = setTimeout(() => {
     w.timer = undefined;
@@ -279,37 +294,41 @@ function askList(m: string, w: Watched) {
 
 async function readList(m: string, w: Watched) {
   if (watched.get(m) !== w || !w.due || w.listing) return;
-  if (hidden()) return;
+  if (hidden() || !backendReady(m)) return;
+  const epoch = w.epoch;
+  const signal = w.ac.signal;
   w.due = false;
   w.listing = true;
   w.listedAt = Date.now();
   let ok = false;
   try {
-    const list = await listHistory(m);
-    if (watched.get(m) !== w) return;
+    const list = await listHistory(m, signal);
+    if (watched.get(m) !== w || w.epoch !== epoch) return;
     w.list = list;
+    w.staleList = false;
     w.failed.clear();
     ok = true;
   } catch {
     // The machine is away or refused: what was listed stays, and the list
     // is tried again after a while.
   } finally {
-    w.listing = false;
+    if (w.epoch === epoch) w.listing = false;
   }
-  if (watched.get(m) !== w) return;
+  if (watched.get(m) !== w || w.epoch !== epoch) return;
   if (ok) w.listFailures = 0;
-  else retryList(m, w);
+  else if (backendReady(m)) retryList(m, w);
   apply(m, w);
   if (w.due) askList(m, w);
 }
 
 /** Tries a failed list again after its back-off. */
 function retryList(m: string, w: Watched) {
+  const epoch = w.epoch;
   w.listFailures++;
   clearTimeout(w.retryTimer);
   w.retryTimer = setTimeout(() => {
     w.retryTimer = undefined;
-    if (watched.get(m) !== w) return;
+    if (watched.get(m) !== w || w.epoch !== epoch) return;
     w.due = true;
     void readList(m, w);
   }, retryAfter(w.listFailures));
@@ -335,11 +354,13 @@ function hide(m: string, w: Watched, address: string) {
  * back-off. */
 function read(m: string, w: Watched, c: Choice, key: string) {
   if (w.reading.has(key)) return;
+  const epoch = w.epoch;
+  const signal = w.ac.signal;
   w.reading.add(key);
-  readHistory(m, c.terminal, c.generation)
+  readHistory(m, c.terminal, c.generation, signal)
     .then(
       (r) => {
-        if (watched.get(m) !== w) return;
+        if (watched.get(m) !== w || w.epoch !== epoch) return;
         w.readFailures.delete(key);
         if (r.pid === c.snapshot.pid && r.at === c.snapshot.at) w.bytes.set(key, { bytes: r.bytes, cols: r.cols, rows: r.rows });
         else {
@@ -348,12 +369,13 @@ function read(m: string, w: Watched, c: Choice, key: string) {
         }
       },
       (e) => {
-        if (watched.get(m) !== w) return;
+        if (watched.get(m) !== w || w.epoch !== epoch) return;
         w.failed.add(key);
         if (!transient(e)) {
           if (e instanceof HistoryError && e.code === 'not_found') askList(m, w);
           return;
         }
+        if (!backendReady(m)) return;
         const n = (w.readFailures.get(key) ?? 0) + 1;
         w.readFailures.set(key, n);
         clearTimeout(w.readRetries.get(key));
@@ -361,7 +383,7 @@ function read(m: string, w: Watched, c: Choice, key: string) {
           key,
           setTimeout(() => {
             w.readRetries.delete(key);
-            if (watched.get(m) !== w) return;
+            if (watched.get(m) !== w || w.epoch !== epoch) return;
             w.failed.delete(key);
             apply(m, w);
           }, retryAfter(n)),
@@ -369,6 +391,7 @@ function read(m: string, w: Watched, c: Choice, key: string) {
       },
     )
     .finally(() => {
+      if (w.epoch !== epoch) return;
       w.reading.delete(key);
       if (watched.get(m) === w) apply(m, w);
     });
@@ -387,26 +410,34 @@ function adopt(m: string, w: Watched, leaf: L.TerminalLeaf, record: TerminalReco
   if (!newest) return;
   const was = w.adoptions.get(leaf.terminal);
   if (was?.from === from && (was.busy || was.done || was.timer !== undefined)) return;
+  const epoch = w.epoch;
+  const signal = w.ac.signal;
   const a: Adoption = { from, busy: true, done: false, failures: was?.from === from ? was.failures : 0 };
   w.adoptions.set(leaf.terminal, a);
-  adoptHistory(m, from, leaf.terminal).then(
+  adoptHistory(m, from, leaf.terminal, signal).then(
     (moved) => {
+      if (watched.get(m) !== w || w.epoch !== epoch) return;
       a.busy = false;
       a.done = true;
       if (moved) a.moved = { pid: newest.pid, at: newest.at };
-      if (watched.get(m) === w) askList(m, w);
+      askList(m, w);
+      apply(m, w);
     },
     (err) => {
+      if (watched.get(m) !== w || w.epoch !== epoch) return;
       a.busy = false;
       if (!transient(err)) {
         a.done = true;
+        apply(m, w);
         return;
       }
+      if (!backendReady(m)) return;
       a.failures++;
       a.timer = setTimeout(() => {
         a.timer = undefined;
-        if (watched.get(m) === w) apply(m, w);
+        if (watched.get(m) === w && w.epoch === epoch) apply(m, w);
       }, retryAfter(a.failures));
+      apply(m, w);
     },
   );
 }
@@ -417,7 +448,7 @@ function adopt(m: string, w: Watched, leaf: L.TerminalLeaf, record: TerminalReco
  * machine's terminals are not known again yet) keeps what it shows. */
 function apply(m: string, w: Watched) {
   const mt = useTerms.getState().machines[m];
-  if (!w.list || !mt?.layout) return;
+  if (!w.list || w.staleList || !mt?.layout || mt.backend?.phase !== 'ready') return;
   const entries = new Map(w.list.terminals.map((e) => [e.terminal, e]));
   const want = new Map<string, Choice>();
   const keep = new Set<string>();
@@ -441,14 +472,21 @@ function apply(m: string, w: Watched) {
     if (w.shown.get(address) === key) continue;
     if (w.bytes.has(key)) show(m, w, address, key, c);
     else if (w.failed.has(key)) hide(m, w, address);
-    else read(m, w, c, key);
+    else if (w.reading.size < MAX_CONCURRENT_READS) read(m, w, c, key);
   }
   // A snapshot is moved once what the leaf shows was read (or failed):
   // the machine removes the files of the one it moves from.
+  let adopting = 0;
+  for (const a of w.adoptions.values()) if (a.busy) adopting++;
   for (const [leaf, record] of leaves) {
+    if (adopting >= MAX_CONCURRENT_ADOPTIONS) break;
     const c = want.get(leaf.terminal);
     const key = c && snapshotKey(w, c);
-    if (key === undefined || w.shown.get(leaf.terminal) === key || w.failed.has(key)) adopt(m, w, leaf, record, entries);
+    if (key === undefined || w.shown.get(leaf.terminal) === key || w.failed.has(key)) {
+      const wasBusy = w.adoptions.get(leaf.terminal)?.busy === true;
+      adopt(m, w, leaf, record, entries);
+      if (!wasBusy && w.adoptions.get(leaf.terminal)?.busy) adopting++;
+    }
   }
   // Bytes no leaf wants go, with the tries of their reads.
   const keys = new Set([...want.values()].map((c) => snapshotKey(w, c)));
@@ -483,16 +521,35 @@ function awaitCapture(m: string, w: Watched, waiting: boolean) {
   );
 }
 
+/** Pauses timers and retries while a machine's backend is not ready (offline,
+ * rebooting, disabled), keeping shown preludes and cached bytes intact. */
+function pause(w: Watched) {
+  w.epoch++;
+  w.ac.abort();
+  w.ac = new AbortController();
+  w.listing = false;
+  w.reading.clear();
+  clearTimeout(w.timer);
+  w.timer = undefined;
+  clearTimeout(w.retryTimer);
+  w.retryTimer = undefined;
+  clearTimeout(w.waitTimer);
+  w.waitTimer = undefined;
+  for (const timer of w.readRetries.values()) clearTimeout(timer);
+  w.readRetries.clear();
+  for (const a of w.adoptions.values()) {
+    a.busy = false;
+    clearTimeout(a.timer);
+    a.timer = undefined;
+  }
+}
+
 /** Stops following machine m: its preludes go. */
 function forget(m: string) {
   const w = watched.get(m);
   if (!w) return;
   watched.delete(m);
-  clearTimeout(w.timer);
-  clearTimeout(w.retryTimer);
-  clearTimeout(w.waitTimer);
-  for (const timer of w.readRetries.values()) clearTimeout(timer);
-  for (const a of w.adoptions.values()) clearTimeout(a.timer);
+  pause(w);
   for (const address of [...w.shown.keys()]) setPrelude(m, address, undefined);
 }
 
@@ -502,13 +559,25 @@ function sync() {
   const values = useSettings.getState().values;
   for (const m of [...watched.keys()]) if (!machines[m] || !captureOn(m, values)) forget(m);
   for (const [m, mt] of Object.entries(machines)) {
-    // A machine whose terminals are not there (it is coming back) keeps
-    // what it shows.
-    if (!captureOn(m, values) || mt.backend?.phase !== 'ready') continue;
-    const pids = livePids(mt.terminals);
+    if (!captureOn(m, values)) continue;
+    const ready = mt.backend?.phase === 'ready';
     let w = watched.get(m);
+    if (!ready) {
+      // A machine whose terminals are not there (offline, rebooting or
+      // disabled) pauses its polling and keeps what it shows.
+      if (w && w.wasReady) {
+        w.wasReady = false;
+        pause(w);
+      }
+      continue;
+    }
+    const pids = livePids(mt.terminals);
     if (!w) {
       w = {
+        epoch: 0,
+        ac: new AbortController(),
+        wasReady: true,
+        staleList: false,
         pids,
         listedAt: 0,
         due: false,
@@ -524,6 +593,28 @@ function sync() {
         adoptions: new Map(),
       };
       watched.set(m, w);
+      askList(m, w);
+    } else if (!w.wasReady) {
+      // Returned from offline/reboot/disable: clear back-off and mark any
+      // pre-disconnect list stale until refreshed.
+      w.wasReady = true;
+      w.staleList = w.list !== undefined;
+      w.listFailures = 0;
+      w.waits = 0;
+      w.listedAt = 0;
+      w.failed.clear();
+      w.readFailures.clear();
+      for (const timer of w.readRetries.values()) clearTimeout(timer);
+      w.readRetries.clear();
+      for (const a of w.adoptions.values()) {
+        a.failures = 0;
+        clearTimeout(a.timer);
+        a.timer = undefined;
+      }
+      clearTimeout(w.retryTimer);
+      w.retryTimer = undefined;
+      clearTimeout(w.waitTimer);
+      w.waitTimer = undefined;
       askList(m, w);
     } else if (newPrograms(w.pids, pids)) {
       w.waits = 0;
@@ -572,6 +663,7 @@ export function historyCleared(m: string) {
   const w = watched.get(m);
   if (!w) return;
   w.list = { terminals: [], restoreScreen: w.list?.restoreScreen ?? false };
+  w.staleList = false;
   w.bytes.clear();
   apply(m, w);
   askList(m, w);

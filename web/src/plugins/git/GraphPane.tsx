@@ -179,8 +179,12 @@ export function GraphPane({ m, view }: PaneViewProps) {
   // most 1000). Each read replaces the paging: answers for an earlier one
   // (another filter's, an older list's) are dropped.
   const page = useRef<Paging>(newPaging());
+  const pageAbort = useRef<AbortController | undefined>(undefined);
   const scope = useRef('');
   useEffect(() => {
+    pageAbort.current?.abort();
+    const ac = new AbortController();
+    pageAbort.current = ac;
     const sc = `${m}\u0000${repo}\u0000${filterKeyNow}\u0000${remotes}`;
     const limit = scope.current === sc ? Math.min(1000, Math.max(pageLimit, page.current.next)) : pageLimit;
     scope.current = sc;
@@ -188,16 +192,16 @@ export function GraphPane({ m, view }: PaneViewProps) {
     page.current = pg;
     setLoadingMore(false);
     gitApi
-      .log(m, repo, { limit, branches: filter.length ? filter : undefined, remotes })
+      .log(m, repo, { limit, branches: filter.length ? filter : undefined, remotes, signal: ac.signal })
       .then((l) => {
-        if (page.current !== pg) return;
+        if (page.current !== pg || ac.signal.aborted) return;
         pg.next = l.commits.length;
         pg.ready = true;
         setData({ commits: l.commits, more: l.more, refs: l.refs ?? [], stashes: l.stashes ?? [], head: l.head, branch: l.branch });
         setError(undefined);
       })
       .catch((e) => {
-        if (page.current !== pg) return;
+        if (page.current !== pg || ac.signal.aborted) return;
         // A ref of the filter is gone (deleted elsewhere): every branch.
         if (filter.length && e instanceof GitError && e.code === 'bad_ref') {
           setFilter([]);
@@ -206,6 +210,7 @@ export function GraphPane({ m, view }: PaneViewProps) {
         }
         setError(errorText(e));
       });
+    return () => ac.abort();
     // The filter is in filterKeyNow.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [m, repo, filterKeyNow, remotes, version, pageLimit]);
@@ -224,13 +229,20 @@ export function GraphPane({ m, view }: PaneViewProps) {
     if (!data?.more || !pg.ready || pg.loading || pg.failed) return;
     pg.loading = true;
     setLoadingMore(true);
+    const signal = pageAbort.current?.signal;
     try {
-      const l = await gitApi.log(m, repo, { skip: pg.next, limit: pageLimit, branches: filter.length ? filter : undefined, remotes });
-      if (page.current !== pg) return;
+      const l = await gitApi.log(m, repo, {
+        skip: pg.next,
+        limit: pageLimit,
+        branches: filter.length ? filter : undefined,
+        remotes,
+        signal,
+      });
+      if (page.current !== pg || signal?.aborted) return;
       pg.next += l.commits.length;
       setData((d) => d && { ...d, commits: appendCommits(d.commits, l.commits), more: l.more && l.commits.length > 0 });
     } catch (e) {
-      if (page.current !== pg) return;
+      if (page.current !== pg || signal?.aborted) return;
       // Not asked again until the list is read again.
       pg.failed = true;
       setError(errorText(e));

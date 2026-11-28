@@ -64,14 +64,17 @@ test('kinds keep the UI’s commands', () => {
       expect(k.start).toEqual([k.id]);
     }
   }
-  expect(cont).toEqual({ claude: 'claude --continue', codex: 'codex resume --last' });
-  expect(started).toEqual(['claude', 'codex', 'gemini', 'opencode', 'kimi', 'grok', 'cursor', 'copilot', 'qwen', 'amp']);
+  expect(cont).toEqual({ claude: 'claude --continue', codex: 'codex resume --last', agy: 'agy --continue' });
+  expect(started).toEqual(['claude', 'codex', 'agy', 'gemini', 'opencode', 'kimi', 'grok', 'cursor', 'copilot', 'qwen', 'amp']);
   const claude = byId('claude')!;
   expect(claude.resumeById).toEqual(['claude', '--resume', PLACEHOLDER]);
   expect([...claude.start!, ...claude.newSession!]).toEqual(['claude', '--session-id', PLACEHOLDER]);
   const codex = byId('codex')!;
   expect(codex.resumeById).toEqual(['codex', 'resume', PLACEHOLDER]);
   expect(codex.newSession).toBeUndefined();
+  const agy = byId('agy')!;
+  expect(agy.resumeById).toEqual(['agy', '--resume', PLACEHOLDER]);
+  expect(agy.newSession).toBeUndefined();
   expect(byId('nobody')).toBeUndefined();
 });
 
@@ -132,7 +135,7 @@ test('kinds are copies', () => {
 // TCP port without authentication.
 test('chat kinds', () => {
   const manifests = manifestIds();
-  expect(ids(chatKinds())).toEqual(['claude', 'codex', 'kimi', 'grok']);
+  expect(ids(chatKinds())).toEqual(['claude', 'codex', 'agy', 'kimi', 'grok']);
   for (const k of all()) {
     const spec = chatSpec(k.id);
     if (!k.chat) {
@@ -157,6 +160,7 @@ test('chat kinds', () => {
   const want: Record<string, string> = {
     claude: 'claude [claude]',
     codex: 'codex [codex app-server --listen stdio://]',
+    agy: 'acp [agy acp --stdio]',
     kimi: 'acp [kimi acp]',
     grok: 'acp [grok agent --no-leader stdio]',
   };
@@ -172,6 +176,9 @@ describe('JSON', () => {
   test('a kind', () => {
     expect(JSON.stringify(byId('codex'))).toBe(
       '{"id":"codex","title":"Codex","usageProvider":"codex","start":["codex"],"continueLatest":["codex","resume","--last"],"resumeById":["codex","resume","{id}"],"transcript":"codex","chat":{"adapter":"codex"}}',
+    );
+    expect(JSON.stringify(byId('agy'))).toBe(
+      '{"id":"agy","title":"Antigravity","usageProvider":"antigravity","start":["agy"],"continueLatest":["agy","--continue"],"resumeById":["agy","--resume","{id}"],"transcript":"agy","chat":{"adapter":"acp"}}',
     );
     // A chat's command, environment and session metadata stay on the
     // machine's side.

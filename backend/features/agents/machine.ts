@@ -62,6 +62,7 @@ export function agentsMachine(o: AgentsMachineOptions = {}) {
         resolve: (p) => resolveSession(resolver, p),
       },
       ops: { [Op.Detect]: serveDetect(o.detect) },
+      close: () => resolver.close(),
     };
   });
 }

@@ -29,6 +29,7 @@ jobs:
             desktop/pnpm-lock.yaml
             e2e/pnpm-lock.yaml
             backend/pnpm-lock.yaml
+            site/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -46,6 +47,7 @@ jobs:
       - run: pnpm -C desktop test
         env:
           EXTENDED_TESTS: 1
+      - run: pnpm -C site test
 
   integration:
     runs-on: ubuntu-24.04
@@ -118,6 +120,7 @@ jobs:
             desktop/pnpm-lock.yaml
             e2e/pnpm-lock.yaml
             backend/pnpm-lock.yaml
+            site/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:

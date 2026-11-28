@@ -10,17 +10,47 @@
 // read again, nor one read here lately; one that grew is read on. At most
 // 2 sessions are read at once; a transcript over MAX_SESSION_BYTES, or a
 // session of more records than are held, is too large.
-import type { FileHandle } from 'node:fs/promises';
+import { lstat, readdir, realpath, type FileHandle } from 'node:fs/promises';
+import { posix } from 'node:path';
 import type { z } from 'zod';
 import { Fail } from '#shared/lib/fail.ts';
+import { validSessionId } from '#shared/agents/kinds.ts';
 import { TranscriptCode } from '#shared/proto/agentproto/transcript.ts';
-import { SessionError, type Resolver, type SessionFile } from '#machine/agents/sessions.ts';
+import {
+  LIMITS,
+  SessionError,
+  TIMING,
+  claudeInfoOf,
+  claudeProjectDirs,
+  clean,
+  codexDays,
+  mtimeOf,
+  rolloutId,
+  sameDir,
+  type Resolver,
+  type SessionFile,
+} from '#machine/agents/sessions.ts';
 import type { sessionUsage } from '../protocol.ts';
-import { obj, type UsageEnv } from './env.ts';
-import { NotRegular, eachLineBackward, endsLine, readLines } from './logs.ts';
-import { LOG, claudeLine, claudeUsage, codexParser, type Entry, type Rec } from './parsers.ts';
-import { contextWindow, pricingWith, tierCost, tierOf, type Tier } from './pricing.ts';
-import { RETENTION, dedupe, type CostScanner } from './scan.ts';
+import {
+  DB_LIMITS,
+  DBError,
+  dbFiles,
+  readAntigravitySession,
+  readAntigravitySummaries,
+  readAntigravityTrajectory,
+  readOpenCodeSession,
+  type AntigravitySummary,
+  type DBLimits,
+  type DBRead,
+} from './databases.ts';
+import { isObj, obj, str, type UsageEnv } from './env.ts';
+import { kimiHome } from './kimi.ts';
+import { grokHome } from './limits.ts';
+import { NotRegular, eachLineBackward, endsLine, openRegular, readLines } from './logs.ts';
+import { LOG, claudeLine, claudeUsage, codexParser, grokUpdate, kimiLine, kimiModelName, type Entry, type Rec } from './parsers.ts';
+import { OPENCODE_TABLES, antigravityTable, contextWindow, pricingWith, tierCost, tierOf, type Tier } from './pricing.ts';
+import { RETENTION, antigravityDBs, dedupe, openCodeDBs, type CostScanner } from './scan.ts';
+import { SQLiteWorker } from './sqlworker.ts';
 
 /** A transcript of a session: its path (the key of what is kept of it)
  * and how to open it as the file the locator found (no symbolic link
@@ -33,7 +63,7 @@ export interface Transcript {
 
 /** Finds a session's transcripts, its own first, then its subagents'.
  * Throws Fail not_found (none yet), compressed or bad_params. */
-export type LocateSession = (kind: string, session: string, signal: AbortSignal) => Promise<Transcript[]>;
+export type LocateSession = (kind: string, session: string, signal: AbortSignal, codexHomes?: readonly string[]) => Promise<Transcript[]>;
 
 /** The locator of the coding agents' sessions (backend/machine/agents),
  * which the agents feature and the chat host use too: a session's
@@ -46,10 +76,10 @@ export function sessionsLocator(r: Resolver): LocateSession {
     if (!h) throw Object.assign(new Error('usage: the transcript is not the file located'), { code: 'ENOENT' });
     return h;
   };
-  return async (kind, session) => {
+  return async (kind, session, _signal, codexHomes) => {
     let f: SessionFile;
     try {
-      f = await r.locate(kind, session);
+      f = await r.locate(kind, session, codexHomes);
     } catch (err) {
       if (!(err instanceof SessionError)) throw err;
       if (err.code === 'not_found') throw new Fail(TranscriptCode.NotFound, 404, 'usage: no transcript of the session');
@@ -103,9 +133,24 @@ const recordBytes = (r: Rec) => RECORD_BYTES + r.k.length + r.m.length + r.s.len
 /** A session too large to read. */
 const tooLarge = () => new Fail('too_large', 400, 'usage: a transcript of the session is too large');
 
-/** The kind of log of a provider's transcripts. */
-const logKind = (provider: string): string | undefined =>
-  provider === 'claude' ? LOG.claude : provider === 'codex' ? LOG.codex : undefined;
+/** The kind of log of a provider's file-based transcripts. */
+const fileLogKind = (provider: string): string | undefined => {
+  switch (provider) {
+    case 'claude':
+      return LOG.claude;
+    case 'codex':
+      return LOG.codex;
+    case 'grok':
+      return LOG.grok;
+    case 'kimi':
+      return LOG.kimi;
+    default:
+      return undefined;
+  }
+};
+
+/** The provider of an agent kind whose sessions can be priced. */
+export const SESSION_PROVIDERS: ReadonlySet<string> = new Set(['claude', 'codex', 'grok', 'kimi', 'antigravity', 'opencode']);
 
 /** What a read of a transcript found, kept for the next. */
 interface Read {
@@ -151,10 +196,36 @@ export function cutModel(m: string): string {
   return b.subarray(0, i).toString('utf8');
 }
 
+/** Idle lifetime for pooled SQLite workers kept between session polls. */
+const IDLE_WORKER_MS = 30_000;
+const MAX_AG_SUM_MEMO = 16;
+const MAX_AG_TRAJ_MEMO = 64;
+
+type AgSessionResult = Awaited<ReturnType<typeof readAntigravitySession>>;
+type OcSessionResult = Awaited<ReturnType<typeof readOpenCodeSession>>;
+
+interface DBMemoEntry {
+  stamp: string;
+  cutoff: number;
+  bytes: number;
+  use: number;
+  value: AgSessionResult | OcSessionResult;
+}
+
 /** The sessions' reads of an agent and what they keep. */
 export class SessionReader {
   private readonly memo = new Map<string, Read>();
   private memoBytes = 0;
+  private readonly dbMemo = new Map<string, DBMemoEntry>();
+  private dbMemoBytes = 0;
+  private readonly agSumMemo = new Map<string, { stamp: string; summaries: AntigravitySummary[]; use: number }>();
+  private readonly agTrajMemo = new Map<
+    string,
+    { stamp: string; traj: { workspace: string; project: string; ts: number } | null; use: number }
+  >();
+  private readonly idleWorkers: Array<{ w: SQLiteWorker; ms: number; timer: ReturnType<typeof setTimeout> }> = [];
+  private closed = false;
+  private dbReadCount = 0;
   private use = 0;
   private running = 0;
   private readonly waiting: (() => void)[] = [];
@@ -166,21 +237,171 @@ export class SessionReader {
     this.l = l;
   }
 
+  /** Borrows an idle SQLiteWorker for ms or creates a fresh one. */
+  borrowWorker(ms: number): SQLiteWorker {
+    const idx = this.idleWorkers.findIndex((e) => e.ms === ms && e.w.running);
+    if (idx >= 0) {
+      const [entry] = this.idleWorkers.splice(idx, 1);
+      clearTimeout(entry!.timer);
+      return entry!.w;
+    }
+    return new SQLiteWorker(ms);
+  }
+
+  /** Returns a healthy worker to the bounded idle pool, or terminates it. */
+  returnWorker(w: SQLiteWorker, ms: number): void {
+    if (this.closed || !w.running || this.idleWorkers.length >= this.l.parallel) {
+      w.close();
+      return;
+    }
+    const entry = {
+      w,
+      ms,
+      timer: setTimeout(() => {
+        const i = this.idleWorkers.indexOf(entry);
+        if (i >= 0) this.idleWorkers.splice(i, 1);
+        w.close();
+      }, IDLE_WORKER_MS),
+    };
+    entry.timer.unref?.();
+    this.idleWorkers.push(entry);
+  }
+
+  /** Terminates any pooled idle SQLite workers (called on agent shutdown). */
+  close(): void {
+    this.closed = true;
+    for (const e of this.idleWorkers.splice(0)) {
+      clearTimeout(e.timer);
+      e.w.close();
+    }
+  }
+
+  /** Number of uncached SQLite session reads performed (tests). */
+  get dbReads(): number {
+    return this.dbReadCount;
+  }
+
+  noteDbRead(): void {
+    this.dbReadCount++;
+  }
+
+  getAgSummaries(path: string, stamp: string): AntigravitySummary[] | undefined {
+    const hit = this.agSumMemo.get(path);
+    if (!hit || hit.stamp !== stamp) return undefined;
+    hit.use = ++this.use;
+    return hit.summaries;
+  }
+
+  putAgSummaries(path: string, stamp: string, summaries: AntigravitySummary[]): void {
+    this.agSumMemo.set(path, { stamp, summaries, use: ++this.use });
+    while (this.agSumMemo.size > MAX_AG_SUM_MEMO) {
+      let oldest: string | undefined;
+      for (const [k, v] of this.agSumMemo) if (oldest === undefined || v.use < this.agSumMemo.get(oldest)!.use) oldest = k;
+      this.agSumMemo.delete(oldest!);
+    }
+  }
+
+  getAgTrajectory(
+    path: string,
+    stamp: string,
+  ): { hit: true; traj: { workspace: string; project: string; ts: number } | null } | { hit: false } {
+    const hit = this.agTrajMemo.get(path);
+    if (!hit || hit.stamp !== stamp) return { hit: false };
+    hit.use = ++this.use;
+    return { hit: true, traj: hit.traj };
+  }
+
+  putAgTrajectory(path: string, stamp: string, traj: { workspace: string; project: string; ts: number } | null): void {
+    this.agTrajMemo.set(path, { stamp, traj, use: ++this.use });
+    while (this.agTrajMemo.size > MAX_AG_TRAJ_MEMO) {
+      let oldest: string | undefined;
+      for (const [k, v] of this.agTrajMemo) if (oldest === undefined || v.use < this.agTrajMemo.get(oldest)!.use) oldest = k;
+      this.agTrajMemo.delete(oldest!);
+    }
+  }
+
+  getDbSession<T extends AgSessionResult | OcSessionResult>(
+    key: string,
+    stamp: string,
+    cutoff: number,
+  ): { hit: true; value: T } | { hit: false } {
+    const e = this.dbMemo.get(key);
+    if (!e || e.stamp !== stamp || cutoff < e.cutoff) return { hit: false };
+    e.use = ++this.use;
+    return { hit: true, value: e.value as T };
+  }
+
+  putDbSession(key: string, stamp: string, cutoff: number, value: AgSessionResult | OcSessionResult): void {
+    const old = this.dbMemo.get(key);
+    if (old) {
+      this.dbMemoBytes -= old.bytes;
+      this.dbMemo.delete(key);
+    }
+    const recs = value ? value.records : [];
+    const bytes = recs.reduce((n, x) => n + recordBytes(x), 64);
+    if (bytes > this.l.memoBytes) return;
+    this.dbMemo.set(key, { stamp, cutoff, bytes, use: ++this.use, value });
+    this.dbMemoBytes += bytes;
+    while (this.dbMemo.size > this.l.memoFiles || this.dbMemoBytes > this.l.memoBytes) {
+      let oldest: string | undefined;
+      for (const [k, v] of this.dbMemo) if (oldest === undefined || v.use < this.dbMemo.get(oldest)!.use) oldest = k;
+      this.dbMemoBytes -= this.dbMemo.get(oldest!)!.bytes;
+      this.dbMemo.delete(oldest!);
+    }
+  }
+
   /** What a session of provider used: files are its transcripts, its own
    * first. A response that several of them recorded counts once (the
    * record with the most output). */
   async cost(e: UsageEnv, provider: string, files: Transcript[], own: Record<string, Tier> | undefined): Promise<SessionUsage> {
-    const kind = logKind(provider);
+    const kind = fileLogKind(provider);
     if (!kind) throw new Fail('bad_params', 400, 'usage: not a session of an agent whose sessions are priced');
     if (!files.length) throw new Fail('not_found', 404, 'usage: no transcript of the session');
-    await this.slot(e.signal);
+    return this.withSlot(e.signal, () => this.read(e, provider, kind, files, own));
+  }
+
+  /** Runs fn while holding one of this reader's parallel session slots so
+   * file-based and SQLite-backed session reads share the same bound. */
+  async withSlot<T>(signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+    await this.slot(signal);
     try {
-      return await this.read(e, provider, kind, files, own);
+      return await fn();
     } finally {
-      const next = this.waiting.shift();
-      if (next) next();
-      else this.running--;
+      this.releaseSlot();
     }
+  }
+
+  /** Prices records already read while holding a slot (no nested slot acquire). */
+  priceRecords(
+    e: UsageEnv,
+    provider: string,
+    records: readonly Rec[],
+    context: { model: string; used: number; window?: number; tableProvider?: string },
+    own: Record<string, Tier> | undefined,
+  ): SessionUsage {
+    if (!SESSION_PROVIDERS.has(provider)) throw new Fail('bad_params', 400, 'usage: not a session of an agent whose sessions are priced');
+    const held = new Held(this.l);
+    held.add(records);
+    return this.summarize(e, provider, [records], context, own);
+  }
+
+  /** Prices records read from a database-backed session (Antigravity,
+   * OpenCode) with the same cutoff, deduplication, bounds and slot limit
+   * as file-based transcripts. */
+  async costRecords(
+    e: UsageEnv,
+    provider: string,
+    records: readonly Rec[],
+    context: { model: string; used: number; window?: number; tableProvider?: string },
+    own: Record<string, Tier> | undefined,
+  ): Promise<SessionUsage> {
+    return this.withSlot(e.signal, async () => this.priceRecords(e, provider, records, context, own));
+  }
+
+  private releaseSlot(): void {
+    const next = this.waiting.shift();
+    if (next) next();
+    else this.running--;
   }
 
   private async slot(signal: AbortSignal): Promise<void> {
@@ -211,10 +432,8 @@ export class SessionReader {
     files: Transcript[],
     own: Record<string, Tier> | undefined,
   ): Promise<SessionUsage> {
-    const cutoff = Math.floor(e.now() / 1000) - RETENTION;
     const held = new Held(this.l);
-    const best = new Map<string, number>();
-    const recs: Rec[] = [];
+    const lists: (readonly Rec[])[] = [];
     let main: Read | undefined;
     for (const [i, f] of files.entries()) {
       e.signal.throwIfAborted();
@@ -226,7 +445,27 @@ export class SessionReader {
         throw err;
       }
       if (i === 0) main = r;
-      for (const x of r.ent.records) {
+      lists.push(r.ent.records);
+    }
+    let model = main!.model;
+    // The last turn's model, also before its first response.
+    if (kind === LOG.codex && main!.ent.codex?.model) model = main!.ent.codex.model;
+    if (!model) model = main!.ent.records.at(-1)?.m ?? '';
+    return this.summarize(e, provider, lists, { model, used: main!.used, window: main!.window }, own);
+  }
+
+  private summarize(
+    e: UsageEnv,
+    provider: string,
+    lists: readonly (readonly Rec[])[],
+    context: { model: string; used: number; window?: number; tableProvider?: string },
+    own: Record<string, Tier> | undefined,
+  ): SessionUsage {
+    const cutoff = Math.floor(e.now() / 1000) - RETENTION;
+    const best = new Map<string, number>();
+    const recs: Rec[] = [];
+    for (const list of lists) {
+      for (const x of list) {
         if (x.t < cutoff || x.e) continue;
         if (!x.k) {
           recs.push(x);
@@ -241,7 +480,8 @@ export class SessionReader {
     }
     const u = { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0, requests: 0, cost: 0, priced: true };
     for (const r of recs) {
-      const { price } = pricingWith(provider, r.m, own);
+      const table = provider === 'opencode' ? (OPENCODE_TABLES[r.v] ?? '') : provider === 'antigravity' ? antigravityTable(r.m) : provider;
+      const { price } = pricingWith(table, r.m, own);
       const cost = price ? tierCost(tierOf(price, r.x || r.i + r.c + r.w + r.h), r.i, r.c, r.w, r.h, r.o) : r.p;
       u.input += r.i;
       u.cached += r.c;
@@ -252,12 +492,19 @@ export class SessionReader {
       u.cost += cost;
       u.priced &&= !!price || r.p > 0;
     }
-    let model = main!.model;
-    // The last turn's model, also before its first response.
-    if (kind === LOG.codex && main!.ent.codex?.model) model = main!.ent.codex.model;
-    if (!model) model = main!.ent.records.at(-1)?.m ?? '';
-    let size = main!.window;
-    if (!size && model) size = contextWindow(provider, model);
+    let model = context.model;
+    if (!model) model = recs.at(-1)?.m ?? '';
+    if (model === 'unknown') model = '';
+    let size = context.window ?? 0;
+    if (!size && model) {
+      const table =
+        provider === 'opencode'
+          ? (OPENCODE_TABLES[context.tableProvider ?? recs.at(-1)?.v ?? ''] ?? '')
+          : provider === 'antigravity'
+            ? antigravityTable(model)
+            : provider;
+      if (table) size = contextWindow(table, model);
+    }
     model = cutModel(model);
     const out: SessionUsage = {
       input: u.input,
@@ -270,7 +517,7 @@ export class SessionReader {
     };
     if (model) out.model = model;
     if (u.reasoning) out.reasoning = u.reasoning;
-    if (main!.used) out.contextUsed = main!.used;
+    if (context.used) out.contextUsed = context.used;
     if (size) out.contextSize = size;
     return out;
   }
@@ -357,6 +604,10 @@ export class SessionReader {
       const p = codexParser(path, ent.codex, ent.records);
       line = p.line;
       done = () => (ent.codex = p.state());
+    } else if (kind === LOG.grok) {
+      line = (l) => grokUpdate(path, l, ent.records);
+    } else if (kind === LOG.kimi) {
+      line = (l) => kimiLine('', l, ent.records);
     } else line = (l) => claudeLine(path, l, ent.records);
     ent.off = await readLines(
       fh,
@@ -431,6 +682,40 @@ async function latestContext(
         out.used = n;
         return true;
       }
+      if (kind === LOG.grok) {
+        if (!line.includes('"turn_completed"') || !line.includes('"usage"')) return false;
+        const d = parse(line);
+        const update = obj(obj(d?.params).update);
+        if (!d || update.sessionUpdate !== 'turn_completed') return false;
+        const usage = obj(update.usage);
+        const byModel = isObj(usage.modelUsage) && Object.keys(usage.modelUsage).length ? usage.modelUsage : { '': usage };
+        for (const m of Object.keys(byModel).sort()) {
+          const u = obj(byModel[m]);
+          const input = typeof u.inputTokens === 'number' && Number.isFinite(u.inputTokens) ? Math.trunc(u.inputTokens) : 0;
+          const created =
+            typeof u.cacheCreationTokens === 'number' && Number.isFinite(u.cacheCreationTokens) ? Math.trunc(u.cacheCreationTokens) : 0;
+          const calls =
+            typeof u.modelCalls === 'number' && Number.isFinite(u.modelCalls) && u.modelCalls > 0 ? Math.trunc(u.modelCalls) : 1;
+          if (input + created <= 0) continue;
+          out.model = m;
+          out.used = Math.max(Math.trunc((input + created) / calls), 1);
+          return true;
+        }
+        return false;
+      }
+      if (kind === LOG.kimi) {
+        if (!line.includes('"usage.record"')) return false;
+        const d = parse(line);
+        if (!d || d.type !== 'usage.record') return false;
+        const u = obj(d.usage);
+        const tok = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.trunc(v) : 0);
+        const n = tok(u.inputOther) + tok(u.inputCacheRead) + tok(u.inputCacheCreation);
+        if (n <= 0) return false;
+        const m = kimiModelName(str(d.model));
+        out.model = m === 'unknown' ? '' : m;
+        out.used = n;
+        return true;
+      }
       if (!line.includes('"token_count"')) return false;
       const p = obj(parse(line)?.payload);
       if (p.type !== 'token_count' || !p.info || typeof p.info !== 'object') return false;
@@ -454,3 +739,588 @@ function parse(line: string): Record<string, unknown> | undefined {
     return undefined;
   }
 }
+
+// ---- Locators for Grok, Kimi Code, Antigravity, OpenCode and Codex-by-cwd ----
+
+const MAX_SCAN_DIRS = 256;
+const MAX_SCAN_SESSIONS = 1024;
+/** Global ceiling on Kimi session directories inspected across all workspaces
+ * in one cwd lookup so many workspaces cannot fan out to 256×1024 scans. */
+export const MAX_KIMI_TOTAL_SESSIONS = 2048;
+const MAX_AG_CANDIDATES = 16;
+
+/** Cleaned cwd plus its realpath (when resolvable and distinct) so symlinked
+ * directories like /tmp vs /private/tmp match agent logs reliably. */
+async function cwdVariants(cwd: string): Promise<string[]> {
+  if (!cwd) return [];
+  const c = clean(cwd);
+  try {
+    const real = clean(await realpath(c));
+    return real && real !== c ? [c, real] : [c];
+  } catch {
+    return [c];
+  }
+}
+
+/** Memoized matcher against a set of cleaned cwd variants: checks exact
+ * cleaned string equality first before calling realpath(2) at most once per
+ * distinct directory path. */
+function makeCwdMatcher(wants: ReadonlySet<string>): {
+  matches: (dir: string) => Promise<boolean>;
+  variants: (dir: string) => Promise<string[]>;
+} {
+  const cache = new Map<string, string[]>();
+  const variants = async (dir: string): Promise<string[]> => {
+    const c = clean(dir);
+    if (!c) return [];
+    let vs = cache.get(c);
+    if (!vs) {
+      vs = await cwdVariants(c);
+      cache.set(c, vs);
+    }
+    return vs;
+  };
+  const matches = async (dir: string): Promise<boolean> => {
+    const c = clean(dir);
+    if (!c) return false;
+    if (wants.has(c)) return true;
+    const vs = await variants(c);
+    return vs.some((v) => wants.has(v));
+  };
+  return { matches, variants };
+}
+
+async function resolvedDir(p: string): Promise<string | null> {
+  try {
+    const real = await realpath(p);
+    const st = await lstat(real);
+    return st.isDirectory() ? real : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Verifies p is a user-owned regular file whose resolved path stays inside
+ * root, returning its size/mtimeMs; null otherwise. */
+async function ownRegularIn(root: string, p: string, uid: number): Promise<{ path: string; mtimeMs: number } | null> {
+  try {
+    const lst = await lstat(p);
+    if (!lst.isFile()) return null;
+    const real = await realpath(p);
+    if (!real.startsWith(root + '/')) return null;
+    const st = await lstat(real);
+    if (!st.isFile() || (uid >= 0 && st.uid !== uid)) return null;
+    return { path: real, mtimeMs: st.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+const notFound = () => new Fail(TranscriptCode.NotFound, 404, 'usage: no transcript of the session');
+
+/** Locates a Grok session's updates.jsonl by UUID or cwd (preferring
+ * sessions modified since sinceMs, falling back to the newest matching cwd
+ * session for resumed sessions prior to their first new write). */
+export async function locateGrokSession(e: UsageEnv, session: string, cwd: string, sinceMs?: number): Promise<Transcript[]> {
+  const root = await resolvedDir(posix.join(grokHome(e), 'sessions'));
+  if (!root) throw notFound();
+  let bestFresh: { path: string; mtimeMs: number } | null = null;
+  let bestAny: { path: string; mtimeMs: number } | null = null;
+  const consider = async (p: string) => {
+    const hit = await ownRegularIn(root, p, e.uid);
+    if (!hit) return;
+    if (!bestAny || hit.mtimeMs > bestAny.mtimeMs) bestAny = hit;
+    if (sinceMs === undefined || session || hit.mtimeMs >= sinceMs) {
+      if (!bestFresh || hit.mtimeMs > bestFresh.mtimeMs) bestFresh = hit;
+    }
+  };
+  if (session) {
+    if (!validSessionId(session)) throw new Fail('bad_params', 400, 'usage: not a session id');
+    let dirs;
+    try {
+      dirs = await readdir(root, { withFileTypes: true });
+    } catch {
+      throw notFound();
+    }
+    let n = 0;
+    for (const d of dirs) {
+      e.signal.throwIfAborted();
+      if (!d.isDirectory()) continue;
+      if (++n > MAX_SCAN_DIRS) break;
+      await consider(posix.join(root, d.name, session, 'updates.jsonl'));
+    }
+  } else if (cwd) {
+    for (const c of await cwdVariants(cwd)) {
+      const encoded = encodeURIComponent(c);
+      if (!encoded || encoded === '.' || encoded === '..' || encoded.includes('/')) continue;
+      const projDir = posix.join(root, encoded);
+      let subs;
+      try {
+        subs = await readdir(projDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      let n = 0;
+      for (const s of subs) {
+        e.signal.throwIfAborted();
+        if (!s.isDirectory() || !validSessionId(s.name)) continue;
+        if (++n > MAX_SCAN_SESSIONS) break;
+        await consider(posix.join(projDir, s.name, 'updates.jsonl'));
+      }
+    }
+  }
+  const best = bestFresh ?? bestAny;
+  if (!best) throw notFound();
+  const chosen = (best as { path: string; mtimeMs: number }).path;
+  return [{ path: chosen, open: () => openRegular(chosen) }];
+}
+
+/** Collects a Kimi Code session directory's wire logs, main agent first. */
+async function kimiWireLogs(root: string, sessionDir: string, uid: number): Promise<{ paths: string[]; mtimeMs: number } | null> {
+  const candidates: { name: string; path: string; mtimeMs: number }[] = [];
+  const agentsDir = posix.join(sessionDir, 'agents');
+  try {
+    for (const a of await readdir(agentsDir, { withFileTypes: true })) {
+      if (!a.isDirectory()) continue;
+      const hit = await ownRegularIn(root, posix.join(agentsDir, a.name, 'wire.jsonl'), uid);
+      if (hit) candidates.push({ name: a.name, path: hit.path, mtimeMs: hit.mtimeMs });
+    }
+  } catch {
+    // no agents/ dir
+  }
+  const top = await ownRegularIn(root, posix.join(sessionDir, 'wire.jsonl'), uid);
+  if (top) candidates.push({ name: '', path: top.path, mtimeMs: top.mtimeMs });
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => {
+    const am = a.name === 'main' || a.name === '' ? 0 : 1;
+    const bm = b.name === 'main' || b.name === '' ? 0 : 1;
+    return am - bm || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  });
+  const mtimeMs = candidates.reduce((m, c) => Math.max(m, c.mtimeMs), 0);
+  return { paths: candidates.map((c) => c.path), mtimeMs };
+}
+
+/** Reads a Kimi Code session's state.json workDir/cwd safely (max 64 KiB). */
+async function kimiSessionCwd(root: string, sessionDir: string, uid: number): Promise<string> {
+  const hit = await ownRegularIn(root, posix.join(sessionDir, 'state.json'), uid);
+  if (!hit) return '';
+  try {
+    const fh = await openRegular(hit.path);
+    try {
+      const b = Buffer.alloc(64 << 10);
+      const { bytesRead } = await fh.read(b, 0, b.length, 0);
+      const st = obj(parse(b.subarray(0, bytesRead).toString('utf8')));
+      return str(st.cwd) || str(st.workDir);
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return '';
+  }
+}
+
+/** Locates a Kimi Code session's wire logs by UUID or cwd (preferring
+ * sessions modified since sinceMs, falling back to newest matching cwd). */
+export async function locateKimiSession(
+  e: UsageEnv,
+  session: string,
+  cwd: string,
+  sinceMs?: number,
+  maxTotalSessions = MAX_KIMI_TOTAL_SESSIONS,
+): Promise<Transcript[]> {
+  const root = await resolvedDir(posix.join(kimiHome(e), 'sessions'));
+  if (!root) throw notFound();
+  let workspaces;
+  try {
+    workspaces = await readdir(root, { withFileTypes: true });
+  } catch {
+    throw notFound();
+  }
+  const wants = new Set(await cwdVariants(cwd));
+  const matcher = makeCwdMatcher(wants);
+  let bestFresh: { paths: string[]; mtimeMs: number } | null = null;
+  let bestAny: { paths: string[]; mtimeMs: number } | null = null;
+  let nWs = 0;
+  let totalSessions = 0;
+  for (const ws of workspaces) {
+    e.signal.throwIfAborted();
+    if (!ws.isDirectory()) continue;
+    if (++nWs > MAX_SCAN_DIRS) break;
+    const wsDir = posix.join(root, ws.name);
+    if (session) {
+      for (const name of [`session_${session}`, session]) {
+        const found = await kimiWireLogs(root, posix.join(wsDir, name), e.uid);
+        if (found && (!bestFresh || found.mtimeMs > bestFresh.mtimeMs)) bestFresh = found;
+      }
+      continue;
+    }
+    if (totalSessions >= maxTotalSessions) break;
+    let subs;
+    try {
+      subs = await readdir(wsDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    let nSess = 0;
+    for (const s of subs) {
+      e.signal.throwIfAborted();
+      if (!s.isDirectory()) continue;
+      if (++nSess > MAX_SCAN_SESSIONS || ++totalSessions > maxTotalSessions) break;
+      const sDir = posix.join(wsDir, s.name);
+      const found = await kimiWireLogs(root, sDir, e.uid);
+      if (!found) continue;
+      const isFresh = sinceMs === undefined || found.mtimeMs >= sinceMs;
+      if (isFresh && bestFresh && found.mtimeMs <= bestFresh.mtimeMs) continue;
+      if (!isFresh && (bestFresh || (bestAny && found.mtimeMs <= bestAny.mtimeMs))) continue;
+      const dir = await kimiSessionCwd(root, sDir, e.uid);
+      if (!dir || !(await matcher.matches(dir))) continue;
+      if (isFresh) bestFresh = found;
+      if (!bestAny || found.mtimeMs > bestAny.mtimeMs) bestAny = found;
+    }
+  }
+  const best = bestFresh ?? bestAny;
+  if (!best) throw notFound();
+  return best.paths.map((p) => ({ path: p, open: () => openRegular(p) }));
+}
+
+/** Locates a Claude Code session by cwd (preferring transcripts modified
+ * since sinceMs, falling back to the newest matching cwd transcript for
+ * resumed or idle sessions). */
+export async function locateClaudeByCwd(e: UsageEnv, r: Resolver, cwd: string, sinceMs: number | undefined): Promise<Transcript[]> {
+  if (!cwd) throw notFound();
+  const cands: Array<{ id: string; file: string; mod: number }> = [];
+  for (const d of r.claudeDirs()) {
+    for (const dir of await claudeProjectDirs(r, posix.join(d, 'projects'), cwd)) {
+      for (const ent of await r.files.readDir(dir, LIMITS.entries)) {
+        e.signal.throwIfAborted();
+        const id = ent.name.endsWith('.jsonl') ? ent.name.slice(0, -'.jsonl'.length) : '';
+        if (!validSessionId(id) || !ent.isFile()) continue;
+        const file = posix.join(dir, ent.name);
+        const st = await r.files.lstat(file);
+        if (!st) continue;
+        cands.push({ id, file, mod: mtimeOf(st) });
+      }
+    }
+  }
+  if (!cands.length) throw notFound();
+  cands.sort((a, b) => b.mod - a.mod);
+  const pick = async (list: typeof cands): Promise<string | null> => {
+    let tried = 0;
+    for (const c of list) {
+      if (tried >= LIMITS.confirm || e.signal.aborted) break;
+      tried++;
+      let fh: FileHandle;
+      try {
+        fh = await r.files.openNoFollow(c.file);
+      } catch {
+        continue;
+      }
+      try {
+        if (await sameDir(r.files, (await claudeInfoOf(fh)).cwd, cwd)) return c.id;
+      } finally {
+        await fh.close().catch(() => {});
+      }
+    }
+    return null;
+  };
+  let chosen: string | null = null;
+  if (sinceMs !== undefined) {
+    const fresh = cands.filter((c) => c.mod >= sinceMs);
+    if (fresh.length) chosen = await pick(fresh);
+  }
+  if (!chosen) chosen = await pick(sinceMs !== undefined ? cands.filter((c) => c.mod < sinceMs) : cands);
+  if (!chosen) throw notFound();
+  return sessionsLocator(r)('claude', chosen, e.signal);
+}
+
+/** Locates a Codex session by cwd (including extra configured Codex homes
+ * and resumed rollouts: prefers rollouts modified since sinceMs, falling
+ * back to the newest matching cwd rollout). */
+export async function locateCodexByCwd(
+  e: UsageEnv,
+  r: Resolver,
+  cwd: string,
+  sinceMs: number | undefined,
+  extraCodexHomes: readonly string[] | undefined,
+): Promise<Transcript[]> {
+  const homes = r.codexHomes(extraCodexHomes);
+  const lookback = Math.min(sinceMs ?? e.now(), e.now() - 7 * 86_400_000);
+  const days = codexDays(lookback, e.now());
+  let bestFresh: { id: string; mod: number } | null = null;
+  let bestSince: { id: string; mod: number } | null = null;
+  let bestAny: { id: string; mod: number } | null = null;
+  let reads = 0;
+  for (const h of homes) {
+    for (const d of days) {
+      e.signal.throwIfAborted();
+      const dir = posix.join(h, 'sessions', d);
+      const ents = (await r.files.readDir(dir, LIMITS.entries)).sort((a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));
+      for (const ent of ents) {
+        const id = rolloutId(ent.name);
+        if (!id || !ent.isFile()) continue;
+        const p = posix.join(dir, ent.name);
+        const st = await r.files.lstat(p);
+        if (!st) continue;
+        const mod = mtimeOf(st);
+        const isSince = sinceMs === undefined || mod >= sinceMs;
+        // Skip older candidates once a fresh match is already found.
+        if (!isSince && (bestFresh || bestSince || (bestAny && mod <= bestAny.mod))) continue;
+        if (reads >= LIMITS.metaReads || e.signal.aborted) break;
+        reads++;
+        const m = await r.rolloutMeta(p);
+        if (!m || m.id !== id || m.parent !== '' || !(await sameDir(r.files, m.cwd, cwd))) continue;
+        if (isSince) {
+          if (sinceMs === undefined || m.started >= sinceMs) {
+            if (!bestFresh || mod > bestFresh.mod) bestFresh = { id, mod };
+          }
+          if (!bestSince || mod > bestSince.mod) bestSince = { id, mod };
+        }
+        if (!bestAny || mod > bestAny.mod) bestAny = { id, mod };
+      }
+    }
+  }
+  const chosen = bestFresh ?? bestSince ?? bestAny;
+  if (!chosen) throw notFound();
+  return sessionsLocator(r)('codex', chosen.id, e.signal, extraCodexHomes);
+}
+
+/** Antigravity conversation_summaries.db paths (CLI first, then desktop/IDE). */
+const ANTIGRAVITY_DIRS = ['.gemini/antigravity-cli', '.gemini/antigravity', '.gemini/antigravity-ide'] as const;
+
+/** Reads and prices one Antigravity conversation database (by UUID or cwd)
+ * inside the reader's shared concurrency slot. */
+export async function readAntigravitySessionUsage(
+  e: UsageEnv,
+  reader: SessionReader,
+  opts: { session: string; cwd: string; sinceMs?: number; own?: Record<string, Tier>; dbLimits?: DBLimits },
+): Promise<SessionUsage> {
+  return reader.withSlot(e.signal, async () => {
+    const dbs = await antigravityDBs(e);
+    if (!dbs.length) throw notFound();
+    const limits = opts.dbLimits ?? DB_LIMITS;
+    let worker: SQLiteWorker | null = null;
+    const dbRead = (): DBRead => ({
+      signal: e.signal,
+      limits,
+      uid: e.uid,
+      worker: (worker ??= reader.borrowWorker(limits.requestMs)),
+    });
+    try {
+      let target: { path: string; mtimeSec: number; stamp: string } | null = null;
+      if (opts.session) {
+        const want = `${opts.session}.db`;
+        let bestMtime = -1;
+        for (const p of dbs) {
+          if (posix.basename(p) !== want) continue;
+          try {
+            const st = await dbFiles(p, e.uid);
+            if (st.mtime > bestMtime) {
+              bestMtime = st.mtime;
+              target = { path: p, mtimeSec: Math.floor(st.mtime / 1e9), stamp: st.stamp };
+            }
+          } catch {
+            // unreadable or link
+          }
+        }
+      } else if (opts.cwd) {
+        const wants = new Set(await cwdVariants(opts.cwd));
+        const matcher = makeCwdMatcher(wants);
+        const dbByPath = new Set(dbs);
+        const dbsById = new Map<string, string[]>();
+        for (const p of dbs) {
+          const base = posix.basename(p);
+          if (!base.endsWith('.db')) continue;
+          const id = base.slice(0, -3);
+          const list = dbsById.get(id);
+          if (list) list.push(p);
+          else dbsById.set(id, [p]);
+        }
+        // Primary lookup: conversation_summaries.db (reliable for agy CLI
+        // conversations whose trajectory_metadata_blob may be empty).
+        let bestSumFresh: { path: string; mtimeMs: number; mtimeSec: number; stamp: string; active: boolean } | null = null;
+        let bestSumAny: { path: string; mtimeMs: number; mtimeSec: number; stamp: string; active: boolean } | null = null;
+        for (const sub of ANTIGRAVITY_DIRS) {
+          e.signal.throwIfAborted();
+          const dir = posix.join(e.home, sub);
+          const sumPath = posix.join(dir, 'conversation_summaries.db');
+          let summaries: AntigravitySummary[];
+          try {
+            const sumInfo = await dbFiles(sumPath, e.uid);
+            const cached = reader.getAgSummaries(sumPath, sumInfo.stamp);
+            if (cached) {
+              summaries = cached;
+            } else {
+              summaries = await readAntigravitySummaries(sumPath, dbRead());
+              reader.putAgSummaries(sumPath, sumInfo.stamp, summaries);
+            }
+          } catch {
+            continue;
+          }
+          for (const s of summaries) {
+            e.signal.throwIfAborted();
+            let matched = false;
+            for (const ws of s.workspaces) {
+              if (await matcher.matches(ws)) {
+                matched = true;
+                break;
+              }
+            }
+            if (!matched) continue;
+            const preferred = posix.join(dir, 'conversations', `${s.id}.db`);
+            const candidates = dbByPath.has(preferred) ? [preferred] : (dbsById.get(s.id) ?? []);
+            for (const p of candidates) {
+              try {
+                const st = await dbFiles(p, e.uid);
+                const fileMs = st.mtime / 1e6;
+                const mtimeMs = Math.max(fileMs, s.modifiedMs);
+                const cand = { path: p, mtimeMs, mtimeSec: Math.floor(st.mtime / 1e9), stamp: st.stamp, active: s.active };
+                const better = (a: typeof cand, b: typeof cand | null) => !b || (a.active !== b.active ? a.active : a.mtimeMs > b.mtimeMs);
+                if (opts.sinceMs === undefined || mtimeMs >= opts.sinceMs || s.active) {
+                  if (better(cand, bestSumFresh)) bestSumFresh = cand;
+                }
+                if (better(cand, bestSumAny)) bestSumAny = cand;
+              } catch {
+                // skip unreadable/link
+              }
+            }
+          }
+        }
+        const sumChosen = bestSumFresh ?? bestSumAny;
+        if (sumChosen) {
+          target = { path: sumChosen.path, mtimeSec: sumChosen.mtimeSec, stamp: sumChosen.stamp };
+        } else {
+          // Fallback: scan trajectory_metadata_blob (two-pass: prefer >= sinceMs,
+          // then fall back to the newest matching cwd conversation).
+          const allCands: { path: string; mtimeMs: number; mtimeSec: number; stamp: string }[] = [];
+          for (const p of dbs) {
+            e.signal.throwIfAborted();
+            try {
+              const st = await dbFiles(p, e.uid);
+              allCands.push({ path: p, mtimeMs: st.mtime / 1e6, mtimeSec: Math.floor(st.mtime / 1e9), stamp: st.stamp });
+            } catch {
+              // skip
+            }
+          }
+          allCands.sort((a, b) => b.mtimeMs - a.mtimeMs);
+          const scanTraj = async (list: typeof allCands) => {
+            for (const c of list.slice(0, MAX_AG_CANDIDATES)) {
+              e.signal.throwIfAborted();
+              try {
+                const cached = reader.getAgTrajectory(c.path, c.stamp);
+                const traj = cached.hit ? cached.traj : await readAntigravityTrajectory(c.path, dbRead());
+                if (!cached.hit) reader.putAgTrajectory(c.path, c.stamp, traj);
+                if (!traj?.workspace) continue;
+                if (await matcher.matches(traj.workspace)) {
+                  return { path: c.path, mtimeSec: c.mtimeSec, stamp: c.stamp };
+                }
+              } catch {
+                // skip damaged/busy candidate
+              }
+            }
+            return null;
+          };
+          if (opts.sinceMs !== undefined) {
+            target = await scanTraj(allCands.filter((c) => c.mtimeMs >= opts.sinceMs!));
+            if (!target) target = await scanTraj(allCands.filter((c) => c.mtimeMs < opts.sinceMs!));
+          } else {
+            target = await scanTraj(allCands);
+          }
+        }
+      }
+      if (!target) throw notFound();
+      const cutoff = Math.floor(e.now() / 1000) - RETENTION;
+      const memoKey = `ag\0${target.path}`;
+      const hit = reader.getDbSession<AgSessionResult>(memoKey, target.stamp, cutoff);
+      let res: AgSessionResult;
+      if (hit.hit) {
+        res = hit.value;
+      } else {
+        reader.noteDbRead();
+        res = await readAntigravitySession(target.path, cutoff, target.mtimeSec, dbRead());
+        reader.putDbSession(memoKey, target.stamp, cutoff, res);
+      }
+      return reader.priceRecords(e, 'antigravity', res.records, { model: res.model, used: res.contextUsed }, opts.own);
+    } catch (err) {
+      if (err instanceof DBError && err.code === 'too_large') throw tooLarge();
+      throw err;
+    } finally {
+      if (worker) reader.returnWorker(worker, limits.requestMs);
+    }
+  });
+}
+
+/** Reads and prices one OpenCode session (by session id or cwd) inside the
+ * reader's shared concurrency slot. */
+export async function readOpenCodeSessionUsage(
+  e: UsageEnv,
+  reader: SessionReader,
+  opts: { session: string; cwd: string; sinceMs?: number; own?: Record<string, Tier>; dbLimits?: DBLimits },
+): Promise<SessionUsage> {
+  return reader.withSlot(e.signal, async () => {
+    const dbs = await openCodeDBs(e);
+    if (!dbs.length) throw notFound();
+    const limits = opts.dbLimits ?? DB_LIMITS;
+    let worker: SQLiteWorker | null = null;
+    const dbRead = (): DBRead => ({
+      signal: e.signal,
+      limits,
+      uid: e.uid,
+      worker: (worker ??= reader.borrowWorker(limits.requestMs)),
+    });
+    const cwds = opts.cwd ? await cwdVariants(opts.cwd) : [];
+    const matcher = makeCwdMatcher(new Set(cwds));
+    const cutoff = Math.floor(e.now() / 1000) - RETENTION;
+    try {
+      let best: OcSessionResult = null;
+      for (const p of dbs) {
+        e.signal.throwIfAborted();
+        let st;
+        try {
+          st = await dbFiles(p, e.uid);
+        } catch {
+          continue;
+        }
+        const memoKey = `oc\0${JSON.stringify([p, opts.session, cwds, opts.sinceMs ?? null])}`;
+        const hit = reader.getDbSession<OcSessionResult>(memoKey, st.stamp, cutoff);
+        let res: OcSessionResult;
+        if (hit.hit) {
+          res = hit.value;
+        } else {
+          try {
+            reader.noteDbRead();
+            res = await readOpenCodeSession(
+              p,
+              {
+                session: opts.session || undefined,
+                cwds,
+                sinceMs: opts.sinceMs,
+                sinceSec: cutoff,
+                resolveDir: matcher.variants,
+              },
+              dbRead(),
+            );
+            reader.putDbSession(memoKey, st.stamp, cutoff, res);
+          } catch (err) {
+            if (err instanceof DBError && err.code === 'too_large') throw tooLarge();
+            // skip unreadable/busy channel db and try the rest
+            continue;
+          }
+        }
+        if (res && (!best || res.updatedAt > best.updatedAt)) best = res;
+      }
+      if (!best) throw notFound();
+      return reader.priceRecords(
+        e,
+        'opencode',
+        best.records,
+        { model: best.mainModel, used: best.contextUsed, tableProvider: best.mainProvider },
+        opts.own,
+      );
+    } finally {
+      if (worker) reader.returnWorker(worker, limits.requestMs);
+    }
+  });
+}
+
+/** Process start time slack when matching a session by cwd+pid (ms). */
+export const CWD_START_SLACK_MS = TIMING.startSlackMs;

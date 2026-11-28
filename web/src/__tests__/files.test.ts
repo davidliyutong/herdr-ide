@@ -19,15 +19,19 @@ import { useDialog } from '../dialog';
 import { isRenameKey, renameKeyHint } from '../rowKeys';
 import { t } from '../i18n';
 import { FilesPanel, followedDir } from '../plugins/files/FilesPanel';
+import { errorText as filesErrorText, FilesError } from '../plugins/files/api';
 import {
+  compileFilter,
   crumbs,
   excluded,
+  filterHighlight,
   fromSettings,
   getScrollMemory,
   poll,
   polledDirs,
   relativePath,
   setFilter,
+  setFilterRegex,
   setHidden,
   showRoot,
   shownDirs,
@@ -112,6 +116,37 @@ function stubFetch() {
         })),
       });
     }
+    if (url.pathname === '/api/m/m/p/files/find') {
+      if (answers.find) {
+        const a = answers.find(url.searchParams);
+        return json(a.json, a.status);
+      }
+      const dir = url.searchParams.get('dir') ?? '/';
+      const query = url.searchParams.get('query') ?? '';
+      const regex = url.searchParams.get('regex') === '1';
+      const hidden = url.searchParams.get('hidden') === '1';
+      const rawEx = url.searchParams.has('exclude') ? url.searchParams.getAll('exclude') : [];
+      const ex = rawEx.length === 1 && rawEx[0] === '' ? [] : rawEx;
+      const compiled = compileFilter(query, regex);
+      if (compiled.error) return json({ error: 'bad_regex', message: compiled.error }, 400);
+      const matches: Array<{ path: string; rel: string; name: string; is_dir?: boolean }> = [];
+      const walkFind = (cur: string, relBase: string) => {
+        for (const e of tree[cur] ?? []) {
+          if ((!hidden && e.name.startsWith('.')) || excluded(ex, e.name)) continue;
+          const full = cur === '/' ? `/${e.name}` : `${cur}/${e.name}`;
+          const rel = relBase ? `${relBase}/${e.name}` : e.name;
+          const ok = compiled.re
+            ? compiled.re.test(e.name) || (compiled.matchPath && compiled.re.test(rel))
+            : compiled.matchPath
+              ? rel.toLowerCase().includes(compiled.needle)
+              : e.name.toLowerCase().includes(compiled.needle);
+          if (ok) matches.push({ path: full, rel, name: e.name, ...(e.is_dir ? { is_dir: true } : {}) });
+          if (e.is_dir) walkFind(full, rel);
+        }
+      };
+      if (compiled.active) walkFind(dir, '');
+      return json({ matches });
+    }
     const action = url.pathname.replace('/api/m/m/p/files/', '');
     if (answers[action]) {
       const a = answers[action](body);
@@ -132,6 +167,7 @@ describe('file tree rows', () => {
     follow: true,
     hidden: false,
     filter: '',
+    filterRegex: false,
     expanded: {},
     dirs: {},
     mtimes: {},
@@ -345,10 +381,10 @@ describe('FilesPanel', () => {
   const flush = () => act(async () => settle());
   /** Opens a tab of its own for a new terminal in cwd. */
   const openTab = async (id: string, cwd: string) => {
-    const terminals = hub.machines.get('m')!.terminals;
-    terminals.push(FakeHub.term(id, { cwd }));
+    const rec = FakeHub.term(id, { cwd });
+    hub.machines.get('m')!.terminals.push(rec);
     await act(async () => {
-      hub.push({ t: 'snapshot', m: 'm', terminals });
+      hub.event('m', 'created', id, rec);
       hub.model.mutate('m', (l) => {
         const ws = l.workspaces[0];
         return { ...l, workspaces: [{ ...ws, tabs: [...ws.tabs, { root: { terminal: id }, focused: id }], selected: ws.tabs.length }] };
@@ -420,6 +456,8 @@ describe('FilesPanel', () => {
       follow: true,
       hidden: false,
       filter: '',
+      filterRegex: false,
+      filterSearch: undefined,
       expanded: {},
       dirs: {},
       mtimes: {},
@@ -459,7 +497,7 @@ describe('FilesPanel', () => {
     expect(useTree.getState()).toMatchObject({ root: '/home/u', follow: false });
     expect(rows()[0]).toBe('/home/u/src');
     await act(async () => setFilter('zzz'));
-    expect(host.textContent).toContain(t('files.noMatch'));
+    await vi.waitFor(() => expect(host.textContent).toContain(t('files.noMatch')));
   });
 
   it('moves with the keyboard and renames with F2', async () => {
@@ -1082,5 +1120,102 @@ describe('FilesPanel', () => {
     expect(isRenameKey({ key: 'F2' }, false)).toBe(true);
     expect(isRenameKey({ key: 'Enter' }, false)).toBe(false);
     expect(isRenameKey({ key: 'Enter', metaKey: true }, true)).toBe(false);
+  });
+
+  it('distinguishes hub read-only mode from read-only filesystem errors', () => {
+    expect(filesErrorText(new FilesError('read_only', 'read-only mode'))).toBe(t('files.error.read_only'));
+    expect(filesErrorText(new FilesError('read_only_fs', 'EROFS: read-only file system'))).toBe(t('files.error.read_only_fs'));
+    expect(filesErrorText(new FilesError('read_only', 'EROFS: read-only file system'))).toBe(t('files.error.read_only_fs'));
+  });
+
+  it('searches filenames across the whole project including unexpanded folders and supports regex', async () => {
+    tree['/home/u/src/lib'] = [d('nested'), f('a.go'), f('b.go')];
+    tree['/home/u/src/lib/nested'] = [f('DeepTarget42.ts'), f('other.txt')];
+
+    // Before expanding /home/u/src/lib, typing a filter finds DeepTarget42.ts across the whole project.
+    await act(async () => setFilter('deeptarget'));
+    await vi.waitFor(() => {
+      expect(rows()).toEqual(['/home/u/src/lib', '/home/u/src/lib/nested', '/home/u/src/lib/nested/DeepTarget42.ts']);
+    });
+    expect(row('/home/u/src/lib/nested/DeepTarget42.ts').querySelector('mark')?.textContent).toBe('DeepTarget');
+
+    // Toggle regex mode via the button inside the filter field.
+    const rxBtn = host.querySelector<HTMLButtonElement>(`button[aria-label="${t('files.regex')}"]`)!;
+    expect(rxBtn.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => rxBtn.click());
+    expect(rxBtn.getAttribute('aria-pressed')).toBe('true');
+
+    await act(async () => setFilter('^(main\\.go|deeptarget\\d+\\.ts)$'));
+    await vi.waitFor(() => {
+      expect(rows()).toEqual([
+        '/home/u/src/lib',
+        '/home/u/src/lib/nested',
+        '/home/u/src/lib/nested/DeepTarget42.ts',
+        '/home/u/src/main.go',
+      ]);
+    });
+    expect(filterHighlight('DeepTarget42.ts', '\\d+', true)).toEqual([[10, 12]]);
+    // Zero-length regex does not loop forever.
+    expect(filterHighlight('abc', '.*', true)).toEqual([[0, 3]]);
+    expect(filterHighlight('abc', '^', true)).toBeUndefined();
+
+    // Invalid regex surfaces an inline error without hanging or crashing.
+    await act(async () => setFilter('[unclosed'));
+    await flush();
+    expect(rows()).toEqual([]);
+    expect(host.querySelector('.files-filter-field')?.classList.contains('error')).toBe(true);
+    expect(host.textContent).toContain(t('files.error.bad_regex'));
+
+    // Switching tabs remembers both filter and regex toggle per root.
+    await act(async () => setFilter('\\.go$'));
+    await vi.waitFor(() => {
+      expect(rows()).toContain('/home/u/src/lib/a.go');
+    });
+    await openTab('p2', '/home/u/other');
+    expect(useTree.getState()).toMatchObject({ root: '/home/u/other', filter: '', filterRegex: false });
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 0));
+    await flush();
+    expect(useTree.getState()).toMatchObject({ root: '/home/u/src', filter: '\\.go$', filterRegex: true });
+    await act(async () => {
+      setFilter('');
+      setFilterRegex(false);
+    });
+  });
+
+  it('localizes filter search errors and does not fall back to local rows when server rejects bad_regex', async () => {
+    // 1. Server returns a structured FilesError (offline): shows localized message, not raw English prose.
+    answers.find = () => ({ status: 503, json: { error: 'offline', message: 'raw server offline prose' } });
+    await act(async () => setFilter('main'));
+    await vi.waitFor(() => {
+      expect(host.querySelector('.files-note.error')?.textContent).toBe(t('files.error.offline'));
+    });
+    expect(host.textContent).not.toContain('raw server offline prose');
+
+    // 2. Pattern valid in JS RegExp (lookahead) but rejected by server RE2 as bad_regex:
+    // must NOT show local walk() rows above the error alert.
+    answers.find = () => ({ status: 400, json: { error: 'bad_regex', message: 'invalid or unsupported Perl syntax' } });
+    await act(async () => {
+      setFilterRegex(true);
+      setFilter('(?=main)');
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('.files-note.error')?.textContent).toBe(t('files.error.bad_regex'));
+    });
+    expect(rows()).toEqual([]);
+
+    // 3. Matched leaf directory in whole-project filter mode does not show an expanded chevron when previously expanded.
+    answers.find = () => ({ status: 200, json: { matches: [{ path: '/home/u/src/lib', rel: 'lib', name: 'lib', is_dir: true }] } });
+    await act(async () => {
+      useTree.setState((s) => ({ expanded: { ...s.expanded, '/home/u/src/lib': true } }));
+      setFilterRegex(false);
+      setFilter('lib');
+    });
+    await vi.waitFor(() => {
+      expect(rows()).toEqual(['/home/u/src/lib']);
+    });
+    const libRow = treeRows(useTree.getState()).find((r) => r.path === '/home/u/src/lib');
+    expect(libRow?.expanded).toBe(false);
+
+    await act(async () => setFilter(''));
   });
 });

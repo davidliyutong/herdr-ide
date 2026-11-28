@@ -75,6 +75,19 @@ function startedOver(old: Window, w: Window, now: number): boolean {
   return old.resetsAt <= now || w.usedPct <= old.usedPct - HYSTERESIS;
 }
 
+const GEMINI_WINDOW = /\bgemini\b/i;
+const ANTIGRAVITY_THIRD_PARTY_WINDOW = /\b(claude|gpt|openai|anthropic|sonnet|opus|haiku)\b/i;
+
+/** Antigravity accounts often report 100% used on unentitled third-party
+ * (Claude/GPT) buckets alongside healthy primary Gemini windows; suppress
+ * alerts on third-party buckets pinned at 100% without prior <100% usage. */
+function skipUnentitledAntigravityThirdParty(provider: string, ws: readonly Window[], w: Window, was: Window | undefined): boolean {
+  if (provider !== 'antigravity') return false;
+  if (!ANTIGRAVITY_THIRD_PARTY_WINDOW.test(w.label ?? '')) return false;
+  if (!ws.some((x) => GEMINI_WINDOW.test(x.label ?? ''))) return false;
+  return w.usedPct >= 100 && (!was || was.usedPct >= 100);
+}
+
 /** The alerts of the accounts read in this poll (read), whose windows
  * before it were prev, at now (Unix seconds); history's records are
  * updated. */
@@ -116,6 +129,7 @@ export function fireAlerts(
       };
       // A window that started over: a new period for its alerts.
       const was = before.get(aks[i]!);
+      if (skipUnentitledAntigravityThirdParty(a.account.provider, ws, w, was)) return;
       if (was && startedOver(was, w, now)) {
         for (const th of ths) recs.delete(`${wk}|threshold|${th}`);
         recs.delete(`${wk}|pace`);

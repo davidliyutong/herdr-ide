@@ -67,11 +67,13 @@ describe('agent kinds', () => {
     // The commands that continue the directory's latest conversation.
     expect(resumeCommand('claude')).toBe('claude --continue');
     expect(resumeCommand('codex')).toBe('codex resume --last');
-    expect(AGENT_KINDS.filter((k) => k.continueLatest).map((k) => k.id)).toEqual(['claude', 'codex']);
+    expect(resumeCommand('agy')).toBe('agy --continue');
+    expect(AGENT_KINDS.filter((k) => k.continueLatest).map((k) => k.id)).toEqual(['claude', 'codex', 'agy']);
     // The agents the palette starts.
     expect(AGENT_KINDS.filter((k) => k.start).map((k) => k.id)).toEqual([
       'claude',
       'codex',
+      'agy',
       'gemini',
       'opencode',
       'kimi',
@@ -83,6 +85,7 @@ describe('agent kinds', () => {
     ]);
     expect(agentKind('claude')?.transcript).toBe('claude');
     expect(agentKind('codex')?.transcript).toBe('codex');
+    expect(agentKind('agy')?.transcript).toBe('agy');
     expect(agentKind('gemini')?.transcript).toBeUndefined();
   });
 
@@ -130,9 +133,10 @@ describe('agent kinds', () => {
   });
 
   it('name the chat host’s adapter of the agents it runs, never their command', () => {
-    expect(chatKinds().map((k) => k.id)).toEqual(['claude', 'codex', 'kimi', 'grok']);
+    expect(chatKinds().map((k) => k.id)).toEqual(['claude', 'codex', 'agy', 'kimi', 'grok']);
     expect(chatAdapter('claude')).toBe('claude');
     expect(chatAdapter('codex')).toBe('codex');
+    expect(chatAdapter('agy')).toBe('acp');
     expect(chatAdapter('kimi')).toBe('acp');
     expect(chatAdapter('grok')).toBe('acp');
     expect(chatAdapter('opencode')).toBeUndefined();
@@ -178,7 +182,7 @@ describe('the conversation', () => {
     ]);
     expect(c.turn).toBe('working');
     expect(c.items).toStrictEqual([
-      { kind: 'message', id: 'message:user:0', role: 'user', content: [text('a table, please')], at: '2026-11-02T09:30:00Z' },
+      { kind: 'message', id: 'message:user:0', role: 'user', content: [text('a table, please')], seq: 0, at: '2026-11-02T09:30:00Z' },
       { kind: 'thought', id: 'thought:agent:512', content: [text('Rows and columns.')] },
       { kind: 'message', id: 'message:agent:768', role: 'agent', content: [text('| a |\n| 1 |')] },
     ]);

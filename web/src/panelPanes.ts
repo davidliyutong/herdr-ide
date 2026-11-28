@@ -9,13 +9,14 @@
 // Move to Sidebar in the pane's header closes the pane and shows the panel
 // in the sidebar.
 
-import { trackDrag, type DragStart } from './drag';
+import { trackDrag, type Box, type DragStart } from './drag';
 import { dropTargetAt, markerRect, dropped, type DropTarget } from './paneDrag';
+import { insertSlot, near } from './reorderDrag';
 import { actions, current } from './actions';
-import { useStore } from './state/store';
+import { moveRailId, orderRailItems, useStore } from './state/store';
 import { terms } from './state/terms';
 import * as L from './term/layout';
-import { findPanel, panelPlugin, PANEL_VIEW } from './plugins/registry';
+import { activePanels, findPanel, panelPlugin, PANEL_VIEW } from './plugins/registry';
 import type { PanelDef } from './plugins/api';
 import { t } from './i18n';
 
@@ -85,23 +86,46 @@ export function droppedPanel(l: L.Layout, leaf: L.PluginLeaf, tg: DropTarget, ex
   return L.focusPane(next, key);
 }
 
+type PanelDragHit = { kind: 'rail'; index: number; box: Box; visibleIds: string[] } | { kind: 'workspace'; target: DropTarget };
+
 /** Starts tracking a possible drag of a panel (its rail button or title)
- * onto the panes of the machine shown. */
-export function startPanelDrag(ev: DragStart, panel: PanelDef) {
-  const m = useStore.getState().machineId;
+ * onto the panes of the machine shown, or along the right rail to reorder it. */
+export function startPanelDrag(ev: DragStart, panel: PanelDef, o: { fromRail?: boolean } = {}) {
+  const s = useStore.getState();
+  const m = s.machineId;
   const plugin = panelPlugin(panel);
-  if (!m || !plugin || useStore.getState().readOnly) return;
-  const existing = panelPaneHere(panel.id);
-  trackDrag(ev, {
+  const canOpenPane = !!m && !!plugin && !s.readOnly;
+  if (!o.fromRail && !canOpenPane) return;
+  const existing = canOpenPane ? panelPaneHere(panel.id) : undefined;
+  trackDrag<PanelDragHit>(ev, {
     label: t(panel.title),
-    find: (x, y) => dropTargetAt(m, x, y, { pane: existing }),
-    marker: (tg) => {
-      const s = sided(tg);
-      return { box: markerRect(s), zone: s.kind === 'pane' ? s.zone : s.kind };
+    find: (x, y) => {
+      if (o.fromRail) {
+        const rail = near(document.querySelector('.panel-rail'), '.rail-button[data-panel]', 'data-panel', x, y, 'y');
+        if (rail) {
+          const slot = insertSlot(rail.boxes, rail.ids.indexOf(panel.id), x, y, 'y');
+          return slot ? { kind: 'rail', index: slot.index, box: slot.box, visibleIds: rail.ids } : undefined;
+        }
+      }
+      if (!canOpenPane || !m) return undefined;
+      const tg = dropTargetAt(m, x, y, { pane: existing });
+      return tg ? { kind: 'workspace', target: tg } : undefined;
     },
-    drop: async (tg) => {
+    marker: (hit) => {
+      if (hit.kind === 'rail') return { box: hit.box, zone: 'slot' };
+      const sd = sided(hit.target);
+      return { box: markerRect(sd), zone: sd.kind === 'pane' ? sd.zone : sd.kind };
+    },
+    drop: async (hit) => {
+      if (hit.kind === 'rail') {
+        const cur = useStore.getState();
+        const fullIds = orderRailItems(activePanels(), cur.railOrder).map((p) => p.id);
+        cur.setRailOrder(moveRailId(fullIds, hit.visibleIds, panel.id, hit.index));
+        return;
+      }
+      if (!m || !plugin) return;
       const leaf: L.PluginLeaf = { view: { id: L.newId(), plugin: plugin.id, kind: PANEL_VIEW, panel: panel.id } };
-      terms.mutate(m, (l) => droppedPanel(l, leaf, tg, existing));
+      terms.mutate(m, (l) => droppedPanel(l, leaf, hit.target, existing));
       leaveSidebar(panel.id);
     },
     failed: (error) => t('pane.moveFailed', { error }),

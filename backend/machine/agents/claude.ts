@@ -8,7 +8,7 @@ import { validSessionId } from '#shared/agents/kinds.ts';
 import { parseRFC3339 } from '#shared/lib/gotime.ts';
 import { SessionFrom } from '#shared/proto/agentproto/index.ts';
 import type { FileId } from './files.ts';
-import { LIMITS, Search, TIMING, mtimeOf, recordPid, samePath, uniq, type Found, type Info, type Location, type Proc } from './common.ts';
+import { LIMITS, Search, TIMING, mtimeOf, recordPid, sameDir, uniq, type Found, type Info, type Location, type Proc } from './common.ts';
 import type { Resolver } from './sessions.ts';
 
 /** The longest project directory name Claude Code makes from a directory
@@ -159,7 +159,7 @@ async function claudeGuess(r: Resolver, kind: string, p: Proc, cands: number[], 
       continue;
     }
     try {
-      if (samePath((await claudeInfoOf(fh)).cwd, p.cwd)) return { id: c.id, source: SessionFrom.Guess };
+      if (await sameDir(r.files, (await claudeInfoOf(fh)).cwd, p.cwd)) return { id: c.id, source: SessionFrom.Guess };
     } finally {
       await fh.close().catch(() => {});
     }
@@ -185,13 +185,21 @@ export function claudeEscape(cwd: string): string {
  * "-" (the hash after it is not reproduced; the transcripts' own cwd tells
  * them apart). */
 export async function claudeProjectDirs(r: Resolver, projects: string, cwd: string): Promise<string[]> {
-  const esc = claudeEscape(cwd);
-  if (esc.length <= CLAUDE_MAX_NAME) return [posix.join(projects, esc)];
-  const prefix = esc.slice(0, CLAUDE_MAX_NAME) + '-';
-  return (await r.files.readDir(projects, LIMITS.projects))
-    .filter((e) => e.isDirectory() && e.name.startsWith(prefix))
-    .map((e) => posix.join(projects, e.name))
-    .sort();
+  const real = await r.files.realpath(cwd);
+  const cwds = uniq(cwd, real && real !== cwd ? real : '');
+  const out: string[] = [];
+  for (const c of cwds) {
+    const esc = claudeEscape(c);
+    if (esc.length <= CLAUDE_MAX_NAME) {
+      out.push(posix.join(projects, esc));
+      continue;
+    }
+    const prefix = esc.slice(0, CLAUDE_MAX_NAME) + '-';
+    for (const e of await r.files.readDir(projects, LIMITS.projects)) {
+      if (e.isDirectory() && e.name.startsWith(prefix)) out.push(posix.join(projects, e.name));
+    }
+  }
+  return uniq(...out).sort();
 }
 
 /** The directory and time of a Claude Code transcript's first

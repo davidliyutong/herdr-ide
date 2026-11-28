@@ -155,8 +155,8 @@ describe('keybindings', () => {
         .map((r) => r.key);
     const cases: [Platform, string, string[]][] = [
       ['mac', 'tab.new', ['cmd+t']],
-      ['windows', 'tab.new', ['ctrl+shift+t']],
-      ['linux', 'tab.new', ['ctrl+shift+t']],
+      ['windows', 'tab.new', ['ctrl+t']],
+      ['linux', 'tab.new', ['ctrl+t']],
       ['mac-browser', 'tab.new', []],
       ['windows-browser', 'find.open', ['ctrl+shift+f']],
       ['linux-browser', 'find.open', ['ctrl+shift+f']],
@@ -210,9 +210,9 @@ describe('keybindings', () => {
       ['linux', 'pane.back', ['alt+left']],
       ['windows', 'pane.forward', ['alt+right']],
       ['linux', 'pane.forward', ['alt+right']],
-      ['mac', 'pane.undoClose', ['cmd+z']],
-      ['windows', 'pane.undoClose', ['ctrl+shift+z']],
-      ['linux', 'pane.undoClose', ['ctrl+shift+z']],
+      ['mac', 'pane.undoClose', ['cmd+shift+t']],
+      ['windows', 'pane.undoClose', ['ctrl+shift+t']],
+      ['linux', 'pane.undoClose', ['ctrl+shift+t']],
       ['windows', 'workspace.next', ['ctrl+shift+pagedown']],
       ['linux', 'workspace.next', ['ctrl+alt+down']],
       ['mac-browser', 'pane.zoom', []],
@@ -233,12 +233,13 @@ describe('keybindings', () => {
         const seq = parse(r.key);
         expect(seq.length, `${p}: ${r.command}'s default ${r.key} is not a single stroke`).toBe(1);
         // Keys programs in terminals read: Ctrl or Alt with a letter alone,
-        // function keys (except pane.leave's ctrl+b focus escape).
+        // function keys; except pane.leave's ctrl+b focus escape and New
+        // Tab's ctrl+t, the browsers' key (the user's choice over the
+        // shells' transpose and fzf's file search).
         const k = seq[0];
         const terminalKey = ((k.ctrl || k.alt) && !k.cmd && !k.shift && /^[a-z]$/.test(k.key)) || functionKey.test(k.key);
-        expect(r.command !== 'pane.leave' && terminalKey, `${p}: ${r.command}'s default ${r.key} is a key of terminal programs`).toBe(
-          false,
-        );
+        const taken = r.command === 'pane.leave' || (r.command === 'tab.new' && r.key === 'ctrl+t');
+        expect(!taken && terminalKey, `${p}: ${r.command}'s default ${r.key} is a key of terminal programs`).toBe(false);
       }
       // No platform has conflicting defaults.
       expect(conflicts(s.defaults(p)), p).toEqual([]);
@@ -313,7 +314,7 @@ describe('keybindings', () => {
     let changed = 0;
     s.onChange(() => changed++);
     s.setUser([
-      { key: 'Cmd+Shift+T', command: 'tab.new' },
+      { key: 'Cmd+Alt+T', command: 'tab.new' },
       { key: 'cmd+t', command: '-tab.new' },
       { command: '-pane.zoom' },
       { key: 'ctrl+k z', command: 'pane.zoom', when: 'always' },
@@ -321,10 +322,10 @@ describe('keybindings', () => {
       { key: 'cmd+w', command: 'tab.close' },
     ]);
     const st = s.state();
-    expect(effective(st, 'mac', 'tab.new')).toEqual(['cmd+shift+t@terminal']);
+    expect(effective(st, 'mac', 'tab.new')).toEqual(['cmd+alt+t@terminal']);
     // User rules apply on every platform.
-    expect(effective(st, 'windows', 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'cmd+shift+t@terminal']);
-    expect(effective(st, 'linux', 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'cmd+shift+t@terminal']);
+    expect(effective(st, 'windows', 'tab.new')).toEqual(['ctrl+t@terminal', 'cmd+alt+t@terminal']);
+    expect(effective(st, 'linux', 'tab.new')).toEqual(['ctrl+t@terminal', 'cmd+alt+t@terminal']);
     expect(effective(st, 'mac', 'pane.zoom')).toEqual(['ctrl+k z@always']);
     expect(st.problems).toEqual([{ index: 4, code: 'unknown', detail: 'future.command' }]);
     // cmd+w closes the pane and the tab now.
@@ -335,7 +336,7 @@ describe('keybindings', () => {
     const file = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>[];
     expect(file.length).toBe(6);
     expect(file[4].args).toEqual({ x: 1 });
-    expect(file[0].key).toBe('Cmd+Shift+T');
+    expect(file[0].key).toBe('Cmd+Alt+T');
     if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600);
 
     for (const bad of [
@@ -376,7 +377,7 @@ describe('keybindings', () => {
     );
     const s = new Keybindings(path);
     s.load();
-    expect(effective(s.state(), 'linux', 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'ctrl+k n@terminal']);
+    expect(effective(s.state(), 'linux', 'tab.new')).toEqual(['ctrl+t@terminal', 'ctrl+k n@terminal']);
     expect(s.state().problems).toEqual([
       { index: 1, code: 'invalid', detail: 'invalid command ""' },
       { index: 2, code: 'invalid', detail: 'not a rule object' },
@@ -389,7 +390,7 @@ describe('keybindings', () => {
       { key: 'ctrl+k z', command: 'pane.zoom' },
       { key: 'ctrl+k <', command: '-tab.new', x: [] },
     ]);
-    expect(effective(s.state(), 'linux', 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'ctrl+k n@terminal']);
+    expect(effective(s.state(), 'linux', 'tab.new')).toEqual(['ctrl+t@terminal', 'ctrl+k n@terminal']);
     expect(s.state().problems).toEqual([]);
     expect(readFileSync(path, 'utf8')).toBe(`// my keys
 [
@@ -459,7 +460,7 @@ describe('keybindings', () => {
       s.reload();
     };
     edit(`[{"key": "ctrl+k m", "command": "tab.new"}]`);
-    expect(effective(s.state(), 'linux', 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'ctrl+k m@terminal']);
+    expect(effective(s.state(), 'linux', 'tab.new')).toEqual(['ctrl+t@terminal', 'ctrl+k m@terminal']);
     expect(notified).toBe(1);
     edit(`[{"key": `);
     expect(effective(s.state(), 'linux', 'tab.new').length).toBe(2);
@@ -501,5 +502,25 @@ describe('keybindings', () => {
       ],
     ];
     for (const commands of bad) expect(() => new Keybindings('', { commands }), commands[0].id).toThrow();
+  });
+
+  test('cached state isolates callers and invalidates on write', () => {
+    const path = join(tempDir(), 'keybindings.json');
+    const s = new Keybindings(path);
+    s.load();
+    const first = s.state();
+    first.user.push({ key: 'ctrl+k z', command: 'tab.new' });
+    first.effective.mac.length = 0;
+
+    // Mutating the returned object must not corrupt the cached state.
+    const second = s.state();
+    expect(second.user).toEqual([]);
+    expect(effective(second, 'mac', 'tab.new')).toEqual(['cmd+t@terminal']);
+
+    // Writing new user bindings invalidates the cache immediately.
+    s.setUser([{ key: 'ctrl+k n', command: 'tab.new' }]);
+    const third = s.state();
+    expect(third.user).toEqual([{ key: 'ctrl+k n', command: 'tab.new' }]);
+    expect(effective(third, 'mac', 'tab.new')).toEqual(['cmd+t@terminal', 'ctrl+k n@terminal']);
   });
 });

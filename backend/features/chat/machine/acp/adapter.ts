@@ -1,12 +1,13 @@
 // The chat host's adapter for the agents that speak the Agent Client
-// Protocol on their standard input and output: Kimi Code (`kimi acp`) and
-// Grok (`grok agent --no-leader stdio`), the kinds whose chat spec names the
-// adapter acp.
+// Protocol on their standard input and output: Antigravity (`agy acp --stdio`),
+// Kimi Code (`kimi acp`) and Grok (`grok agent --no-leader stdio`), the kinds
+// whose chat spec names the adapter acp.
 //
 // A chat's agent runs as one process with one session: a new one
 // (session/new, with the chat spec's _meta), or the chat's earlier one
 // taken up by its id: session/resume, which replays nothing, where the
-// agent has it, else session/load, whose replay the adapter drops (the
+// agent has it (falling back to session/load if resume reports an internal
+// read error), else session/load, whose replay the adapter drops (the
 // chat's log has it). The client states neither the fs nor the terminal
 // capability and answers every other request of the agent with "method not
 // found"; a permission's options that allow or reject for good are not
@@ -14,26 +15,44 @@
 // turn per prompt: a prompt while a turn runs waits in the adapter and is
 // sent when the turn ends.
 //
-// Sessions and history ask an agent process of their own (a probe), which
-// ends once it answered: session/list, and session/load, whose replay is an
-// import's events. A replay is the agent's own account of the session: what
-// it injected into the user's messages, merged or left out (Kimi Code's
+// Sessions, models, fork and history ask an agent process of their own (a
+// probe), which ends once it answered: session/list (filtered by cwd for
+// agents that return every workspace's sessions), session/new + session/close
+// for Op.Models, session/fork where supported, and session/load, whose replay
+// is an import's events. A replay is the agent's own account of the session:
+// what it injected into the user's messages, merged or left out (Kimi Code's
 // leaves images out, merges a cancelled prompt with the next, and numbers
 // tool calls anew), so an import starts with a notice that it is one. An
 // ACP agent cannot tell that a terminal runs a session (no inTerminal).
 import { randomBytes } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
+import { posix } from 'node:path';
 import { NAME } from '#shared/lib/brand.ts';
 import { discard, type Logger } from '#shared/lib/log.ts';
 import { formatRFC3339, parseRFC3339 } from '#shared/lib/gotime.ts';
 import { Notice, VERSION, noticeMethod } from '#shared/proto/agentproto/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { ChatProtoError, Code, EventType, TurnState, type Event } from '#shared/proto/chatproto/index.ts';
-import type { Adapter, HistoryParams, RunParams, Session, SessionsParams, Sink, StartParams } from '../adapter.ts';
+import type {
+  Adapter,
+  ForkParams,
+  ForkResult,
+  HistoryParams,
+  ModelsParams,
+  PrepareConfigContext,
+  RunParams,
+  Session,
+  SessionsParams,
+  Sink,
+  StartParams,
+} from '../adapter.ts';
 import type { AgentProcess } from '../agentproc.ts';
+import { LiveSessions } from '../runtime.ts';
+import { acpExtension } from './extensions.ts';
 import { Items, contentUpdate } from './items.ts';
 import { Conn, initialize, permissionCancelled, RequestError, type Handler, type InitializeResult } from './rpc.ts';
 import { ACP_TIMING, AcpSession, callError, startError, type AcpTiming } from './session.ts';
-import { clip, isObj, str, type Obj } from './state.ts';
+import { LEGACY_MODE_ID, LEGACY_MODE_ID_ALT, clientModeOption, clip, isObj, markFull, modelOptions, str, type Obj } from './state.ts';
 
 export { ACP_TIMING, type AcpTiming } from './session.ts';
 
@@ -64,6 +83,24 @@ function checkRun(argv: string[], cwd: string): void {
 }
 
 const logger = (l: Logger | undefined): Logger => l ?? discard;
+
+/** Cleans a POSIX directory path for comparison. */
+function cleanDir(p: string): string {
+  const n = posix.normalize(p);
+  return n.length > 1 ? n.replace(/\/+$/, '') : n;
+}
+
+/** Resolves a directory path to its canonical form (with clean fallback if
+ * the path does not exist on disk). */
+async function canonicalDir(p: string): Promise<string> {
+  if (!p) return '';
+  const c = cleanDir(p);
+  try {
+    return cleanDir(await realpath(c));
+  } catch {
+    return c;
+  }
+}
 
 /** An agent process that answers a question (sessions, history) and ends. */
 class Probe {
@@ -100,6 +137,7 @@ function probeHandler(notify?: (method: string, params: unknown) => void): Handl
 export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
   const t: AcpTiming = { ...ACP_TIMING, ...o.timing };
   const itemPrefix = o.itemPrefix ?? randomPrefix;
+  const live = new LiveSessions<AcpSession>();
 
   /** Runs the agent and initializes it. */
   async function startProbe(p: RunParams, h: Handler, signal: AbortSignal): Promise<{ pr: Probe; init: InitializeResult }> {
@@ -123,6 +161,29 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
   }
 
   return {
+    meta: { runtime: 'process', handoffInjection: 'attributed_context', partialForkBy: 'none' },
+
+    /** Synthesizes the client-enforced permission mode option before start or
+     * journal wake for ACP kinds without a native mode option (e.g. Grok, or a
+     * sleeping pre-upgrade ACP chat whose saved config lacks a mode option). */
+    prepareConfig(ctx: PrepareConfigContext): chat.ConfigOption[] | undefined {
+      if (ctx.config?.some((opt) => opt.category === chat.Category.Mode)) return undefined;
+      const hasConfig = (ctx.config?.length ?? 0) > 0;
+      if (!hasConfig && !acpExtension(ctx.kind)?.needsClientMode) return undefined;
+      const cfg: chat.ConfigOption[] = (ctx.config ?? []).map((opt) => ({
+        ...opt,
+        options: (opt.options ?? []).map((v) => ({ ...v })),
+      }));
+      const id = cfg.some((opt) => opt.id === LEGACY_MODE_ID) ? LEGACY_MODE_ID_ALT : LEGACY_MODE_ID;
+      const fallback = ctx.fromJournal ? chat.Mode.Default : (ctx.settings.defaultModes?.[ctx.kind] ?? ctx.settings.defaultMode);
+      let cur = ctx.options.mode || fallback;
+      if (cur !== chat.Mode.AcceptEdits && cur !== chat.Mode.Full) cur = chat.Mode.Default;
+      if (!ctx.fromJournal && !ctx.settings.allowFull && cur === chat.Mode.Full) cur = chat.Mode.Default;
+      cfg.push(clientModeOption(id, cur));
+      markFull(cfg);
+      return cfg;
+    },
+
     async start(p: StartParams, sink: Sink, signal: AbortSignal): Promise<Session> {
       checkRun(p.argv, p.cwd);
       const s = new AcpSession(p.kind, logger(p.logger), sink, t, itemPrefix());
@@ -149,10 +210,13 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
         }
         throw new ChatProtoError(e);
       }
+      live.add(s);
       return s;
     },
 
-    /** Lists the sessions the agent kept for a directory (session/list). */
+    /** Lists the sessions the agent kept for a directory (session/list),
+     * filtering out sessions from other workspaces for agents (like agy) whose
+     * session/list ignores the cwd parameter. */
     async sessions(p: SessionsParams, signal: AbortSignal) {
       const { pr, init } = await startProbe(p, probeHandler(), signal);
       try {
@@ -165,9 +229,25 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
         }
         const page = listPage(res);
         if (!page) throw new ChatProtoError({ code: Code.Failed, message: 'acp: session/list: a malformed answer' });
+        const wantClean = cleanDir(p.cwd);
+        const wantReal = await canonicalDir(p.cwd);
+        const dirCache = new Map<string, Promise<string>>();
+        const matchesCwd = async (dir: string): Promise<boolean> => {
+          if (dir === '') return true;
+          const dc = cleanDir(dir);
+          if (dc === wantClean || dc === wantReal) return true;
+          let prDir = dirCache.get(dc);
+          if (!prDir) {
+            prDir = canonicalDir(dc);
+            dirCache.set(dc, prDir);
+          }
+          const dr = await prDir;
+          return dr === wantClean || dr === wantReal;
+        };
         const out: Array<{ s: chat.Session; at: number }> = [];
         for (const si of page.sessions) {
           if (si.sessionId === '' || out.length === MAX_SESSIONS) continue;
+          if (!(await matchesCwd(si.cwd))) continue;
           const at = parseRFC3339(si.updatedAt);
           const s: chat.Session = { sessionId: si.sessionId, cwd: si.cwd };
           const title = clip(si.title, TITLE_RUNES);
@@ -183,6 +263,67 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
       }
     },
 
+    /** Probes available models via initialize -> session/new -> session/close. */
+    async models(p: ModelsParams, signal: AbortSignal): Promise<chat.ModelOption[]> {
+      const { pr, init } = await startProbe(p, probeHandler(), signal);
+      let sid = '';
+      try {
+        let res: unknown;
+        try {
+          res = await pr.conn.call('session/new', { cwd: p.cwd, mcpServers: [] }, { ms: t.session, signal });
+        } catch (e) {
+          throw new ChatProtoError(callError(e));
+        }
+        const r: Obj = isObj(res) ? res : {};
+        if (typeof r.sessionId === 'string') sid = r.sessionId;
+        const list = modelOptions(r.configOptions, r.models, init.capabilities.image);
+        live.notifyModels(list, (s) => s.agentKind === p.kind);
+        return list;
+      } finally {
+        if (sid && init.capabilities.close && !pr.conn.ended) {
+          try {
+            await pr.conn.call('session/close', { sessionId: sid }, { ms: Math.min(t.grace, 2000) });
+          } catch {
+            // best-effort graceful close
+          }
+        }
+        await pr.end();
+      }
+    },
+
+    /** Forks an existing session via session/fork where the agent advertises
+     * sessionCapabilities.fork; throws Unsupported for partial forks (ACP
+     * session/fork always clones the full session) or agents without fork so
+     * the host falls back to a consistent context-seeded fork. */
+    async fork(p: ForkParams, signal: AbortSignal): Promise<ForkResult> {
+      if (p.partial || p.upToMessageId || p.beforeTurnId || p.lastTurnId) {
+        throw new ChatProtoError({ code: Code.Unsupported, message: 'ACP session/fork does not support partial history forks' });
+      }
+      const { pr, init } = await startProbe(p, probeHandler(), signal);
+      try {
+        if (!init.capabilities.fork) throw new ChatProtoError({ code: Code.Unsupported, message: 'the agent cannot fork a session' });
+        let res: unknown;
+        try {
+          res = await pr.conn.call('session/fork', { sessionId: p.sessionId, cwd: p.cwd, mcpServers: [] }, { ms: t.session, signal });
+        } catch (e) {
+          throw new ChatProtoError(callError(e));
+        }
+        if (!isObj(res) || typeof res.sessionId !== 'string' || res.sessionId === '') {
+          throw new ChatProtoError({ code: Code.Failed, message: 'acp: session/fork: an answer without a sessionId' });
+        }
+        if (init.capabilities.close && !pr.conn.ended) {
+          try {
+            await pr.conn.call('session/close', { sessionId: res.sessionId }, { ms: Math.min(t.grace, 2000) });
+          } catch {
+            // best-effort graceful close
+          }
+        }
+        return { sessionId: res.sessionId };
+      } finally {
+        await pr.end();
+      }
+    },
+
     /** Emits a session's earlier conversation from the agent's replay of it
      * (session/load), after a notice that it is an import and an info event
      * of the title the agent lists the session with (none of either when
@@ -192,12 +333,18 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
      * is emitted; nothing when the replay has no such item. */
     async history(p: HistoryParams, emit: (ev: Event) => void, signal: AbortSignal): Promise<void> {
       const h = new History(p.after, emit);
+      const hook = acpExtension(p.kind)?.createHistoryHook?.(p);
       const { pr, init } = await startProbe(
         p,
         probeHandler((method, params) => {
           if (method !== 'session/update' || !isObj(params) || params.sessionId !== p.sessionId) return;
           const u = params.update;
           if (!isObj(u) || typeof u.sessionUpdate !== 'string' || !contentUpdate(u.sessionUpdate)) return;
+          const intercepted = hook?.onUpdate(u.sessionUpdate, u);
+          if (intercepted) {
+            h.update(str(intercepted.sessionUpdate) ?? u.sessionUpdate, intercepted);
+            return;
+          }
           h.update(u.sessionUpdate, u);
         }),
         signal,
@@ -219,6 +366,7 @@ export function acpAdapter(o: AcpAdapterOptions = {}): Adapter {
           logger(p.logger)(
             `acp ${p.kind}: the import's last item ${JSON.stringify(p.after)} is not in the replay of ${p.sessionId}: nothing imported`,
           );
+        else hook?.afterReplay(emit);
       } finally {
         h.close();
         await pr.end();

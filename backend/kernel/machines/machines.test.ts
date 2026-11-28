@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import { Fail } from '../fail.ts';
 import { agentDialer, localSpec, running, sleep, sshSpec, testMachines, waitFor, TEST_INFO } from '../testing.ts';
 import { Op, readLine, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { Machine, type Dialer, type StreamHandler } from './machine.ts';
+import { SSHTimeoutError } from './transport/ssh.ts';
 import { Registry } from './registry.ts';
 import { LOCAL_ID, loadSpecs, sortByOrder, validTarget, type Deploy, type Spec, type State } from './spec.ts';
 
@@ -135,6 +137,79 @@ describe('registry', () => {
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ version: 3, machines: [sshSpec('a')] });
     r.setOrder(['a', LOCAL_ID]);
     expect(Registry.open(path).getOrder()).toEqual(['a', LOCAL_ID]);
+  });
+
+  // Every hub of a namespace shares the file: a change applies to what
+  // another hub wrote since, watch reads what it changes meanwhile, a file
+  // that becomes no machines file keeps the list and refuses changes until
+  // it is fixed, and one removed takes no machine away.
+  test('another hub of the namespace writes the file', async () => {
+    const path = tempFile();
+    const mine = Registry.open(path);
+    const other = Registry.open(path);
+    mine.put(sshSpec('a'));
+    other.put(sshSpec('b'));
+    mine.setOrder(['b', 'a']);
+    expect(
+      Registry.open(path)
+        .specs()
+        .map((s) => s.id),
+    ).toEqual(['a', 'b']);
+    expect(Registry.open(path).getOrder()).toEqual(['b', 'a']);
+    expect(other.reload()).toBe(true);
+    expect(other.reload()).toBe(false);
+    expect(other.getOrder()).toEqual(['b', 'a']);
+
+    other.delete('a');
+    expect(mine.reload()).toBe(true);
+    expect(mine.specs().map((s) => s.id)).toEqual(['b']);
+
+    writeFileSync(path, '{"machines":{}}');
+    expect(mine.reload()).toBe(false);
+    expect(mine.specs().map((s) => s.id)).toEqual(['b']);
+    expect(() => mine.put(sshSpec('c'))).toThrow('machines is not a list');
+    expect(readFileSync(path, 'utf8')).toBe('{"machines":{}}');
+
+    rmSync(path);
+    expect(mine.reload()).toBe(false);
+    expect(mine.specs().map((s) => s.id)).toEqual(['b']);
+    mine.put(sshSpec('c'));
+    expect(
+      Registry.open(path)
+        .specs()
+        .map((s) => s.id),
+    ).toEqual(['b', 'c']);
+  });
+
+  // watch looks at the file until its signal ends: a change calls
+  // onChange, a file that becomes no machines file is logged once.
+  extended('watch reads what another hub writes', async () => {
+    const path = tempFile();
+    const mine = Registry.open(path);
+    const other = Registry.open(path);
+    const ac = new AbortController();
+    let seen = 0;
+    const logged: string[] = [];
+    const watching = mine.watch(
+      ac.signal,
+      () => seen++,
+      (l) => void logged.push(l),
+      10,
+    );
+    other.put(sshSpec('a'));
+    await waitFor('the change read', () => seen === 1);
+    expect(mine.specs().map((s) => s.id)).toEqual(['a']);
+    // A change of its own that read the other's is told too.
+    other.put(sshSpec('b'));
+    mine.setOrder(['b', 'a']);
+    await waitFor("the other's change told", () => seen === 2);
+    writeFileSync(path, '{"machines":{}}');
+    await waitFor('the broken file reported', () => logged.length === 1);
+    await sleep(100);
+    expect([seen, logged.length]).toEqual([2, 1]);
+    expect(logged[0]).toContain('machines is not a list');
+    ac.abort();
+    await watching;
   });
 
   // A change whose write fails is undone.
@@ -271,6 +346,159 @@ describe('machines', () => {
     expect(m.state().error).toBe('no');
     m.wake();
     await waitFor('the second dial', () => dials.get('x') === 2);
+    ac.abort();
+    await done;
+  });
+
+  // An SSH timeout does not auto-retry: the machine stays in error until
+  // wake() (manual Retry) or abort/disable.
+  test('an SSH timeout waits for manual retry without auto-retrying', async () => {
+    let dials = 0;
+    const logs: string[] = [];
+    const m = new Machine(sshSpec('x'), {
+      dial: async () => {
+        dials++;
+        throw new SSHTimeoutError('ssh: connect to host x port 22: Operation timed out');
+      },
+      logger: (l) => void logs.push(l),
+      publish: () => {},
+      streams: () => undefined,
+      localSupported: true,
+      timing: { backoffMinMs: 10, backoffMaxMs: 20 },
+    });
+    const ac = new AbortController();
+    const done = m.run(ac.signal);
+    await waitFor('the error', () => m.state().status === 'error');
+    expect(dials).toBe(1);
+    expect(m.state().error).toBe('ssh: connect to host x port 22: Operation timed out');
+    expect(logs.at(-1)).toContain('waiting for retry');
+    // Much longer than backoffMaxMs: still no automatic retry.
+    await sleep(80);
+    expect(dials).toBe(1);
+    expect(m.state().status).toBe('error');
+    // Manual retry wakes it immediately, and a second timeout stops again.
+    m.wake();
+    await waitFor('the manual retry', () => dials === 2 && m.state().status === 'error');
+    await sleep(60);
+    expect(dials).toBe(2);
+    ac.abort();
+    await done;
+  });
+
+  // An SSH hello timeout before the machine ever became ready also waits
+  // for manual retry instead of auto-retrying in a loop.
+  test('an SSH hello timeout waits for manual retry', async () => {
+    const { duplexPair } = await import('node:stream');
+    const { Session } = await import('./transport/session.ts');
+    let dials = 0;
+    let lastSession: InstanceType<typeof Session> | undefined;
+    const m = new Machine(sshSpec('x'), {
+      dial: async () => {
+        dials++;
+        const [a, b] = duplexPair();
+        // Peer never replies to Op.Hello.
+        b.resume();
+        const session = new Session(a, () => b.destroy());
+        lastSession = session;
+        return { session, platform: 'linux/amd64' };
+      },
+      logger: () => {},
+      publish: () => {},
+      streams: () => undefined,
+      localSupported: true,
+      timing: { helloTimeoutMs: 30, sessionRetryMs: 10, backoffMinMs: 10 },
+    });
+    const ac = new AbortController();
+    const done = m.run(ac.signal);
+    await waitFor('the hello timeout error', () => m.state().status === 'error');
+    expect(dials).toBe(1);
+    expect(m.state().error).toContain('no reply in time');
+    // Session ends with SSHTimeoutError so dialSSH's closer can stop a dead ControlMaster.
+    expect(lastSession?.err).toBeInstanceOf(SSHTimeoutError);
+    await sleep(80);
+    expect(dials).toBe(1);
+    m.wake();
+    await waitFor('the manual retry', () => dials === 2 && m.state().status === 'error');
+    ac.abort();
+    await done;
+  });
+
+  // A previously ready SSH machine auto-retries on SSHTimeoutError during a
+  // bounded reboot recovery window, then parks for manual retry once the window expires.
+  test('a previously ready SSH machine auto-recovers across SSH timeouts during a reboot window, then parks', async () => {
+    const agent = agentDialer();
+    let mode: 'ok' | 'timeout' = 'ok';
+    let timeoutDials = 0;
+    const m = new Machine(sshSpec('x'), {
+      dial: async (spec, signal, progress) => {
+        if (mode === 'timeout') {
+          timeoutDials++;
+          throw new SSHTimeoutError('ssh: connect to host x port 22: Operation timed out');
+        }
+        return agent(spec, signal, progress);
+      },
+      logger: () => {},
+      publish: () => {},
+      streams: () => undefined,
+      localSupported: true,
+      timing: { sessionRetryMs: 10, backoffMinMs: 15, backoffMaxMs: 25, rebootRetryMs: 300 },
+    });
+    const ac = new AbortController();
+    const done = m.run(ac.signal);
+    await waitFor('initial ready', () => m.ready);
+
+    // Simulate remote host reboot: session drops and subsequent SSH connects time out briefly, then succeed.
+    mode = 'timeout';
+    agent.agents[0].kill();
+    await waitFor('auto-retry during reboot window', () => timeoutDials >= 2);
+    mode = 'ok';
+    await waitFor('recovered after reboot', () => m.ready && agent.agents.length === 2);
+
+    // If timeouts outlast the reboot recovery window, the machine parks for manual Retry.
+    timeoutDials = 0;
+    mode = 'timeout';
+    agent.agents[1].kill();
+    await waitFor('bounded retries during window', () => timeoutDials >= 2);
+    await sleep(360);
+    const parkedCount = timeoutDials;
+    await sleep(80);
+    expect(timeoutDials).toBe(parkedCount);
+    expect(m.state().status).toBe('error');
+
+    // Manual Retry wakes it immediately.
+    mode = 'ok';
+    m.wake();
+    await waitFor('recovered on manual retry', () => m.ready && agent.agents.length === 3);
+    ac.abort();
+    await done;
+  });
+
+  // wake() while connected is a no-op and does not shorten the next session drop's retry wait.
+  test('wake while connected does not skip the next sessionRetryMs wait', async () => {
+    const agent = agentDialer();
+    let secondDialAt = 0;
+    let dials = 0;
+    const m = new Machine(sshSpec('x'), {
+      dial: async (spec, signal, progress) => {
+        dials++;
+        if (dials === 2) secondDialAt = performance.now();
+        return agent(spec, signal, progress);
+      },
+      logger: () => {},
+      publish: () => {},
+      streams: () => undefined,
+      localSupported: true,
+      timing: { sessionRetryMs: 120, backoffMinMs: 10 },
+    });
+    const ac = new AbortController();
+    const done = m.run(ac.signal);
+    await waitFor('ready', () => m.ready);
+    m.wake();
+    const droppedAt = performance.now();
+    agent.agents[0].kill();
+    await waitFor('second dial', () => dials === 2);
+    // retryDelay applies ±20% jitter, so 120ms waits at least ~90ms; a leaked wake() would redial in <10ms.
+    expect(secondDialAt - droppedAt).toBeGreaterThanOrEqual(70);
     ac.abort();
     await done;
   });
@@ -622,6 +850,56 @@ describe('machines', () => {
     expect(mg.list().map((m) => m.id)).toEqual(['b', LOCAL_ID, 'a']);
     const again = testMachines([localSpec(), sshSpec('c'), sshSpec('a')], { registry: Registry.open(path) });
     expect(again.list().map((m) => m.id)).toEqual([LOCAL_ID, 'a', 'c']);
+  });
+
+  // What another hub of the namespace changes in the machines file reaches
+  // this hub's list (sync): a machine added is connected, one removed ends
+  // its session and leaves, one whose target changed is made anew, labels,
+  // flags and the order follow; the local machine stays, and the listeners
+  // learn which machines left.
+  test('sync follows the machines file', async () => {
+    const dial = agentDialer();
+    const path = tempFile();
+    const reg = Registry.open(path);
+    reg.put(sshSpec('a', 'u@a'));
+    reg.put(sshSpec('b', 'u@b'));
+    const select = (stored: readonly Spec[]) => loadSpecs(stored, [], 'mac');
+    const mg = testMachines(select(reg.specs()), { registry: reg, select, dial });
+    const lists: (readonly string[])[] = [];
+    mg.subscribe({ list: (removed) => void lists.push(removed) });
+    const stop = running(mg);
+    const b = mg.get('b')!;
+    await waitFor("b's session", () => b.ready);
+    const sess = b.live();
+
+    mg.sync();
+    expect(lists).toEqual([]);
+
+    const other = Registry.open(path);
+    other.delete('b');
+    other.put(sshSpec('c', 'u@c'));
+    other.put({ ...sshSpec('a', 'u@a', 'GPU'), enabled: false });
+    other.put({ id: LOCAL_ID, label: 'Workstation', kind: 'local', enabled: true });
+    other.setOrder(['c', 'a', LOCAL_ID]);
+    expect(reg.reload()).toBe(true);
+    mg.sync();
+    expect(lists).toEqual([['b']]);
+    await sess.done();
+    expect(mg.list().map((m) => m.id)).toEqual(['c', 'a', LOCAL_ID]);
+    expect([mg.get('a')!.label, mg.get('a')!.state().status]).toEqual(['GPU', 'disabled']);
+    expect(mg.get(LOCAL_ID)!.label).toBe('Workstation');
+    await waitFor("c's session", () => mg.get('c')!.ready);
+
+    const a = mg.get('a')!;
+    other.put(sshSpec('a', 'u@a', 'GPU'));
+    other.delete('a');
+    other.put(sshSpec('a', 'u@a2', 'GPU'));
+    reg.reload();
+    mg.sync();
+    expect(lists[1]).toEqual(['a']);
+    expect(mg.get('a')).not.toBe(a);
+    expect(mg.get('a')!.target).toBe('u@a2');
+    await stop();
   });
 
   // Agent events reach the listeners for machines the hub has.

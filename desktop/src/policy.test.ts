@@ -8,6 +8,7 @@ import {
   APP_PARTITION,
   appWindowPreferences,
   BROWSER_PARTITION,
+  detachedWindowPreferences,
   guestMayNavigate,
   guestPreferences,
   hostResolver,
@@ -79,11 +80,14 @@ test('permissions require both the requesting frame and top window to belong to 
     { ...main, autoplayPolicy: undefined, webviewTag: undefined },
     { ...appWindowPreferences('/app/preload.cjs'), autoplayPolicy: undefined, webviewTag: undefined },
   );
-  // Only the main window may hold webviews.
+  // Main and detached windows may hold webviews; only main relaxes autoplay.
   assert.equal(main.webviewTag, true);
   assert.equal(webPreferences.webviewTag, false);
   assert.equal(main.autoplayPolicy, 'no-user-gesture-required');
   assert.equal('autoplayPolicy' in webPreferences, false);
+  const det = detachedWindowPreferences('/app/preload.cjs');
+  assert.deepEqual(det, { ...appWindowPreferences('/app/preload.cjs'), webviewTag: true });
+  assert.equal('autoplayPolicy' in det, false);
   assert.notEqual(APP_PARTITION, BROWSER_PARTITION);
 });
 
@@ -173,6 +177,9 @@ test("a guest never navigates to the app's own host", () => {
     `${origin}/api/m/local/hc/stop`,
     `http://${APP_HOST}/`,
     `https://${APP_HOST}:7781/m/local/code/`,
+    `https://${APP_HOST}./`,
+    `http://${APP_HOST}.:8080/api/x`,
+    `https://${APP_HOST.toUpperCase()}../`,
   ]) {
     assert.equal(guestMayNavigate(url, origin), false, url);
   }

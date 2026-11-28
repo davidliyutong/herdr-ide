@@ -4,6 +4,8 @@
 // recordings (testdata/golden); what the adapter asked checked
 // against the policies it keeps and the pinned schema.
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { noticeMethod, Notice } from '#shared/proto/agentproto/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { ChatProtoError } from '#shared/proto/chatproto/index.ts';
@@ -13,9 +15,11 @@ import { codexAdapter } from './adapter.ts';
 import type { CodexSession } from './session.ts';
 import {
   FakeRun,
+  GOLDEN,
   HANDSHAKE,
   TEST_TIMING,
   TestSink,
+  canonical,
   edited,
   fixture,
   goldenLines,
@@ -51,9 +55,15 @@ const text = (s: string): unknown[] => [{ type: 'text', text: s }];
 
 /** Sends a message as the host does: recorded when it sees no turn run and
  * nothing wait. */
-async function prompt(s: CodexSession, msg: string, body: string | unknown[]): Promise<void> {
+async function prompt(s: CodexSession, msg: string, body: string | unknown[], delivery?: chat.Delivery): Promise<void> {
   await s.prompt(
-    { content: typeof body === 'string' ? text(body) : body, message: msg, clientId: 'c-' + msg, recorded: !s.busy },
+    {
+      content: typeof body === 'string' ? text(body) : body,
+      message: msg,
+      clientId: 'c-' + msg,
+      recorded: !s.busy,
+      ...(delivery ? { delivery } : {}),
+    },
     AbortSignal.timeout(PATIENCE),
   );
 }
@@ -61,6 +71,19 @@ async function prompt(s: CodexSession, msg: string, body: string | unknown[]): P
 /** Compares the events and the chat with the golden file. */
 function compareGolden(name: string, k: TestSink): void {
   const got = records(k);
+  if (process.env.UPDATE_TESTDATA === '1') {
+    const path = join(GOLDEN, name + '.golden');
+    const prevRaw = readFileSync(path, 'utf8')
+      .split('\n')
+      .filter((l) => l !== '');
+    const merged = got.map((line, i) => {
+      const old = prevRaw[i];
+      if (old !== undefined && canonical(JSON.parse(old)) === line) return old;
+      return line;
+    });
+    writeFileSync(path, merged.join('\n') + '\n');
+    return;
+  }
   const want = goldenLines(name);
   expect(want.length).toBeGreaterThan(2);
   expect(got.length).toBe(want.length);
@@ -212,7 +235,7 @@ describe('the recordings through the Codex adapter', () => {
     const { s, k } = await start(f);
     await prompt(s, 'm1', 'sleep');
     await k.wait('the command', (k) => k.count((ev) => ev.t === chat.EventType.Update && !!ev.item) === 1);
-    await prompt(s, 'm2', 'Also end your answer with the word banana.');
+    await prompt(s, 'm2', 'Also end your answer with the word banana.', chat.Delivery.Steer);
     await k.wait("the turn's end", turnEnds(1));
     const st = f.requests(1, 'turn/steer');
     expect(st.length).toBe(1);
@@ -333,7 +356,17 @@ describe('the recordings through the Codex adapter', () => {
     const cur = Object.fromEntries((k.chat.config ?? []).map((o) => [o.id, o.currentValue]));
     expect(cur).toEqual({ model: 'gpt-6-luna', thought_level: 'high', mode: chat.Mode.Full });
     const c = k.chat.capabilities;
-    expect([c.images, c.model, c.effort, c.cancelQueued]).toEqual([true, true, true, false]);
+    expect([c.images, c.model, c.effort, c.cancelQueued, c.steer, c.stopTask, c.fork, c.rewind, c.rewindFiles]).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
     expect(policyProblems(f)).toEqual([]);
   });
 

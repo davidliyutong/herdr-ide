@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// Status bar widget show/hide (right-click menu, customize button, persistence,
+// Status bar widget show/hide (right-click menu, persistence,
 // keeping non-widget plugin mounts active) and Monaco scrollBeyondLastLine.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -62,7 +62,7 @@ describe('status bar widget visibility and editor scroll', () => {
     useStore.setState({ hiddenStatusWidgets: [] });
   });
 
-  it('hides and shows status bar widgets via context menu and customize button while keeping non-widget mounts active', async () => {
+  it('hides and shows status bar widgets via context menu while keeping non-widget mounts active', async () => {
     await act(async () => {
       root.render(createElement(StatusBar, { connected: true, chord: false }));
     });
@@ -88,10 +88,11 @@ describe('status bar widget visibility and editor scroll', () => {
     expect(host.querySelector('.demo-widget')).toBeNull();
     expect(host.querySelector('.always-mounted')).not.toBeNull();
 
-    // Clicking the customize button opens the checklist including "Show All Widgets".
-    const customize = host.querySelector<HTMLButtonElement>('.status-widgets-btn')!;
+    // Right-clicking the status bar opens the checklist including "Show All Widgets" (no trailing customize button).
+    expect(host.querySelector('.status-widgets-btn')).toBeNull();
+    const bar = host.querySelector<HTMLElement>('footer.statusbar')!;
     await act(async () => {
-      customize.click();
+      bar.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 220, clientY: 600 }));
     });
     const menu2 = useMenu.getState().menu!;
     const showAll = menu2.entries.find((e) => isItem(e) && e.label === t('statusbar.showAll'));

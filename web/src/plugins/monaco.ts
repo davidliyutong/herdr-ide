@@ -18,9 +18,11 @@ import { usePrefs } from '../prefs';
 import { locale } from '../i18n';
 import { allowedLocales } from './monacoLocales';
 import { appearanceOf, resolveTheme, useSystemDark } from '../appearance';
+import { quoteFontFamily } from '../terminal/fonts';
 import { lineTokenizer, type LineTokenizer } from '../highlight/highlighter';
 import { LANGS, languageOf } from '../highlight/languages';
 import { ROLES, ROLE_STYLE, ROLE_TOKEN } from '../highlight/roles';
+import './monaco.css';
 
 export type Monaco = typeof MonacoNs;
 export type CodeEditor = MonacoNs.editor.IStandaloneCodeEditor;
@@ -70,6 +72,12 @@ async function load(): Promise<Monaco> {
     },
   };
   const m = monaco as unknown as Monaco;
+  // Cmd/Ctrl+[ and ] are Go Back and Go Forward (keymap.ts handleEditorKey),
+  // not Outdent and Indent Line: Tab and Shift+Tab indent.
+  m.editor.addKeybindingRules([
+    { keybinding: m.KeyMod.CtrlCmd | m.KeyCode.BracketLeft, command: '-editor.action.outdentLines' },
+    { keybinding: m.KeyMod.CtrlCmd | m.KeyCode.BracketRight, command: '-editor.action.indentLines' },
+  ]);
   registerLanguages(m);
   followTheme(m);
   return m;
@@ -199,6 +207,15 @@ function defineThemes(monaco: Monaco) {
             'editorLineNumber.activeForeground': v('--ds-color-muted', '#acacac'),
             'editorWidget.background': v('--ds-color-sidebar', dark ? '#171717' : '#fafafa'),
             'editorWidget.border': v('--ds-color-border-strong', dark ? '#3a3a3a' : '#d4d4d4'),
+            'menu.background': v('--ds-color-hover', dark ? '#262626' : '#f0f0f0'),
+            'menu.foreground': v('--ds-color-foreground', dark ? '#f0f0f0' : '#0a0a0a'),
+            'menu.border': v('--ds-color-border-strong', dark ? '#3a3a3a' : '#d4d4d4'),
+            'menu.separatorBackground': v('--ds-color-border', dark ? '#2a2a2a' : '#e5e5e5'),
+            'menu.selectionBackground': v('--ds-accent', dark ? '#7aa2f7' : '#3a63c8'),
+            'menu.selectionForeground': v('--ds-on-accent', '#ffffff'),
+            'list.hoverBackground': v('--ds-accent', dark ? '#7aa2f7' : '#3a63c8'),
+            'list.hoverForeground': v('--ds-on-accent', '#ffffff'),
+            'widget.shadow': v('--shadow', dark ? '#00000080' : '#0a0a0a2e'),
             focusBorder: v('--ds-accent', dark ? '#7aa2f7' : '#3a63c8'),
             'editorCursor.foreground': v('--ds-accent', dark ? '#7aa2f7' : '#3a63c8'),
             'editorGutter.addedBackground': v('--ds-git-added', dark ? '#81b88b' : '#587c0c'),
@@ -238,8 +255,12 @@ function followTheme(monaco: Monaco) {
 /** The editor's options that follow the settings: the terminal's font. */
 export function fontOptions(): MonacoNs.editor.IEditorOptions {
   const a = appearanceOf(usePrefs.getState().prefs);
+  const primary = a.fontFamily.trim();
+  const cjk = quoteFontFamily(a.cjkFontFamily);
   return {
-    fontFamily: `${a.fontFamily ? a.fontFamily + ', ' : ''}'JetBrains Mono', Menlo, monospace`,
+    fontFamily: [primary, "'JetBrains Mono'", 'Menlo', cjk, "'Noto Sans Mono CJK SC'", "'PingFang SC'", 'monospace']
+      .filter(Boolean)
+      .join(', '),
     fontSize: a.fontSize,
   };
 }
@@ -275,6 +296,10 @@ export const defaultEditorOptions: MonacoNs.editor.IEditorOptions = {
   minimap: { enabled: false },
   scrollBeyondLastLine: true,
   fixedOverflowWidgets: true,
+  // Keep context menus in light DOM inside .monaco-editor so fixedOverflowWidgets
+  // inherits StandaloneThemeService's --vscode-* variables instead of mounting an
+  // unstyled shadow-root-host directly on document.body.
+  useShadowDOM: false,
   renderWhitespace: 'selection',
 };
 

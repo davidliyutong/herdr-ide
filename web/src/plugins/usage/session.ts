@@ -23,8 +23,14 @@ export interface SessionTarget {
   m: string;
   /** The agent's kind (a detector id, agentkinds). */
   kind: string;
-  /** Its session id (isSessionId). */
-  session: string;
+  /** Its session id (isSessionId), when known. */
+  session?: string;
+  /** Its working directory, for agents matched by cwd. */
+  cwd?: string;
+  /** The foreground process id (used on the machine to bound cwd matches). */
+  pid?: number;
+  /** The terminal address (disambiguates cached cwd entries). */
+  terminal?: string;
   status?: AgentStatus;
 }
 
@@ -43,8 +49,16 @@ export const SESSION_TIMEOUT_MS = 15_000;
 /** How long after a final read failed it is tried again, once (ms). */
 export const SESSION_RETRY_MS = 10_000;
 
+/** How often a focused session whose transcript was not found yet is checked
+ * again while its agent stays idle/unknown (ms). */
+export const SESSION_NOT_FOUND_RECHECK_MS = 15_000;
+
 /** The key of a session in useUsage.sessions. */
 export const sessionKey = (m: string, kind: string, session: string): string => JSON.stringify([m, kind, session]);
+
+/** The key of a SessionTarget (by session id when known, else cwd + stable terminal). */
+export const targetKey = (t: Pick<SessionTarget, 'm' | 'kind' | 'session' | 'cwd' | 'pid' | 'terminal'>): string =>
+  t.session ? sessionKey(t.m, t.kind, t.session) : sessionKey(t.m, t.kind, `cwd:${t.cwd ?? ''}:${t.terminal ?? t.pid ?? ''}`);
 
 /** The reads of a session: when the last began (ms), whether one is under
  * way and another must follow it, whether one waits for the page to show,
@@ -55,6 +69,8 @@ interface Slot {
   busy: boolean;
   again: boolean;
   owed: boolean;
+  gen: number;
+  abort?: AbortController;
   timer?: ReturnType<typeof setTimeout>;
   retry?: ReturnType<typeof setTimeout>;
 }
@@ -64,7 +80,7 @@ const slots = new Map<string, Slot>();
 function slotOf(key: string): Slot {
   let s = slots.get(key);
   if (s) return s;
-  s = { at: 0, busy: false, again: false, owed: false };
+  s = { at: 0, busy: false, again: false, owed: false, gen: 0 };
   slots.set(key, s);
   // Those of sessions long gone, the oldest first; none with a read under
   // way or waiting.
@@ -94,30 +110,44 @@ function put(key: string, e: SessionEntry) {
   });
 }
 
-/** Reads a session's numbers into useUsage.sessions: whether the machine
- * answered. A failure without a code of its own (the machine offline, the
- * network, no answer within SESSION_TIMEOUT_MS) keeps what was known. */
-async function load(t: SessionTarget, key: string): Promise<boolean> {
-  const q = new URLSearchParams({ kind: t.kind, session: t.session });
+/** Reads a session's numbers into useUsage.sessions: 'ok' when the machine
+ * answered, 'aborted' when cancelled before completion (e.g. pane switch),
+ * 'failed' otherwise (offline, network, timeout). A failure keeps what was
+ * known. */
+async function load(t: SessionTarget, key: string, slot: Slot, gen: number): Promise<'ok' | 'aborted' | 'failed'> {
+  const q = new URLSearchParams({ kind: t.kind });
+  if (t.session) q.set('session', t.session);
+  if (t.cwd) q.set('cwd', t.cwd);
+  if (t.pid) q.set('pid', String(t.pid));
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), SESSION_TIMEOUT_MS);
+  slot.abort = abort;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    abort.abort();
+  }, SESSION_TIMEOUT_MS);
   try {
     const r = await fetch(`/api/m/${encodeURIComponent(t.m)}/p/usage/session?${q}`, { signal: abort.signal });
-    const j = await jsonBody(r);
+    if (abort.signal.aborted || slot.gen !== gen) return timedOut ? 'failed' : 'aborted';
     if (r.ok) {
+      const j: unknown = await r.json();
+      if (abort.signal.aborted || slot.gen !== gen) return timedOut ? 'failed' : 'aborted';
       const usage = sessionUsageOf(j);
       if (usage) put(key, { usage, at: Date.now() });
-      return !!usage;
+      return usage ? 'ok' : 'failed';
     }
+    const j = await jsonBody(r);
+    if (abort.signal.aborted || slot.gen !== gen) return timedOut ? 'failed' : 'aborted';
     if (typeof j.error === 'string' && CODES.has(j.error)) {
       put(key, { code: j.error as SessionCode, status: t.status, at: Date.now() });
-      return true;
+      return 'ok';
     }
-    return false;
+    return 'failed';
   } catch {
-    return false;
+    return abort.signal.aborted && !timedOut ? 'aborted' : 'failed';
   } finally {
     clearTimeout(timer);
+    if (slot.abort === abort) slot.abort = undefined;
   }
 }
 
@@ -128,7 +158,7 @@ async function load(t: SessionTarget, key: string): Promise<boolean> {
  * it fails it is tried once more SESSION_RETRY_MS later (retry is that
  * try). */
 export function requestSession(t: SessionTarget, final = false, retry = false) {
-  const key = sessionKey(t.m, t.kind, t.session);
+  const key = targetKey(t);
   const s = slotOf(key);
   if (!shown()) {
     s.owed = true;
@@ -151,14 +181,22 @@ export function requestSession(t: SessionTarget, final = false, retry = false) {
   s.owed = false;
   s.at = Date.now();
   s.busy = true;
-  void load(t, key).then((ok) => {
+  const gen = ++s.gen;
+  void load(t, key, s, gen).then((res) => {
+    if (s.gen !== gen) return;
     s.busy = false;
+    if (res === 'aborted') {
+      // Cancelled on pane switch / unmount: allow an immediate read if focused again.
+      s.at = 0;
+      s.again = false;
+      return;
+    }
     if (s.again) {
       s.again = false;
       requestSession(t, true);
       return;
     }
-    if (ok || !final || retry || s.retry) return;
+    if (res === 'ok' || !final || retry || s.retry) return;
     s.retry = setTimeout(() => {
       s.retry = undefined;
       requestSession(t, true, true);
@@ -166,15 +204,35 @@ export function requestSession(t: SessionTarget, final = false, retry = false) {
   });
 }
 
-/** Cancels the reads that wait for their gap or their one more try (the
+function abortSlot(s: Slot) {
+  if (s.abort || s.busy) {
+    s.gen++;
+    if (s.abort) {
+      s.abort.abort();
+      s.abort = undefined;
+    }
+    s.busy = false;
+    s.at = 0;
+    s.again = false;
+  }
+  clearTimeout(s.timer);
+  s.timer = undefined;
+  clearTimeout(s.retry);
+  s.retry = undefined;
+}
+
+/** Aborts an in-flight read for a single session key (e.g. when switching
+ * away from its terminal pane so it does not hold a machine read slot). */
+export function abortSessionRead(key: string) {
+  const s = slots.get(key);
+  if (!s) return;
+  abortSlot(s);
+}
+
+/** Cancels in-flight reads and reads waiting for their gap or retry (the
  * status bar's item is gone). */
 export function cancelSessionReads() {
-  for (const s of slots.values()) {
-    clearTimeout(s.timer);
-    s.timer = undefined;
-    clearTimeout(s.retry);
-    s.retry = undefined;
-  }
+  for (const s of slots.values()) abortSlot(s);
 }
 
 /** Forgets every session's reads: when they were and what is owed. */
@@ -190,11 +248,17 @@ const unpriced = (key: string) => useUsage.getState().sessions[key]?.code === 'b
 /** Keeps the numbers of session t current while the status bar shows it,
  * as the module's comment says. */
 export function useSessionReads(t: SessionTarget | undefined) {
-  const key = t ? sessionKey(t.m, t.kind, t.session) : undefined;
+  const key = t ? targetKey(t) : undefined;
   const status = t?.status;
   const latest = useRef(t);
   latest.current = t;
   const seen = useRef<{ key?: string; status?: AgentStatus }>({});
+  // Abort any in-flight read when switching away from a pane/session so rapid
+  // terminal switches do not pile up against MAX_SESSION_READS on the hub.
+  useEffect(() => {
+    if (!key) return;
+    return () => abortSessionRead(key);
+  }, [key]);
   // The focused session, and its agent's status.
   useEffect(() => {
     const before = seen.current;
@@ -203,9 +267,10 @@ export function useSessionReads(t: SessionTarget | undefined) {
     if (!cur || !key || unpriced(key)) return;
     const e = useUsage.getState().sessions[key];
     if (before.key !== key) {
-      // Another pane or session: its numbers, unless the machine had none
-      // and its agent did nothing since.
-      if (!(e?.code === 'not_found' && e.status === status)) requestSession(cur);
+      // Another pane or session: its numbers, unless the machine recently had
+      // none and its agent did nothing since.
+      const freshMiss = e?.code === 'not_found' && e.status === status && Date.now() - e.at < SESSION_NOT_FOUND_RECHECK_MS;
+      if (!freshMiss) requestSession(cur);
     } else if (before.status !== status) {
       if (status === 'done' || status === 'idle') requestSession(cur, true);
       else if (e?.code) requestSession(cur);
@@ -216,6 +281,7 @@ export function useSessionReads(t: SessionTarget | undefined) {
   // come. A tick reads when it worked since the last one, so that one
   // blocked for long is not read again and again.
   const inTurn = status === 'working' || status === 'blocked';
+  const notFound = useUsage((s) => (key ? s.sessions[key]?.code === 'not_found' : false));
   const worked = useRef(false);
   useEffect(() => {
     if (status === 'working') worked.current = true;
@@ -232,6 +298,18 @@ export function useSessionReads(t: SessionTarget | undefined) {
     }, SESSION_WORKING_EVERY);
     return () => clearInterval(id);
   }, [key, inTurn]);
+  // A focused terminal whose transcript was not written yet: re-check
+  // periodically so fast turns or resumed sessions show up without waiting for
+  // a status transition.
+  useEffect(() => {
+    if (!key || !notFound || inTurn) return;
+    const id = setInterval(() => {
+      const cur = latest.current;
+      if (!cur || unpriced(key)) return;
+      requestSession(cur);
+    }, SESSION_NOT_FOUND_RECHECK_MS);
+    return () => clearInterval(id);
+  }, [key, notFound, inTurn]);
   // A read owed while the page was hidden.
   useEffect(() => {
     if (!key) return;

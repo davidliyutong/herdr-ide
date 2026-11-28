@@ -101,6 +101,9 @@ export class Session {
     const { signal } = opts;
     if (signal?.aborted) throw signal.reason;
     const st = await this.ys.open();
+    // Avoid unhandled 'error' events when abort/timeout destroys st before
+    // Reader attaches or after reader.release() detaches its listener.
+    st.on('error', () => {});
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;

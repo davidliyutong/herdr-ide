@@ -45,11 +45,16 @@ describe('routes', () => {
       'GET /api/m/:id/p/chat/trusted',
       'POST /api/m/:id/p/chat/trusted',
       'POST /api/m/:id/p/chat/host/stop',
+      'GET /api/m/:id/p/chat/models',
+      'POST /api/m/:id/p/chat/models',
+      'POST /api/m/:id/p/chat/fork',
+      'POST /api/m/:id/p/chat/switch',
+      'GET /api/m/:id/p/chat/export',
     ]);
     const ro = await start({ readOnly: true });
     const { problems, checked } = await checkGuarded(r as unknown as TestHub, ro as unknown as TestHub, { machine: 'gpu' });
     expect(problems).toEqual([]);
-    expect(checked.length).toBe(13);
+    expect(checked.length).toBe(16);
     // Off, every route answers plugin_disabled.
     r.settings.set('plugins.chat.enabled', '', false);
     expect(await r.call('GET', '/api/p/chat/states')).toEqual([404, { error: 'plugin_disabled', message: 'plugin_disabled' }]);
@@ -57,6 +62,18 @@ describe('routes', () => {
 
   // Each route is one request of the machine's chat host, which a change
   // starts when none serves; what it takes is checked on the hub first.
+  // A POST while a GET is under way starts the host: it does not share the
+  // GET's listing, which finds none running.
+  test('a POST of agents does not join a GET under way', async () => {
+    const r = await start();
+    r.host.running = false;
+    r.host.agents.set('claude', true);
+    const [peek, started] = await Promise.all([r.call('GET', m('agents')), r.call('POST', m('agents'))]);
+    expect(peek).toMatchObject([409, { error: 'not_running' }]);
+    expect(started[0]).toBe(200);
+    expect(r.host.running).toBe(true);
+  });
+
   test('requests', async () => {
     const r = await start();
     const f = r.host;
@@ -104,6 +121,9 @@ describe('routes', () => {
       '{"kind":"claude","cwd":"/w","import":true}',
       '{"kind":"claude","cwd":"/w","options":{"mode":"yolo"}}',
       '{"kind":"claude","cwd":"/w","options":{"model":"a\\nb"}}',
+      '{"kind":"claude","cwd":"/w","options":{"models":["ok",""]}}',
+      '{"kind":"claude","cwd":"/w","options":{"models":"m"}}',
+      `{"kind":"claude","cwd":"/w","options":{"models":${JSON.stringify(Array.from({ length: chat.MAX_START_MODELS + 1 }, (_, i) => `m${i}`))}}}`,
       `{"kind":"claude","cwd":"/w","pad":"${'x'.repeat(64 << 10)}"}`,
     ])
       expect([body.slice(0, 60), ...(await r.call('POST', m('new'), body))]).toMatchObject([
@@ -117,7 +137,7 @@ describe('routes', () => {
     [code, out] = await r.call(
       'POST',
       m('new'),
-      '{"kind":"claude","cwd":"/w","resume":"5f0c","import":true,"options":{"model":"m","mode":"full"}}',
+      '{"kind":"claude","cwd":"/w","resume":"5f0c","import":true,"options":{"model":"m","mode":"full","models":["n","o"]}}',
     );
     const c = out.chat as chat.Chat;
     expect(code).toBe(200);
@@ -129,7 +149,7 @@ describe('routes', () => {
       cwd: '/w',
       resume: '5f0c',
       import: true,
-      options: { model: 'm', mode: 'full' },
+      options: { model: 'm', mode: 'full', models: ['n', 'o'] },
     });
     expect(r.lastAudit()).toMatchObject({
       event: 'chat.new',
@@ -289,6 +309,7 @@ describe('routes', () => {
     for (const [code, status] of [
       [chat.Code.UnknownChat, 404],
       [chat.Code.Busy, 409],
+      [chat.Code.ProbeBusy, 429],
       [chat.Code.TooMany, 409],
       [chat.Code.BadRequest, 400],
       [chat.Code.StartFailed, 502],
@@ -389,7 +410,7 @@ describe('routes', () => {
         },
       ],
     };
-    [code, out] = await r.call('GET', '/api/p/chat/hosts');
+    [code, out] = await r.call('GET', '/api/p/chat/hosts?refresh=1');
     const [gpu, box] = out.hosts as Array<Record<string, unknown>>;
     expect(gpu).toEqual({
       machine: 'gpu',
@@ -413,7 +434,7 @@ describe('routes', () => {
     const id = chat.newChatID();
     f.chats.set(id, testChat({ id, state: chat.State.Working, status: chat.Status.Working, agentVersion: '1.0' }));
     f.chats.set(chat.newChatID(), testChat({ id: chat.newChatID(), state: chat.State.Closed }));
-    [code, out] = await r.call('GET', '/api/p/chat/hosts');
+    [code, out] = await r.call('GET', '/api/p/chat/hosts?refresh=1');
     expect((out.hosts as unknown[])[0]).toEqual({
       machine: 'gpu',
       label: 'gpu',
@@ -449,5 +470,174 @@ describe('routes', () => {
     expect(r.lastAudit()).toMatchObject({ event: 'chat.host_stop', status: 200 });
     expect(f.running).toBe(false);
     expect((await r.call('POST', m('host/stop')))[0]).toBe(409);
+  });
+
+  test('new chat with workspace injects vault preset env, reports summary, and never audits values', async () => {
+    let locked = false;
+    const seen: Array<{ machine: string; ws: string }> = [];
+    const r = await start({
+      workspaceEnv: async (machine, ws) => {
+        seen.push({ machine, ws });
+        if (locked) return { env: {} as Record<string, string>, names: [], presets: ['p1'], missing: [], locked: true };
+        return {
+          env: { CHAT_SECRET: 'chat-secret-val' } as Record<string, string>,
+          names: ['CHAT_SECRET'],
+          presets: ['p1'],
+          missing: ['OLD_KEY'],
+          locked: false,
+        };
+      },
+    });
+    const [code, body] = await r.call('POST', m('new'), JSON.stringify({ kind: 'claude', cwd: '/w', workspace: 'ws-9' }));
+    expect(code).toBe(200);
+    expect(seen).toEqual([{ machine: 'gpu', ws: 'ws-9' }]);
+    expect(body.vault).toEqual({ injected: 1, missing: ['OLD_KEY'] });
+    const req = r.host.requests.find((q) => q.op === chat.Op.New)!;
+    expect(req.env).toEqual({ CHAT_SECRET: 'chat-secret-val' });
+    expect(r.lastAudit()).toMatchObject({ event: 'chat.new', vault_env: ['CHAT_SECRET'], vault_presets: ['p1'] });
+    expect(r.audit.text()).not.toContain('chat-secret-val');
+
+    locked = true;
+    const [code2, body2] = await r.call('POST', m('new'), JSON.stringify({ kind: 'claude', cwd: '/w', workspace: 'ws-9' }));
+    expect(code2).toBe(200);
+    expect(body2.vault).toEqual({ injected: 0, locked: true });
+    expect(r.host.requests.filter((q) => q.op === chat.Op.New).at(-1)!.env).toBeUndefined();
+
+    // Fork and switch resolve fresh workspaceEnv too: fail closed when locked or workspace omitted,
+    // inject fresh env and audit only names (never values) when unlocked.
+    const srcId = (body.chat as chat.Chat).id;
+    const [fkLockedCode, fkLockedBody] = await r.call('POST', m('fork'), JSON.stringify({ chat: srcId, workspace: 'ws-9' }));
+    expect(fkLockedCode).toBe(200);
+    expect(fkLockedBody.vault).toEqual({ injected: 0, locked: true });
+    expect(r.host.requests.filter((q) => q.op === chat.Op.Fork).at(-1)!.env).toBeUndefined();
+
+    const [swNoWsCode, swNoWsBody] = await r.call('POST', m('switch'), JSON.stringify({ chat: srcId, targetKind: 'codex' }));
+    expect(swNoWsCode).toBe(200);
+    expect(swNoWsBody.vault).toBeUndefined();
+    expect(r.host.requests.filter((q) => q.op === chat.Op.Switch).at(-1)!.env).toBeUndefined();
+
+    locked = false;
+    const [fkCode, fkBody] = await r.call('POST', m('fork'), JSON.stringify({ chat: srcId, workspace: 'ws-9' }));
+    expect(fkCode).toBe(200);
+    expect(fkBody.vault).toEqual({ injected: 1, missing: ['OLD_KEY'] });
+    expect(r.host.requests.filter((q) => q.op === chat.Op.Fork).at(-1)!.env).toEqual({ CHAT_SECRET: 'chat-secret-val' });
+    expect(r.lastAudit()).toMatchObject({ event: 'chat.fork', vault_env: ['CHAT_SECRET'], vault_presets: ['p1'] });
+
+    const [swCode, swBody] = await r.call('POST', m('switch'), JSON.stringify({ chat: srcId, targetKind: 'codex', workspace: 'ws-9' }));
+    expect(swCode).toBe(200);
+    expect(swBody.vault).toEqual({ injected: 1, missing: ['OLD_KEY'] });
+    expect(r.host.requests.filter((q) => q.op === chat.Op.Switch).at(-1)!.env).toEqual({ CHAT_SECRET: 'chat-secret-val' });
+    expect(r.lastAudit()).toMatchObject({ event: 'chat.switch', vault_env: ['CHAT_SECRET'], vault_presets: ['p1'] });
+    expect(r.audit.text()).not.toContain('chat-secret-val');
+  });
+
+  test('models, fork, switch and export routes', async () => {
+    const r = await start();
+    const f = r.host;
+    f.modelsByKind.set('claude', {
+      models: [{ value: 'claude-sonnet-4-6', name: 'Sonnet 4.6' }],
+      fetchedAt: '2026-01-02T03:04:05Z',
+    });
+
+    // GET /models validates kind and does not start host when stopped.
+    f.running = false;
+    expect((await r.call('GET', m('models?kind=nope')))[0]).toBe(400);
+    expect(await r.call('GET', m('models?kind=claude'))).toMatchObject([409, { error: 'not_running' }]);
+    expect(f.running).toBe(false);
+
+    // POST /models starts host, ensures Claude SDK, refreshes models and audits.
+    let [code, out] = await r.call('POST', m('models'), JSON.stringify({ kind: 'claude', cwd: '/w' }));
+    expect(code).toBe(200);
+    expect(out).toEqual({
+      models: [{ value: 'claude-sonnet-4-6', name: 'Sonnet 4.6' }],
+      fetchedAt: '2026-01-02T03:04:05Z',
+    });
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Models, kind: 'claude', cwd: '/w', refresh: true });
+    expect(r.lastAudit()).toMatchObject({ event: 'chat.models', kind: 'claude', cwd: '/w', refresh: true, status: 200 });
+
+    // GET /models now reads cached list from the running host.
+    [code, out] = await r.call('GET', m('models?kind=claude'));
+    expect(code).toBe(200);
+    expect(out.models).toEqual([{ value: 'claude-sonnet-4-6', name: 'Sonnet 4.6' }]);
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Models, kind: 'claude', refresh: false });
+
+    // Create a chat, then fork, switch, and export it.
+    const [, created] = await r.call('POST', m('new'), JSON.stringify({ kind: 'claude', cwd: '/w' }));
+    const srcId = (created.chat as chat.Chat).id;
+
+    expect((await r.call('POST', m('fork'), JSON.stringify({ chat: 'bad' })))[0]).toBe(400);
+    [code, out] = await r.call('POST', m('fork'), JSON.stringify({ chat: srcId, upToSeq: 4, title: 'Branch A' }));
+    expect(code).toBe(200);
+    const forkedId = (out.chat as chat.Chat).id;
+    expect(chat.validChatID(forkedId)).toBe(true);
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Fork, chat: srcId, upToSeq: 4, title: 'Branch A' });
+    expect(r.lastAudit()).toMatchObject({ event: 'chat.fork', chat: srcId, upToSeq: 4, forked_chat: forkedId, status: 200 });
+
+    expect((await r.call('POST', m('switch'), JSON.stringify({ chat: srcId, targetKind: 'nope' })))[0]).toBe(400);
+    [code, out] = await r.call(
+      'POST',
+      m('switch'),
+      JSON.stringify({ chat: srcId, targetKind: 'codex', options: { model: 'gpt-5', mode: 'plan' } }),
+    );
+    expect(code).toBe(200);
+    const switchedId = (out.chat as chat.Chat).id;
+    expect((out.chat as chat.Chat).kind).toBe('codex');
+    expect(f.requests.at(-1)).toEqual({
+      op: chat.Op.Switch,
+      chat: srcId,
+      targetKind: 'codex',
+      options: { model: 'gpt-5', mode: 'plan' },
+    });
+    expect(r.lastAudit()).toMatchObject({
+      event: 'chat.switch',
+      chat: srcId,
+      targetKind: 'codex',
+      mode: 'plan',
+      switched_chat: switchedId,
+      status: 200,
+    });
+
+    f.exportedMarkdown = '# Conversation Handoff\n\n### User\n\nhi';
+    [code, out] = await r.call('GET', m(`export?chat=${srcId}&upToSeq=2`));
+    expect([code, out]).toEqual([200, { markdown: '# Conversation Handoff\n\n### User\n\nhi' }]);
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Export, chat: srcId, upToSeq: 2 });
+
+    // Custom maxBytes and lossless raw JSON export.
+    [code, out] = await r.call('GET', m(`export?chat=${srcId}&maxBytes=65536`));
+    expect(code).toBe(200);
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Export, chat: srcId, maxBytes: 65536 });
+    expect((await r.call('GET', m(`export?chat=${srcId}&maxBytes=100`)))[0]).toBe(400);
+    expect((await r.call('GET', m(`export?chat=${srcId}&format=xml`)))[0]).toBe(400);
+
+    f.exportedData = {
+      version: 1,
+      exportedAt: '2026-01-01T00:00:00Z',
+      chat: {
+        id: srcId,
+        kind: 'claude',
+        title: 'Test',
+        cwd: '/w',
+        sessionId: '',
+        state: chat.State.Idle,
+        created: '2026-01-01T00:00:00Z',
+        updated: '2026-01-01T00:00:00Z',
+        seq: 1,
+      },
+      events: [{ seq: 1, t: chat.EventType.Turn, state: chat.TurnState.Error, error: { code: 'failed', message: 'm', stderr: 'SECRET' } }],
+    };
+    [code, out] = await r.call('GET', m(`export?chat=${srcId}&format=json`));
+    expect(code).toBe(200);
+    expect(out.format).toBe('json');
+    expect((out.data as chat.ChatExport).events[0]?.error?.stderr).toBe('SECRET');
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Export, chat: srcId, format: 'json' });
+
+    // Sessions cache hit vs ?refresh=1 bypass.
+    f.sessions = [{ sessionId: 's-cache', cwd: '/w', title: 'cached' }];
+    const beforeSess = f.count(chat.Op.Sessions);
+    expect((await r.call('POST', m('sessions?kind=claude&cwd=/w')))[0]).toBe(200);
+    expect((await r.call('POST', m('sessions?kind=claude&cwd=/w')))[0]).toBe(200);
+    expect(f.count(chat.Op.Sessions)).toBe(beforeSess + 1);
+    expect((await r.call('POST', m('sessions?kind=claude&cwd=/w&refresh=1')))[0]).toBe(200);
+    expect(f.count(chat.Op.Sessions)).toBe(beforeSess + 2);
   });
 });

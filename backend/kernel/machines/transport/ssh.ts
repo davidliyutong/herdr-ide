@@ -32,6 +32,17 @@ export class AuthRequiredError extends Error {
   }
 }
 
+/** ssh timed out trying to reach the machine. */
+export class SSHTimeoutError extends Error {
+  /** True when the ssh child process itself hung past our deadline (a dead
+   * ControlMaster); false when ssh exited on its own with a timeout error. */
+  readonly timedOut: boolean;
+  constructor(detail: string, timedOut = false) {
+    super(detail);
+    this.timedOut = timedOut;
+  }
+}
+
 export interface SSHOptions {
   target: string;
   controlDir: string;
@@ -205,7 +216,9 @@ export function classifySSHError(stderr: string, err?: Error): Error {
   ])
     if (s.includes(m)) return new AuthRequiredError(lastLines(stderr, 3).trim());
   const msg = lastLines(stderr, 3).trim();
-  return new Error(msg === '' && err ? err.message : msg);
+  const text = msg === '' && err ? err.message : msg;
+  if (s.includes('timed out')) return new SSHTimeoutError(text);
+  return new Error(text);
 }
 
 export function normArch(m: string): string {
@@ -238,7 +251,12 @@ export async function run(
     cancelSignal: opts.signal,
   });
   if (r.isCanceled) throw opts.signal?.reason ?? new Error('ssh: cancelled');
-  if (r.timedOut) throw Object.assign(new Error('ssh: timed out'), { timedOut: true });
+  if (r.timedOut) {
+    // The control master may hold a connection that died without a word;
+    // the next attempt should not wait for it again.
+    if (!opts.signal?.aborted) await stopMaster(o);
+    throw new SSHTimeoutError('ssh: timed out', true);
+  }
   if (r.exitCode === 0) return r.stdout;
   if (r.exitCode === 255) return Promise.reject(classifySSHError(r.stderr, new Error(`exit status ${r.exitCode}`)));
   if (r.exitCode === undefined) throw new Error(`ssh: ${r.shortMessage}`);
@@ -481,7 +499,7 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
         signal,
       });
     } catch (e) {
-      if (signal?.aborted) throw e;
+      if (signal?.aborted || e instanceof SSHTimeoutError) throw e;
       // Only the download's own failures (the script's status 3 and 4) are
       // remembered, not the connection's.
       if (/exit status [34]\b/.test((e as Error).message)) o.downloadFailures?.failure(o.target);
@@ -527,7 +545,8 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
       },
     );
   } catch (e) {
-    throw new Error(`upload the machine build ${version}: ${(e as Error).message}`);
+    const msg = `upload the machine build ${version}: ${(e as Error).message}`;
+    throw e instanceof SSHTimeoutError ? new SSHTimeoutError(msg, e.timedOut) : new Error(msg);
   }
   if (!confirmed(out)) throw new Error(`upload the machine build ${version}: the machine did not confirm its sha256`);
   return `${dir}/${HUB_BIN}`;
@@ -537,15 +556,7 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
  * missing and reaches the machine's node of that build over ssh stdio. */
 export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ session: Session; platform: Platform }> {
   o.progress?.({ step: 'probe' });
-  let out: string;
-  try {
-    out = await run(o, PROBE_SCRIPT, { timeoutMs: 30_000, signal });
-  } catch (e) {
-    // The control master may hold a connection that died without a word;
-    // the next attempt should not wait for it again.
-    if ((e as { timedOut?: boolean }).timedOut && !signal?.aborted) await stopMaster(o);
-    throw e;
-  }
+  const out = await run(o, PROBE_SCRIPT, { timeoutMs: 30_000, signal });
   const probe = parseProbe(out);
   const platform: Platform = { os: probe.os, arch: probe.arch, home: probe.home };
   const target: MachineTarget = { os: probe.os, arch: probe.arch, ...(probe.libc ? { libc: probe.libc } : {}) };
@@ -581,9 +592,13 @@ export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ se
   const exited = p.then((r) => r.exitCode ?? null);
   // Wait for the pipe's write callback before releasing borrowed frame bytes.
   const conn = pairDuplex(p.stdout, p.stdin);
+  let session!: Session;
   const closer = () => {
     p.stdin.end();
     p.kill();
+    // When Op.Hello times out over SSH, the control master may be dead; stop it
+    // so the next attempt starts fresh instead of hanging on the same master.
+    if (session?.err instanceof SSHTimeoutError) void stopMaster(o);
   };
   const lost = stopMasterIfStuck(
     exited.then(() => {}),
@@ -593,7 +608,7 @@ export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ se
       void stopMaster(o);
     },
   );
-  const session = new Session(conn, closer, lost);
+  session = new Session(conn, closer, lost);
   void exited.then((code) => session.finish(classifySSHError(stderr.tail(), new Error(`exit status ${code}`))));
   return { session, platform };
 }

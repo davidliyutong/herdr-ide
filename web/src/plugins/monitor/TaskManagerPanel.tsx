@@ -97,25 +97,21 @@ export function TaskManagerPanel() {
 
   // Poll metrics and processes while mounted and unpaused.
   useEffect(() => {
-    if (!m || machine?.status !== 'ready') return;
-    let alive = true;
+    if (!m || machine?.status !== 'ready' || paused) return;
+    const ac = new AbortController();
     const poll = () => {
-      if (!alive || document.hidden) return;
-      void fetchMetrics(m);
-      void fetchProcesses(m);
+      if (ac.signal.aborted || document.hidden) return;
+      void fetchMetrics(m, ac.signal);
+      void fetchProcesses(m, ac.signal);
     };
     poll();
-    if (paused)
-      return () => {
-        alive = false;
-      };
     const timer = setInterval(poll, intervalMs);
     const onVis = () => {
       if (!document.hidden) poll();
     };
     document.addEventListener('visibilitychange', onVis);
     return () => {
-      alive = false;
+      ac.abort();
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVis);
     };

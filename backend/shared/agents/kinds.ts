@@ -71,8 +71,12 @@ export interface Kind {
 export interface ChatSpec {
   /** The protocol the agent speaks (ADAPTERS). */
   adapter: AdapterName;
+  /** How the adapter runs: 'process' spawns argv[0] resolved via PATH (default);
+   * 'embedded' runs in-process inside the chat host with no external binary. */
+  runtime?: 'process' | 'embedded';
   /** The command the adapter adds its protocol's own arguments to; argv[0]
-   * is looked up in the user's PATH and is the program start runs too. */
+   * is looked up in the user's PATH and is the program start runs too. Empty
+   * for an embedded runtime. */
   argv: string[];
   /** Added to the agent's environment; absent for nothing. */
   env?: Record<string, string>;
@@ -106,11 +110,11 @@ function row(k: Kind, chat?: ChatSpec): Row {
 // The agents in the order the UIs offer them: those the command palette
 // starts first, the others by id.
 //
-// The chats: Claude Code and Codex through their own protocols; Kimi Code
-// and Grok through ACP (`kimi acp`; `grok agent --no-leader stdio`, its
-// sessions told not to approve everything, which the user's always-approve
-// setting would make them). OpenCode has no chat: `opencode acp` listens on
-// a TCP port without authentication.
+// The chats: Claude Code and Codex through their own protocols; Antigravity
+// (`agy acp --stdio`), Kimi Code (`kimi acp`) and Grok (`grok agent
+// --no-leader stdio`, its sessions told not to approve everything, which
+// the user's always-approve setting would make them) through ACP. OpenCode
+// has no chat: `opencode acp` listens on a TCP port without authentication.
 const rows: readonly Row[] = [
   row(
     {
@@ -137,6 +141,18 @@ const rows: readonly Row[] = [
     },
     { adapter: Adapter.Codex, argv: argv('codex app-server --listen stdio://') },
   ),
+  row(
+    {
+      id: 'agy',
+      title: 'Antigravity',
+      usageProvider: 'antigravity',
+      start: argv('agy'),
+      continueLatest: argv('agy --continue'),
+      resumeById: argv('agy --resume ' + PLACEHOLDER),
+      transcript: 'agy',
+    },
+    { adapter: Adapter.ACP, argv: argv('agy acp --stdio') },
+  ),
   row({ id: 'gemini', title: 'Gemini CLI', start: argv('gemini') }),
   row({ id: 'opencode', title: 'OpenCode', usageProvider: 'opencode', start: argv('opencode') }),
   row({ id: 'kimi', title: 'Kimi Code', usageProvider: 'kimi', start: argv('kimi') }, { adapter: Adapter.ACP, argv: argv('kimi acp') }),
@@ -148,7 +164,6 @@ const rows: readonly Row[] = [
   row({ id: 'copilot', title: 'GitHub Copilot', start: argv('copilot') }),
   row({ id: 'qwen', title: 'Qwen Code', start: argv('qwen') }),
   row({ id: 'amp', title: 'Amp', start: argv('amp') }),
-  row({ id: 'agy', title: 'Antigravity', usageProvider: 'antigravity' }),
   row({ id: 'cline', title: 'Cline' }),
   row({ id: 'devin', title: 'Devin' }),
   row({ id: 'droid', title: 'Droid' }),

@@ -116,6 +116,15 @@ export interface UIState {
   setStatusWidgetVisible(id: string, visible: boolean): void;
   toggleStatusWidget(id: string): void;
   showAllStatusWidgets(): void;
+  /** Right sidebar rail panel order (ids) and hidden panel ids in this browser
+   * (independent of enabling/disabling plugins). */
+  railOrder: string[];
+  hiddenRailPanels: string[];
+  setRailOrder(order: string[]): void;
+  setRailPanelVisible(id: string, visible: boolean): void;
+  toggleRailPanel(id: string): void;
+  showAllRailPanels(): void;
+  resetRailOrder(): void;
   setReadOnly(v: boolean): void;
 }
 
@@ -158,6 +167,8 @@ export const useStore = create<UIState>((set, get) => ({
   lastPanel: loadPref<string | null>('lastPanel', null) ?? undefined,
   panelWidth: loadPref('panelWidth', PANEL_WIDTH.def),
   hiddenStatusWidgets: loadPref<string[]>('hiddenStatusWidgets', []),
+  railOrder: loadPref<string[]>('railOrder', []),
+  hiddenRailPanels: loadPref<string[]>('hiddenRailPanels', []),
   toasts: [],
 
   setConnected: (connected) => set({ connected }),
@@ -232,6 +243,32 @@ export const useStore = create<UIState>((set, get) => ({
     savePref('hiddenStatusWidgets', []);
     set({ hiddenStatusWidgets: [] });
   },
+  setRailOrder: (order) => {
+    const next = [...new Set(order.filter((x) => typeof x === 'string' && x))];
+    savePref('railOrder', next);
+    set({ railOrder: next });
+  },
+  setRailPanelVisible: (id, visible) => {
+    const cur = get().hiddenRailPanels;
+    const next = visible ? cur.filter((x) => x !== id) : cur.includes(id) ? cur : [...cur, id];
+    if (next === cur) return;
+    savePref('hiddenRailPanels', next);
+    set({ hiddenRailPanels: next });
+  },
+  toggleRailPanel: (id) => {
+    const hidden = get().hiddenRailPanels.includes(id);
+    get().setRailPanelVisible(id, hidden);
+  },
+  showAllRailPanels: () => {
+    if (!get().hiddenRailPanels.length) return;
+    savePref('hiddenRailPanels', []);
+    set({ hiddenRailPanels: [] });
+  },
+  resetRailOrder: () => {
+    if (!get().railOrder.length) return;
+    savePref('railOrder', []);
+    set({ railOrder: [] });
+  },
   sshLogin: true,
   toast: (msg, action, ttl, kind, position) => {
     const id = ++toastSeq;
@@ -244,6 +281,34 @@ export const useStore = create<UIState>((set, get) => ({
 }));
 
 type Setter = (p: Partial<UIState>) => void;
+
+/** Orders items by saved railOrder (unknown ids stay in their natural order). */
+export function orderRailItems<T extends { id: string }>(items: readonly T[], order: readonly string[]): T[] {
+  if (!order.length) return [...items];
+  const rank = new Map(order.map((id, i) => [id, i]));
+  return items
+    .map((item, idx) => ({ item, idx, r: rank.get(item.id) ?? Infinity }))
+    .sort((a, b) => a.r - b.r || a.idx - b.idx)
+    .map((x) => x.item);
+}
+
+/** Moves `id` to insertion slot `slot` among `visibleIds`, preserving any hidden
+ * ids from `fullOrder` in place relative to their neighbors. */
+export function moveRailId(fullOrder: readonly string[], visibleIds: readonly string[], id: string, slot: number): string[] {
+  const fromVis = visibleIds.indexOf(id);
+  if (fromVis < 0) return [...fullOrder];
+  const clamped = Math.max(0, Math.min(visibleIds.length, slot));
+  if (clamped === fromVis || clamped === fromVis + 1) return [...fullOrder];
+  const nextVis = visibleIds.filter((x) => x !== id);
+  const insertAt = clamped > fromVis ? clamped - 1 : clamped;
+  nextVis.splice(insertAt, 0, id);
+  // Splice the reordered visible ids back into the slots they occupied in fullOrder.
+  const visSet = new Set(visibleIds);
+  let k = 0;
+  const out = fullOrder.map((x) => (visSet.has(x) ? nextVis[k++]! : x));
+  while (k < nextVis.length) out.push(nextVis[k++]!);
+  return out;
+}
 
 /** Keeps the shown machine one that exists: the one shown last, else the
  * local machine, else the first. */

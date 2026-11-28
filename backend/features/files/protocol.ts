@@ -19,6 +19,8 @@ import { defineProtocol } from '#shared/proto/protocol.ts';
 export const MAX_WRITE = 8 << 20;
 /** Bounds the paths of one stat (the agent's limit). */
 export const MAX_STAT = 200;
+/** Bounds the matches returned by one find request. */
+export const MAX_FIND_LIMIT = 500;
 /** Bounds an upload into the explorer (the agent's limit). */
 export const MAX_UPLOAD = 4 * 2 ** 30;
 
@@ -51,10 +53,42 @@ const paths = z.array(z.string());
 /** A change of large trees (a copy, a removal) answers after its work. */
 const CHANGE_MS = 10 * 60_000;
 
+export const findMatch = z.object({
+  path: z.string(),
+  rel: z.string(),
+  name: z.string(),
+  is_dir: z.boolean().optional(),
+});
+export type FindMatch = z.infer<typeof findMatch>;
+
+export const findResult = z.object({
+  matches: z.array(findMatch),
+  truncated: z.boolean().optional(),
+});
+export type FindResult = z.infer<typeof findResult>;
+
 export const filesProtocol = defineProtocol('files', {
   /** The state of paths, in their order. The agent waits at most 10 s for
    * them (a dead mount) and runs at most 8 stats at once. */
   stat: { params: z.object({ paths: paths.max(MAX_STAT) }), result: z.array(entry), timeoutMs: 20_000 },
+  /** Bounded recursive file/dir search under dir for @ autocomplete (match
+   * "fuzzy", .gitignore-aware, capped at 2000 entries / 2 s) and for the file
+   * explorer's whole-project filename filter (match "name", optional regex,
+   * hidden and exclude patterns, capped at 50000 entries / 5 s). Read-only
+   * and never follows symlinks. */
+  find: {
+    params: z.object({
+      dir: path,
+      query: z.string().max(256).optional(),
+      limit: z.number().int().min(1).max(MAX_FIND_LIMIT).optional(),
+      match: z.enum(['fuzzy', 'name']).optional(),
+      regex: z.boolean().optional(),
+      hidden: z.boolean().optional(),
+      exclude: z.array(z.string().max(200)).max(100).optional(),
+    }),
+    result: findResult,
+    timeoutMs: 10_000,
+  },
   /** A folder; a taken name fails (exists), or with unique the folder takes
    * the first free name-1, name-2… */
   mkdir: { params: z.object({ path, unique: z.boolean().optional() }), result, timeoutMs: CHANGE_MS },

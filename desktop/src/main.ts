@@ -9,12 +9,14 @@ import {
   Notification,
   powerMonitor,
   safeStorage,
+  screen,
   session,
   shell,
   systemPreferences,
   type BaseWindow,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
+  type WebContents,
 } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
@@ -25,9 +27,22 @@ import tokens from '../../spec/tokens.json';
 import { APP_NAME, APP_SLUG } from '../../web/src/brand';
 import { detectLocale, translate } from '../../web/src/i18n';
 import type { MessageKey } from '../../web/src/i18n/en';
-import type { OpenedFolders } from '../../web/src/shell';
+import type { OpenedFolders, OpenTabWindowOptions } from '../../web/src/shell';
 import { channels } from './bridge';
 import { closeGuard, isCloseAnswer, parseUnsaved, type CloseGuard } from './closeGuard';
+import {
+  clampWindowBounds,
+  DETACHED_COMMANDS,
+  DETACHED_MIN_HEIGHT,
+  DETACHED_MIN_WIDTH,
+  detachedWindowUrl,
+  MAX_DETACHED_WINDOWS,
+  menuDisabledFor,
+  nextQuitTarget,
+  parseOpenTabRequest,
+  pointInBounds,
+  type QuitWindow,
+} from './detached';
 import {
   channelHead,
   HubHost,
@@ -54,6 +69,7 @@ import {
   APP_PARTITION,
   appWindowPreferences,
   BROWSER_PARTITION,
+  detachedWindowPreferences,
   guestMayNavigate,
   guestPreferences,
   hostResolver,
@@ -64,6 +80,7 @@ import {
 } from './policy';
 import { serveApp } from './protocol';
 import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
+import { sameBindings, startupGate, type StartupGate } from './startup';
 import { macTrafficLightPosition, windowFrameOptions } from './titlebar';
 import { codeIdentity, instanceFiles, KEYCHAIN_RECORD, keychainMigration, runTool, safeStorageItem, securityKeychain } from './keychain';
 import { UNLOCK_FILE, unlockStore, type Prepared } from './unlockStore';
@@ -101,13 +118,54 @@ let hub: HubHost | undefined;
 let mainWindow: BrowserWindow | undefined;
 // The main window's page asks about unsaved changes before it closes.
 let guard: CloseGuard | undefined;
+interface DetachedEntry {
+  win: BrowserWindow;
+  guard: CloseGuard;
+  docking: boolean;
+  dockTimer?: ReturnType<typeof setTimeout>;
+}
+// Standalone detached tab windows (keyed by `${m}\n${pane}`), each with its own close guard.
+const detachedWindows = new Map<string, DetachedEntry>();
+
+function detachedForContents(contents: WebContents) {
+  for (const entry of detachedWindows.values()) {
+    if (!entry.win.isDestroyed() && entry.win.webContents === contents) return entry;
+  }
+  return undefined;
+}
+
+function detachedForWindow(win: BaseWindow | undefined) {
+  if (!win) return undefined;
+  for (const entry of detachedWindows.values()) {
+    if (!entry.win.isDestroyed() && entry.win === win) return entry;
+  }
+  return undefined;
+}
+
+function trackedQuitWindows(): QuitWindow<BrowserWindow>[] {
+  const out: QuitWindow<BrowserWindow>[] = [];
+  for (const entry of detachedWindows.values()) {
+    if (!entry.win.isDestroyed()) out.push({ window: entry.win, kind: 'detached', unsaved: entry.guard.hasUnsaved() });
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    out.push({ window: mainWindow, kind: 'main', unsaved: guard?.hasUnsaved() ?? false });
+  }
+  return out;
+}
+
+function hasOpenTrackedWindow(): boolean {
+  return trackedQuitWindows().length > 0;
+}
 // The origin of the app's pages, which only its session serves.
 const origin = APP_ORIGIN;
 // The hub served once: windows may open.
 let serving = false;
+// Coordinates parallel hub startup and first window paint (startup.ts).
+let bootGate: StartupGate | undefined;
 let quitting = false;
-// Quit was chosen while the main window was open: it closes first.
+// Quit was chosen while tracked windows were open: they close sequentially (dirty first).
 let quitAfterClose = false;
+let quitTarget: BrowserWindow | undefined;
 let stopped = false;
 let systemShutdown = false;
 let reportingError = false;
@@ -124,8 +182,25 @@ let zoomFactor = 1;
 // appearance.uiFontSize in CSS pixels: paired with zoomFactor to keep the
 // macOS traffic lights vertically centered in the integrated header row.
 let uiFontSize = tokens.font.root;
-// The commands whose menu items are disabled, as the page last said.
-let disabled = new Set<string>();
+// The commands whose menu items are disabled, as the main page last said.
+let mainDisabled = new Set<string>();
+
+function cancelQuit() {
+  quitAfterClose = false;
+  quitTarget = undefined;
+}
+
+function advanceQuit() {
+  if (!quitAfterClose || reportingError) return;
+  const next = nextQuitTarget(trackedQuitWindows());
+  if (!next) {
+    quitTarget = undefined;
+    app.quit();
+    return;
+  }
+  quitTarget = next.window;
+  next.window.close();
+}
 // Folders opened with the app, until the page takes them.
 const folders = new FolderQueue();
 // Native OS notifications (Electron Notification API), queued click routing.
@@ -133,6 +208,10 @@ const notifications = createNotifications({
   isSupported: () => Notification.isSupported(),
   create: (opts) => new Notification(opts),
   showMain,
+  setBadgeCount: (count) => {
+    app.setBadgeCount(count);
+    if (platform === 'darwin') app.dock?.setBadge(count > 0 ? String(count) : '');
+  },
 });
 
 /** macOS: the step that gives safeStorage's keychain item to this build
@@ -168,9 +247,11 @@ function describe(error: unknown): string {
 async function fail(error: unknown) {
   if (reportingError || quitting) return;
   reportingError = true;
+  bootGate?.abort();
   console.error(error);
   // Stop before showing a modal dialog, including after a startup timeout.
   stopFollowing();
+  if (!serving && mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
   await hub?.stop();
   if (quitting) return;
   await dialog.showMessageBox({
@@ -193,11 +274,8 @@ app.on('web-contents-created', (_event, contents) => {
   // browser panes' guest, at an address that is not the hub's (policy.ts
   // guestPreferences).
   contents.on('will-attach-webview', (event, prefs, params) => {
-    const ok =
-      !!mainWindow &&
-      contents === mainWindow.webContents &&
-      isInternal(contents.getURL(), origin) &&
-      guestPreferences(prefs, params, origin);
+    const isAppWindow = (!!mainWindow && contents === mainWindow.webContents) || !!detachedForContents(contents);
+    const ok = isAppWindow && isInternal(contents.getURL(), origin) && guestPreferences(prefs, params, origin);
     if (!ok) event.preventDefault();
   });
   if (contents.getType() === 'webview') {
@@ -249,14 +327,28 @@ function showMain() {
     if (serving && !quitting) createWindow();
     return;
   }
+  if (!serving) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
 }
 
-/** A command of the menu, for the main window's page. In another window (a
- * program's, VS Code's own) closing a pane or a tab closes that window. */
+/** A command of the menu, for the focused app window's page. In a detached tab
+ * window, pane/find/zoom/palette commands act on that window and tab.close
+ * closes it (running its close guard); in other secondary windows (program
+ * windows, standalone VS Code) closing a pane or tab closes that window. */
 function runCommand(command: string, focused: BaseWindow | undefined) {
+  const det = detachedForWindow(focused);
+  if (det) {
+    if (command === 'tab.close') {
+      det.win.close();
+      return;
+    }
+    if (DETACHED_COMMANDS.has(command)) {
+      det.win.webContents.send(channels.command, command);
+      return;
+    }
+  }
   if (focused && focused !== mainWindow && (command === 'pane.close' || command === 'tab.close')) {
     focused.close();
     return;
@@ -266,26 +358,46 @@ function runCommand(command: string, focused: BaseWindow | undefined) {
   mainWindow.webContents.send(channels.command, command);
 }
 
-function buildMenu() {
-  const template = menuTemplate(bindings, APP_NAME, t, (command) => (_item, focused) => runCommand(command, focused), platform, disabled);
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+function effectiveDisabled(): Set<string> {
+  const focused = BrowserWindow.getFocusedWindow() ?? undefined;
+  return menuDisabledFor(menuCommands(), mainDisabled, !!detachedForWindow(focused));
 }
 
-/** Disables the menu items of the commands the page says cannot run now. */
-function applyDisabled(next: Set<string>) {
-  disabled = next;
+function syncMenuEnabled() {
   const menu = Menu.getApplicationMenu();
   if (!menu) return;
+  const eff = effectiveDisabled();
   for (const id of menuCommands()) {
     const item = menu.getMenuItemById(id);
-    if (item) item.enabled = !disabled.has(id);
+    if (item) item.enabled = !eff.has(id);
   }
 }
 
-/** Zooms the main window's page to the zoom setting. */
+function buildMenu() {
+  const template = menuTemplate(
+    bindings,
+    APP_NAME,
+    t,
+    (command) => (_item, focused) => runCommand(command, focused),
+    platform,
+    effectiveDisabled(),
+  );
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/** Disables the menu items of the commands the main page says cannot run now. */
+function applyDisabled(next: Set<string>) {
+  mainDisabled = next;
+  syncMenuEnabled();
+}
+
+/** Zooms the main window and any detached tab windows to the zoom setting. */
 function applyZoom() {
-  const contents = mainWindow?.webContents;
-  if (contents && !contents.isDestroyed() && contents.getZoomFactor() !== zoomFactor) contents.setZoomFactor(zoomFactor);
+  const apply = (contents: WebContents | undefined) => {
+    if (contents && !contents.isDestroyed() && contents.getZoomFactor() !== zoomFactor) contents.setZoomFactor(zoomFactor);
+  };
+  apply(mainWindow?.webContents);
+  for (const entry of detachedWindows.values()) apply(entry.win.webContents);
 }
 
 /** Keeps the macOS traffic lights vertically centered in the integrated header
@@ -311,6 +423,7 @@ function applySettings(s: ShellSettings) {
 }
 
 function applyBindings(b: Binding[]) {
+  if (sameBindings(bindings, b)) return;
   bindings = b;
   buildMenu();
 }
@@ -330,6 +443,12 @@ function fromMainPage(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   );
 }
 
+function fromDetachedPage(event: IpcMainEvent | IpcMainInvokeEvent) {
+  const frame = event.senderFrame;
+  if (!frame || frame !== event.sender.mainFrame || frame.origin !== origin || !isInternal(frame.url, origin)) return undefined;
+  return detachedForContents(event.sender);
+}
+
 ipcMain.on(channels.menuState, (event, value: unknown) => {
   if (!fromMainPage(event)) return;
   const next = parseDisabled(value);
@@ -338,11 +457,53 @@ ipcMain.on(channels.menuState, (event, value: unknown) => {
 
 ipcMain.on(channels.unsaved, (event, value: unknown) => {
   const n = parseUnsaved(value);
-  if (fromMainPage(event) && n !== undefined) guard?.setUnsaved(n);
+  if (n === undefined) return;
+  if (fromMainPage(event)) {
+    guard?.setUnsaved(n);
+    return;
+  }
+  fromDetachedPage(event)?.guard.setUnsaved(n);
 });
 
 ipcMain.on(channels.closeAnswer, (event, value: unknown) => {
-  if (fromMainPage(event) && isCloseAnswer(value)) guard?.answer(value);
+  if (!isCloseAnswer(value)) return;
+  if (fromMainPage(event)) {
+    guard?.answer(value);
+    return;
+  }
+  fromDetachedPage(event)?.guard.answer(value);
+});
+
+ipcMain.handle(channels.windowOpenTab, (event, value: unknown) => {
+  if (!fromMainPage(event) && !fromDetachedPage(event)) return false;
+  const req = parseOpenTabRequest(value);
+  return req ? openDetachedTabWindow(req) : false;
+});
+
+ipcMain.on(channels.windowFocusMain, (event) => {
+  const det = fromDetachedPage(event);
+  if (det) {
+    // Detached window is docking back into main: skip its close guard so
+    // window.close() does not steal focus back from mainWindow.
+    det.docking = true;
+    clearTimeout(det.dockTimer);
+    det.dockTimer = setTimeout(() => {
+      det.docking = false;
+      det.dockTimer = undefined;
+    }, 2000);
+    showMain();
+    return;
+  }
+  if (fromMainPage(event)) showMain();
+});
+
+ipcMain.handle(channels.windowIsOverMain, (event, value: unknown) => {
+  if (!fromDetachedPage(event)) return false;
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return false;
+  if (typeof value !== 'object' || value === null) return false;
+  const { x, y } = value as { x?: unknown; y?: unknown };
+  if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+  return pointInBounds(x, y, mainWindow.getBounds());
 });
 
 ipcMain.on(channels.foldersWanted, (event, wanted: unknown) => {
@@ -361,6 +522,9 @@ ipcMain.handle(channels.notifySupported, (event) => (fromMainPage(event) ? notif
 ipcMain.handle(channels.notifyShow, (event, opts: unknown) => (fromMainPage(event) ? notifications.show(opts) : false));
 ipcMain.on(channels.notifyClose, (event, tag: unknown) => {
   if (fromMainPage(event)) notifications.close(tag);
+});
+ipcMain.on(channels.notifyBadge, (event, count: unknown) => {
+  if (fromMainPage(event)) notifications.setBadgeCount(count);
 });
 ipcMain.on(channels.notifyClickWanted, (event, wanted: unknown) => {
   if (!fromMainPage(event)) return;
@@ -486,9 +650,7 @@ function createWindow() {
     close: () => {
       if (!win.isDestroyed()) win.close();
     },
-    cancelled: () => {
-      quitAfterClose = false;
-    },
+    cancelled: cancelQuit,
     setTimer: (fn, ms) => {
       const t = setTimeout(fn, ms);
       return () => clearTimeout(t);
@@ -497,12 +659,15 @@ function createWindow() {
   guard = g;
   const onTheme = () => win.setBackgroundColor(windowBackground());
   nativeTheme.on('updated', onTheme);
+  win.on('focus', syncMenuEnabled);
+  win.on('blur', syncMenuEnabled);
   // Folders opened from now on wait for the next page, which asks for them;
   // this runs before that page can.
   win.webContents.on('did-start-navigation', (details) => {
     if (details.isMainFrame && !details.isSameDocument) {
       folders.takenBy(undefined);
       notifications.takenBy(undefined);
+      notifications.setBadgeCount(0);
     }
   });
   // What a page said of its unsaved changes goes with it, once another one
@@ -516,6 +681,7 @@ function createWindow() {
   win.webContents.on('render-process-gone', (_event, details) => {
     folders.takenBy(undefined);
     notifications.takenBy(undefined);
+    notifications.setBadgeCount(0);
     g.reset();
     if (!quitting) void fail(new DesktopError('desktop.rendererGone', details.reason));
   });
@@ -534,7 +700,7 @@ function createWindow() {
     });
     // preventDefault here ignores the page's objection: the window goes.
     if (choice === 0) event.preventDefault();
-    else quitAfterClose = false;
+    else cancelQuit();
   });
   // Windows ends a session (log off, restart, shut down) with this.
   win.on('session-end', () => {
@@ -553,31 +719,154 @@ function createWindow() {
       sendFullScreen(false);
     });
   }
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => {
+    if (bootGate) bootGate.windowReady();
+    else if (!reportingError && !quitting && !win.isDestroyed()) win.show();
+  });
   win.on('closed', () => {
     g.reset();
     if (guard === g) guard = undefined;
     nativeTheme.off('updated', onTheme);
     folders.takenBy(undefined);
     notifications.takenBy(undefined);
+    notifications.setBadgeCount(0);
     mainWindow = undefined;
-    // Program windows do not keep the app open.
-    if (quitAfterClose || quitsWithLastWindow(platform)) app.quit();
+    if (quitTarget === win) quitTarget = undefined;
+    syncMenuEnabled();
+    // Program windows do not keep the app open; on Windows/Linux closing the
+    // main window quits the app (closing detached windows cleanly as part of quit).
+    if (!reportingError) {
+      if (quitAfterClose) {
+        advanceQuit();
+      } else if (quitsWithLastWindow(platform)) {
+        app.quit();
+      }
+    }
   });
   void win.loadURL(`${origin}/`).catch(fail);
 }
 
+/** Opens (or focuses) a standalone native-frame window showing only the core
+ * pane(s) of a detached tab. Closing it directly asks its page to check
+ * unsaved changes and close the tab; quitting the app preserves tabs. */
+function openDetachedTabWindow(req: OpenTabWindowOptions): boolean {
+  if (!serving || quitting || reportingError) return false;
+  const key = `${req.m}\n${req.pane}`;
+  const existing = detachedWindows.get(key);
+  if (existing && !existing.win.isDestroyed()) {
+    if (existing.win.isMinimized()) existing.win.restore();
+    existing.win.show();
+    existing.win.focus();
+    return true;
+  }
+  if (detachedWindows.size >= MAX_DETACHED_WINDOWS) return false;
+  const display =
+    req.x !== undefined && req.y !== undefined ? screen.getDisplayNearestPoint({ x: req.x, y: req.y }) : screen.getPrimaryDisplay();
+  const bounds = clampWindowBounds(req, display.workArea);
+  const win = new BrowserWindow({
+    title: req.title || APP_NAME,
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    minWidth: DETACHED_MIN_WIDTH,
+    minHeight: DETACHED_MIN_HEIGHT,
+    show: false,
+    backgroundColor: windowBackground(),
+    ...(platform === 'linux' && { icon: join(app.getAppPath(), 'assets', 'icon.png') }),
+    webPreferences: detachedWindowPreferences(join(__dirname, 'preload.cjs')),
+  });
+  const g = closeGuard({
+    ask: () => {
+      // Only bring the detached window in front when it actually has unsaved
+      // edits to ask about (avoiding focus flashes during clean close/dock).
+      if (g.hasUnsaved()) {
+        if (win.isMinimized()) win.restore();
+        win.show();
+        win.focus();
+      }
+      const reason: 'close' | 'quit' = quitting || quitAfterClose ? 'quit' : 'close';
+      win.webContents.send(channels.closeRequest, reason);
+    },
+    close: () => {
+      if (!win.isDestroyed()) win.close();
+    },
+    cancelled: cancelQuit,
+    setTimer: (fn, ms) => {
+      const t = setTimeout(fn, ms);
+      return () => clearTimeout(t);
+    },
+  });
+  const entry: DetachedEntry = { win, guard: g, docking: false };
+  detachedWindows.set(key, entry);
+  const onTheme = () => {
+    if (!win.isDestroyed()) win.setBackgroundColor(windowBackground());
+  };
+  nativeTheme.on('updated', onTheme);
+  win.on('focus', syncMenuEnabled);
+  win.on('blur', syncMenuEnabled);
+  win.webContents.on('did-navigate', () => g.reset());
+  win.webContents.on('did-finish-load', applyZoom);
+  win.on('close', (event) => {
+    if (entry.docking) return;
+    // Direct close asks the detached page so it can confirm unsaved changes
+    // and close the tab; app quit asks only when unsaved > 0 (keeping tabs).
+    const directClose = !quitting && !quitAfterClose;
+    if (!g.onClose(systemShutdown, directClose)) event.preventDefault();
+  });
+  win.webContents.on('will-prevent-unload', (event) => {
+    if (systemShutdown) return event.preventDefault();
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      buttons: [t('unsaved.leave'), t('dialog.cancel')],
+      defaultId: 1,
+      cancelId: 1,
+      message: t('unsaved.title'),
+      detail: t('unsaved.leaveDetail'),
+    });
+    if (choice === 0) event.preventDefault();
+    else cancelQuit();
+  });
+  win.webContents.on('render-process-gone', () => {
+    g.reset();
+    if (!win.isDestroyed()) win.destroy();
+  });
+  win.on('session-end', () => {
+    systemShutdown = true;
+  });
+  win.once('ready-to-show', () => {
+    if (!reportingError && !quitting && !win.isDestroyed()) win.show();
+  });
+  win.on('closed', () => {
+    clearTimeout(entry.dockTimer);
+    g.reset();
+    nativeTheme.off('updated', onTheme);
+    if (detachedWindows.get(key)?.win === win) detachedWindows.delete(key);
+    if (quitTarget === win) quitTarget = undefined;
+    syncMenuEnabled();
+    if (!reportingError && quitAfterClose) advanceQuit();
+  });
+  void win.loadURL(detachedWindowUrl(origin, req.m, req.pane)).catch(() => {
+    if (!win.isDestroyed()) win.destroy();
+  });
+  return true;
+}
+
 app.on('before-quit', (event) => {
-  // The main window closes first, so a page with unsaved changes can keep
-  // the app (will-prevent-unload) before the hub stops; quitting goes on
-  // once it has closed.
-  if (!stopped && !systemShutdown && mainWindow && !mainWindow.isDestroyed()) {
+  // Close tracked windows sequentially (dirty windows first) so cancelling quit
+  // on any window with unsaved changes never destroys clean windows.
+  if (!stopped && !systemShutdown && hasOpenTrackedWindow()) {
     event.preventDefault();
+    if (quitAfterClose && quitTarget && !quitTarget.isDestroyed()) {
+      quitTarget.close();
+      return;
+    }
     quitAfterClose = true;
-    mainWindow.close();
+    advanceQuit();
     return;
   }
   quitting = true;
+  bootGate?.abort();
   stopFollowing();
   notifications.closeAll();
   if (stopped) return;
@@ -656,10 +945,6 @@ if (!app.requestSingleInstanceLock()) {
       powerMonitor.on('shutdown', () => {
         systemShutdown = true;
       });
-      if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), 'assets', 'icon.png'));
-      // Windows and Linux show these in About (macOS reads its bundle).
-      app.setAboutPanelOptions({ applicationName: APP_NAME, applicationVersion: app.getVersion() });
-      buildMenu();
       // The key of the system's prompts: to the hub in its start
       // message, and to nothing else.
       const key = verifyKey();
@@ -710,13 +995,28 @@ if (!app.requestSingleInstanceLock()) {
       });
       hub = host;
       (globalThis as { __hubPid?: () => number | undefined }).__hubPid = () => hub?.pid;
+      // Spawn the hub first so its process initialization overlaps setting up
+      // Electron sessions, menus and creating the main renderer window; any
+      // request or channel waits on HubHost.serving() until the hub is ready.
+      const starting = host.start();
       // The app's windows live in a session of their own, where the app's
-      // origin is the hub's: the handler is there before a page loads.
+      // origin is the hub's: protocol and permission handlers are installed
+      // before any window is created.
       const ses = session.fromPartition(APP_PARTITION);
       serveApp(ses, host);
-      await host.start();
-      serving = true;
-      if (quitting) return;
+      ses.setPermissionRequestHandler((contents, permission, callback, details) => {
+        callback(allowPermission(permission, details.requestingUrl, contents.getURL(), origin));
+      });
+      ses.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
+        return allowPermission(permission, requestingOrigin, contents?.getURL() || '', origin);
+      });
+      // The browser panes' guests live in their own partition, so they share
+      // nothing with the app, and the app's origin is not the hub's there.
+      // A guest gets no permission but full screen; downloads keep
+      // Electron's save dialog (no will-download handler saves by itself).
+      const guests = session.fromPartition(BROWSER_PARTITION);
+      guests.setPermissionRequestHandler((_contents, permission, callback) => callback(allowGuestPermission(permission)));
+      guests.setPermissionCheckHandler((_contents, permission) => allowGuestPermission(permission));
       verify = verifier(key, {
         platform,
         canPromptTouchID: () => platform === 'darwin' && systemPreferences.canPromptTouchID(),
@@ -733,21 +1033,21 @@ if (!app.requestSingleInstanceLock()) {
         ...(platform === 'win32' && { helloKeys: helloKeysFor(runPowerShell) }),
         unlockStore: unlockStore(app.getPath('userData'), safeStorage, { prepare: keychainStep() }),
       });
-      ses.setPermissionRequestHandler((contents, permission, callback, details) => {
-        callback(allowPermission(permission, details.requestingUrl, contents.getURL(), origin));
+      if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), 'assets', 'icon.png'));
+      // Windows and Linux show these in About (macOS reads its bundle).
+      app.setAboutPanelOptions({ applicationName: APP_NAME, applicationVersion: app.getVersion() });
+      buildMenu();
+      const gate = startupGate(() => {
+        bootGate = undefined;
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
       });
-      ses.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
-        return allowPermission(permission, requestingOrigin, contents?.getURL() || '', origin);
-      });
-      // The browser panes' guests live in their own partition, so they share
-      // nothing with the app, and the app's origin is not the hub's there.
-      // A guest gets no permission but full screen; downloads keep
-      // Electron's save dialog (no will-download handler saves by itself).
-      const guests = session.fromPartition(BROWSER_PARTITION);
-      guests.setPermissionRequestHandler((_contents, permission, callback) => callback(allowGuestPermission(permission)));
-      guests.setPermissionCheckHandler((_contents, permission) => allowGuestPermission(permission));
+      bootGate = gate;
       stopFollowing = followHub(host, keys, { bindings: applyBindings, settings: applySettings });
       createWindow();
+      await starting;
+      serving = true;
+      if (quitting || reportingError) return;
+      gate.hubReady();
     })
     .catch(fail);
 }

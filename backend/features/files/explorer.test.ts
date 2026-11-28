@@ -144,6 +144,15 @@ describe('through the machine', () => {
     }
     if (action === 'stat')
       return reply({ ok: true, plugin: (params.paths as string[]).map((p) => ({ path: p, exists: p !== '/gone', size: 0, mtime: 0 })) });
+    if (action === 'find') {
+      if (params.regex && params.query === '[bad') return reply({ ok: false, code: 'bad_regex', error: 'Invalid regular expression' });
+      return reply({
+        ok: true,
+        plugin: {
+          matches: [{ path: `${params.dir}/src/Button.tsx`, rel: 'src/Button.tsx', name: 'Button.tsx' }],
+        },
+      });
+    }
     if (path === '/exists') return reply({ ok: false, code: 'exists', error: 'exists: /exists' });
     if (path === '/missing') return reply({ ok: false, code: 'not_found', error: 'not_found: /missing' });
     return reply({ ok: true, plugin: { paths: [path || String(params.dir)] } });
@@ -269,8 +278,52 @@ describe('through the machine', () => {
       expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([403, 'read_only']);
       res = await fetch(`${ro.url}/api/m/local/p/files/stat`, { method: 'POST', body: '{"paths":["/x"]}' });
       expect(res.status).toBe(200);
+      res = await fetch(`${ro.url}/api/m/local/p/files/find?dir=/repo&query=Btn&limit=10`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        matches: [{ path: '/repo/src/Button.tsx', rel: 'src/Button.tsx', name: 'Button.tsx' }],
+      });
     } finally {
       await ro.stop();
     }
+  });
+
+  test('find validates query params and relays to machine', async () => {
+    let res = await fetch(`${fc.url}/api/m/local/p/files/find`);
+    expect(res.status).toBe(400);
+    res = await fetch(`${fc.url}/api/m/local/p/files/find?dir=/repo&limit=501`);
+    expect(res.status).toBe(400);
+    res = await fetch(`${fc.url}/api/m/local/p/files/find?dir=/repo&match=bogus`);
+    expect(res.status).toBe(400);
+    res = await fetch(`${fc.url}/api/m/local/p/files/find?dir=/repo&regex=maybe`);
+    expect(res.status).toBe(400);
+    res = await fetch(`${fc.url}/api/m/local/p/files/find?dir=/repo&exclude=bad/path`);
+    expect(res.status).toBe(400);
+    res = await fetch(`${fc.url}/api/m/local/p/files/find?dir=/repo&query=Button&limit=25`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      matches: [{ path: '/repo/src/Button.tsx', rel: 'src/Button.tsx', name: 'Button.tsx' }],
+    });
+    expect(calls.at(-1)).toEqual({ action: 'find', params: { dir: '/repo', query: 'Button', limit: 25 } });
+
+    res = await fetch(
+      `${fc.url}/api/m/local/p/files/find?dir=/repo&query=%5EButton%5C.tsx%24&match=name&regex=1&hidden=1&exclude=.git&exclude=*.tmp&limit=500`,
+    );
+    expect(res.status).toBe(200);
+    expect(calls.at(-1)).toEqual({
+      action: 'find',
+      params: {
+        dir: '/repo',
+        query: '^Button\\.tsx$',
+        match: 'name',
+        regex: true,
+        hidden: true,
+        exclude: ['.git', '*.tmp'],
+        limit: 500,
+      },
+    });
+
+    res = await fetch(`${fc.url}/api/m/local/p/files/find?dir=/repo&query=%5Bbad&match=name&regex=1`);
+    expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([400, 'bad_regex']);
   });
 });

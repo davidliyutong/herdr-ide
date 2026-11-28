@@ -52,7 +52,7 @@ describe('a page of the webview that does not load', () => {
     expect(button.textContent).toBe(t('browser.openSystem'));
     expect(button.title).toBe('https://intranet.example/docs');
     await click(button);
-    expect(open).toHaveBeenCalledWith('https://intranet.example/docs', '_blank', 'noopener');
+    expect(open).toHaveBeenCalledWith('https://intranet.example/docs', '_blank', 'noopener,noreferrer');
     // A load that works takes the note away.
     await fire('did-navigate', { url: 'https://intranet.example/docs' });
     expect(failed()).toBeNull();

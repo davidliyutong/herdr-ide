@@ -19,6 +19,7 @@ const common = [
   'setDisabledCommands',
   'setUnsaved',
   'verifyUser',
+  'windows',
 ];
 
 test('the page gets its channels and the desktopShell bridge, with these functions', () => {
@@ -126,12 +127,51 @@ test('closing with unsaved changes: a count and an answer from the page, a reque
     { channel: channels.closeAnswer, value: 'close' },
   ]);
   let asked = 0;
-  const off = shell.onCloseRequest(() => asked++);
+  const reasons: Array<'close' | 'quit' | undefined> = [];
+  const off = shell.onCloseRequest((reason) => {
+    asked++;
+    reasons.push(reason);
+  });
   receive(channels.closeRequest, undefined);
+  receive(channels.closeRequest, 'close');
+  receive(channels.closeRequest, 'quit');
   receive(channels.closeRequest, 'payload');
   off();
   receive(channels.closeRequest, undefined);
-  assert.equal(asked, 1);
+  assert.equal(asked, 3);
+  assert.deepEqual(reasons, [undefined, 'close', 'quit']);
+  sent.length = 0;
+});
+
+test('detached tab windows bridge exposes only per-window methods and validates requests', async () => {
+  const expectedDetached = ['answerClose', 'browser', 'detached', 'onCloseRequest', 'onCommand', 'pathForFile', 'setUnsaved', 'windows'];
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const det = desktopShellFor(platform, true);
+    assert.equal(det.detached, true);
+    assert.deepEqual(Object.keys(det).sort(), expectedDetached);
+    assert.equal('titlebar' in det, false);
+    assert.equal('privacy' in det, false);
+    assert.equal('verifyUser' in det, false);
+    assert.equal('notifications' in det, false);
+    assert.equal('metrics' in det, false);
+    assert.equal('onOpenFolders' in det, false);
+    assert.equal('setDisabledCommands' in det, false);
+  }
+  invoked.length = 0;
+  sent.length = 0;
+  answers.set(channels.windowOpenTab, true);
+  answers.set(channels.windowIsOverMain, true);
+  assert.equal(await shell.windows!.openTab({ m: '', pane: 't1' }), false);
+  assert.equal(await shell.windows!.openTab({ m: 'local', pane: 't1', x: 50, y: 60 }), true);
+  shell.windows!.focusMain();
+  assert.equal(await shell.windows!.isOverMain(NaN, 10), false);
+  assert.equal(await shell.windows!.isOverMain(100, 200), true);
+  assert.deepEqual(invoked, [
+    { channel: channels.windowOpenTab, args: [{ m: 'local', pane: 't1', x: 50, y: 60 }] },
+    { channel: channels.windowIsOverMain, args: [{ x: 100, y: 200 }] },
+  ]);
+  assert.deepEqual(sent, [{ channel: channels.windowFocusMain, value: undefined }]);
+  invoked.length = 0;
   sent.length = 0;
 });
 
@@ -304,7 +344,7 @@ test('browser.onOpen delivers http(s) addresses only, while it listens', () => {
 
 test('notifications validates options and targets in both directions', async () => {
   const notifications = shell.notifications!;
-  assert.deepEqual(Object.keys(notifications).sort(), ['close', 'onClick', 'show', 'supported']);
+  assert.deepEqual(Object.keys(notifications).sort(), ['close', 'onClick', 'setBadgeCount', 'show', 'supported']);
 
   answers.set(channels.notifySupported, true);
   assert.equal(await notifications.supported(), true);
@@ -358,7 +398,18 @@ test('notifications validates options and targets in both directions', async () 
   notifications.close('m|t1');
   notifications.close('bad\ntag');
   notifications.close('');
-  assert.deepEqual(sent, [{ channel: channels.notifyClose, value: 'm|t1' }]);
+  notifications.setBadgeCount!(3);
+  notifications.setBadgeCount!(0);
+  notifications.setBadgeCount!(50000);
+  notifications.setBadgeCount!(-1);
+  notifications.setBadgeCount!(1.5);
+  notifications.setBadgeCount!('2' as unknown as number);
+  assert.deepEqual(sent, [
+    { channel: channels.notifyClose, value: 'm|t1' },
+    { channel: channels.notifyBadge, value: 3 },
+    { channel: channels.notifyBadge, value: 0 },
+    { channel: channels.notifyBadge, value: 9999 },
+  ]);
 
   sent.length = 0;
   const clicks: unknown[] = [];

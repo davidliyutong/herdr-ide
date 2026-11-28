@@ -64,10 +64,12 @@ vi.mock('../vt/atlas', async (actual) => {
 import { vtFromBytes, type Vt } from '../vt/module';
 import { TermPane, type PaneOptions, type TermLink } from '../vt/pane';
 import { Terminal, newFrame } from '../vt/terminal';
+import { noteScroll } from '../vt/scrollMemory';
 import { hexColor } from '../vt/renderer';
 import { appearanceOf } from '../appearance';
 import { getPrefs } from '../prefs';
 import { setPrelude } from '../state/preludes';
+import { draggedPathsText, endPathsDrag, startPathsDrag, takesPaths } from '../pathsDrag';
 import type { AttachOptions, StreamHandler } from '../term/connection';
 
 // Node's file system, without its types in the browser project; under jsdom
@@ -667,6 +669,83 @@ describe('a terminal’s pane', () => {
     });
   });
 
+  describe('the file explorer’s rows dragged over it', () => {
+    /** A drag's data, as the explorer's dragstart fills it. */
+    function rows(m: string, paths: string[], known = true) {
+      const data = new Map<string, string>();
+      const fake = {
+        types: [] as string[],
+        dropEffect: 'none',
+        items: [],
+        setData(type: string, value: string) {
+          data.set(type, value);
+          this.types = [...data.keys()];
+        },
+        getData: (type: string) => data.get(type) ?? '',
+      };
+      const dt = fake as unknown as DataTransfer;
+      startPathsDrag(dt, { m, paths });
+      // A drag from another window: its machine is known at the drop only.
+      if (!known) endPathsDrag();
+      return dt;
+    }
+    function fire(host: HTMLElement, type: string, dt: DataTransfer) {
+      const ev = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, 'dataTransfer', { value: dt });
+      host.dispatchEvent(ev);
+      return ev;
+    }
+    async function attachedPane(o: Partial<PaneOptions> = {}) {
+      const target = vi.fn();
+      const files = vi.fn(async () => 'uploaded ');
+      const made = pane(800, 400, {
+        takesPaths: (dt) => takesPaths(dt, 'a'),
+        onDropPaths: (dt) => draggedPathsText(dt, 'a'),
+        onDropFiles: files,
+        onDropTarget: target,
+        ...o,
+      });
+      await loadEmulator();
+      link.handler!.output(enc(NEW_SHELL));
+      await settle(120);
+      const host = document.body.lastElementChild as HTMLElement;
+      return { ...made, host, target, files };
+    }
+    afterEach(() => endPathsDrag());
+
+    it('of its machine: pastes their paths, shell-quoted, where they are, uploading nothing', async () => {
+      const { host, target, files } = await attachedPane();
+      const dt = rows('a', ['/home/u/a.txt', "/home/u/it's here", '/home/u/dir']);
+      expect(fire(host, 'dragover', dt).defaultPrevented).toBe(true);
+      expect(target).toHaveBeenLastCalledWith('paths');
+      expect(fire(host, 'drop', dt).defaultPrevented).toBe(true);
+      expect(target).toHaveBeenLastCalledWith(undefined);
+      expect(link.written).toEqual([`/home/u/a.txt '/home/u/it'\\''s here' /home/u/dir `]);
+      expect(files).not.toHaveBeenCalled();
+    });
+
+    it('of another machine: refused while dragged; dropped from another window, nothing is pasted', async () => {
+      const { host, target } = await attachedPane();
+      const dt = rows('b', ['/home/u/a.txt']);
+      expect(fire(host, 'dragover', dt).defaultPrevented).toBe(false);
+      expect(target).toHaveBeenLastCalledWith(undefined);
+      fire(host, 'drop', dt);
+      const elsewhere = rows('b', ['/home/u/a.txt'], false);
+      expect(fire(host, 'dragover', elsewhere).defaultPrevented).toBe(true);
+      fire(host, 'drop', elsewhere);
+      expect(link.written).toEqual([]);
+    });
+
+    it('read-only: refused', async () => {
+      const { host, target } = await attachedPane({ readOnly: () => true });
+      const dt = rows('a', ['/home/u/a.txt']);
+      expect(fire(host, 'dragover', dt).defaultPrevented).toBe(false);
+      expect(target).toHaveBeenLastCalledWith(undefined);
+      fire(host, 'drop', dt);
+      expect(link.written).toEqual([]);
+    });
+  });
+
   describe('whose program ended', () => {
     async function ended(o: Partial<PaneOptions> = {}, known = true) {
       const closed = vi.fn();
@@ -765,6 +844,175 @@ describe('a terminal’s pane', () => {
       ta.dispatchEvent(ev2);
       expect(ev2.defaultPrevented).toBe(true);
       expect(link.written).toEqual(['\x02']);
+    });
+
+    it('replays a prelude from another grid with styled ANSI output intact and without mutating the pane frame', async () => {
+      // Saved at 60x15 while the live pane is 100x25 (800x400 with 8x16 cells).
+      const ansi = '\x1b[32mBUILD OK\x1b[0m\r\n\x1b[31mWARN line\x1b[0m';
+      setPrelude('a', 't1', enc(ansi), '-- output saved earlier --', { cols: 60, rows: 15 });
+      const { p } = pane(800, 400);
+      await loadEmulator();
+      link.handler!.output(enc('\x1b[H\x1b[2J$ new-shell'));
+      await settle(700);
+      const term = p.term!;
+      expect([term.cols, term.rows]).toEqual([100, 25]);
+      // Live viewport shows the new shell cleanly on the live grid.
+      expect(p.screenText()).toContain('$ new-shell');
+      // Scrollback above the new shell preserves both the styled ANSI lines and the dim note.
+      const bar = term.scrollbar();
+      expect(bar.total).toBeGreaterThan(bar.len);
+      term.scroll(-bar.offset);
+      const top = newFrame(term.cols, term.rows);
+      term.update(top);
+      const text = top.lines.map((r) => String.fromCodePoint(...r.codes.filter((c) => c !== 0)).trimEnd()).join('\n');
+      expect(text).toContain('BUILD OK');
+      expect(text).toContain('WARN line');
+      expect(text).toContain('-- output saved earlier --');
+      // Foreground color of 'BUILD OK' (SGR 32 -> palette index 2) survived replay.
+      const buildRow = top.lines.find((r) => String.fromCodePoint(...r.codes.filter((c) => c !== 0)).includes('BUILD OK'))!;
+      expect(buildRow.fg[0]).toBe(hexColor(appearanceOf(getPrefs()).colors.palette[2]));
+    });
+
+    it('delays the first-paint timeout until a slow remote attach resolves so scroll restoration is not lost', async () => {
+      link.held = true;
+      noteScroll('a', 't1', { total: 40, offset: 5, len: 25, rows: ['line-005'] });
+      const { p } = pane(800, 400);
+      await loadEmulator();
+      // Attach RPC takes 900ms (> PAINT_MAX_MS = 600ms) over a slow remote link.
+      await settle(900);
+      expect(p.attached).toBe(false);
+      // Attach resolves and first paint streams scrollback containing line-005.
+      link.release!();
+      await settle(10);
+      let burst = '';
+      for (let i = 0; i < 40; i++) burst += `line-${String(i).padStart(3, '0')}\r\n`;
+      link.handler!.output(enc(burst));
+      await settle(700);
+      expect(p.attached).toBe(true);
+      // Scroll position was restored to line-005 rather than consumed while attaching.
+      expect(p.screenText()).toContain('line-005');
+      expect(p.term!.atBottom).toBe(false);
+    });
+
+    it('reattaches after exhausted attach retries on restarted program or tab reveal, and reopens core-ended pane on same-pid reboot', async () => {
+      let connection: (up: boolean) => void = () => {};
+      const onConnection = (fn: (up: boolean) => void) => ((connection = fn), () => {});
+      const reopened = vi.fn();
+      // Exhaust all 6 attach attempts (1 initial + 5 retries) while a kept terminal restarts.
+      link.held = true;
+      const { p, attached } = pane(800, 400, { onConnection, onReopen: reopened });
+      await loadEmulator();
+      for (let i = 0; i < 6; i++) {
+        link.refuse!();
+        await settle(10_000);
+      }
+      expect(link.attaches).toHaveLength(6);
+      expect(p.attached).toBe(false);
+
+      // No further retry fires on its own, but setProgram(newPid) recovers immediately.
+      link.held = false;
+      p.setProgram(200);
+      await settle(50);
+      expect(link.attaches).toHaveLength(7);
+      expect(p.attached).toBe(true);
+      expect(attached).toHaveBeenCalledTimes(1);
+
+      // Core ends due to host reboot: stream closes with host_shutdown while pid was 200.
+      link.handler!.closed('host_shutdown');
+      expect(p.attached).toBe(false);
+      // After reboot, the restarted kept shell reuses the exact same pid (200).
+      connection(true);
+      await settle(50);
+      expect(reopened).toHaveBeenCalledTimes(1);
+      expect(link.attaches).toHaveLength(8);
+      expect(p.attached).toBe(true);
+
+      // Hidden kept tab whose retries exhausted recovers when shown again.
+      p.setShown(false);
+      link.handler!.closed('disconnected');
+      link.held = true;
+      connection(true);
+      await settle(10);
+      for (let i = 0; i < 6; i++) {
+        link.refuse!();
+        await settle(10_000);
+      }
+      expect(p.attached).toBe(false);
+      link.held = false;
+      p.setShown(true);
+      await settle(50);
+      expect(p.attached).toBe(true);
+    });
+
+    it('sends the restored grid when resized during a slow remote attach, after zero-width collapse, or when remote size lags', async () => {
+      // 1. Slow remote attach started while narrow, then widened before attach resolves.
+      link.held = true;
+      let remote: { cols: number; rows: number } | undefined = { cols: 15, rows: 25 };
+      const { size, p } = pane(120, 400, { remoteSize: () => remote });
+      const setWidth = (w: number) => {
+        size.w = w;
+        for (const cb of observers) cb();
+      };
+      await loadEmulator();
+      expect(link.attaches).toHaveLength(1);
+      expect([link.attaches[0].cols, link.attaches[0].rows]).toEqual([15, 25]);
+      // Window widens before remote attach resolves: local term resizes, attach must still send resize on resolve.
+      setWidth(800); // 100 cols
+      expect(p.term!.cols).toBe(100);
+      expect(link.resized).toEqual([]);
+      link.release!();
+      await settle(20);
+      expect(link.resized).toContainEqual([100, 25]);
+
+      // 2. Collapsing to zero width and restoring to the exact same width forces a resize & redraw.
+      remote = { cols: 100, rows: 25 };
+      await settle(150);
+      link.resized.length = 0;
+      setWidth(0);
+      expect(link.resized).toEqual([]);
+      setWidth(800);
+      expect(link.resized).toContainEqual([100, 25]);
+
+      // 3. If remote core still reports a narrow size after resize settles, verify timer re-sends the current grid.
+      await settle(150);
+      link.resized.length = 0;
+      remote = { cols: 12, rows: 25 };
+      setWidth(960); // 120 cols
+      expect(link.resized).toEqual([[120, 25]]);
+      // Simulate remote still lagging at 12 cols when settle check fires.
+      await settle(150);
+      expect(link.resized).toEqual([
+        [120, 25],
+        [120, 25],
+      ]);
+    });
+
+    it('extends wrapped OSC 8 hyperlinks across trailing WIDE_HEAD spacer cells left by wrapped CJK characters', async () => {
+      // 80px / 8px = 10 columns, 160px / 16px = 10 rows.
+      const { p } = pane(80, 160);
+      await loadEmulator();
+      // 9 ASCII chars + 2-col CJK '中' wraps leaving a WIDE_HEAD spacer at row 0 col 9.
+      link.handler!.output(enc('\x1b]8;;https://example.com/\x1b\\123456789中ab\x1b]8;;\x1b\\'));
+      await settle(700);
+      const internal = p as unknown as {
+        frame: { lines: Array<{ wide: Uint8Array; link: Uint8Array }> };
+        linkAt(col: number, row: number): { cells: Array<{ y: number; from: number; to: number }>; link: { text: string } } | undefined;
+      };
+      expect(internal.frame.lines[0].wide[9]).toBe(3);
+      // Simulate the WIDE_HEAD spacer cell without the hyperlink flag set.
+      internal.frame.lines[0].link[9] = 0;
+      const fromTop = internal.linkAt(2, 0);
+      const fromBottom = internal.linkAt(0, 1);
+      expect(fromTop?.link.text).toBe('https://example.com/');
+      expect(fromTop?.cells).toEqual([
+        { y: 0, from: 0, to: 9 },
+        { y: 1, from: 0, to: 4 },
+      ]);
+      expect(fromBottom?.link.text).toBe('https://example.com/');
+      expect(fromBottom?.cells).toEqual([
+        { y: 0, from: 0, to: 9 },
+        { y: 1, from: 0, to: 4 },
+      ]);
     });
   });
 });

@@ -10,7 +10,8 @@
 // protocol's shapes (protocol.ts), and lists are cut to their bounds.
 import { hasMessage, t, type MessageKey } from '../../i18n';
 import { answer, failureOf, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
-import { builtinDefaults } from '../../settings';
+import { builtinDefaults, setSetting, useSettings } from '../../settings';
+import { useStore } from '../../state/store';
 import {
   MODES,
   STATES_PATH,
@@ -20,6 +21,7 @@ import {
   type ChatHostSession,
   type ChatState,
   type HostSettings,
+  type ModelOption,
   type Options,
   type Session,
   type TrustedFolder,
@@ -41,6 +43,7 @@ async function send<T>(url: string, init?: RequestInit): Promise<T> {
   try {
     r = await fetch(url, init);
   } catch (e) {
+    if (init?.signal?.aborted || (e instanceof DOMException && e.name === 'AbortError')) throw e;
     throw new ChatFailure('network', e instanceof Error ? e.message : String(e));
   }
   return answer<T>(r, failure);
@@ -54,6 +57,9 @@ const query = (o: Record<string, string>) => new URLSearchParams(o).toString();
 export const MAX_AGENTS = 64;
 export const MAX_CHATS = 2000;
 export const MAX_SESSION_PAGE = 200;
+export const MAX_MODELS = 256;
+/** Chat agent kinds that have per-provider visible model settings, in UI order. */
+export const CHAT_PROVIDERS = ['claude', 'codex', 'agy', 'kimi', 'grok'] as const;
 /** The most characters of a title, and of a path, kept; the longest
  * session id taken. */
 const MAX_TITLE = 500;
@@ -63,6 +69,22 @@ const MAX_SESSION_ID = 256;
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v: unknown, max = MAX_TITLE): string => (typeof v === 'string' ? v.slice(0, max) : '');
 const seq = (v: unknown): number => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : 0);
+
+/** A model offered by an agent kind, read; undefined for invalid entries. */
+export function readModelOption(v: unknown): ModelOption | undefined {
+  if (!isObject(v) || typeof v.value !== 'string' || !v.value.trim()) return undefined;
+  const value = v.value.slice(0, 256);
+  const name = typeof v.name === 'string' && v.name.trim() ? v.name.slice(0, 256) : value;
+  const out: ModelOption = { value, name };
+  if (typeof v.description === 'string' && v.description) out.description = v.description.slice(0, 500);
+  if (Array.isArray(v.efforts)) {
+    const efforts = v.efforts.filter((e): e is string => typeof e === 'string' && !!e).slice(0, 16);
+    if (efforts.length) out.efforts = efforts;
+  }
+  if (typeof v.defaultEffort === 'string' && v.defaultEffort) out.defaultEffort = v.defaultEffort.slice(0, 64);
+  if (typeof v.images === 'boolean') out.images = v.images;
+  return out;
+}
 
 /** An agent's status, read; undefined for what is none. */
 export function readAgent(v: unknown): AgentStatus | undefined {
@@ -220,6 +242,29 @@ export interface NewChat {
   resume?: string;
   import?: boolean;
   options?: Options;
+  /** Optional workspace id whose linked vault presets are injected into the chat agent. */
+  workspace?: string;
+}
+
+/** Vault preset injection summary returned by POST /new when presets are linked. */
+export interface NewChatVault {
+  injected: number;
+  locked?: boolean;
+  corrupt?: boolean;
+  logFailed?: boolean;
+  missing?: string[];
+}
+
+function readNewChatVault(v: unknown): NewChatVault | undefined {
+  if (!isObject(v)) return undefined;
+  const injected = typeof v.injected === 'number' && Number.isSafeInteger(v.injected) && v.injected >= 0 ? v.injected : 0;
+  const missing = Array.isArray(v.missing) ? v.missing.filter((x): x is string => typeof x === 'string') : undefined;
+  const out: NewChatVault = { injected };
+  if (v.locked === true) out.locked = true;
+  if (v.corrupt === true) out.corrupt = true;
+  if (v.logFailed === true) out.logFailed = true;
+  if (missing?.length) out.missing = missing;
+  return out;
 }
 
 export const chatApi = {
@@ -236,12 +281,30 @@ export const chatApi = {
   },
   /** Which chat kinds the machine can start, from a chat host that serves
    * (not_running otherwise; read_only on a read-only page). */
-  agents: async (m: string): Promise<AgentStatus[]> =>
-    list((await send<{ agents?: unknown }>(`${base(m)}/agents`, { cache: 'no-store' })).agents, MAX_AGENTS, readAgent),
+  agents: async (m: string, o?: { refresh?: boolean; signal?: AbortSignal }): Promise<AgentStatus[]> =>
+    list(
+      (
+        await send<{ agents?: unknown }>(`${base(m)}/agents${o?.refresh ? '?refresh=1' : ''}`, {
+          cache: 'no-store',
+          ...(o?.signal ? { signal: o.signal } : {}),
+        })
+      ).agents,
+      MAX_AGENTS,
+      readAgent,
+    ),
   /** The same, starting the machine's chat host when none serves (a
    * change: not on a read-only page). */
-  startAgents: async (m: string): Promise<AgentStatus[]> =>
-    list((await send<{ agents?: unknown }>(`${base(m)}/agents`, { method: 'POST' })).agents, MAX_AGENTS, readAgent),
+  startAgents: async (m: string, o?: { refresh?: boolean; signal?: AbortSignal }): Promise<AgentStatus[]> =>
+    list(
+      (
+        await send<{ agents?: unknown }>(`${base(m)}/agents${o?.refresh ? '?refresh=1' : ''}`, {
+          method: 'POST',
+          ...(o?.signal ? { signal: o.signal } : {}),
+        })
+      ).agents,
+      MAX_AGENTS,
+      readAgent,
+    ),
   /** The machine's chats, closed ones included, the latest first, from a
    * chat host that serves (not_running otherwise). */
   chats: async (m: string): Promise<ChatState[]> =>
@@ -249,11 +312,22 @@ export const chatApi = {
   /** A page of the sessions an agent kept for a directory, each once;
    * nextCursor asks for the next ('' after the last). A change, as listing
    * them may run the agent: it starts the machine's chat host when none
-   * serves, and a read-only page has none. */
-  async sessions(m: string, kind: string, cwd: string, cursor = ''): Promise<{ sessions: Session[]; nextCursor: string }> {
+   * serves, and a read-only page has none. Served from the hub's TTL cache
+   * unless o.refresh is true. */
+  async sessions(
+    m: string,
+    kind: string,
+    cwd: string,
+    cursor = '',
+    o?: { refresh?: boolean; signal?: AbortSignal },
+  ): Promise<{ sessions: Session[]; nextCursor: string }> {
     const q: Record<string, string> = { kind, cwd };
     if (cursor) q.cursor = cursor;
-    const r = await send<{ sessions?: unknown; nextCursor?: unknown }>(`${base(m)}/sessions?${query(q)}`, { method: 'POST' });
+    if (o?.refresh) q.refresh = '1';
+    const r = await send<{ sessions?: unknown; nextCursor?: unknown }>(`${base(m)}/sessions?${query(q)}`, {
+      method: 'POST',
+      ...(o?.signal ? { signal: o.signal } : {}),
+    });
     const seen = new Set<string>();
     const sessions = list(r.sessions, MAX_SESSION_PAGE, readSession).filter((s) => {
       if (seen.has(s.sessionId)) return false;
@@ -262,12 +336,17 @@ export const chatApi = {
     });
     return { sessions, nextCursor: plain(r.nextCursor, 4096) ?? '' };
   },
-  /** Makes a chat; resolves to its state as the host made it. */
-  async newChat(m: string, body: NewChat): Promise<ChatState> {
-    const r = await send<{ chat?: unknown }>(`${base(m)}/new`, jsonInit('POST', body));
+  /** Makes a chat; resolves to its state and optional vault injection summary. */
+  async createChat(m: string, body: NewChat): Promise<{ chat: ChatState; vault?: NewChatVault }> {
+    const r = await send<{ chat?: unknown; vault?: unknown }>(`${base(m)}/new`, jsonInit('POST', body));
     const chat = readState(r.chat);
     if (!chat) throw new ChatFailure('protocol', 'no chat in the answer');
-    return chat;
+    const vault = readNewChatVault(r.vault);
+    return vault ? { chat, vault } : { chat };
+  },
+  /** Makes a chat; resolves to its state as the host made it. */
+  async newChat(m: string, body: NewChat): Promise<ChatState> {
+    return (await chatApi.createChat(m, body)).chat;
   },
   /** Ends a chat's agent; the chat stays, closed. */
   close: (m: string, chat: string) => send<unknown>(`${base(m)}/close?${query({ chat })}`, { method: 'POST' }).then(() => {}),
@@ -301,7 +380,92 @@ export const chatApi = {
   /** Stops a machine's headless chat host cleanly (refused with busy while
    * any chat is working, waiting or starting). */
   stopHost: (m: string) => send<unknown>(`${base(m)}/host/stop`, { method: 'POST' }).then(() => {}),
+  /** Cached models for an agent kind from a running host (never starts host/agent). */
+  async models(m: string, kind: string, signal?: AbortSignal): Promise<{ models: ModelOption[]; fetchedAt?: string }> {
+    const r = await send<{ models?: unknown; fetchedAt?: unknown }>(`${base(m)}/models?${query({ kind })}`, {
+      cache: 'no-store',
+      ...(signal ? { signal } : {}),
+    });
+    const models = list(r.models, MAX_MODELS, readModelOption);
+    const fetchedAt = typeof r.fetchedAt === 'string' && r.fetchedAt ? r.fetchedAt.slice(0, 64) : undefined;
+    return fetchedAt ? { models, fetchedAt } : { models };
+  },
+  /** Probes an agent kind on machine m for its latest model list (starts host if needed). */
+  async refreshModels(m: string, kind: string, cwd?: string, signal?: AbortSignal): Promise<{ models: ModelOption[]; fetchedAt?: string }> {
+    const r = await send<{ models?: unknown; fetchedAt?: unknown }>(`${base(m)}/models`, {
+      ...jsonInit('POST', { kind, ...(cwd ? { cwd } : {}), refresh: true }),
+      ...(signal ? { signal } : {}),
+    });
+    const models = list(r.models, MAX_MODELS, readModelOption);
+    const fetchedAt = typeof r.fetchedAt === 'string' && r.fetchedAt ? r.fetchedAt.slice(0, 64) : undefined;
+    return fetchedAt ? { models, fetchedAt } : { models };
+  },
+  /** Forks an existing chat (up to upToSeq, or its end) into a new chat, returning optional vault summary. */
+  async forkWithVault(
+    m: string,
+    body: { chat: string; upToSeq?: number; title?: string; maxBytes?: number; workspace?: string },
+  ): Promise<{ chat: ChatState; vault?: NewChatVault }> {
+    const r = await send<{ chat?: unknown; vault?: unknown }>(`${base(m)}/fork`, jsonInit('POST', body));
+    const chat = readState(r.chat);
+    if (!chat) throw new ChatFailure('protocol', 'no chat in the answer');
+    const vault = readNewChatVault(r.vault);
+    return vault ? { chat, vault } : { chat };
+  },
+  /** Forks an existing chat (up to upToSeq, or its end) into a new chat. */
+  async fork(
+    m: string,
+    body: { chat: string; upToSeq?: number; title?: string; maxBytes?: number; workspace?: string },
+  ): Promise<ChatState> {
+    return (await chatApi.forkWithVault(m, body)).chat;
+  },
+  /** Exports context from a chat and starts a new chat with targetKind in the same directory, returning optional vault summary. */
+  async switchChatWithVault(
+    m: string,
+    body: { chat: string; targetKind: string; options?: Options; upToSeq?: number; maxBytes?: number; workspace?: string },
+  ): Promise<{ chat: ChatState; vault?: NewChatVault }> {
+    const r = await send<{ chat?: unknown; vault?: unknown }>(`${base(m)}/switch`, jsonInit('POST', body));
+    const chat = readState(r.chat);
+    if (!chat) throw new ChatFailure('protocol', 'no chat in the answer');
+    const vault = readNewChatVault(r.vault);
+    return vault ? { chat, vault } : { chat };
+  },
+  /** Exports context from a chat and starts a new chat with targetKind in the same directory. */
+  async switchChat(
+    m: string,
+    body: { chat: string; targetKind: string; options?: Options; upToSeq?: number; maxBytes?: number; workspace?: string },
+  ): Promise<ChatState> {
+    return (await chatApi.switchChatWithVault(m, body)).chat;
+  },
+  /** Exports a chat's conversation as a bounded Markdown digest. */
+  async exportMarkdown(m: string, chat: string, upToSeq?: number, maxBytes?: number): Promise<string> {
+    const q: Record<string, string> = { chat };
+    if (upToSeq !== undefined) q.upToSeq = String(upToSeq);
+    if (maxBytes !== undefined) q.maxBytes = String(maxBytes);
+    const r = await send<{ markdown?: unknown }>(`${base(m)}/export?${query(q)}`, { cache: 'no-store' });
+    return typeof r.markdown === 'string' ? r.markdown : '';
+  },
+  /** Exports a chat's raw metadata and stored events as lossless JSON. */
+  async exportJson(m: string, chat: string, upToSeq?: number): Promise<Record<string, unknown>> {
+    const q: Record<string, string> = { chat, format: 'json' };
+    if (upToSeq !== undefined) q.upToSeq = String(upToSeq);
+    const r = await send<{ data?: unknown }>(`${base(m)}/export?${query(q)}`, { cache: 'no-store' });
+    if (!isObject(r.data)) throw new ChatFailure('protocol', 'no export data in the answer');
+    return r.data;
+  },
 };
+
+/** Default and selectable Markdown export / handoff digest budget presets (in KiB). */
+export const DEFAULT_HANDOFF_MAX_KB = 96;
+export const HANDOFF_BUDGET_PRESETS = [32, 64, 96, 192, 384, 512] as const;
+
+/** Configured Markdown export / handoff digest budget in KiB (16..512, default 96). */
+export function handoffMaxKB(values: Values): number {
+  const raw = values['chat.handoffMaxKB']?.value ?? builtinDefaults['chat.handoffMaxKB'];
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return Math.max(16, Math.min(512, Math.trunc(raw)));
+  }
+  return DEFAULT_HANDOFF_MAX_KB;
+}
 
 type Values = Record<string, { value?: unknown; machines?: Record<string, unknown> } | undefined>;
 
@@ -310,17 +474,107 @@ type Values = Record<string, { value?: unknown; machines?: Record<string, unknow
 const valueFor = (values: Values, key: string, m: string): unknown =>
   values[key]?.machines?.[m] ?? values[key]?.value ?? builtinDefaults[key];
 
+/** Whether a chat provider kind is enabled in settings (default on). */
+export function isChatProviderEnabled(values: Values, kind: string | undefined): boolean {
+  if (!kind) return true;
+  const key = `chat.providers.${kind}`;
+  return (values[key]?.value ?? builtinDefaults[key]) !== false;
+}
+
+/** Visible model ID allowlist for an agent kind (empty = show all models). */
+export function visibleModelsFor(values: Values, kind: string | undefined): string[] {
+  if (!kind) return [];
+  const key = `chat.visibleModels.${kind}`;
+  const raw = values[key]?.value ?? builtinDefaults[key];
+  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+}
+
+/** chat.model.<kind>'s value for "the model chosen last" (chat.lastModel.<kind>). */
+export const LAST_MODEL = '@last';
+/** The most models a new chat is asked to try (chatproto MAX_START_MODELS). */
+export const MAX_START_MODELS = 64;
+
+const stringOf = (values: Values, key: string): string => {
+  const raw = values[key]?.value ?? builtinDefaults[key];
+  return typeof raw === 'string' ? raw : '';
+};
+
+/** What a new chat of agent kind starts with (chat.model.<kind>): '' for
+ * the agent's default, LAST_MODEL for the model chosen last, else a model. */
+export const startModelSetting = (values: Values, kind: string): string => stringOf(values, `chat.model.${kind}`);
+
+/** The model chosen last in a chat of agent kind (chat.lastModel.<kind>). */
+export const lastModelFor = (values: Values, kind: string): string => stringOf(values, `chat.lastModel.${kind}`);
+
+/** Why a model of agent kind cannot start a chat: (offered known) no longer
+ * listed by the agent, else hidden by the kind's visible models. */
+export function modelUnavailable(
+  values: Values,
+  kind: string,
+  model: string,
+  offered?: readonly string[],
+): 'hidden' | 'withdrawn' | undefined {
+  if (offered && offered.length > 0 && !offered.includes(model)) return 'withdrawn';
+  const visible = visibleModelsFor(values, kind);
+  if (visible.length > 0 && !visible.includes(model)) return 'hidden';
+  return undefined;
+}
+
+/**
+ * The models a new chat of agent kind asks to start with (chatproto
+ * Options.model and Options.models): the one chat.model.<kind> names (the
+ * model chosen last for LAST_MODEL), then, while the kind shows only some
+ * models (chat.visibleModels.<kind>), those in the agent's order. A model
+ * hidden there, or one the agent no longer lists (offered: its cached list,
+ * when known), is left out. The agent starts on the first it lists (the
+ * adapters check them against what it offers then); none asked leaves the
+ * agent's own default, which only a kind that shows every model gets.
+ */
+export function startModelOptions(values: Values, kind: string, offered?: readonly string[]): { model?: string; models?: string[] } {
+  const setting = startModelSetting(values, kind);
+  const pref = setting === LAST_MODEL ? lastModelFor(values, kind) : setting;
+  const visible = visibleModelsFor(values, kind);
+  const listed = offered && offered.length > 0 ? offered : undefined;
+  const fallbacks = visible.length === 0 ? [] : listed ? listed.filter((m) => visible.includes(m)) : visible;
+  const order: string[] = [];
+  for (const m of [pref, ...fallbacks]) {
+    if (m && !order.includes(m) && !modelUnavailable(values, kind, m, listed)) order.push(m);
+  }
+  const [model, ...models] = order.slice(0, MAX_START_MODELS);
+  if (!model) return {};
+  return models.length > 0 ? { model, models } : { model };
+}
+
+/** Remembers the model chosen in a chat of agent kind, for its new chats
+ * while chat.model.<kind> is LAST_MODEL (only then: a choice is no setting
+ * otherwise). Says nothing of a failure: the choice itself was made. */
+export async function rememberModel(kind: string, model: string): Promise<void> {
+  const values = useSettings.getState().values;
+  const key = `chat.lastModel.${kind}`;
+  if (startModelSetting(values, kind) !== LAST_MODEL || lastModelFor(values, kind) === model || values[key]?.locked) return;
+  if (useStore.getState().readOnly) return;
+  await setSetting(key, model);
+}
+
 /** Whether machine m's chats may give an agent full access: its setting
  * chat.allowFullAccess (off by default). */
 export const fullAccessAllowed = (values: Values, m: string): boolean => valueFor(values, 'chat.allowFullAccess', m) === true;
 
-/** The permission mode a new chat on machine m asks for: the setting
- * chat.permissionMode (one of MODES); none for full access while the
- * machine's chat.allowFullAccess is not on, which leaves the mode to the
- * chat host (it starts no agent with full access then). */
-export function permissionMode(values: Values, m: string): string | undefined {
-  const v = valueFor(values, 'chat.permissionMode', m);
-  const mode = typeof v === 'string' && (MODES as readonly string[]).includes(v) ? v : 'default';
+/** The permission mode a new chat of agent `kind` on machine m asks for:
+ * checks the per-agent override `chat.permissionMode.<kind>` first (when set
+ * to a concrete mode rather than `inherit`), else falls back to the global
+ * `chat.permissionMode`; returns undefined for `full` while the machine's
+ * `chat.allowFullAccess` is not on, leaving the mode to the chat host. */
+export function permissionMode(values: Values, m: string, kind?: string): string | undefined {
+  let raw: unknown;
+  if (kind) {
+    const specific = valueFor(values, `chat.permissionMode.${kind}`, m);
+    if (typeof specific === 'string' && specific !== 'inherit' && (MODES as readonly string[]).includes(specific)) {
+      raw = specific;
+    }
+  }
+  if (raw === undefined) raw = valueFor(values, 'chat.permissionMode', m);
+  const mode = typeof raw === 'string' && (MODES as readonly string[]).includes(raw) ? raw : 'default';
   return mode === 'full' && !fullAccessAllowed(values, m) ? undefined : mode;
 }
 

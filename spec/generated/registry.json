@@ -48,6 +48,27 @@
       }
     },
     {
+      "id": "agy",
+      "title": "Antigravity",
+      "usageProvider": "antigravity",
+      "start": [
+        "agy"
+      ],
+      "continueLatest": [
+        "agy",
+        "--continue"
+      ],
+      "resumeById": [
+        "agy",
+        "--resume",
+        "{id}"
+      ],
+      "transcript": "agy",
+      "chat": {
+        "adapter": "acp"
+      }
+    },
+    {
       "id": "gemini",
       "title": "Gemini CLI",
       "start": [
@@ -111,11 +132,6 @@
       "start": [
         "amp"
       ]
-    },
-    {
-      "id": "agy",
-      "title": "Antigravity",
-      "usageProvider": "antigravity"
     },
     {
       "id": "cline",
@@ -444,6 +460,16 @@
       "when": "terminal"
     },
     {
+      "id": "view.panel.next",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
+      "id": "view.panel.previous",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
       "id": "view.panel.files",
       "section": "view",
       "when": "terminal"
@@ -587,6 +613,8 @@
     "command.view.panel.files",
     "command.view.panel.git",
     "command.view.panel.monitor",
+    "command.view.panel.next",
+    "command.view.panel.previous",
     "command.view.panel.search",
     "command.view.panel.usage",
     "command.view.panel.vault",
@@ -620,6 +648,8 @@
     "settings.appearance.theme.dark",
     "settings.appearance.theme.light",
     "settings.appearance.theme.system",
+    "settings.appearance.uiCjkFontFamily",
+    "settings.appearance.uiFontFamily",
     "settings.appearance.uiFontSize",
     "settings.browser.forwardIdle",
     "settings.browser.openLinks",
@@ -627,17 +657,66 @@
     "settings.browser.openLinks.external",
     "settings.browser.openLinks.loopback",
     "settings.chat.allowFullAccess",
+    "settings.chat.handoffMaxKB",
     "settings.chat.idleStopMinutes",
+    "settings.chat.lastModel.agy",
+    "settings.chat.lastModel.claude",
+    "settings.chat.lastModel.codex",
+    "settings.chat.lastModel.grok",
+    "settings.chat.lastModel.kimi",
     "settings.chat.maxChatMB",
     "settings.chat.maxChats",
     "settings.chat.maxLive",
     "settings.chat.maxTotalMB",
+    "settings.chat.model.agy",
+    "settings.chat.model.claude",
+    "settings.chat.model.codex",
+    "settings.chat.model.grok",
+    "settings.chat.model.kimi",
     "settings.chat.permissionMode",
     "settings.chat.permissionMode.acceptEdits",
+    "settings.chat.permissionMode.agy",
+    "settings.chat.permissionMode.agy.acceptEdits",
+    "settings.chat.permissionMode.agy.default",
+    "settings.chat.permissionMode.agy.full",
+    "settings.chat.permissionMode.agy.inherit",
+    "settings.chat.permissionMode.agy.plan",
+    "settings.chat.permissionMode.claude",
+    "settings.chat.permissionMode.claude.acceptEdits",
+    "settings.chat.permissionMode.claude.default",
+    "settings.chat.permissionMode.claude.full",
+    "settings.chat.permissionMode.claude.inherit",
+    "settings.chat.permissionMode.claude.plan",
+    "settings.chat.permissionMode.codex",
+    "settings.chat.permissionMode.codex.acceptEdits",
+    "settings.chat.permissionMode.codex.default",
+    "settings.chat.permissionMode.codex.full",
+    "settings.chat.permissionMode.codex.inherit",
+    "settings.chat.permissionMode.codex.plan",
     "settings.chat.permissionMode.default",
     "settings.chat.permissionMode.full",
+    "settings.chat.permissionMode.grok",
+    "settings.chat.permissionMode.grok.acceptEdits",
+    "settings.chat.permissionMode.grok.default",
+    "settings.chat.permissionMode.grok.full",
+    "settings.chat.permissionMode.grok.inherit",
+    "settings.chat.permissionMode.kimi",
+    "settings.chat.permissionMode.kimi.default",
+    "settings.chat.permissionMode.kimi.full",
+    "settings.chat.permissionMode.kimi.inherit",
+    "settings.chat.permissionMode.kimi.plan",
     "settings.chat.permissionMode.plan",
+    "settings.chat.providers.agy",
+    "settings.chat.providers.claude",
+    "settings.chat.providers.codex",
+    "settings.chat.providers.grok",
+    "settings.chat.providers.kimi",
     "settings.chat.retentionDays",
+    "settings.chat.visibleModels.agy",
+    "settings.chat.visibleModels.claude",
+    "settings.chat.visibleModels.codex",
+    "settings.chat.visibleModels.grok",
+    "settings.chat.visibleModels.kimi",
     "settings.codeServer.install",
     "settings.codeServer.install.download",
     "settings.codeServer.install.existing",
@@ -646,6 +725,9 @@
     "settings.files.confirmTrash",
     "settings.files.exclude",
     "settings.files.followFocus",
+    "settings.files.openLinks",
+    "settings.files.openLinks.editor",
+    "settings.files.openLinks.vscode",
     "settings.files.showHidden",
     "settings.files.sortOrder",
     "settings.files.sortOrder.default",
@@ -653,6 +735,7 @@
     "settings.files.sortOrder.mixed",
     "settings.files.sortOrder.modified",
     "settings.files.sortOrder.type",
+    "settings.files.wordWrap",
     "settings.git.autoFetch",
     "settings.git.changesView",
     "settings.git.changesView.list",
@@ -667,6 +750,7 @@
     "settings.git.untrackedChanges.mixed",
     "settings.git.untrackedChanges.separate",
     "settings.group.behavior",
+    "settings.group.chatModels",
     "settings.group.clipboard",
     "settings.group.cursor",
     "settings.group.text",
@@ -742,6 +826,7 @@
     "settings.terminal.bell.sound",
     "settings.terminal.bell.visual",
     "settings.terminal.boldIsBright",
+    "settings.terminal.cjkFontFamily",
     "settings.terminal.colorScheme.dark",
     "settings.terminal.colorScheme.dark.default",
     "settings.terminal.colorScheme.dark.dracula",
@@ -823,6 +908,18 @@
     "settings.usage.refreshOpen",
     "settings.usage.refreshWorking",
     "settings.usage.statusBar",
+    "settings.usage.statusBarProvider",
+    "settings.usage.statusBarProvider.antigravity",
+    "settings.usage.statusBarProvider.auto",
+    "settings.usage.statusBarProvider.claude",
+    "settings.usage.statusBarProvider.codex",
+    "settings.usage.statusBarProvider.grok",
+    "settings.usage.statusBarProvider.kimi",
+    "settings.usage.statusBarWindow",
+    "settings.usage.statusBarWindow.5h",
+    "settings.usage.statusBarWindow.7d",
+    "settings.usage.statusBarWindow.auto",
+    "settings.usage.statusBarWindow.both",
     "settings.usage.thresholds",
     "settings.vault.approvalTimeout",
     "settings.vault.autoLock",
@@ -877,7 +974,7 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+shift+t",
+        "key": "ctrl+t",
         "command": "tab.new",
         "when": "terminal"
       },
@@ -1002,7 +1099,7 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+shift+z",
+        "key": "ctrl+shift+t",
         "command": "pane.undoClose",
         "when": "terminal"
       },
@@ -1246,7 +1343,7 @@
         "when": "terminal"
       },
       {
-        "key": "cmd+z",
+        "key": "cmd+shift+t",
         "command": "pane.undoClose",
         "when": "terminal"
       },
@@ -1380,7 +1477,7 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+shift+t",
+        "key": "ctrl+t",
         "command": "tab.new",
         "when": "terminal"
       },
@@ -1495,7 +1592,7 @@
         "when": "terminal"
       },
       {
-        "key": "ctrl+shift+z",
+        "key": "ctrl+shift+t",
         "command": "pane.undoClose",
         "when": "terminal"
       },
@@ -1572,17 +1669,45 @@
     "appearance.colorTheme": "blue",
     "appearance.language": "auto",
     "appearance.theme": "system",
+    "appearance.uiCjkFontFamily": "",
+    "appearance.uiFontFamily": "",
     "appearance.uiFontSize": 13,
     "browser.forwardIdle": 30,
     "browser.openLinks": "loopback",
     "chat.allowFullAccess": false,
+    "chat.handoffMaxKB": 96,
     "chat.idleStopMinutes": 30,
+    "chat.lastModel.agy": "",
+    "chat.lastModel.claude": "",
+    "chat.lastModel.codex": "",
+    "chat.lastModel.grok": "",
+    "chat.lastModel.kimi": "",
     "chat.maxChatMB": 64,
     "chat.maxChats": 500,
     "chat.maxLive": 8,
     "chat.maxTotalMB": 512,
+    "chat.model.agy": "",
+    "chat.model.claude": "",
+    "chat.model.codex": "",
+    "chat.model.grok": "",
+    "chat.model.kimi": "",
     "chat.permissionMode": "default",
+    "chat.permissionMode.agy": "inherit",
+    "chat.permissionMode.claude": "inherit",
+    "chat.permissionMode.codex": "inherit",
+    "chat.permissionMode.grok": "inherit",
+    "chat.permissionMode.kimi": "inherit",
+    "chat.providers.agy": true,
+    "chat.providers.claude": true,
+    "chat.providers.codex": true,
+    "chat.providers.grok": true,
+    "chat.providers.kimi": true,
     "chat.retentionDays": 30,
+    "chat.visibleModels.agy": [],
+    "chat.visibleModels.claude": [],
+    "chat.visibleModels.codex": [],
+    "chat.visibleModels.grok": [],
+    "chat.visibleModels.kimi": [],
     "codeServer.install": "push",
     "codeServer.path": "",
     "files.confirmTrash": false,
@@ -1595,8 +1720,10 @@
       "Thumbs.db"
     ],
     "files.followFocus": true,
+    "files.openLinks": "editor",
     "files.showHidden": false,
     "files.sortOrder": "default",
+    "files.wordWrap": false,
     "git.autoFetch": 0,
     "git.changesView": "list",
     "git.confirmSync": false,
@@ -1640,6 +1767,7 @@
     "plugins.vscode.enabled": false,
     "terminal.bell": "visual",
     "terminal.boldIsBright": false,
+    "terminal.cjkFontFamily": "",
     "terminal.colorScheme.dark": "default",
     "terminal.colorScheme.light": "default",
     "terminal.colors.dark.background": "#0a0a0a",
@@ -1717,6 +1845,8 @@
     "usage.refreshOpen": 5,
     "usage.refreshWorking": 10,
     "usage.statusBar": true,
+    "usage.statusBarProvider": "auto",
+    "usage.statusBarWindow": "auto",
     "usage.thresholds": [
       "80",
       "95"

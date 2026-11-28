@@ -9,6 +9,7 @@
 import { create } from 'zustand';
 import { hasMessage, t } from '../../i18n';
 import { jsonBody, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
+import { registerWorkspacePresetSaver, syncVaultWorkspacePresets, useWorkspacePresets } from '../../state/workspacePresets';
 import type { Fresh } from './proof';
 
 export interface VaultStatus {
@@ -27,7 +28,34 @@ export interface VaultVariable {
   /** Machine ids; '*' is every machine. */
   machines: string[];
   injectOnly: boolean;
+  /** Optional group id; absent when ungrouped. */
+  group?: string;
   created: string;
+  updated: string;
+}
+
+export interface VaultGroup {
+  id: string;
+  name: string;
+  description?: string;
+  created: string;
+  updated: string;
+}
+
+export interface VaultPreset {
+  id: string;
+  name: string;
+  description?: string;
+  variables: string[];
+  groups: string[];
+  created: string;
+  updated: string;
+}
+
+export interface VaultWorkspaceLink {
+  machine: string;
+  workspace: string;
+  presets: string[];
   updated: string;
 }
 
@@ -88,8 +116,40 @@ export class VaultError extends PluginError {
   }
 }
 
-/** A failure's message in the UI's language: never the failure's own. */
-export const errorText = makeErrorText(VaultError, 'vault.error', { fallback: () => t('vault.error.failed') });
+/** A failure's message in the UI's language: distinguishes overloaded hub
+ * error codes (busy, full, not_found, exists) by the server's structured
+ * detail so groups, presets, workspace links and file transfers get accurate
+ * localized copy instead of variable/passphrase messages. */
+export const errorText = makeErrorText(VaultError, 'vault.error', {
+  special: (e) => {
+    const msg = e.message.toLowerCase();
+    if (e.code === 'busy') {
+      if (msg.includes('file')) return t('vault.error.file_busy');
+      return undefined;
+    }
+    if (e.code === 'full') {
+      if (msg.includes('group')) return t('vault.error.full_groups');
+      if (msg.includes('preset')) return t('vault.error.full_presets');
+      if (msg.includes('workspace link')) return t('vault.error.full_links');
+      return undefined;
+    }
+    if (e.code === 'not_found') {
+      if (msg.includes('group')) return t('vault.error.group_not_found');
+      if (msg.includes('preset')) return t('vault.error.preset_not_found');
+      if (msg.includes('authenticator')) return t('vault.error.authenticator_not_found');
+      if (msg.includes('exemption')) return t('vault.error.exemption_not_found');
+      if (msg.includes('request')) return t('vault.error.request_not_found');
+      return undefined;
+    }
+    if (e.code === 'exists') {
+      if (msg.includes('group')) return t('vault.error.group_exists');
+      if (msg.includes('preset')) return t('vault.error.preset_exists');
+      return undefined;
+    }
+    return undefined;
+  },
+  fallback: () => t('vault.error.failed'),
+});
 
 /** Why the vault did not load, in the UI's language: its file of another
  * version or unreadable, the hub keeps no file, or a failure. */
@@ -103,13 +163,14 @@ const base = '/api/p/vault';
 /** The page's vault session (memory only). */
 let token = '';
 
-async function request(method: string, path: string, body?: unknown): Promise<Response> {
-  const res = await fetch(base + path, jsonInit(method, body, token ? { 'X-Vault-Session': token } : {}));
+async function request(method: string, path: string, body?: unknown, signal?: AbortSignal, endOnAuthFail = true): Promise<Response> {
+  const init = jsonInit(method, body, token ? { 'X-Vault-Session': token } : {});
+  const res = await fetch(base + path, signal ? { ...init, signal } : init);
   if (!res.ok) {
     const data = await jsonBody(res);
     const code = String(data.error ?? res.status);
     // The gate refused: the session ended (idle, locked, passphrase changed).
-    if (code === 'vault_session') endLocalSession();
+    if (code === 'vault_session' && endOnAuthFail) endLocalSession();
     // The session a proof opened may not change what guards the vault.
     if (code === 'vault_passphrase') useVault.setState({ sessionProof: true });
     throw new VaultError(code, data.message, typeof data.name === 'string' ? data.name : undefined);
@@ -117,15 +178,17 @@ async function request(method: string, path: string, body?: unknown): Promise<Re
   return res;
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await request(method, path, body);
+async function call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal, endOnAuthFail = true): Promise<T> {
+  const res = await request(method, path, body, signal, endOnAuthFail);
   return (await jsonBody(res)) as T;
 }
 
 function endLocalSession() {
+  loadSeq++;
   token = '';
   // The log is a session's: it goes with it.
   useVault.setState({ session: false, sessionProof: false, log: [] });
+  useWorkspacePresets.setState({ session: false });
 }
 
 interface Opened {
@@ -136,32 +199,49 @@ interface Opened {
 }
 
 function opened(o: Opened) {
+  loadSeq++;
   token = o.session;
   useVault.setState({ session: true, sessionProof: !!o.proof, status: o.status });
+  useWorkspacePresets.setState({ session: true, locked: !!o.status.locked });
 }
 
 const enc = encodeURIComponent;
 
 export const vaultApi = {
-  list: () =>
+  list: (signal?: AbortSignal) =>
     call<{
       status: VaultStatus;
       variables: VaultVariable[];
+      groups?: VaultGroup[];
+      presets?: VaultPreset[];
+      workspaceLinks?: VaultWorkspaceLink[];
       session?: boolean;
       sessionProof?: boolean;
       idle?: number;
       autoLock?: AutoLock;
       guard?: VaultGuard | null;
       unlock?: VaultUnlock;
-    }>('GET', ''),
+    }>('GET', '', undefined, signal),
   /** Creates or changes a variable; `to` renames it in the same write. */
   set: (
     name: string,
-    body: { to?: string; description?: string; machines?: string[]; injectOnly?: boolean; value?: string },
+    body: { to?: string; description?: string; machines?: string[]; injectOnly?: boolean; group?: string; value?: string },
     fresh?: Fresh,
   ) => call<VaultVariable>('PUT', `/vars/${enc(name)}`, { ...body, ...fresh }),
   remove: (name: string) => call('DELETE', `/vars/${enc(name)}`),
   reveal: (name: string, fresh?: Fresh) => call<{ value: string }>('POST', `/vars/${enc(name)}/reveal`, fresh),
+  createGroup: (body: { name: string; description?: string }) => call<VaultGroup>('POST', '/groups', body),
+  updateGroup: (id: string, body: { name?: string; description?: string }) => call<VaultGroup>('PUT', `/groups/${enc(id)}`, body),
+  deleteGroup: (id: string) => call('DELETE', `/groups/${enc(id)}`),
+  assignGroup: (names: string[], group: string, fresh?: Fresh) =>
+    call<{ ok: boolean }>('POST', '/groups/assign', { names, group, ...fresh }),
+  createPreset: (body: { name: string; description?: string; variables?: string[]; groups?: string[] }) =>
+    call<VaultPreset>('POST', '/presets', body),
+  updatePreset: (id: string, body: { name?: string; description?: string; variables?: string[]; groups?: string[] }, fresh?: Fresh) =>
+    call<VaultPreset>('PUT', `/presets/${enc(id)}`, { ...body, ...fresh }),
+  deletePreset: (id: string) => call('DELETE', `/presets/${enc(id)}`),
+  setWorkspacePresets: (machine: string, workspace: string, presets: string[], fresh?: Fresh) =>
+    call<{ link: VaultWorkspaceLink | null }>('PUT', `/workspaces/${enc(machine)}/${enc(workspace)}`, { presets, ...fresh }),
   session: (passphrase: string) => call<Opened>('POST', '/session', { passphrase }),
   sessionByProof: (proof: Proof) => call<Opened>('POST', '/session', { proof }),
   /** Unlocks a locked vault with an unlock entry: the desktop app's relay
@@ -187,7 +267,7 @@ export const vaultApi = {
   requests: () => call<{ requests: VaultRequest[] }>('GET', '/requests'),
   answer: (id: string, answer: Answer, verify?: { proof?: Proof; passphrase?: string }) =>
     call('POST', `/requests/${enc(id)}`, { answer, ...verify }),
-  log: () => call<{ log: VaultAccess[] }>('GET', '/log'),
+  log: (signal?: AbortSignal, endOnAuthFail = true) => call<{ log: VaultAccess[] }>('GET', '/log', undefined, signal, endOnAuthFail),
   /** An export file of the variables named (or all), as its text: the hub
    * seals it, so values never reach the page. */
   exportFile: async (body: { passphrase: string; filePassphrase: string; names?: string[]; all?: boolean }) =>
@@ -407,6 +487,9 @@ interface VaultState {
    * undefined until loaded. */
   guard?: VaultGuard | null;
   variables: VaultVariable[];
+  groups: VaultGroup[];
+  presets: VaultPreset[];
+  workspaceLinks: VaultWorkspaceLink[];
   log: VaultAccess[];
   /** By id: requests waiting for an answer. */
   requests: Record<string, VaultRequest>;
@@ -420,7 +503,16 @@ interface VaultState {
   unlock?: VaultUnlock;
 }
 
-export const useVault = create<VaultState>(() => ({ variables: [], log: [], requests: {}, session: false, sessionProof: false }));
+export const useVault = create<VaultState>(() => ({
+  variables: [],
+  groups: [],
+  presets: [],
+  workspaceLinks: [],
+  log: [],
+  requests: {},
+  session: false,
+  sessionProof: false,
+}));
 
 /** Opens a session with the passphrase (unlocking the vault). */
 export async function openSession(passphrase: string) {
@@ -492,30 +584,62 @@ export function appOf(ps?: VaultProcess[]): string {
   return ps?.[1]?.name ?? '';
 }
 
+let loadAbort: AbortController | undefined;
+let loadSeq = 0;
+
 /** Loads the variables and, with a session, the log again: the hub shows
  * the log to a session only (it tells what was read, by whom and which
- * apps are exempt). */
-export async function loadVault() {
+ * apps are exempt). Each call supersedes any earlier in-flight load (aborting
+ * its fetch and guarding commits by monotonic sequence) so bulk operations
+ * and WS changed bursts can never overwrite newer state out of order. */
+export async function loadVault(): Promise<void> {
+  loadAbort?.abort();
+  const ac = new AbortController();
+  loadAbort = ac;
+  const seq = ++loadSeq;
   try {
     // What the hub says of the session counts only for the token sent: a
     // load that crossed a session's start or end says nothing of it.
     const sent = token;
-    const [list, log] = await Promise.all([vaultApi.list(), sent ? vaultApi.log().catch(() => ({ log: [] })) : { log: [] }]);
+    const [list, log] = await Promise.all([
+      vaultApi.list(ac.signal),
+      sent ? vaultApi.log(ac.signal, false).catch(() => ({ log: [] })) : { log: [] },
+    ]);
+    if (seq !== loadSeq || ac.signal.aborted) return;
     if (token === sent && !list.session) token = '';
+    const variables = list.variables ?? [];
+    const groups = list.groups ?? [];
+    const presets = list.presets ?? [];
+    const workspaceLinks = list.workspaceLinks ?? [];
+    const guard = list.guard ?? null;
     useVault.setState({
       status: list.status,
-      variables: list.variables ?? [],
+      variables,
+      groups,
+      presets,
+      workspaceLinks,
       log: token && token === sent ? (log.log ?? []) : [],
       session: !!token,
       sessionProof: !!token && !!list.sessionProof,
-      guard: list.guard ?? null,
+      guard,
       idle: list.idle,
       autoLock: list.autoLock,
       unlock: list.unlock,
       error: undefined,
     });
+    syncVaultWorkspacePresets({
+      variables,
+      presets,
+      workspaceLinks,
+      locked: !!list.status?.locked,
+      session: !!token,
+      verifyEachAllow: !!(guard && 'verifyEachAllow' in guard && guard.verifyEachAllow),
+    });
   } catch (e) {
+    if (seq !== loadSeq || ac.signal.aborted) return;
     useVault.setState({ error: e instanceof VaultError ? e.code : 'failed' });
+  } finally {
+    if (loadAbort === ac) loadAbort = undefined;
   }
 }
 
@@ -578,11 +702,21 @@ export function dropRequest(id: string) {
   });
 }
 
-/** Loads the requests, and the vault if it was loaded, again: the page's
- * connection to the hub came back, and the hub may have restarted (its
- * requests and sessions gone, the vault locked) or changed meanwhile. */
+/** Loads the requests and the vault again: the page's connection to the
+ * hub came back, and the hub may have restarted (its requests and sessions
+ * gone, the vault locked) or changed meanwhile. Loading the vault on
+ * connect also keeps workspace-linked presets current before the Vault
+ * panel is opened. */
 export function reloadVault() {
   void loadRequests();
-  const s = useVault.getState();
-  if (s.status || s.error) void loadVault();
+  void loadVault();
 }
+
+registerWorkspacePresetSaver(async (machine, workspace, presets, passphrase) => {
+  try {
+    await vaultApi.setWorkspacePresets(machine, workspace, presets, passphrase ? { passphrase } : undefined);
+    await loadVault();
+  } catch (e) {
+    throw e instanceof VaultError ? new VaultError(e.code, errorText(e), e.variable) : e;
+  }
+});

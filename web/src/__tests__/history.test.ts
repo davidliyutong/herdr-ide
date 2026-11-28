@@ -29,6 +29,7 @@ import {
   INTERVAL,
   LIST_GAP_MS,
   LIST_SETTLE_MS,
+  MAX_CONCURRENT_READS,
   RETRY_MAX_MS,
   RETRY_MIN_MS,
   awaitsCapture,
@@ -232,7 +233,7 @@ function layoutOf(...leaves: TerminalLeaf[]): Layout {
 }
 
 /** Machine a's terminals and layout, as the page's model publishes them. */
-function machine(records: TerminalRecord[], layout: Layout, phase: 'ready' | 'starting' = 'ready') {
+function machine(records: TerminalRecord[], layout: Layout, phase: 'ready' | 'starting' | 'error' = 'ready') {
   const terminals: Record<string, TerminalRecord> = {};
   for (const r of records) terminals[r.address] = r;
   const a: MachineTerms = { backend: { phase, code: '', version: '' }, terminals, layout };
@@ -689,5 +690,198 @@ describe('the history plugin in the page', () => {
     expect(hub.adopts()).toHaveLength(3);
     expect(hub.list.terminals).toEqual([entry('t2', 0, 0, { pid: 100, at: 3000 })]);
     expect(text(preludeOf('a', 't2')?.bytes)).toBe('the old terminal');
+  });
+
+  it('pauses polling while offline or disabled, resets backoff, skips stale pre-reboot list reads, and shows fresh history immediately on reconnect', async () => {
+    restarted();
+    hub.failLists = 3;
+    stop = startHistory();
+    await settle();
+    // 3 failures ramp backoff up (2s, 4s, 8s...).
+    await vi.advanceTimersByTimeAsync(2000 + 4000);
+    expect(hub.lists()).toBe(3);
+
+    // Remote machine goes offline / is manually disabled for 10 minutes: ZERO list calls.
+    machine([], layoutOf({ terminal: 't1' }), 'error');
+    const listsBeforeOffline = hub.lists();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(hub.lists()).toBe(listsBeforeOffline);
+
+    // Machine reboots and is re-enabled: backoff resets and fresh list runs within LIST_SETTLE_MS.
+    hub.failLists = 0;
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 300, 9000, { pid: 200, at: 7000 })] };
+    hub.data.set('t1 previous', { bytes: enc('after reboot history'), pid: 200, at: 7000 });
+    machine([rec('t1', 300)], layoutOf({ terminal: 't1' }), 'ready');
+    await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS + 20);
+    expect(hub.lists()).toBe(listsBeforeOffline + 1);
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('after reboot history');
+
+    // Second disconnect + reconnect with a stale pre-reboot list cached: does NOT
+    // read against the stale list before the fresh post-reboot list arrives.
+    const readsBefore = hub.reads().length;
+    machine([], layoutOf({ terminal: 't1' }), 'error');
+    // Prelude stays visible while away.
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('after reboot history');
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 400, 12000, { pid: 300, at: 10000 })] };
+    hub.data.set('t1 previous', { bytes: enc('second reboot history'), pid: 300, at: 10000 });
+    machine([rec('t1', 400)], layoutOf({ terminal: 't1' }), 'ready');
+    // Before LIST_SETTLE_MS fires the fresh list, no read against the stale list happened.
+    expect(hub.reads()).toHaveLength(readsBefore);
+    await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS + 20);
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('second reboot history');
+  });
+
+  it('shows pre-boot history immediately on same-pid reboot when list beats capture and keeps it seamlessly after rotation', async () => {
+    capture(true);
+    // Pre-boot current snapshot reports pid 0 before capture rotates it, while kept t1 reused pid 100.
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 0, 3000)] };
+    hub.data.set('t1 current', { bytes: enc('pre-boot same pid'), pid: 0, at: 3000 });
+    machine([rec('t1', 100)], layoutOf({ terminal: 't1' }));
+    stop = startHistory();
+    await settle();
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('pre-boot same pid');
+    expect(hub.reads()).toHaveLength(1);
+
+    // Capture later rotates current -> previous (pid 0, at 3000) and writes post-reboot current (pid 100, at 9000).
+    const changed = vi.fn();
+    const off = onPrelude('a', 't1', changed);
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 100, 9000, { pid: 0, at: 3000 })] };
+    // Advance past capture wait so follower re-lists: same (pid: 0, at: 3000) key means zero re-read and zero churn.
+    await vi.advanceTimersByTimeAsync(30_000 + LIST_GAP_MS + LIST_SETTLE_MS + 20);
+    expect(hub.lists()).toBe(2);
+    expect(hub.reads()).toHaveLength(1);
+    expect(changed).not.toHaveBeenCalled();
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('pre-boot same pid');
+    off();
+  });
+
+  it('bounds concurrent snapshot reads during restart recovery to MAX_CONCURRENT_READS', async () => {
+    capture(true);
+    const total = 10;
+    const leaves = Array.from({ length: total }, (_, i) => ({ terminal: `t${i}` }));
+    const recs = Array.from({ length: total }, (_, i) => rec(`t${i}`, 200 + i));
+    hub.list = {
+      restoreScreen: false,
+      terminals: Array.from({ length: total }, (_, i) => entry(`t${i}`, 100 + i, 3000 + i)),
+    };
+    for (let i = 0; i < total; i++) hub.data.set(`t${i} current`, { bytes: enc(`snap-${i}`), pid: 100 + i, at: 3000 + i });
+
+    let inFlight = 0;
+    let peak = 0;
+    const releases: Array<() => void> = [];
+    const origFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/p/history/read')) {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise<void>((r) => releases.push(r));
+        inFlight--;
+      }
+      return origFetch(url, init);
+    });
+
+    machine(recs, {
+      version: 2,
+      selected: 0,
+      workspaces: [{ id: 'w', name: '', cwd: '', selected: 0, tabs: leaves.map((root) => ({ root, focused: root.terminal })) }],
+    });
+    stop = startHistory();
+    await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS + 10);
+    expect(peak).toBe(MAX_CONCURRENT_READS);
+    expect(inFlight).toBe(MAX_CONCURRENT_READS);
+    while (releases.length > 0) {
+      releases.shift()!();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(peak).toBe(MAX_CONCURRENT_READS);
+    for (let i = 0; i < total; i++) expect(text(preludeOf('a', `t${i}`)?.bytes)).toBe(`snap-${i}`);
+  });
+
+  it('ignores pre-disconnect list/adopt completions after reconnect and clears preludes on historyCleared while staleList is set', async () => {
+    // 1. Pre-disconnect listHistory resolving after reconnect does not overwrite post-reconnect state or stall fresh listing.
+    let staleListSignal: AbortSignal | undefined;
+    let resolveStaleList!: (r: Response) => void;
+    let interceptFirstList = true;
+    const origFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      const u = String(url);
+      if (u === '/api/m/a/p/history' && interceptFirstList) {
+        interceptFirstList = false;
+        staleListSignal = init?.signal ?? undefined;
+        return new Promise<Response>((r) => (resolveStaleList = r));
+      }
+      return origFetch(url, init);
+    });
+
+    restarted();
+    stop = startHistory();
+    await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS + 10);
+    expect(staleListSignal).toBeDefined();
+    expect(staleListSignal?.aborted).toBe(false);
+
+    // Machine disconnects -> aborts pre-disconnect list.
+    machine([], layoutOf({ terminal: 't1' }), 'error');
+    expect(staleListSignal?.aborted).toBe(true);
+
+    // Machine reconnects with fresh post-reboot history.
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 300, 9000, { pid: 200, at: 7000 })] };
+    hub.data.set('t1 previous', { bytes: enc('fresh post-reconnect'), pid: 200, at: 7000 });
+    machine([rec('t1', 300)], layoutOf({ terminal: 't1' }), 'ready');
+
+    // Stale pre-disconnect list resolves late -> must be ignored and must not block reconnect's fresh list.
+    resolveStaleList(
+      new Response(JSON.stringify({ restoreScreen: false, terminals: [entry('t1', 200, 5000, { pid: 100, at: 3000 })] }), { status: 200 }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(preludeOf('a', 't1')).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS + 20);
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('fresh post-reconnect');
+
+    // 2. historyCleared while staleList is true (right after reconnect before fresh list fires) immediately clears preludes.
+    machine([], layoutOf({ terminal: 't1' }), 'error');
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('fresh post-reconnect');
+    machine([rec('t1', 400)], layoutOf({ terminal: 't1' }), 'ready');
+    historyCleared('a');
+    expect(preludeOf('a', 't1')).toBeUndefined();
+    stop();
+
+    // 3. Pre-disconnect adoptHistory rejecting after disconnect does not schedule offline retries or stall post-reconnect adoption.
+    let adoptSignal: AbortSignal | undefined;
+    let resolveOldAdopt!: (r: Response) => void;
+    let interceptFirstAdopt = true;
+    hub = new FakeHistory();
+    hub.install();
+    const baseFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      const u = String(url);
+      if (u.startsWith('/api/m/a/p/history/adopt') && interceptFirstAdopt) {
+        interceptFirstAdopt = false;
+        adoptSignal = init?.signal ?? undefined;
+        return new Promise<Response>((r) => (resolveOldAdopt = r));
+      }
+      return baseFetch(url, init);
+    });
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 100, 3000)] };
+    hub.data.set('t1 current', { bytes: enc('old terminal'), pid: 100, at: 3000 });
+    machine([rec('t2', 300)], layoutOf({ terminal: 't2', before: 't1' }), 'ready');
+    stop = startHistory();
+    await settle();
+    expect(adoptSignal).toBeDefined();
+    expect(adoptSignal?.aborted).toBe(false);
+
+    // Disconnect aborts adopt; even if the old fetch settles with 409 offline, ZERO retries run while offline.
+    machine([], layoutOf({ terminal: 't2', before: 't1' }), 'error');
+    expect(adoptSignal?.aborted).toBe(true);
+    resolveOldAdopt(new Response('{"error":"offline"}', { status: 409 }));
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(hub.adopts()).toHaveLength(0);
+
+    // Reconnect runs adoption cleanly (was not stuck in busy state).
+    machine([rec('t2', 300)], layoutOf({ terminal: 't2', before: 't1' }), 'ready');
+    await settle();
+    expect(hub.adopts()).toHaveLength(1);
   });
 });

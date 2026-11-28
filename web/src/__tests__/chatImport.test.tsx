@@ -275,6 +275,8 @@ describe('the chat panel’s earlier sessions', () => {
       'POST /api/m/m/p/chat/sessions',
       'POST /api/m/m/p/chat/sessions',
     ]);
+    // Refresh bypasses the hub cache via ?refresh=1.
+    expect(chats.requests.slice(before).every((r) => r.query.refresh === '1')).toBe(true);
     expect(listedDirectory('~', '/home/u')).toBe('/home/u');
     expect(listedDirectory('/srv/x/', '/home/u')).toBe('/srv/x');
     expect(listedDirectory('relative', '/home/u')).toBe('/home/u');
@@ -305,6 +307,28 @@ describe('the chat panel’s earlier sessions', () => {
     expect(host!.querySelector('.agent-sessions')).toBeNull();
   });
 
+  it('shows probe-concurrency error copy instead of turn-busy text when session listing returns probe_busy or busy', async () => {
+    await setup();
+    const origFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const u = new URL(url, 'http://page');
+      if (u.pathname === '/api/m/m/p/chat/sessions' && u.searchParams.get('kind') === 'claude') {
+        return new Response('{"error":"probe_busy","message":"too many probes run"}', { status: 429 });
+      }
+      if (u.pathname === '/api/m/m/p/chat/sessions' && u.searchParams.get('kind') === 'codex') {
+        return new Response('{"error":"busy","message":"too many session listings run"}', { status: 409 });
+      }
+      return origFetch(url, init);
+    });
+    await render(createElement(PastSessions, { m: 'm' }));
+    const notes = [...host!.querySelectorAll('.agent-sessions-note')].map((n) => n.textContent ?? '');
+    expect(notes).toHaveLength(2);
+    for (const note of notes) {
+      expect(note).toContain('too many session or model checks');
+      expect(note).not.toContain('the agent is working');
+    }
+  });
+
   it('open a session as a chat: POST new with import, and the chat’s pane in a new tab', async () => {
     const { model } = await setup();
     script();
@@ -312,7 +336,12 @@ describe('the chat panel’s earlier sessions', () => {
     await act(async () => rowOf(S1).click());
     for (let i = 0; i < 4; i++) await act(settle);
     expect(chats.posts()).toEqual([
-      { method: 'POST', path: '/api/m/m/p/chat/new', query: {}, body: { kind: 'claude', cwd: DIR, resume: S1, import: true } },
+      {
+        method: 'POST',
+        path: '/api/m/m/p/chat/new',
+        query: {},
+        body: { kind: 'claude', cwd: DIR, resume: S1, import: true, workspace: 'w1' },
+      },
     ]);
     const opened = chatViews(model).find((v) => v.view.chat === NEW_CHAT)!;
     expect(opened.view).toMatchObject({ plugin: 'chat', kind: 'chat', chat: NEW_CHAT, agent: 'claude' });
@@ -363,7 +392,12 @@ describe('the chat panel’s earlier sessions', () => {
     await act(async () => rowOf(C1).click());
     for (let i = 0; i < 4; i++) await act(settle);
     expect(chats.posts()).toEqual([
-      { method: 'POST', path: '/api/m/m/p/chat/new', query: {}, body: { kind: 'codex', cwd: DIR, resume: C1, import: true } },
+      {
+        method: 'POST',
+        path: '/api/m/m/p/chat/new',
+        query: {},
+        body: { kind: 'codex', cwd: DIR, resume: C1, import: true, workspace: 'w1' },
+      },
     ]);
   });
 
@@ -470,7 +504,7 @@ describe('Continue in Chat in a terminal’s header', () => {
     expect(button.title).toBe('Continue this Claude Code session in a chat');
     await act(async () => button.click());
     for (let i = 0; i < 4; i++) await act(settle);
-    expect(chats.posts().map((r) => r.body)).toEqual([{ kind: 'claude', cwd: DIR, resume: S1, import: true }]);
+    expect(chats.posts().map((r) => r.body)).toEqual([{ kind: 'claude', cwd: DIR, resume: S1, import: true, workspace: 'w1' }]);
     const opened = chatViews(model).find((v) => v.view.chat === NEW_CHAT)!;
     expect(opened).toMatchObject({ ws: 'w1', tab: 2, view: { agent: 'claude' } });
   });

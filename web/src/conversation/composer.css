@@ -1,0 +1,704 @@
+/* Composer-specific styles (web/src/conversation/Composer.tsx and
+   web/src/components/FilePicker.tsx), imported by Composer.tsx. */
+
+/* ---- Slack-style queued messages stack (#4) ---- */
+.conv-queued {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: calc(56rem - 36px);
+  margin: 0 auto 6px;
+}
+.conv-queued-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+}
+.conv-queued-head > .lucide {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.conv-queued-clear {
+  margin-left: auto;
+  height: 20px;
+  min-height: 0;
+  padding: 0 6px;
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+}
+.conv-queued-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--line-2);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  color: var(--fg);
+  font-size: var(--fs-sm);
+}
+.conv-queued-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.conv-queued-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+}
+.conv-queued-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.conv-queued-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 14rem;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+}
+.conv-queued-chip > .lucide {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+.conv-queued-aside {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.conv-queued-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.conv-queued-tag[data-steering] {
+  color: var(--accent);
+}
+.conv-queued-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0.72;
+  transition: opacity 0.12s;
+}
+.conv-queued-item:hover .conv-queued-actions,
+.conv-queued-item:focus-within .conv-queued-actions {
+  opacity: 1;
+}
+
+/* ---- Attached workspace file chips (#5) ---- */
+.conv-file-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 10px 0;
+}
+.conv-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 18rem;
+  height: 24px;
+  padding: 0 4px 0 7px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  color: var(--fg);
+  font-size: var(--fs-xs);
+}
+.conv-file-chip .file-icon {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+.conv-file-chip-label {
+  min-width: 0;
+  font-family: var(--mono);
+}
+.conv-file-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-mute);
+}
+.conv-file-chip-remove:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.conv-file-chip-remove > .lucide {
+  width: 11px;
+  height: 11px;
+}
+
+/* ---- @ autocomplete icon & dir styling (#5) ---- */
+.conv-menu-item > .file-icon {
+  flex: none;
+  align-self: center;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+
+/* ---- Markdown preview pane (#7) ---- */
+.conv-composer-preview {
+  min-height: 44px;
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+.conv-composer-preview-empty {
+  color: var(--fg-mute);
+  font-style: italic;
+}
+.conv-preview-toggle[aria-pressed='true'] {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+
+/* ---- Valid slash-command highlight backdrop ---- */
+.conv-input-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  padding: 4px 4px;
+  overflow: hidden;
+  pointer-events: none;
+  color: transparent;
+  font: inherit;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+.conv-slash-highlight {
+  color: transparent;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 4px;
+  box-shadow: inset 0 -1.5px 0 color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
+/* ---- Left `+` button & menu inside input bar ---- */
+.conv-plus-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.conv-plus-btn:hover:not(:disabled),
+.conv-plus-btn[aria-expanded='true'] {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.conv-plus-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.conv-plus-btn > .lucide {
+  width: 16px;
+  height: 16px;
+}
+.conv-plus-menu {
+  padding: 5px;
+  border-radius: var(--radius-lg);
+}
+.conv-plus-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+}
+.conv-plus-item:hover {
+  background: var(--bg-3);
+}
+.conv-plus-item > .lucide {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-dim);
+}
+.conv-plus-shortcut {
+  margin-left: auto;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+}
+
+/* ---- Bottom meta bar below composer box (Claude Code layout) ---- */
+.conv-meta-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  max-width: calc(56rem - 36px);
+  margin: 6px auto 0;
+  padding: 0 4px;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  min-height: var(--ctl-sm);
+}
+.conv-meta-left,
+.conv-meta-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.conv-meta-left {
+  flex: 1 1 auto;
+  gap: 12px;
+  overflow: hidden;
+}
+.conv-meta-right {
+  flex: none;
+}
+.conv-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 14rem;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  user-select: none;
+}
+.conv-meta-item > .lucide {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--fg-mute);
+}
+.conv-branch {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+/* ---- Combined Model + Effort trigger & flyout submenu ---- */
+.conv-model-effort {
+  gap: 6px;
+}
+.conv-me-model {
+  color: var(--fg);
+  font-weight: 500;
+}
+.conv-me-effort {
+  flex: none;
+  color: var(--fg-mute);
+  font-weight: 400;
+}
+.conv-menu-section-head {
+  padding: 5px 8px 4px;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  user-select: none;
+}
+.conv-menu-sep {
+  height: 1px;
+  margin: 4px 4px;
+  background: var(--line);
+}
+.conv-me-effort-row {
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+.conv-me-effort-val {
+  margin-left: auto;
+  color: var(--fg-mute);
+  font-size: var(--fs-sm);
+}
+.conv-select-option.active .conv-me-effort-val,
+.conv-select-option.active .conv-me-effort-arrow {
+  color: inherit;
+  opacity: 0.9;
+}
+.conv-me-effort-arrow {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-mute);
+}
+.conv-me-effort-hint {
+  padding: 5px 8px 6px;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
+/* ---- Explicit steer / interrupt-send button (#4) ---- */
+.conv-steer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 28px;
+  min-height: 0;
+  padding: 0 8px;
+  font-size: var(--fs-sm);
+}
+.conv-steer > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+
+/* ---- Circular context usage ring & hover/click details popover ---- */
+.conv-ctx-ring-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  min-height: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.conv-ctx-ring-btn:hover,
+.conv-ctx-ring-btn[aria-expanded='true'] {
+  background: var(--bg-2);
+  border-color: var(--line-2);
+  color: var(--fg);
+}
+.conv-ring-svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  transform: rotate(-90deg);
+}
+.conv-ring-track {
+  fill: none;
+  stroke: var(--line-2);
+  stroke-width: 2.2;
+}
+.conv-ring-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.2s ease;
+}
+.conv-ctx-ring-btn[data-level='mid'] .conv-ring-fill {
+  stroke: var(--warning);
+}
+.conv-ctx-ring-btn[data-level='high'] .conv-ring-fill {
+  stroke: var(--error);
+}
+.conv-ring-spin {
+  width: 14px;
+  height: 14px;
+}
+.conv-compact-popover {
+  position: fixed;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 270px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px var(--shadow);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+}
+.conv-ctx-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.conv-ctx-head-title {
+  color: var(--fg-dim);
+  font-weight: 500;
+}
+.conv-ctx-pct {
+  color: var(--fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.conv-ctx-bar {
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line-2);
+}
+.conv-ctx-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.conv-ctx-bar[data-level='mid'] > span {
+  background: var(--warning);
+}
+.conv-ctx-bar[data-level='high'] > span {
+  background: var(--error);
+}
+.conv-ctx-details {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.conv-ctx-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.conv-ctx-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.conv-ctx-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+}
+.conv-ctx-stale {
+  color: var(--fg-mute);
+}
+.conv-ctx-ring-btn[data-stale='true'] .conv-ring-track {
+  stroke-dasharray: 2.5 2;
+  opacity: 0.7;
+}
+.conv-ctx-note > .lucide {
+  width: 12px;
+  height: 12px;
+}
+.conv-ctx-compact-link {
+  align-self: flex-start;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.conv-ctx-compact-link:hover {
+  text-decoration: underline;
+}
+.conv-compact-desc {
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+.conv-compact-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: var(--ctl-sm);
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+.conv-compact-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.conv-compact-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* ---- Reusable FilePicker popover (#5) ---- */
+.conv-file-picker-popover {
+  position: fixed;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-width: calc(100vw - 16px);
+  max-height: 360px;
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.file-picker {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: inherit;
+  color: var(--fg);
+  font-size: var(--fs-sm);
+}
+.file-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.file-picker-crumbs {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 2px;
+}
+.file-picker-crumb-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex: none;
+}
+.file-picker-sep {
+  color: var(--fg-mute);
+}
+.file-picker-crumb {
+  height: 22px;
+  min-height: 0;
+  max-width: 9rem;
+  padding: 0 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  cursor: pointer;
+}
+.file-picker-crumb:hover,
+.file-picker-crumb[aria-current='location'] {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.file-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.file-picker-search-ic {
+  width: 13px;
+  height: 13px;
+  color: var(--fg-mute);
+  flex: none;
+}
+.file-picker-filter {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+.file-picker-list {
+  flex: 1;
+  min-height: 120px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.file-picker-row {
+  position: relative;
+  cursor: pointer;
+}
+.file-picker-check {
+  flex: none;
+  margin: 0 2px 0 0;
+  cursor: pointer;
+}
+.file-picker-note {
+  padding: 12px;
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+.file-picker-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.file-picker-count {
+  margin-right: auto;
+}
+
+/* Narrow panes hide the branch label text first if space gets tight. */
+@container (max-width: 460px) {
+  .conv-meta-bar {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+}

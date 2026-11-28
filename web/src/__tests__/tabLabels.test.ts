@@ -148,4 +148,30 @@ describe('tab labels', () => {
     const labels = Array.from(host.querySelectorAll('.palette-item .ellipsis')).map((e) => e.textContent);
     expect(labels).toEqual(['website', 'claude · website · 3']);
   });
+
+  it('suppresses the blue unread dot on muted tabs and tabs inside a muted workspace', async () => {
+    await act(async () => root.render(createElement(Workspace)));
+    expect(tabs()[2].querySelector('.dot-blocked')).not.toBeNull();
+
+    // Muting the tab hides its blue dot.
+    await act(async () => hub.model.mutate('m', (l) => L.muteTab(l, 'wwwwwwww', 2, true)));
+    await act(settle);
+    expect(tabs()[2].querySelector('.dot-blocked')).toBeNull();
+    expect(tabs()[2].querySelector('.tab-muted')).not.toBeNull();
+
+    // Unmuting the tab brings the blue dot back.
+    await act(async () => hub.model.mutate('m', (l) => L.muteTab(l, 'wwwwwwww', 2, false)));
+    await act(settle);
+    expect(tabs()[2].querySelector('.dot-blocked')).not.toBeNull();
+
+    // Muting the parent workspace also hides the blue dot on its tabs.
+    await act(async () => hub.model.mutate('m', (l) => L.muteWorkspace(l, 'wwwwwwww', true)));
+    await act(settle);
+    expect(tabs()[2].querySelector('.dot-blocked')).toBeNull();
+
+    // Unmuting the workspace restores it.
+    await act(async () => hub.model.mutate('m', (l) => L.muteWorkspace(l, 'wwwwwwww', false)));
+    await act(settle);
+    expect(tabs()[2].querySelector('.dot-blocked')).not.toBeNull();
+  });
 });

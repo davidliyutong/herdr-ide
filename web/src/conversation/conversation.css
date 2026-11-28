@@ -27,6 +27,7 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  overflow-anchor: none;
   scrollbar-gutter: stable;
 }
 .conv-list {
@@ -38,10 +39,13 @@
   padding: 14px 18px 18px;
 }
 
-/* Only the items in view are laid out and painted; one that has been keeps
-   its height as its placeholder. */
+/* Older items outside the recent tail lay out lazily and keep their height as
+   placeholder; the recent tail lays out eagerly so opening or returning to a
+   chat snaps straight to its position without multi-frame scroll chasing. */
 .conv-item {
   min-width: 0;
+}
+.conv-item:nth-last-child(n + 21) {
   content-visibility: auto;
   contain-intrinsic-block-size: auto 2.5rem;
 }
@@ -106,6 +110,57 @@
   display: flex;
   justify-content: flex-end;
 }
+.conv-user-wrap {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.conv-user-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.conv-user:hover .conv-user-actions,
+.conv-user:focus-within .conv-user-actions {
+  opacity: 1;
+}
+.conv-user-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  min-height: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-mute);
+  cursor: pointer;
+}
+.conv-user-action:hover:not(:disabled) {
+  border-color: var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.conv-user-action.is-unsupported {
+  opacity: 0.45;
+}
+.conv-user-action.is-unsupported:hover {
+  opacity: 0.8;
+}
+.conv-user-action > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
 .conv-bubble {
   display: flex;
   flex-direction: column;
@@ -113,78 +168,138 @@
   gap: 4px;
   min-width: 0;
   max-width: min(85%, 44rem);
-  padding: 7px 12px;
+  padding: 8px 12px;
   background: var(--bg-2);
   border-radius: var(--radius-lg);
   line-height: 1.5;
 }
 .conv-user-text {
+  min-width: 0;
   max-width: 100%;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+}
+.conv-user-md {
+  overflow-wrap: break-word;
+}
+.conv-bubble .conv-user-md {
+  line-height: inherit;
+}
+.conv-bubble .conv-user-md > :first-child {
+  margin-top: 0;
+}
+.conv-bubble .conv-user-md > :last-child {
+  margin-bottom: 0;
 }
 .conv-user-text.clamped {
   max-height: calc(1.5em * 12);
   overflow: hidden;
   mask-image: linear-gradient(to bottom, #000 70%, transparent);
 }
+.conv-user-edit {
+  width: min(100%, 44rem);
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+}
+.conv-edit-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 3.5rem;
+  max-height: 20rem;
+  padding: 6px 8px;
+  resize: vertical;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.45;
+}
+.conv-edit-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.conv-edit-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--warning);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+.conv-edit-warn > .lucide {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  margin-top: 2px;
+}
+.conv-edit-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.conv-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.conv-edit-actions button > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
 
-/* ---- the agent's messages ---- */
+/* ---- follow-up questions replayed on an agent message ---- */
+.conv-followup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+.conv-followup-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.conv-followup-head > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.conv-followup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.conv-followup-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.conv-followup-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* ---- the agent's messages (compact Markdown styling lives in markdown.css) ---- */
 .conv-agent {
   line-height: 1.6;
-}
-.conv-md {
-  font-size: inherit;
-}
-.conv-md h1,
-.conv-md h2,
-.conv-md h3,
-.conv-md h4,
-.conv-md h5,
-.conv-md h6 {
-  margin: 1.1em 0 0.45em;
-}
-.conv-md h1 {
-  font-size: 1.3em;
-  padding-bottom: 0.2em;
-}
-.conv-md h2 {
-  font-size: 1.16em;
-  padding-bottom: 0.2em;
-}
-.conv-md h3 {
-  font-size: 1.05em;
-}
-.conv-md p,
-.conv-md ul,
-.conv-md ol,
-.conv-md blockquote,
-.conv-md .md-table,
-.conv-md .md-code,
-.conv-md .md-math-display {
-  margin-bottom: 0.75em;
-}
-.conv-md ul,
-.conv-md ol {
-  padding-left: 1.6em;
-}
-.conv-md table {
-  font-size: 0.95em;
-  font-variant-numeric: tabular-nums;
-}
-.conv-md th,
-.conv-md td {
-  padding: 0.3em 0.75em;
-  vertical-align: top;
-}
-.conv-md th {
-  text-align: left;
-}
-.conv-md tbody tr:nth-child(even) td {
-  background: color-mix(in srgb, var(--bg-2) 45%, transparent);
-}
-.conv-md .md-math-display {
-  padding: 2px 0;
 }
 
 /* ---- quiet rows: thoughts and tool calls ---- */
@@ -333,10 +448,79 @@ button.conv-path:hover .conv-path-name {
 .conv-meta {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: none;
   color: var(--fg-mute);
   font-size: var(--fs-sm);
+}
+.conv-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--bg-1);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.conv-bg-badge {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+.conv-model-badge {
+  color: var(--fg-mute);
+}
+.conv-task-live {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--working);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.conv-task-stat {
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.conv-task-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: none;
+  height: 22px;
+  min-height: 0;
+  padding: 0 7px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.conv-task-stop:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--error) 45%, transparent);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error);
+}
+.conv-task-stop:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+.conv-task-stop > .lucide {
+  flex: none;
+  width: 10px;
+  height: 10px;
+}
+.conv-task-stop > svg:not(.conv-spin) {
+  fill: currentColor;
 }
 .conv-stat {
   font-family: var(--mono);
@@ -700,17 +884,18 @@ button.conv-path:hover .conv-path-name {
 /* ---- the composer ---- */
 .conv-composer {
   flex: none;
-  padding: 6px 18px 12px;
+  padding: 6px 18px 10px;
 }
 .conv-box {
+  position: relative;
   display: flex;
   flex-direction: column;
   max-width: calc(56rem - 36px);
   margin: 0 auto;
-  overflow: hidden;
   background: var(--bg-1);
   border: 1px solid var(--line-2);
-  border-radius: var(--radius-lg);
+  border-radius: 14px;
+  transition: border-color 0.12s;
 }
 .conv-box:focus-within {
   border-color: var(--accent);
@@ -725,6 +910,10 @@ button.conv-path:hover .conv-path-name {
   font-size: var(--fs-md);
   line-height: 1.4;
   box-shadow: inset 3px 0 0 var(--blocked);
+}
+.conv-box > .conv-banner:first-child {
+  border-top-left-radius: 13px;
+  border-top-right-radius: 13px;
 }
 .conv-banner > span:first-of-type {
   flex: 1;
@@ -745,13 +934,22 @@ button.conv-path:hover .conv-path-name {
   width: var(--ic-sm);
   height: var(--ic-sm);
 }
+.conv-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 6px 8px;
+}
 .conv-input {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
-  min-height: calc(1.45em + 14px);
+  box-sizing: border-box;
+  min-height: 28px;
   max-height: 40vh;
   margin: 0;
-  padding: 8px 12px 4px;
+  padding: 4px 4px;
   overflow-y: auto;
   resize: none;
   border: none;
@@ -774,13 +972,11 @@ button.conv-path:hover .conv-path-name {
 .conv-input:disabled {
   cursor: not-allowed;
 }
-.conv-foot {
-  display: flex;
+.conv-input-actions {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 6px 6px 12px;
-  color: var(--fg-mute);
-  font-size: var(--fs-sm);
+  flex: none;
 }
 .conv-stop {
   display: inline-flex;
@@ -796,11 +992,11 @@ button.conv-stop > .lucide {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--ctl);
-  height: var(--ctl);
+  width: 28px;
+  height: 28px;
   min-height: 0;
   padding: 0;
-  border-radius: var(--radius);
+  border-radius: 999px;
 }
 .conv-meter {
   display: inline-flex;
@@ -827,9 +1023,9 @@ button.conv-stop > .lucide {
   background: var(--error);
 }
 
-/* Markdown still arriving: its blocks one after the other, as one text. */
+/* Markdown still arriving: keep compact block rhythm matching settled output. */
 .conv-stream > .markdown + .markdown {
-  margin-top: 0;
+  margin-top: 0.75em;
 }
 
 /* ---- a subagent's call: its items nested, a rule at their left ---- */
@@ -899,6 +1095,29 @@ button.conv-stop > .lucide {
 .conv-ask-title {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.conv-ask[data-async='true'][data-state='waiting'] {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.conv-ask[data-async='true'][data-state='waiting'] .conv-ask-head > .lucide {
+  color: var(--accent);
+}
+.conv-ask-badge {
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.conv-ask[data-state='done'] .conv-ask-badge,
+.conv-ask[data-state='stale'] .conv-ask-badge {
+  border-color: var(--line-2);
+  background: transparent;
+  color: var(--fg-mute);
 }
 .conv-ask-from {
   color: var(--fg-mute);
@@ -1000,12 +1219,28 @@ button.conv-stop > .lucide {
   padding: 0;
   line-height: 1.45;
 }
+.conv-q-text {
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+}
+.conv-q-text > :first-child {
+  margin-top: 0;
+}
+.conv-q-text > :last-child {
+  margin-bottom: 0;
+}
 .conv-q-header {
   padding: 0 6px;
   border: 1px solid var(--line-2);
   border-radius: 999px;
   color: var(--fg-dim);
   font-size: var(--fs-xs);
+}
+.conv-q-optional {
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  font-weight: 400;
 }
 .conv-q-options {
   display: flex;
@@ -1024,6 +1259,9 @@ button.conv-stop > .lucide {
 .conv-q-option:hover {
   background: var(--bg-2);
 }
+.conv-q-option.selected {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
 .conv-q-desc {
   grid-column: 2;
   color: var(--fg-mute);
@@ -1031,8 +1269,20 @@ button.conv-stop > .lucide {
   line-height: 1.4;
 }
 .conv-q-other {
-  grid-template-columns: auto auto minmax(0, 1fr);
+  display: flex;
   align-items: center;
+  gap: 8px;
+  cursor: default;
+}
+.conv-q-other-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  cursor: pointer;
+}
+.conv-q-other .conv-q-input {
+  flex: 1;
 }
 .conv-q-input {
   min-width: 0;
@@ -1146,28 +1396,29 @@ button.conv-stop > .lucide {
 }
 .conv-field {
   position: relative;
+  flex: 1;
+  min-width: 0;
 }
 .conv-menu {
   position: absolute;
-  bottom: 100%;
-  left: 6px;
-  right: 6px;
-  z-index: 2;
-  max-height: 16rem;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 18rem;
   overflow-y: auto;
-  margin-bottom: 4px;
   padding: 4px;
   background: var(--float);
   border: 1px solid var(--line-2);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 16px var(--shadow);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 28px var(--shadow);
 }
 .conv-menu-item {
   display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
-  padding: 4px 8px;
+  padding: 5px 8px;
   border-radius: var(--radius-sm);
   font-size: var(--fs-md);
   cursor: pointer;
@@ -1185,6 +1436,13 @@ button.conv-stop > .lucide {
 .conv-menu-label {
   flex: none;
   font-family: var(--mono);
+  font-weight: 500;
+}
+.conv-menu-match {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  border-radius: 2px;
+  padding: 0 1px;
 }
 .conv-menu-hint {
   flex: none;
@@ -1200,29 +1458,34 @@ button.conv-stop > .lucide {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.conv-foot .conv-select {
+.conv-meta-bar .conv-select {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  max-width: 12rem;
+  max-width: 16rem;
   min-height: var(--ctl-sm);
   height: var(--ctl-sm);
-  padding: 0 6px;
+  padding: 0 7px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: transparent;
   color: var(--fg-dim);
   font-size: var(--fs-sm);
   line-height: 1;
+  cursor: pointer;
 }
-.conv-foot .conv-select:hover:not(:disabled),
-.conv-foot .conv-select[aria-expanded='true'] {
+.conv-meta-bar .conv-select:hover:not(:disabled),
+.conv-meta-bar .conv-select[aria-expanded='true'] {
   background: var(--bg-2);
   color: var(--fg);
 }
-.conv-foot .conv-select[aria-expanded='true'] {
+.conv-meta-bar .conv-select[aria-expanded='true'] {
   border-color: var(--line-2);
+}
+.conv-meta-bar .conv-select:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 .conv-select-label {
   flex: 1 1 auto;
@@ -1306,23 +1569,160 @@ button.conv-stop > .lucide {
   }
 }
 .conv-usage {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  display: inline-flex;
   align-items: center;
-  gap: 4px 12px;
-  max-width: calc(56rem - 36px);
-  margin: 4px auto 0;
-  padding: 0 4px;
-  color: var(--fg-mute);
-  font-size: var(--fs-xs);
+  flex: none;
   font-variant-numeric: tabular-nums;
 }
-.conv-usage-limit[data-level='mid'] {
-  color: var(--warning);
+
+/* ---- collapsible background tasks & subagents tray (#10) ---- */
+.conv-tasks {
+  flex: none;
+  width: 100%;
+  max-width: 56rem;
+  margin: 4px auto 0;
+  padding: 0 18px;
+  box-sizing: border-box;
 }
-.conv-usage-limit[data-level='high'] {
+.conv-tasks-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--h-row);
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.conv-tasks-head:hover {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.conv-tasks-head[aria-expanded='true'] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.conv-tasks-head .conv-chevron {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--fg-mute);
+  transition: transform 0.12s;
+}
+.conv-tasks-head[aria-expanded='true'] .conv-chevron {
+  transform: rotate(90deg);
+}
+.conv-tasks-spin {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--working);
+}
+.conv-tasks-count {
+  flex: none;
+  font-weight: 500;
+}
+.conv-tasks-preview {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+}
+.conv-tasks-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  border-inline: 1px solid var(--line-2);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--error) 8%, var(--bg-1));
   color: var(--error);
+  font-size: var(--fs-xs);
+}
+.conv-tasks-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 3px 0;
+  list-style: none;
+  max-height: 12rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--line-2);
+  border-top: none;
+  border-bottom-left-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+  background: var(--bg-1);
+}
+.conv-task-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px 8px;
+  box-sizing: border-box;
+  font-size: var(--fs-sm);
+}
+.conv-task-row:hover {
+  background: var(--bg-2);
+}
+.conv-task-icon {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-mute);
+}
+.conv-task-jump,
+.conv-task-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+.conv-task-jump {
+  min-height: 0;
+  height: auto;
+  padding: 2px 4px;
+  margin: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.conv-task-jump:hover .conv-task-title {
+  text-decoration: underline;
+}
+.conv-task-agent {
+  flex: none;
+  color: var(--fg-dim);
+  font-weight: 500;
+}
+.conv-task-title {
+  min-width: 0;
+}
+.conv-task-title.mono {
+  font-family: var(--mono);
+  font-size: 0.95em;
+}
+.conv-task-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
 }
 
 /* A narrow pane. */
@@ -1330,10 +1730,16 @@ button.conv-stop > .lucide {
   .conv-list {
     padding: 10px 12px 14px;
   }
+  .conv-tasks {
+    padding: 0 10px;
+  }
   .conv-composer {
     padding: 4px 10px 10px;
   }
   .conv-bubble {
     max-width: 92%;
+  }
+  .conv-user-actions {
+    opacity: 1;
   }
 }

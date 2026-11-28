@@ -28,135 +28,149 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_thought_chunk",
+    "content": {
+     "type": "text",
+     "text": ""
+    },
+    "messageId": "msg_0001",
     "_meta": {
      "veldr": {
       "estimatedTokens": 50
      }
-    },
-    "content": {
-     "text": "",
-     "type": "text"
-    },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_thought_chunk"
+    }
    }
   },
   {
    "t": "update",
-   "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_thought_chunk",
+    "content": {
+     "type": "text",
+     "text": ""
+    },
+    "messageId": "msg_0001",
     "_meta": {
      "veldr": {
       "estimatedTokens": 50
      }
-    },
-    "content": {
-     "text": "",
-     "type": "text"
-    },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_thought_chunk"
-   }
+    }
+   },
+   "item": "msg_0001/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000019"
   },
   {
    "t": "update",
    "live": true,
    "item": "toolu_0001",
    "update": {
-    "kind": "think",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0001",
     "title": "Agent",
-    "toolCallId": "toolu_0001"
+    "kind": "think",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0001",
+    "title": "Run touch sub.txt",
     "kind": "think",
+    "status": "pending",
     "rawInput": {
      "description": "Run touch sub.txt",
+     "subagent_type": "general-purpose",
      "prompt": "Use the Bash tool to run `touch sub.txt` in the current working directory. Then report whether the command worked (for example, by checking that the file exists with `ls -l sub.txt`). Reply with a one-line report of the result.",
-     "run_in_background": false,
-     "subagent_type": "general-purpose"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Run touch sub.txt",
-    "toolCallId": "toolu_0001"
-   }
+     "run_in_background": false
+    }
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000045"
   },
   {
    "t": "update",
    "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
+    "status": "in_progress",
     "_meta": {
      "veldr": {
       "task": {
+       "taskId": "a0000000000000001",
+       "type": "local_agent",
        "description": "Run touch sub.txt",
-       "type": "local_agent"
+       "subagentType": "general-purpose"
       }
      }
-    },
-    "sessionUpdate": "tool_call_update",
-    "status": "in_progress",
-    "toolCallId": "toolu_0001"
+    }
    }
   },
   {
    "t": "update",
    "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
     "_meta": {
      "veldr": {
       "task": {
        "description": "Running Create sub.txt and list it to verify",
-       "durationMs": 1092,
        "lastTool": "Bash",
        "tokens": 35247,
-       "toolUses": 1
+       "toolUses": 1,
+       "durationMs": 1092,
+       "taskId": "a0000000000000001"
       }
      }
-    },
-    "sessionUpdate": "tool_call_update",
-    "toolCallId": "toolu_0001"
+    }
    }
   },
   {
    "t": "update",
-   "item": "toolu_0002",
-   "parent": "toolu_0001",
    "update": {
-    "kind": "execute",
-    "rawInput": {
-     "command": "touch sub.txt \u0026\u0026 ls -l sub.txt",
-     "description": "Create sub.txt and list it to verify"
-    },
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0002",
     "title": "Create sub.txt and list it to verify",
-    "toolCallId": "toolu_0002"
-   }
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {
+     "command": "touch sub.txt && ls -l sub.txt",
+     "description": "Create sub.txt and list it to verify"
+    }
+   },
+   "parent": "toolu_0001",
+   "item": "toolu_0002"
   },
   {
    "t": "update",
-   "item": "toolu_0002",
-   "parent": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0002",
+    "status": "completed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "-rw-r--r--@ 1 user  wheel  0 11月 22 19:44 sub.txt",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "-rw-r--r--@ 1 user  wheel  0 11月 22 19:44 sub.txt"
+      }
      }
-    ],
+    ]
+   },
+   "parent": "toolu_0001",
+   "item": "toolu_0002"
+  },
+  {
+   "t": "update",
+   "item": "toolu_0001",
+   "update": {
     "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0002"
+    "toolCallId": "toolu_0001",
+    "status": "completed"
    }
   },
   {
@@ -164,45 +178,51 @@
    "item": "toolu_0001",
    "update": {
     "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
     "status": "completed",
-    "toolCallId": "toolu_0001"
-   }
-  },
-  {
-   "t": "update",
-   "item": "toolu_0001",
-   "update": {
     "_meta": {
      "veldr": {
       "task": {
-       "durationMs": 3034,
        "summary": "Worked: `touch sub.txt` created `sub.txt` (0 bytes) in the working directory, confirmed by `ls -l`.",
+       "taskId": "a0000000000000001",
        "tokens": 40861,
-       "toolUses": 1
+       "toolUses": 1,
+       "durationMs": 3034
       }
      }
-    },
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0001"
+    }
    }
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
+    "status": "completed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "Worked: `touch sub.txt` created `sub.txt` (0 bytes) in the working directory, confirmed by `ls -l`.",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "Worked: `touch sub.txt` created `sub.txt` (0 bytes) in the working directory, confirmed by `ls -l`."
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0001"
+    ]
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000060"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0003/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "The subagent reported that `"
+    },
+    "messageId": "msg_0003"
    }
   },
   {
@@ -210,12 +230,12 @@
    "live": true,
    "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "The subagent reported that `",
-     "type": "text"
+     "type": "text",
+     "text": "touch sub.txt`"
     },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0003"
    }
   },
   {
@@ -223,12 +243,12 @@
    "live": true,
    "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "touch sub.txt`",
-     "type": "text"
+     "type": "text",
+     "text": " worked:"
     },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0003"
    }
   },
   {
@@ -236,12 +256,12 @@
    "live": true,
    "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " worked:",
-     "type": "text"
+     "type": "text",
+     "text": " it created a"
     },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0003"
    }
   },
   {
@@ -249,12 +269,12 @@
    "live": true,
    "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " it created a",
-     "type": "text"
+     "type": "text",
+     "text": " 0-byte `"
     },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0003"
    }
   },
   {
@@ -262,12 +282,12 @@
    "live": true,
    "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " 0-byte `",
-     "type": "text"
+     "type": "text",
+     "text": "sub.txt` in the"
     },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0003"
    }
   },
   {
@@ -275,12 +295,12 @@
    "live": true,
    "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "sub.txt` in the",
-     "type": "text"
+     "type": "text",
+     "text": " working directory, confirmed"
     },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0003"
    }
   },
   {
@@ -288,12 +308,12 @@
    "live": true,
    "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " working directory, confirmed",
-     "type": "text"
+     "type": "text",
+     "text": " with"
     },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0003"
    }
   },
   {
@@ -301,43 +321,31 @@
    "live": true,
    "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " with",
-     "type": "text"
+     "type": "text",
+     "text": " `ls -l`."
     },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0003"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " `ls -l`.",
-     "type": "text"
+     "type": "text",
+     "text": "The subagent reported that `touch sub.txt` worked: it created a 0-byte `sub.txt` in the working directory, confirmed with `ls -l`."
     },
     "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0003/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "The subagent reported that `touch sub.txt` worked: it created a 0-byte `sub.txt` in the working directory, confirmed with `ls -l`.",
-     "type": "text"
-    },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0003/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000073"
   },
   {
    "t": "turn",
@@ -351,7 +359,7 @@
    "ToolCall": {
     "kind": "execute",
     "rawInput": {
-     "command": "touch sub.txt \u0026\u0026 ls -l sub.txt",
+     "command": "touch sub.txt && ls -l sub.txt",
      "description": "Create sub.txt and list it to verify"
     },
     "status": "pending",
@@ -420,7 +428,7 @@
     "response": {
      "behavior": "allow",
      "updatedInput": {
-      "command": "touch sub.txt \u0026\u0026 ls -l sub.txt",
+      "command": "touch sub.txt && ls -l sub.txt",
       "description": "Create sub.txt and list it to verify"
      }
     }
@@ -591,15 +599,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -633,7 +641,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 0,

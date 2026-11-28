@@ -87,7 +87,7 @@ describe('registry', () => {
       '| `terminal.fontSize` |',
       '| `extra.on` |',
       '`--extra-on`',
-      '| `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – | `ctrl+shift+t` | – |',
+      '| `tab.new` | `terminal` | `cmd+t` | – | `ctrl+t` | – | `ctrl+t` | – |',
       '<!-- end of make tokens: settings -->\nmiddle\n',
       '\nend\n',
     ]) {

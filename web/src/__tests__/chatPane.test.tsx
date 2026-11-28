@@ -11,6 +11,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: vi.fn() } }));
+vi.mock('../components/TerminalView', () => ({ TerminalView: () => null }));
 
 import { CHAT_NOTICES } from '../conversation/model';
 import { chatPlugin } from '../plugins/chat';
@@ -25,6 +26,10 @@ import { definePlugins } from '../plugins/registry';
 import { useSettings } from '../settings';
 import { useStore } from '../state/store';
 import { useDialog } from '../dialog';
+import { isItem, useMenu, closeMenu } from '../contextMenu';
+import { LeafIcon } from '../components/PluginPane';
+import { PaneHeader } from '../components/PaneHeader';
+import { Workspace } from '../components/Workspace';
 import { setLocale, t } from '../i18n';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
@@ -117,6 +122,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  closeMenu(false);
   useDialog.setState({ current: undefined });
   useChatUi.setState({ renaming: undefined });
   dropSources();
@@ -128,7 +134,17 @@ afterEach(async () => {
 
 async function pane(v: L.PluginView, m = 'm') {
   const Pane = chatPlugin.paneViews!.chat.component;
-  await act(async () => root.render(createElement(Pane, { m, pane: L.viewKey(v.id), view: v, focused: true })));
+  const key = L.viewKey(v.id);
+  await act(async () =>
+    root.render(
+      createElement(
+        'div',
+        { className: 'pane focused' },
+        createElement(PaneHeader, { m, pane: key, leaf: { view: v }, ws: 'w1w1w1w1', focused: true, zoomed: false }),
+        createElement(Pane, { m, pane: key, view: v, focused: true }),
+      ),
+    ),
+  );
   await tick();
 }
 
@@ -144,10 +160,16 @@ describe('the chat pane', () => {
       },
     ]);
     await pane(view(A));
-    expect(q('.chat-agent')!.textContent).toBe('Claude Code');
-    expect(q('.chat-title')!.textContent).toBe('Fix the build');
-    expect(q('.chat-cwd')!.textContent).toBe('~/proj');
-    expect(q('.chat-state')!.textContent).toBe(t('chat.state.idle'));
+    expect(q('.chat-head')).toBeNull();
+    expect(qa('.pane-header')).toHaveLength(1);
+    expect(qa('.pane-header .dot')).toHaveLength(1);
+    expect(qa('.pane-header .pane-kind')).toHaveLength(1);
+    expect(q('.pane-header .chat-agent')!.textContent).toBe('Claude Code');
+    expect(q('.pane-header .chat-title')!.textContent).toBe('Fix the build');
+    expect(q('.pane-header .chat-cwd')!.textContent).toBe('~/proj');
+    expect(q('.pane-header .chat-state')!.textContent).toBe(t('chat.state.idle'));
+    expect(q('.pane-header .chat-action-fork')).not.toBeNull();
+    expect(q('.pane-header .pane-actions')).not.toBeNull();
     await vi.waitFor(async () => {
       await tick();
       expect(host.textContent).toContain('A missing import.');
@@ -156,7 +178,34 @@ describe('the chat pane', () => {
     expect(q<HTMLTextAreaElement>('textarea')!.disabled).toBe(false);
     // The state follows the chat's events.
     await act(async () => chats.event(A, { seq: 3, t: 'state', state: 'working' }));
-    expect(q('.chat-state')!.textContent).toBe(t('chat.state.working'));
+    expect(q('.pane-header .chat-state')!.textContent).toBe(t('chat.state.working'));
+  });
+
+  it('passes machine and cwd to unified Markdown so relative images and HTML render safely in Chat', async () => {
+    chats.chat(A, { kind: 'claude', title: 'Plots', cwd: '/home/u/proj', state: 'idle' }, [
+      {
+        seq: 1,
+        t: 'update',
+        item: 'm1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: {
+            type: 'text',
+            text: '<!-- hidden --><img src="./chart.png" alt="Chart" width="180"><script>alert(1)</script>',
+          },
+        },
+      },
+    ]);
+    await pane(view(A));
+    await vi.waitFor(async () => {
+      await tick();
+      expect(q('.conv-agent img')).not.toBeNull();
+    });
+    const img = q<HTMLImageElement>('.conv-agent img')!;
+    expect(img.getAttribute('src')).toBe('/api/m/m/file?path=%2Fhome%2Fu%2Fproj%2Fchart.png');
+    expect(img.getAttribute('width')).toBe('180');
+    expect(host.textContent).not.toContain('hidden');
+    expect(q('.conv-agent script')).toBeNull();
   });
 
   it('renames the chat in place', async () => {
@@ -236,7 +285,220 @@ describe('the chat pane', () => {
     await pane(view(A));
     await act(async () => q('.chat-title')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
     expect(q('.chat-title-edit')).toBeNull();
+    expect(q('.chat-action-rewind')).toBeNull();
+    expect(q('.chat-action-fork')).toBeNull();
+    expect(q('.chat-action-switch')).toBeNull();
+    expect(q('.chat-action-export')).not.toBeNull();
     await vi.waitFor(() => expect(q<HTMLTextAreaElement>('textarea')?.disabled).toBe(true));
+  });
+
+  it('disables header Fork, Switch Agent, and Rewind buttons while a turn is working', async () => {
+    chats.chat(A, { kind: 'claude', title: 'Busy', state: 'working' });
+    await pane(view(A));
+    expect(q<HTMLButtonElement>('.chat-action-rewind')?.disabled).toBe(true);
+    expect(q<HTMLButtonElement>('.chat-action-fork')?.disabled).toBe(true);
+    expect(q<HTMLButtonElement>('.chat-action-switch')?.disabled).toBe(true);
+    // Export stays enabled even while working.
+    expect(q<HTMLButtonElement>('.chat-action-export')?.disabled).toBe(false);
+  });
+
+  it('forks, switches agent, and exports Markdown from the header actions', async () => {
+    const E = 'c00000000000000e5';
+    const F = 'c00000000000000f6';
+    const downloads: Array<{ name: string; text: string }> = [];
+    const origCreateObjectURL = URL.createObjectURL;
+    const origRevokeObjectURL = URL.revokeObjectURL;
+    const blobs = new Map<string, Blob>();
+    URL.createObjectURL = vi.fn((obj: Blob | MediaSource) => {
+      const u = `blob:test/${blobs.size}`;
+      if (obj instanceof Blob) blobs.set(u, obj);
+      return u;
+    });
+    URL.revokeObjectURL = vi.fn();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      const b = blobs.get(this.href);
+      void b?.text().then((text) => downloads.push({ name: this.download, text }));
+    });
+    try {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const method = init?.method ?? 'GET';
+          calls.push({ url: String(url), method });
+          if (String(url) === '/api/m/m/p/chat/agents') {
+            return new Response(
+              JSON.stringify({
+                agents: [
+                  { kind: 'claude', available: true },
+                  { kind: 'codex', available: true },
+                ],
+              }),
+              { status: 200 },
+            );
+          }
+          if (String(url) === '/api/m/m/p/chat/fork' && method === 'POST') {
+            return new Response(JSON.stringify({ chat: st(E, { kind: 'claude', title: 'Forked' }) }), { status: 200 });
+          }
+          if (String(url) === '/api/m/m/p/chat/switch' && method === 'POST') {
+            return new Response(JSON.stringify({ chat: st(F, { kind: 'codex', title: 'Switched' }) }), { status: 200 });
+          }
+          if (String(url) === `/api/m/m/p/chat/export?chat=${A}` && method === 'GET') {
+            return new Response(JSON.stringify({ markdown: '# Conversation Handoff\n\n### User\n\nHello' }), { status: 200 });
+          }
+          if (String(url) === `/api/m/m/p/chat/export?chat=${A}&format=json` && method === 'GET') {
+            return new Response(JSON.stringify({ format: 'json', data: { version: 1, chat: { id: A }, events: [] } }), { status: 200 });
+          }
+          return new Response('{}', { status: 200 });
+        }),
+      );
+      chats.chat(
+        A,
+        { kind: 'claude', title: 'Orig / Spec', cwd: '/home/u/proj', state: 'idle', capabilities: { fork: true, rewind: true } },
+        [
+          { seq: 1, t: 'user', content: [{ type: 'text', text: 'First prompt' }] },
+          { seq: 2, t: 'user', content: [{ type: 'text', text: 'Second prompt' }] },
+        ],
+      );
+      await pane(view(A));
+      // Rewind header button lists user turns newest-first and opens inline rewind confirmation.
+      await act(async () => q<HTMLButtonElement>('.chat-action-rewind')!.click());
+      const rewindEntries = useMenu.getState().menu?.entries ?? [];
+      expect(rewindEntries.filter(isItem).map((e) => e.label)).toEqual(['#2 · Second prompt', '#1 · First prompt']);
+      await act(async () => {
+        const firstTurn = rewindEntries.find((e) => isItem(e) && e.label === '#1 · First prompt');
+        if (firstTurn && isItem(firstTurn)) firstTurn.run?.();
+      });
+      await tick();
+      expect(q('.conv-user-rewind')).not.toBeNull();
+
+      await act(async () => q<HTMLButtonElement>('.chat-action-fork')!.click());
+      await tick();
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/fork')).toBe(true);
+      expect(useChats.getState().states.m?.[E]?.title).toBe('Forked');
+
+      await act(async () => q<HTMLButtonElement>('.chat-action-switch')!.click());
+      const switchEntries = useMenu.getState().menu?.entries ?? [];
+      expect(switchEntries.some((e) => isItem(e) && e.label === t('chat.handoff.budget') && !!e.submenu?.length)).toBe(true);
+      const codexItem = switchEntries.find((e) => isItem(e) && e.label === 'Codex');
+      expect(codexItem && isItem(codexItem)).toBe(true);
+      await act(async () => {
+        if (codexItem && isItem(codexItem)) codexItem.run?.();
+      });
+      await tick();
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/switch')).toBe(true);
+      expect(useChats.getState().states.m?.[F]?.kind).toBe('codex');
+
+      // Export opens dropdown with Markdown, Raw JSON, and Digest Budget submenu.
+      await act(async () => q<HTMLButtonElement>('.chat-action-export')!.click());
+      const exportEntries = useMenu.getState().menu?.entries ?? [];
+      const mdItem = exportEntries.find((e) => isItem(e) && e.label === t('chat.export.markdown'));
+      const jsonItem = exportEntries.find((e) => isItem(e) && e.label === t('chat.export.json'));
+      expect(mdItem && isItem(mdItem)).toBe(true);
+      expect(jsonItem && isItem(jsonItem)).toBe(true);
+      expect(exportEntries.some((e) => isItem(e) && e.label === t('chat.handoff.budget') && !!e.submenu?.length)).toBe(true);
+      await act(async () => {
+        if (mdItem && isItem(mdItem)) mdItem.run?.();
+      });
+      await tick();
+      expect(calls.some((c) => c.method === 'GET' && c.url === `/api/m/m/p/chat/export?chat=${A}`)).toBe(true);
+      await vi.waitFor(() => expect(downloads).toHaveLength(1));
+      expect(downloads[0]).toEqual({
+        name: `Orig-Spec-${A.slice(0, 8)}.md`,
+        text: '# Conversation Handoff\n\n### User\n\nHello',
+      });
+
+      await act(async () => {
+        if (jsonItem && isItem(jsonItem)) jsonItem.run?.();
+      });
+      await tick();
+      expect(calls.some((c) => c.method === 'GET' && c.url === `/api/m/m/p/chat/export?chat=${A}&format=json`)).toBe(true);
+      await vi.waitFor(() => expect(downloads).toHaveLength(2));
+      expect(downloads[1].name).toBe(`Orig-Spec-${A.slice(0, 8)}.json`);
+      expect(JSON.parse(downloads[1].text)).toEqual({ version: 1, chat: { id: A }, events: [] });
+
+      // ACP chat without native rewind/fork (agy): header rewind shows unsupported notice,
+      // and header fork warns via confirmDialog that the fork is lossy before calling POST /fork.
+      chats.chat(
+        C,
+        { kind: 'agy', title: 'Agy Session', cwd: '/home/u/proj', state: 'idle', capabilities: { fork: false, rewind: false } },
+        [{ seq: 1, t: 'user', content: [{ type: 'text', text: 'Hello agy' }] }],
+      );
+      await pane(view(C, { agent: 'agy' }));
+      const agyRewind = q<HTMLButtonElement>('.chat-action-rewind')!;
+      expect(agyRewind.classList.contains('is-unsupported')).toBe(true);
+      await act(async () => agyRewind.click());
+      const agyRewindEntries = useMenu.getState().menu?.entries ?? [];
+      expect(agyRewindEntries.filter(isItem).map((e) => [e.label, e.disabled])).toEqual([
+        [t('chat.rewindUnsupported', { agent: 'Antigravity' }), true],
+      ]);
+
+      const agyFork = q<HTMLButtonElement>('.chat-action-fork')!;
+      expect(agyFork.dataset.lossy).toBe('true');
+      calls = [];
+      await act(async () => agyFork.click());
+      // Waiting for lossy confirmation dialog; POST /fork has not fired yet.
+      expect(calls.some((c) => c.url === '/api/m/m/p/chat/fork')).toBe(false);
+      const dlg = useDialog.getState().current;
+      expect(dlg?.kind).toBe('confirm');
+      if (dlg?.kind === 'confirm') {
+        expect(dlg.title).toBe(t('chat.forkLossyTitle'));
+        expect(dlg.message).toBe(t('chat.forkLossyMessage', { agent: 'Antigravity' }));
+        await act(async () => dlg.resolve(true));
+      }
+      await tick();
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/fork')).toBe(true);
+    } finally {
+      clickSpy.mockRestore();
+      URL.createObjectURL = origCreateObjectURL;
+      URL.revokeObjectURL = origRevokeObjectURL;
+    }
+  });
+
+  it('renders each agent kind’s brand icon in LeafIcon and on custom-named chat tabs', async () => {
+    // Also register an Antigravity chat in state so agy resolves before and after make tokens.
+    applyStates('m', [st(C, { kind: 'agy' })], false);
+    for (const [leafView, colorVar] of [
+      [view(A, { agent: 'claude' }), 'var(--usage-claude)'],
+      [view(A, { agent: 'codex' }), 'var(--usage-codex)'],
+      [view(C, { agent: 'agy' }), 'var(--usage-antigravity)'],
+    ] as const) {
+      await act(async () => root.render(createElement(LeafIcon, { m: 'm', leaf: { view: leafView }, className: 'tab-kind' })));
+      const logo = q<HTMLElement>('.tab-kind.ai-logo');
+      expect(logo, String(leafView.agent)).not.toBeNull();
+      expect(logo!.style.color, String(leafView.agent)).toBe(colorVar);
+    }
+
+    // Custom-named chat tabs in Workspace still render their agent brand icon alongside the custom label.
+    const codexView = view(A, { agent: 'codex', title: 'Codex task' });
+    const agyView = view(C, { agent: 'agy', title: 'Agy task' });
+    chats.chat(A, { kind: 'codex', title: 'Codex task', state: 'idle' });
+    chats.chat(C, { kind: 'agy', title: 'Agy task', state: 'idle' });
+    await act(async () =>
+      hub.model.mutate('m', () => ({
+        version: 2,
+        workspaces: [
+          {
+            id: 'w1w1w1w1',
+            name: 'one',
+            cwd: '/src',
+            tabs: [
+              { root: { view: codexView }, focused: L.viewKey(codexView.id) },
+              { name: 'My Review', root: { view: agyView }, focused: L.viewKey(agyView.id) },
+            ],
+            selected: 1,
+          },
+        ],
+        selected: 0,
+      })),
+    );
+    await tick();
+    await act(async () => root.render(createElement(Workspace, { m: 'm' })));
+    await tick();
+    const tabs = qa('.tab[role="tab"]');
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0].querySelector<HTMLElement>('.tab-kind.ai-logo')?.style.color).toBe('var(--usage-codex)');
+    expect(tabs[1].querySelector('.tab-label')?.textContent).toBe('My Review');
+    expect(tabs[1].querySelector<HTMLElement>('.tab-kind.ai-logo')?.style.color).toBe('var(--usage-antigravity)');
   });
 
   it('says that a chat is no more, and offers to close its pane', async () => {
@@ -274,7 +536,8 @@ describe('the chat pane', () => {
 
   it('says that a leaf names no chat', async () => {
     await pane(view('nope'));
-    expect(host.textContent).toBe(t('chat.noChat'));
+    expect(q('.chat-pane')).toBeNull();
+    expect(q('.empty-state')!.textContent).toBe(t('chat.noChat'));
     expect(chats.sockets).toHaveLength(0);
   });
 });
@@ -345,7 +608,7 @@ describe('the Chats panel', () => {
     expect(rows()).toEqual(['one']);
     expect(useStore.getState().toasts.at(-1)).toMatchObject({
       msg: t('chat.archived', { title: 'two' }),
-      action: { label: t('chat.restore') },
+      action: { label: t('chat.restore'), ttl: 4000 },
       position: 'bottom-left',
     });
     const toggle = q<HTMLButtonElement>('.chat-archived-toggle')!;
@@ -427,7 +690,7 @@ describe('the Chats panel', () => {
 });
 
 describe('the status bar’s chat usage', () => {
-  it('shows the focused chat’s cost, context and tightest limit', async () => {
+  it('shows the focused chat’s cost and context without duplicating rate limits', async () => {
     const usage = {
       used: 37_000,
       size: 100_000,
@@ -447,11 +710,18 @@ describe('the status bar’s chat usage', () => {
     expect(Array.from(item.querySelectorAll('.chat-usage-part')).map((e) => e.textContent)).toEqual([
       '$0.50',
       t('chat.usage.context', { pct: 37 }),
-      t('chat.usage.limit', { window: '5h', pct: 80 }),
     ]);
-    expect(item.className).toContain('warn');
+    expect(item.className).not.toContain('warn');
+    // Only limits (no cost/context): renders nothing (AI Usage plugin displays quotas).
+    await act(async () => {
+      useChats.setState({ live: { [liveKey('m', B)]: { link: 'attached', usage: { used: 0, size: 0, limits: usage.limits } } } });
+    });
+    expect(q('.chat-usage-item')).toBeNull();
     // Another pane focused: nothing.
-    await act(async () => hub.model.mutate('m', (l) => L.selectTab(l, 'w1w1w1w1', 0)));
+    await act(async () => {
+      useChats.setState({ live: { [liveKey('m', B)]: { link: 'attached', usage } } });
+      hub.model.mutate('m', (l) => L.selectTab(l, 'w1w1w1w1', 0));
+    });
     await tick();
     expect(q('.chat-usage-item')).toBeNull();
   });

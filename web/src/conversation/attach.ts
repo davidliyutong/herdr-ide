@@ -1,8 +1,9 @@
 // What the user attaches to a message: images, read in the page and sent
 // as ACP image blocks (base64), within the chat host's limits (an image of
 // at most MAX_IMAGE bytes, a prompt of at most MAX_PROMPT bytes of JSON);
-// and the content blocks of a message: its images, the files it names with
-// @ (resource_link), its text.
+// and the content blocks of a message: its images, attached local files
+// (picked via FilePicker or @ with spaces), files named inline with @
+// (resource_link), and its text.
 import { MAX_IMAGE, MAX_PROMPT, type ContentBlock } from './model';
 import type { FileSuggestion } from './source';
 
@@ -11,6 +12,9 @@ export const IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image
 
 /** The most images a message takes. */
 export const MAX_ATTACHMENTS = 20;
+
+/** The most local file chips a message takes. */
+export const MAX_FILE_ATTACHMENTS = 50;
 
 export interface Attachment {
   /** The view's own id of it. */
@@ -55,17 +59,55 @@ export function readImage(file: File): Promise<Attachment> {
   });
 }
 
+/** Reconstructs an Attachment from an ACP image ContentBlock (e.g. when moving
+ * a queued message back into the composer to edit). */
+export function attachmentFromImage(block: { mimeType: string; data: string }, index = 0): Attachment {
+  const rawExt = block.mimeType.split('/')[1]?.toLowerCase() || 'png';
+  const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+  const pad = block.data.endsWith('==') ? 2 : block.data.endsWith('=') ? 1 : 0;
+  const size = Math.max(0, Math.floor((block.data.length * 3) / 4) - pad);
+  return {
+    id: `a${++nextId}`,
+    name: `image-${index + 1}.${ext}`,
+    mimeType: block.mimeType,
+    data: block.data,
+    size,
+  };
+}
+
 /** A file URI of an absolute POSIX path. */
 export function fileUri(path: string): string {
   return 'file://' + path.split('/').map(encodeURIComponent).join('/');
 }
 
-/** The content blocks of a message: its images first, the files it still
- * names (each @label in the text, an absolute path) as links, its text
- * last. */
-export function promptContent(text: string, attachments: readonly Attachment[], mentions: readonly FileSuggestion[]): ContentBlock[] {
+/** Decodes a file:// URI back to an absolute POSIX path (undefined otherwise). */
+export function pathFromFileUri(uri: string): string | undefined {
+  if (!uri.startsWith('file://')) return undefined;
+  try {
+    const raw = uri.slice('file://'.length);
+    const decoded = raw.split('/').map(decodeURIComponent).join('/');
+    return decoded.startsWith('/') ? decoded : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The content blocks of a message: its images first, explicitly attached
+ * local files and files still named inline (@label in the text, absolute
+ * path) as resource_link blocks (deduplicated by path), its text last. */
+export function promptContent(
+  text: string,
+  attachments: readonly Attachment[],
+  mentions: readonly FileSuggestion[],
+  files: readonly FileSuggestion[] = [],
+): ContentBlock[] {
   const out: ContentBlock[] = attachments.map((a) => ({ type: 'image', mimeType: a.mimeType, data: a.data }));
   const seen = new Set<string>();
+  for (const f of files) {
+    if (seen.has(f.path) || !f.path.startsWith('/')) continue;
+    seen.add(f.path);
+    out.push({ type: 'resource_link', uri: fileUri(f.path), name: f.label });
+  }
   for (const m of mentions) {
     if (seen.has(m.path) || !m.path.startsWith('/') || !text.includes(`@${m.label}`)) continue;
     seen.add(m.path);

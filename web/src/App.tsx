@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Check, CircleAlert, SlidersHorizontal, TriangleAlert } from 'lucide-react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { Check, CircleAlert, TriangleAlert } from 'lucide-react';
 import { useStore } from './state/store';
 import { terms, useTerms } from './state/terms';
 import { rememberFollowed } from './state/followed';
@@ -8,13 +8,8 @@ import { conn } from './lib/conn';
 import { Sidebar } from './components/Sidebar';
 import { Workspace } from './components/Workspace';
 import { CodeLayer } from './components/CodeLayer';
-import { BrowserLayer } from './plugins/browser/BrowserLayer';
-import { Palette } from './components/Palette';
-import { AuthDialog } from './components/AuthDialog';
-import { AddMachineDialog } from './components/AddMachineDialog';
-import { SettingsDialog } from './components/SettingsDialog';
-import { Dialogs } from './components/Dialogs';
 import { ContextMenu } from './components/ContextMenu';
+import { useDialog } from './dialog';
 import { initDesktop } from './desktop';
 import { warnOnUnload } from './unsaved';
 import { followDesktopClose } from './quitGuard';
@@ -24,7 +19,7 @@ import {
   leaveWindowPane,
   commandLabel,
   handleKey,
-  handlePaneLeaveKey,
+  handleEditorKey,
   keyHint,
   onChordChange,
   pendingChord,
@@ -49,7 +44,19 @@ import { openMenu, type MenuEntry } from './contextMenu';
 import './plugins';
 import './commands';
 import { actions, current, workspaceTitle } from './actions';
+import { initMainWindowSync } from './detachedWindow';
 import { noteFocus } from './paneHistory';
+import { followPanelSwipe } from './panelSwipe';
+import { loadConfig, retryFailedBootstrap, startBootstrap } from './bootstrap';
+
+// Lazy-loaded overlays and optional layers: none is visible on initial paint,
+// keeping them out of the startup JS parse/eval path until opened.
+const BrowserLayer = lazy(() => import('./plugins/browser/BrowserLayer').then((m) => ({ default: m.BrowserLayer })));
+const Palette = lazy(() => import('./components/Palette').then((m) => ({ default: m.Palette })));
+const AuthDialog = lazy(() => import('./components/AuthDialog').then((m) => ({ default: m.AuthDialog })));
+const AddMachineDialog = lazy(() => import('./components/AddMachineDialog').then((m) => ({ default: m.AddMachineDialog })));
+const SettingsDialog = lazy(() => import('./components/SettingsDialog').then((m) => ({ default: m.SettingsDialog })));
+const Dialogs = lazy(() => import('./components/Dialogs').then((m) => ({ default: m.Dialogs })));
 
 /** Text sent from VS Code ("Send to agent") is pasted, not submitted, into
  * the terminal sendTarget picks: an agent of the sending VS Code pane's tab
@@ -127,10 +134,19 @@ export function App() {
   const panel = useStore((s) => s.panel);
   const panelWidth = useStore((s) => s.panelWidth);
   const panelShown = panels.some((p) => p.id === panel);
+  const paletteOpen = useStore((s) => !!s.palette);
+  const settingsOpen = useStore((s) => !!s.settings);
+  const addMachineOpen = useStore((s) => s.addMachine);
+  const authOpen = useStore((s) => !!s.auth);
+  const dialogOpen = useDialog((s) => !!s.current);
   const [chord, setChord] = useState(false);
 
   useEffect(() => {
     const s = useStore.getState();
+    // Ensure initial settings, keybindings and config fetches are in flight
+    // (no-op when main.tsx already kicked them off in parallel).
+    const boot = startBootstrap();
+    let hadConnection = false;
     conn.start({
       onMachines: (list) => s.setMachines(list),
       onMachine: (st) => {
@@ -142,9 +158,16 @@ export function App() {
         useStore.getState().setConnected(c);
         if (c) {
           resyncDownloads();
-          // Changes made while the page was away (e.g. a hub restart).
-          void loadSettings();
-          void loadKeybindings();
+          if (hadConnection) {
+            // Re-sync changes made while the page was away (e.g. a hub restart).
+            void loadSettings();
+            void loadKeybindings();
+            void loadConfig();
+          } else {
+            // Retry only any initial bootstrap request that failed transiently.
+            void retryFailedBootstrap(boot);
+          }
+          hadConnection = true;
         }
       },
       onBridgeSend: (m, text, window, folders) => pasteToAgent(m, text, window, folders),
@@ -159,25 +182,23 @@ export function App() {
       onPlugin: (plugin, m, data) => pluginMessage(plugin, m, data),
     });
     const offTerms = followTerms();
-    void loadKeybindings();
     const offDesktop = initDesktop();
     const offNotify = initNotifications();
     const offUnload = warnOnUnload();
     const offClose = followDesktopClose();
     const offFolders = takeOpenedFolders();
     const offWorkers = followVSCodeSwitch();
-    fetch('/api/config')
-      .then((r) => r.json())
-      .then((c) => useStore.setState({ readOnly: !!c.read_only, sshLogin: c.ssh_login !== false }))
-      .catch(() => {});
+    const offWindows = initMainWindowSync({ onDock: (dm, dpane) => actions.focusPane(dm, dpane) });
+    const offSwipe = followPanelSwipe();
     const off = onChordChange(setChord);
-    // Ctrl+B escapes focus from editors and pane inputs before they consume it;
+    // Ctrl+B (leave) and Go Back/Forward reach the app from editors and pane
+    // inputs before they consume the keys (keymap.ts EDITOR_COMMANDS);
     // terminals route their own keys through TermPane -> appKey -> handleKey.
     const onCaptureKey = (ev: KeyboardEvent) => {
       const el = ev.target as HTMLElement | null;
       if (!el || el.closest('.term-host') || el.closest('.pane-header') || el.closest('.inline-edit')) return;
       if (el.closest('.pane') || (el.closest('.panel') && el.closest('input, textarea, [contenteditable]'))) {
-        handlePaneLeaveKey(ev);
+        handleEditorKey(ev);
       }
     };
     // Bindings also work when the focus is outside a terminal or Monaco editor.
@@ -197,6 +218,8 @@ export function App() {
       offClose();
       offFolders();
       offWorkers();
+      offWindows();
+      offSwipe();
       window.removeEventListener('keydown', onCaptureKey, true);
       window.removeEventListener('keydown', onKey);
     };
@@ -219,14 +242,38 @@ export function App() {
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => actions.toggleSidebar()} />}
       <Workspace />
       <CodeLayer />
-      {browserOn && <BrowserLayer />}
+      {browserOn && (
+        <Suspense fallback={null}>
+          <BrowserLayer />
+        </Suspense>
+      )}
       <RightBar />
       <StatusBar connected={connected} chord={chord} />
-      <Palette />
-      <SettingsDialog />
-      <AddMachineDialog />
-      <Dialogs />
-      <AuthDialog />
+      {paletteOpen && (
+        <Suspense fallback={null}>
+          <Palette />
+        </Suspense>
+      )}
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsDialog />
+        </Suspense>
+      )}
+      {addMachineOpen && (
+        <Suspense fallback={null}>
+          <AddMachineDialog />
+        </Suspense>
+      )}
+      {dialogOpen && (
+        <Suspense fallback={null}>
+          <Dialogs />
+        </Suspense>
+      )}
+      {authOpen && (
+        <Suspense fallback={null}>
+          <AuthDialog />
+        </Suspense>
+      )}
       <ContextMenu />
       <div className="toasts">
         {toasts
@@ -380,17 +427,6 @@ export function StatusBar({ connected, chord }: { connected: boolean; chord: boo
       {chord && <span className="prefix-badge">{pendingChord()}</span>}
       {!hidden.has('app.keyboardShortcuts') && <StatusCommand widgetId="app.keyboardShortcuts" command="app.keyboardShortcuts" />}
       {!hidden.has('app.commandPalette') && <StatusCommand widgetId="app.commandPalette" command="app.commandPalette" />}
-      <button
-        className="status-widgets-btn"
-        title={t('statusbar.customize')}
-        aria-label={t('statusbar.customize')}
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          openWidgetMenu({ clientX: r.right, clientY: r.top, preventDefault() {}, stopPropagation: () => e.stopPropagation() });
-        }}
-      >
-        <SlidersHorizontal />
-      </button>
     </footer>
   );
 }

@@ -7,7 +7,7 @@
 // double click (or Enter) opens it in the editor pane.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChevronsDownUp, Ellipsis, Eye, EyeOff, FilePlus, FolderPlus, LocateFixed, RefreshCw } from 'lucide-react';
+import { ChevronsDownUp, Ellipsis, Eye, EyeOff, FilePlus, FolderPlus, LocateFixed, RefreshCw, Regex } from 'lucide-react';
 import { current, paneDirectory } from '../../actions';
 import { recentSpots } from '../../paneHistory';
 import { useStore } from '../../state/store';
@@ -15,6 +15,7 @@ import { useTerms } from '../../state/terms';
 import * as L from '../../term/layout';
 import { openMenu } from '../../contextMenu';
 import { carriesFiles } from '../../drop';
+import { carriesPaths, endPathsDrag, PATHS_TYPE, startPathsDrag } from '../../pathsDrag';
 import { InlineEdit } from '../../components/InlineEdit';
 import { APP_SLUG } from '../../brand';
 import { t } from '../../i18n';
@@ -29,7 +30,10 @@ import { decorationsOf, useDecorationVersion, useShownDirs } from './decorations
 import {
   baseName,
   collapseAll,
+  compileFilter,
   crumbs,
+  filterHighlight,
+  filterSearchKey,
   getLastAutoRevealed,
   getScrollMemory,
   navRows,
@@ -44,6 +48,7 @@ import {
   setEdit,
   setExpanded,
   setFilter,
+  setFilterRegex,
   setFollow,
   setHidden,
   setLastAutoRevealed,
@@ -84,8 +89,6 @@ import './files.css';
 
 /** How often the shown directories are checked for changes. */
 export const POLL_MS = 2000;
-/** The drag type of paths dragged inside the tree. */
-const DRAG_TYPE = `application/x-${APP_SLUG}-files`;
 /** Clipboard marker written on in-app copy/cut so an earlier OS file copy
  * does not shadow a more recent in-app copy/cut on paste. */
 const CLIP_TYPE = `application/x-${APP_SLUG}-clipboard`;
@@ -166,6 +169,7 @@ export function rootFor(
 export function FilesPanel() {
   const m = useStore((s) => s.machineId);
   const home = useStore((s) => (s.machineId ? s.machines[s.machineId]?.info?.home : undefined));
+  const machineStatus = useStore((s) => (s.machineId ? s.machines[s.machineId]?.status : undefined));
   const readOnly = useStore((s) => s.readOnly);
   const layout = useTerms((s) => (m ? s.machines[m]?.layout : undefined));
   // Both stores: the focused pane is in the layout, the shown machine in the UI's.
@@ -228,14 +232,24 @@ export function FilesPanel() {
   }, [m, s.m, s.root, activeEditor]);
 
   // While the panel is shown and the page visible, the shown directories
-  // are checked for changes, one poll at a time.
+  // are checked for changes, one poll at a time. Refresh immediately when
+  // the shown machine returns from offline/reboot/disable.
   useEffect(() => startPolling(POLL_MS, poll), []);
+  const prevMachine = useRef({ m, status: machineStatus });
+  useEffect(() => {
+    const prev = prevMachine.current;
+    prevMachine.current = { m, status: machineStatus };
+    if (m && prev.m === m && prev.status !== 'ready' && machineStatus === 'ready') refresh();
+  }, [m, machineStatus]);
   // Whether its menus offer Reveal in Finder.
   useEffect(() => loadRevealable(m ?? undefined), [m]);
 
   // Rows are --h-row high, which scales with the UI font size.
   const ROW_HEIGHT = useSize('row');
-  const rows = useMemo(() => treeRows(s), [s.root, s.dirs, s.expanded, s.hidden, s.filter, s.edit, s.exclude, s.sort]);
+  const rows = useMemo(
+    () => treeRows(s),
+    [s.m, s.root, s.dirs, s.expanded, s.hidden, s.filter, s.filterRegex, s.filterSearch, s.edit, s.exclude, s.sort],
+  );
   const kinds = useMemo(() => new Map(rows.map((r) => [r.path, r.dir])), [rows]);
   const isDir = (p: string) => kinds.get(p) ?? p === s.root;
 
@@ -464,18 +478,20 @@ export function FilesPanel() {
     const paths = targets(row.path);
     const out = canDownload(m) ? dragOutUrl(m, paths, isDir) : undefined;
     if (readOnly && !out) return ev.preventDefault();
-    // Rows move or copy inside the tree; dropped on the computer (where
-    // the browser takes DownloadURL: Chromium's), they download.
-    if (!readOnly) ev.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ m, paths }));
+    // Rows move or copy inside the tree, and their paths go into a
+    // terminal or chat of the machine they are dropped on (drop.ts);
+    // dropped on the computer (where the browser takes DownloadURL:
+    // Chromium's), they download.
+    if (!readOnly) startPathsDrag(ev.dataTransfer, { m, paths, dirs: paths.filter(isDir) });
     if (out) ev.dataTransfer.setData('DownloadURL', out);
     ev.dataTransfer.effectAllowed = readOnly ? 'copy' : 'copyMove';
   };
-  const accepts = (dt: DataTransfer) => !readOnly && (Array.from(dt.types).includes(DRAG_TYPE) || carriesFiles(dt));
+  const accepts = (dt: DataTransfer) => !readOnly && (carriesPaths(dt) || carriesFiles(dt));
   const onDragOver = (ev: React.DragEvent, row?: Row) => {
     if (!accepts(ev.dataTransfer)) return;
     ev.preventDefault();
     ev.stopPropagation();
-    const internal = Array.from(ev.dataTransfer.types).includes(DRAG_TYPE);
+    const internal = carriesPaths(ev.dataTransfer);
     ev.dataTransfer.dropEffect = internal && !ev.altKey ? 'move' : 'copy';
     setDrop(dropDir(row));
   };
@@ -485,7 +501,7 @@ export function FilesPanel() {
     ev.stopPropagation();
     setDrop(undefined);
     const dir = dropDir(row);
-    const raw = ev.dataTransfer.getData(DRAG_TYPE);
+    const raw = ev.dataTransfer.getData(PATHS_TYPE);
     if (raw) {
       try {
         const d = JSON.parse(raw) as { m: string; paths: string[] };
@@ -510,12 +526,18 @@ export function FilesPanel() {
     return decorations.get(dir)![row.name];
   };
   const selected = new Set(s.selection);
-  // The filter's text in each name, marked.
-  const needle = s.filter.trim().toLowerCase();
-  const matched = (name: string): Array<[number, number]> | undefined => {
-    const at = needle ? name.toLowerCase().indexOf(needle) : -1;
-    return at < 0 ? undefined : [[at, at + needle.length]];
-  };
+  const compiledFilter = compileFilter(s.filter, s.filterRegex);
+  const activeSearchKey = compiledFilter.active ? filterSearchKey(s) : '';
+  const activeSearch = compiledFilter.active && s.filterSearch?.key === activeSearchKey ? s.filterSearch : undefined;
+  const filterError = compiledFilter.error
+    ? t('files.error.bad_regex')
+    : activeSearch?.errorCode === 'bad_regex'
+      ? t('files.error.bad_regex')
+      : activeSearch?.error;
+  const filterLoading = !!activeSearch?.loading;
+  const filterTruncated = !filterError && !filterLoading && !!activeSearch?.truncated && (activeSearch?.matches?.length ?? 0) > 0;
+  // The filter's text or regular expression in each name, marked.
+  const matched = (name: string): Array<[number, number]> | undefined => filterHighlight(name, s.filter, s.filterRegex);
   const cut = new Set(s.clipboard?.cut && s.clipboard.m === m ? s.clipboard.paths : []);
 
   const drawRow = (row: Row, index: number) => {
@@ -576,6 +598,7 @@ export function FilesPanel() {
           openMenu(ev, menuFor(m, targets(row.path), isDir, treeRef.current));
         }}
         onDragStart={(ev) => onDragStart(ev, row)}
+        onDragEnd={endPathsDrag}
         onDragOver={(ev) => onDragOver(ev, row)}
         onDrop={(ev) => onDrop(ev, row)}
         editor={
@@ -675,27 +698,40 @@ export function FilesPanel() {
           <Ellipsis />
         </button>
       </div>
-      <input
-        className="files-filter"
-        type="search"
-        placeholder={t('files.filter')}
-        aria-label={t('files.filter')}
-        value={s.filter}
-        spellCheck={false}
-        onChange={(e) => setFilter(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') setFilter('');
-          else if (e.key === 'ArrowDown' || e.key === 'Enter') {
-            e.preventDefault();
-            treeRef.current?.focus();
-            const st = useTree.getState();
-            if (!st.cursor || !rows.some((r) => r.path === st.cursor)) {
-              const p = stepId(rowIds(rows), undefined, 1);
-              if (p) select(p);
+      <div className={`files-filter-field${filterError ? ' error' : ''}`}>
+        <input
+          className="files-filter"
+          type="search"
+          placeholder={t('files.filter')}
+          aria-label={t('files.filter')}
+          aria-invalid={!!filterError || undefined}
+          value={s.filter}
+          spellCheck={false}
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setFilter('');
+            else if (e.key === 'ArrowDown' || e.key === 'Enter') {
+              e.preventDefault();
+              treeRef.current?.focus();
+              const st = useTree.getState();
+              if (!st.cursor || !rows.some((r) => r.path === st.cursor)) {
+                const p = stepId(rowIds(rows), undefined, 1);
+                if (p) select(p);
+              }
             }
-          }
-        }}
-      />
+          }}
+        />
+        <button
+          type="button"
+          className={`icon files-filter-regex ${s.filterRegex ? 'on' : ''}`}
+          title={t('files.regex')}
+          aria-label={t('files.regex')}
+          aria-pressed={s.filterRegex}
+          onClick={() => setFilterRegex(!s.filterRegex)}
+        >
+          <Regex />
+        </button>
+      </div>
       <div
         ref={setTreeEl}
         className={`tree files-tree ${drop === root ? 'drop' : ''}`}
@@ -730,8 +766,17 @@ export function FilesPanel() {
           {rows.slice(first, last).map((r, i) => drawRow(r, first + i))}
         </div>
         {rootError && <div className="files-note error small">{rootError}</div>}
-        {rootDir?.entries && !rows.length && (
-          <div className="files-note muted small">{t(s.filter ? 'files.noMatch' : 'files.emptyDir')}</div>
+        {filterError && (
+          <div className="files-note error small" role="alert">
+            {filterError}
+          </div>
+        )}
+        {!filterError && filterLoading && !rows.length && <div className="files-note muted small">{t('files.searching')}</div>}
+        {!filterError && !filterLoading && !rows.length && (compiledFilter.active || rootDir?.entries) && (
+          <div className="files-note muted small">{t(compiledFilter.active ? 'files.noMatch' : 'files.emptyDir')}</div>
+        )}
+        {filterTruncated && (
+          <div className="files-note muted small">{t('files.filterTruncated', { n: activeSearch!.matches!.length })}</div>
         )}
       </div>
     </div>

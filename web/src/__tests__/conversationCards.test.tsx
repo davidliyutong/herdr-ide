@@ -16,6 +16,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Conversation, type ConversationProps } from '../conversation/Conversation';
 import { CHAT_NOTICES, type ChatEvent, type SourceEvent } from '../conversation/model';
 import type { ChatSource, PermissionReply, QuestionReply } from '../conversation/source';
+import { APP_SLUG } from '../brand';
 import { t } from '../i18n';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -401,6 +402,136 @@ describe('questions', () => {
     await emit(s, asked('q2'));
     await emit(s, { seq: next(), t: 'question_done', id: 'q2', answers: { color: ['Red'] }, by: 'user' });
     expect(q('.conv-ask-outcome', card('q2'))?.textContent).toBe(t('conversation.question.answered'));
+  });
+
+  it('renders Codex async questions as non-blocking across turn end, handles superseded, optional, header-only, Markdown, allowOther focus, and Enter submit', async () => {
+    const s = new FakeSource();
+    s.emit(
+      { seq: next(), t: 'turn', state: 'start' },
+      {
+        seq: next(),
+        t: 'update',
+        item: 'am-1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Here are follow-up questions:' },
+          _meta: {
+            [APP_SLUG]: {
+              delivery: 'final_answer',
+              questions: [{ title: 'Should we **deploy** now?', options: ['Yes', 'Later'] }],
+            },
+          },
+        } as ChatEvent['update'],
+      },
+      {
+        seq: next(),
+        t: 'question',
+        id: 'aq1',
+        async: true,
+        item: 'am-1',
+        questions: [
+          {
+            id: 'deploy',
+            header: 'Deploy',
+            question: 'Should we **deploy** now?',
+            options: [{ label: 'Yes' }, { label: 'Later' }],
+            allowOther: true,
+          },
+        ],
+      },
+      { seq: next(), t: 'turn', state: 'end', stopReason: 'end_turn' },
+      { seq: next(), t: 'state', state: 'idle' },
+    );
+    await show(s, { kind: 'codex' });
+
+    // Correlated QuestionCard suppresses duplicate inline follow-up block on AgentMessage.
+    expect(q('.conv-followup')).toBeNull();
+
+    const c = card('aq1');
+    expect(c.dataset.state).toBe('waiting');
+    expect(c.dataset.async).toBe('true');
+    expect(q('.conv-ask-badge', c)?.textContent).toBe(t('conversation.question.async'));
+
+    // Async question does NOT show the blocking waiting banner or disable composer.
+    expect(q('.conv-banner')).toBeNull();
+    expect(q<HTMLTextAreaElement>('textarea')!.disabled).toBe(false);
+
+    // Question text renders compact Markdown.
+    await vi.waitFor(async () => {
+      await settle();
+      expect(q('.conv-q legend strong', c)?.textContent).toBe('deploy');
+    });
+
+    // Detached allowOther: checking "Other" selects it and focuses the detached text input without interfering.
+    const otherRow = q('.conv-q-other', c)!;
+    const otherRadio = q<HTMLInputElement>('label.conv-q-other-toggle input[type="radio"]', otherRow)!;
+    const otherText = q<HTMLInputElement>('input.conv-q-input', otherRow)!;
+    expect(otherText.closest('label')).toBeNull();
+    await check(otherRadio);
+    await settle();
+    expect(otherRadio.checked).toBe(true);
+    expect(document.activeElement).toBe(otherText);
+    await typeInto(otherText, 'Next Tuesday');
+    expect(otherRadio.checked).toBe(true);
+
+    // Enter submits a ready single-question card.
+    await act(async () => {
+      otherText.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(s.answer).toHaveBeenCalledWith('aq1', { answers: { deploy: ['Next Tuesday'] } });
+
+    // Superseded resolution text + optional/header-only question.
+    await emit(s, { seq: next(), t: 'question_done', id: 'aq1', by: 'superseded' });
+    expect(q('.conv-ask-outcome', card('aq1'))?.textContent).toBe(t('conversation.ask.superseded'));
+
+    await emit(s, {
+      seq: next(),
+      t: 'question',
+      id: 'aq2',
+      async: true,
+      questions: [
+        { id: 'req', header: 'Target env', question: '', options: [{ label: 'Staging' }] },
+        { id: 'opt', question: 'Extra notes?', optional: true },
+      ],
+    });
+    const c2 = card('aq2');
+    expect(qa('legend', c2)[0].textContent).toContain('Target env');
+    expect(q('.conv-q-optional', c2)?.textContent).toBe(t('conversation.question.optional'));
+    const submit2 = q<HTMLButtonElement>('button[type="submit"]', c2)!;
+    expect(submit2.disabled).toBe(true);
+    await check(q<HTMLInputElement>('input[type="radio"]', field(c2, 0)));
+    // Optional second question does not block submission.
+    expect(submit2.disabled).toBe(false);
+    await click(submit2);
+    expect(s.answer).toHaveBeenCalledWith('aq2', { answers: { req: ['Staging'] } });
+  });
+
+  it('replays AgentMessage follow-up questions read-only when no interactive QuestionCard correlates to them', async () => {
+    const s = new FakeSource();
+    s.emit({
+      seq: next(),
+      t: 'update',
+      item: 'am-replay',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'Done!' },
+        _meta: {
+          [APP_SLUG]: {
+            questions: [{ title: 'Run **benchmarks**?', options: ['Quick', 'Full'] }],
+          },
+        },
+      } as ChatEvent['update'],
+    });
+    await show(s, { kind: 'codex' });
+    const fu = q('.conv-followup')!;
+    expect(fu).not.toBeNull();
+    expect(q('.conv-followup-head', fu)?.textContent).toContain(t('conversation.question.followUp'));
+    expect(qa('.conv-followup-options .conv-badge', fu).map((b) => b.textContent)).toEqual(['Quick', 'Full']);
+    await vi.waitFor(async () => {
+      await settle();
+      expect(q('.conv-followup-item strong', fu)?.textContent).toBe('benchmarks');
+    });
   });
 });
 

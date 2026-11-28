@@ -7,7 +7,7 @@
 // every agyEveryMs (the polls in between get its last answer), not again
 // for agyBackoffMs after it failed, in a process group of its own killed
 // after agyMs and once it exited (run.ts).
-import { open, readdir, readFile, readlink, stat } from 'node:fs/promises';
+import { readdir, readFile, readlink, stat } from 'node:fs/promises';
 import { posix } from 'node:path';
 import {
   MODEL,
@@ -32,10 +32,14 @@ import {
   type UsageEnv,
 } from './env.ts';
 import { HttpError, localPost } from './http.ts';
+import { openRegular } from './logs.ts';
 import { run } from './run.ts';
 
 /** How long the language server gets to answer. */
 const LOCAL_MS = 5000;
+/** How long discovered language server endpoints are reused before re-running
+ * ps/lsof so newly started Antigravity instances are picked up promptly. */
+export const LS_MEMO_MS = 60_000;
 
 const STATUS_PATH = '/exa.language_server_pb.LanguageServerService/GetUserStatus';
 
@@ -45,42 +49,103 @@ export interface LSProcess {
   csrf: string;
 }
 
-/** The quotas of Antigravity's account on the machine; one the hub names
- * in skip (by the email's hash, known once the server answered) or
- * skipLocal is answered skipped. */
+/** The auth and state files that change when Antigravity switches accounts. */
+const ANTIGRAVITY_STATE_FILES = [
+  '.gemini/antigravity-cli/cli.log',
+  '.gemini/antigravity/cli.log',
+  '.gemini/antigravity-ide/cli.log',
+  '.gemini/antigravity/antigravity_state.pbtxt',
+  '.gemini/antigravity-ide/antigravity_state.pbtxt',
+  '.gemini/antigravity-cli/jetski_state.pbtxt',
+  '.gemini/antigravity-ide/jetski_state.pbtxt',
+];
+
+/** A cheap fingerprint of Antigravity's auth/state files so account
+ * switches invalidate memoized LS endpoints and agy answers promptly. */
+async function antigravityAuthStamp(e: UsageEnv): Promise<string> {
+  const parts: string[] = [];
+  for (const rel of ANTIGRAVITY_STATE_FILES) {
+    try {
+      const st = await stat(posix.join(e.home, rel));
+      parts.push(`${rel}:${st.size}:${Math.trunc(st.mtimeMs)}`);
+    } catch {
+      // absent
+    }
+  }
+  return parts.join('|');
+}
+
+/** The quotas of Antigravity's accounts on the machine: every running
+ * user-owned language server is probed so multiple accounts on the same
+ * machine are all reported; one the hub names in skip (by the email's
+ * hash, known once the server answered) or skipLocal is answered skipped. */
 export async function antigravityAccounts(e: UsageEnv, o: LimitsOptions): Promise<Account[]> {
   e.signal.throwIfAborted();
-  if (skips(o, 'antigravity')) return [skipped({ provider: 'antigravity', status: 'skipped' })];
-  const answered = (m: Record<string, unknown>): Account[] | null => {
+  const answered = (m: Record<string, unknown>): Account | null => {
     const a: Account = { provider: 'antigravity', source: 'ls', status: '' };
     if (!parseAntigravity(a, m)) return null;
-    if (skips(o, 'antigravity', a.id)) return [skipped(a)];
-    return [{ ...a, status: 'ok', asOf: nowSec(e) }];
+    if (a.id ? skips(o, 'antigravity', a.id) : skips(o, 'antigravity')) return skipped(a);
+    return { ...a, status: 'ok', asOf: nowSec(e) };
   };
-  const ep = e.memo.antigravityLS;
-  if (ep) {
-    const m = await userStatus(ep.port, ep.csrf, ep.scheme, e.signal);
-    const r = m && answered(m);
-    if (r) return r;
+  const dedupeAccounts = (list: Account[]): Account[] => {
+    const seen = new Set<string>();
+    const out: Account[] = [];
+    for (const a of list) {
+      const k = a.id || a.email?.toLowerCase() || '';
+      if (k && seen.has(k)) continue;
+      if (k) seen.add(k);
+      out.push(a);
+    }
+    return out;
+  };
+  const stamp = await antigravityAuthStamp(e);
+  const memo = e.memo.antigravityLS;
+  const lsTtl = Math.min(e.t.agyEveryMs, LS_MEMO_MS);
+  if (memo && !o.force && memo.stamp === stamp && e.now() >= memo.at && e.now() - memo.at < lsTtl && memo.endpoints.length > 0) {
+    const accs: Account[] = [];
+    let allOk = true;
+    for (const ep of memo.endpoints) {
+      const m = await userStatus(ep.port, ep.csrf, ep.scheme, e.signal);
+      const r = m && answered(m);
+      if (!r) {
+        allOk = false;
+        break;
+      }
+      accs.push(r);
+    }
+    if (allOk && accs.length > 0) return dedupeAccounts(accs);
     e.memo.antigravityLS = null;
   }
   const procs = await languageServers(e);
+  const endpoints: { port: number; csrf: string; scheme: 'https' | 'http' }[] = [];
+  const found: Account[] = [];
   for (const p of procs) {
+    let matched = false;
     for (const port of await listeningPorts(e, p.pid)) {
       for (const scheme of ['https', 'http'] as const) {
         const m = await userStatus(port, p.csrf, scheme, e.signal);
         if (!m) continue;
         const r = answered(m);
         if (r) {
-          e.memo.antigravityLS = { port, csrf: p.csrf, scheme };
-          return r;
+          endpoints.push({ port, csrf: p.csrf, scheme });
+          found.push(r);
+          matched = true;
         }
         break;
       }
+      if (matched) break;
     }
   }
+  if (found.length > 0) {
+    if (!e.signal.aborted) e.memo.antigravityLS = { endpoints, stamp, at: e.now() };
+    return dedupeAccounts(found);
+  }
+  e.memo.antigravityLS = null;
   e.signal.throwIfAborted();
-  const a = await agyUsage(e);
+  // skipLocal only suppresses the anonymous CLI fallback so a backed-off
+  // anonymous entry never hides named language-server accounts above.
+  if (skips(o, 'antigravity')) return [skipped({ provider: 'antigravity', status: 'skipped' })];
+  const a = await agyUsage(e, o, stamp);
   if (a) return [a.id && skips(o, 'antigravity', a.id) ? skipped(a) : a];
   if (procs.length) return [{ provider: 'antigravity', status: 'error', code: 'no_answer' }];
   return [{ provider: 'antigravity', status: 'missing', code: 'not_running' }];
@@ -276,14 +341,21 @@ async function lookPath(e: UsageEnv, name: string): Promise<string | null> {
 }
 
 /** agy's answer: within agyEveryMs of a run that answered, or agyBackoffMs
- * of one that failed, that run's answer again instead of running agy;
- * null when there is no agy. */
-async function agyUsage(e: UsageEnv): Promise<Account | null> {
+ * of one that failed, that run's answer again instead of running agy
+ * unless forced or auth state changed; null when there is no agy. */
+async function agyUsage(e: UsageEnv, o: LimitsOptions, stamp: string): Promise<Account | null> {
   const bin = await lookPath(e, 'agy');
   if (!bin) return null;
   const now = e.now();
   const last = e.memo.agy.get(bin);
-  if (last && now >= last.at && now - last.at < (last.a.status === 'ok' ? e.t.agyEveryMs : e.t.agyBackoffMs)) return copyAccount(last.a);
+  if (
+    last &&
+    !o.force &&
+    last.stamp === stamp &&
+    now >= last.at &&
+    now - last.at < (last.a.status === 'ok' ? e.t.agyEveryMs : e.t.agyBackoffMs)
+  )
+    return copyAccount(last.a);
   let out = '';
   let ok = false;
   try {
@@ -313,7 +385,7 @@ async function agyUsage(e: UsageEnv): Promise<Account | null> {
     }
   }
   // A run the poll cut short says nothing about agy.
-  if (!e.signal.aborted) e.memo.agy.set(bin, { a: copyAccount(a), at: e.now() });
+  if (!e.signal.aborted) e.memo.agy.set(bin, { a: copyAccount(a), at: e.now(), stamp });
   return a;
 }
 
@@ -327,9 +399,10 @@ const AGY_ACCOUNT = /(?:authenticated successfully as|applyAuthResult: email=)\s
 async function agyEmail(e: UsageEnv): Promise<string> {
   const TAIL = 256 << 10;
   try {
-    const fh = await open(posix.join(e.home, AGY_LOG), 'r');
+    const fh = await openRegular(posix.join(e.home, AGY_LOG), { noFollow: true, uid: e.uid });
     try {
       const st = await fh.stat();
+      if (!st.isFile() || (e.uid >= 0 && st.uid !== e.uid)) return '';
       const from = Math.max(st.size - TAIL, 0);
       const b = Buffer.alloc(Math.min(st.size, TAIL));
       const { bytesRead } = await fh.read(b, 0, b.length, from);
@@ -361,7 +434,8 @@ export function parseAgy(a: Account, out: string): boolean {
   // agy 1.5: {status, response (a table), command: {name: "usage", data:
   // {groups: [{name, buckets: [{name, window: weekly|5h,
   // remaining_fraction, reset_time}]}]}}}.
-  const groups = arr(obj(obj(obj(v).command).data).groups);
+  const cmdData = obj(obj(v).command).data;
+  const groups = arr(obj(cmdData).groups);
   for (const g of groups) {
     const go = obj(g);
     const group = str(go.name);
@@ -377,7 +451,10 @@ export function parseAgy(a: Account, out: string): boolean {
       windows.push(win(kind, clampPct((1 - r) * 100), timeOf(bo.reset_time), sec, label));
     }
   }
-  if (windows.length) return true;
+  if (windows.length) {
+    if (!a.plan) a.plan = str(first(obj(cmdData), 'plan', 'planName', 'tier')) || str(first(obj(v), 'plan', 'planName', 'tier'));
+    return true;
+  }
   if (isObj(v)) {
     let m = v;
     const r = first(m, 'result', 'usage', 'data');

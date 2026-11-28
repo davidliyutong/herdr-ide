@@ -128,11 +128,14 @@ describe('the plugin framework', () => {
     const ed = { updateOptions: (o: Record<string, unknown>) => calls.push(o), onDidDispose: (l: () => void) => (disposed = l) };
     followFont(ed);
     const prefs = usePrefs.getState().prefs;
-    usePrefs.setState({ prefs: { ...prefs, termFontSize: prefs.termFontSize + 3, termFontFamily: 'Iosevka' } });
+    usePrefs.setState({
+      prefs: { ...prefs, termFontSize: prefs.termFontSize + 3, termFontFamily: 'Iosevka', termCjkFontFamily: 'LXGW WenKai' },
+    });
     const remeasure = vi.fn();
     applyFont(remeasure);
     expect(calls.at(-1)).toMatchObject({ fontSize: prefs.termFontSize + 3 });
     expect(String(calls.at(-1)?.fontFamily)).toMatch(/^Iosevka, /);
+    expect(String(calls.at(-1)?.fontFamily)).toContain('"LXGW WenKai"');
     expect(remeasure).toHaveBeenCalledTimes(1);
     // Unchanged: nothing to do; disposed: no longer followed.
     applyFont(remeasure);

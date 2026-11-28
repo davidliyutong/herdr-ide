@@ -28,133 +28,140 @@
    "live": true,
    "item": "toolu_0001",
    "update": {
-    "kind": "execute",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0001",
     "title": "Bash",
-    "toolCallId": "toolu_0001"
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0001",
+    "title": "Sleep 6 seconds then echo done",
     "kind": "execute",
+    "status": "pending",
     "rawInput": {
      "command": "sleep 6; echo done",
      "description": "Sleep 6 seconds then echo done"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Sleep 6 seconds then echo done",
-    "toolCallId": "toolu_0001"
-   }
+    }
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000020"
   },
   {
    "t": "queued",
+   "state": "queued",
+   "message": "m2",
    "content": [
     {
-     "text": "Also say the word EXTRA.",
-     "type": "text"
+     "type": "text",
+     "text": "Also say the word EXTRA."
     }
    ],
-   "clientId": "c2",
-   "message": "m2",
-   "state": "queued"
+   "clientId": "c2"
   },
   {
    "t": "update",
    "item": "toolu_0001",
    "update": {
-    "_meta": {
-     "veldr": {
-      "task": {
-       "description": "Sleep 6 seconds then echo done",
-       "type": "local_bash"
-      }
-     }
-    },
     "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
     "status": "in_progress",
-    "toolCallId": "toolu_0001"
-   }
-  },
-  {
-   "t": "update",
-   "item": "toolu_0001",
-   "update": {
     "_meta": {
      "veldr": {
       "task": {
-       "summary": "Sleep 6 seconds then echo done"
+       "taskId": "task0001",
+       "type": "local_bash",
+       "description": "Sleep 6 seconds then echo done"
       }
      }
-    },
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0001"
+    }
    }
   },
   {
    "t": "update",
    "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
+    "status": "completed",
+    "_meta": {
+     "veldr": {
+      "task": {
+       "summary": "Sleep 6 seconds then echo done",
+       "taskId": "task0001"
+      }
+     }
+    }
+   }
+  },
+  {
+   "t": "update",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
+    "status": "completed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "done",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "done"
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0001"
-   }
+    ]
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000028"
   },
   {
    "t": "queued",
+   "state": "taken",
+   "message": "m2",
    "content": [
     {
-     "text": "Also say the word EXTRA.",
-     "type": "text"
+     "type": "text",
+     "text": "Also say the word EXTRA."
     }
    ],
    "clientId": "c2",
-   "message": "m2",
-   "state": "taken"
+   "item": "00000000-0000-4000-8000-000000000024",
+   "entryUuid": "00000000-0000-4000-8000-000000000024"
   },
   {
    "t": "update",
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "finished\n\nEXTRA",
-     "type": "text"
+     "type": "text",
+     "text": "finished\n\nEXTRA"
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
    "t": "update",
-   "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "finished\n\nEXTRA"
+    },
+    "messageId": "msg_0002",
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "finished\n\nEXTRA",
-     "type": "text"
-    },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0002/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000034"
   },
   {
    "t": "turn",
@@ -379,15 +386,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -407,7 +414,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 0,

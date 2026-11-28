@@ -122,7 +122,7 @@ export function dedupe(rs: Rec[]): Rec[] {
 
 /** OpenCode's databases: $OPENCODE_DB (relative to its data directory)
  * when set, else every channel's in the data directory. */
-async function openCodeDBs(e: UsageEnv): Promise<string[]> {
+export async function openCodeDBs(e: UsageEnv): Promise<string[]> {
   const xdg = getenv(e, 'XDG_DATA_HOME');
   const dir = xdg ? posix.join(expand(e.home, xdg), 'opencode') : posix.join(e.home, '.local/share/opencode');
   const db = getenv(e, 'OPENCODE_DB');
@@ -141,7 +141,7 @@ async function openCodeDBs(e: UsageEnv): Promise<string[]> {
 }
 
 /** Antigravity's conversation databases (desktop, CLI, IDE). */
-async function antigravityDBs(e: UsageEnv): Promise<string[]> {
+export async function antigravityDBs(e: UsageEnv): Promise<string[]> {
   const out: string[] = [];
   for (const sub of ['.gemini/antigravity', '.gemini/antigravity-cli', '.gemini/antigravity-ide']) {
     const dir = posix.join(e.home, sub, 'conversations');

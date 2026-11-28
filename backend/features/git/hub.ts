@@ -10,11 +10,49 @@ import { defineFeature } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
 import { readBody } from '#kernel/http/app.ts';
 import type { Ctx } from '#kernel/http/env.ts';
-import { gitProtocol, params, READS, WRITES, type Params } from './protocol.ts';
+import { CoalesceCache } from '#shared/lib/cache.ts';
+import { gitProtocol, params, READS, WRITES, type Params, type Read } from './protocol.ts';
 import { settings } from './settings.ts';
 
 /** Bounds a change's JSON (a patch or a commit message with the rest). */
 export const MAX_BODY = 5 << 20;
+
+/** Short hub-side TTLs per git read action, in ms. Coalesces concurrent
+ * multi-tab / focus / tree-expand bursts and avoids hammering the machine's
+ * MAX_RUNS semaphore; invalidated immediately on any write to that machine. */
+export const GIT_CACHE_TTL: Record<Read, number> = {
+  repo: 5_000,
+  watch: 500,
+  status: 1_000,
+  log: 2_000,
+  show: 5_000,
+  blob: 2_000,
+  branches: 2_000,
+  tags: 2_000,
+  stashes: 2_000,
+  diffStat: 1_000,
+};
+
+const GIT_CACHE_MAX = 512;
+
+export interface GitOptions {
+  /** Clock function for the hub-side read cache (tests). */
+  now?: () => number;
+}
+
+const canonicalParams = (p: Params): string => {
+  const keys = Object.keys(p).sort();
+  const out: Record<string, unknown> = {};
+  for (const k of keys) out[k] = p[k as keyof Params];
+  return JSON.stringify(out);
+};
+
+const readTtl = (action: Read, p: Params): number => {
+  if (action === 'blob' && p.source && p.source !== 'worktree' && p.source !== 'index' && p.source !== 'head') {
+    return 10_000;
+  }
+  return GIT_CACHE_TTL[action];
+};
 
 const queryStrings = ['repo', 'path', 'rev', 'rev2', 'source'] as const;
 const queryNumbers = ['skip', 'limit', 'parent'] as const;
@@ -36,6 +74,8 @@ export function queryParams(q: URLSearchParams): Params {
   }
   const remotes = q.get('remotes');
   if (remotes === '1' || remotes === 'true') p.remotes = true;
+  const noFiles = q.get('noFiles');
+  if (noFiles === '1' || noFiles === 'true') p.noFiles = true;
   const branches = q.getAll('branch');
   if (branches.length > 0) p.branches = branches;
   return p as Params;
@@ -104,15 +144,23 @@ const answer = (c: Ctx, result: unknown) => {
   return c.json(result as object);
 };
 
-export const gitFeature = () =>
+export const gitFeature = (o: GitOptions = {}) =>
   defineFeature({
     id: 'git',
     settings,
     setup(ctx) {
+      const cache = new CoalesceCache<unknown>({ ttlMs: 0, maxEntries: GIT_CACHE_MAX, now: o.now });
+      ctx.onForget((m) => cache.invalidatePrefix(`${m}\0`, { abort: true }));
+
       for (const action of READS)
         ctx.machineApi.get(`/${action}`, async (c) => {
           const p = queryParams(new URL(c.req.url).searchParams);
-          return answer(c, await ctx.call(c.var.machine, gitProtocol, action, p, { signal: c.req.raw.signal }));
+          const m = c.var.machine;
+          const key = `${m.id}\0${action}\0${canonicalParams(p)}`;
+          const res = await cache.get(key, { signal: c.req.raw.signal, ttlMs: readTtl(action, p) }, (signal) =>
+            ctx.call(m, gitProtocol, action, p, { signal }),
+          );
+          return answer(c, res);
         });
 
       for (const action of WRITES)
@@ -125,9 +173,11 @@ export const gitFeature = () =>
             ctx.audit.log(c.var.who, `git.${action}.done`, { ...auditFields(body), machine: m.id, ok, ...(code ? { code } : {}) });
           try {
             const r = await ctx.call(m, gitProtocol, action, changeParams(body), { signal: c.req.raw.signal });
+            cache.invalidatePrefix(`${m.id}\0`);
             done(true);
             return answer(c, r);
           } catch (e) {
+            cache.invalidatePrefix(`${m.id}\0`);
             done(false, codeOf(e));
             throw e;
           }

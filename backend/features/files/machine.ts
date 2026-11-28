@@ -14,7 +14,7 @@ import { ChunkReader, writeLine, type Reply } from '#shared/proto/agentproto/ind
 import { refusal } from '#machine/dispatch.ts';
 import { defineMachine, type ActionContext, type ActionStream } from '#machine/feature.ts';
 import { renameNoReplace } from '#machine/sys/fs.ts';
-import { MAX_UPLOAD, MAX_WRITE, filesProtocol, type Entry, type Result } from './protocol.ts';
+import { MAX_UPLOAD, MAX_WRITE, filesProtocol, type Entry, type FindResult, type Result } from './protocol.ts';
 import { Guard, codeOf, errCode, holds, within } from './machine/guard.ts';
 import { Revealer, revealCommand } from './machine/reveal.ts';
 import {
@@ -32,6 +32,7 @@ import {
   type Fill,
 } from './machine/save.ts';
 import { Stater } from './machine/stat.ts';
+import { findFiles, type FindOptions } from './machine/find.ts';
 import { trash } from './machine/trash.ts';
 import { copyTree, exists, moveNoReplace, removeTree } from './machine/tree.ts';
 
@@ -61,6 +62,58 @@ export interface FilesOptions {
   dataHome?: string;
   /** How long a broken-off upload's staged file is kept. */
   stagingRetentionMs?: number;
+  /** How many files.find walks run at once, and how long extras wait for a slot. */
+  maxFinding?: number;
+  findSlotWaitMs?: number;
+  /** Override files.find implementation (tests). */
+  find?: (o: FindOptions) => Promise<FindResult>;
+}
+
+/** Bounds concurrent files.find walks on one machine node. */
+class FindGate {
+  private active = 0;
+  private readonly waiting: Array<() => void> = [];
+  private readonly max: number;
+
+  constructor(max: number) {
+    this.max = Math.max(1, max);
+  }
+
+  async take(waitMs: number, signal: AbortSignal): Promise<() => void> {
+    if (signal.aborted) throw new Fail('cancelled', 400, 'file search cancelled');
+    const release = () => {
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.active--;
+    };
+    if (this.active < this.max) {
+      this.active++;
+      return release;
+    }
+    return new Promise((resolve, reject) => {
+      const grant = () => {
+        clearTimeout(t);
+        signal.removeEventListener('abort', cancel);
+        resolve(release);
+      };
+      const leave = () => {
+        const i = this.waiting.indexOf(grant);
+        if (i >= 0) this.waiting.splice(i, 1);
+      };
+      const t = setTimeout(() => {
+        leave();
+        signal.removeEventListener('abort', cancel);
+        reject(new Fail('busy', 429, `${this.max} file searches are in progress`));
+      }, waitMs);
+      const cancel = () => {
+        clearTimeout(t);
+        leave();
+        reject(new Fail('cancelled', 400, 'file search cancelled'));
+      };
+      this.waiting.push(grant);
+      signal.addEventListener('abort', cancel, { once: true });
+    });
+  }
 }
 
 /** A Result's paths, left out when there are none. */
@@ -81,6 +134,9 @@ export const filesMachine = (o: FilesOptions = {}) =>
     });
     const rename = o.rename ?? renameNoReplace;
     const fill = o.fill ?? copyInto;
+    const findGate = new FindGate(o.maxFinding ?? 4);
+    const findWaitMs = o.findSlotWaitMs ?? 3_000;
+    const runFind = o.find ?? findFiles;
     const guardOf = (ctx: ActionContext) => new Guard({ home: ctx.home, base: ctx.base, expand: ctx.expand });
 
     /** Runs f on every path: the paths it made, and the codes of those it
@@ -138,6 +194,24 @@ export const filesMachine = (o: FilesOptions = {}) =>
       housekeep: (now) => pruneStaged(env.base, now, o.stagingRetentionMs ?? STAGING_RETENTION_MS),
       actions: {
         stat: (p, ctx) => stater.stat(p.paths, (x) => ctx.expand(x), ctx.signal),
+
+        find: async (p, ctx) => {
+          const release = await findGate.take(findWaitMs, ctx.signal);
+          try {
+            return await runFind({
+              dir: ctx.expand(p.dir),
+              query: p.query,
+              limit: p.limit,
+              match: p.match,
+              regex: p.regex,
+              hidden: p.hidden,
+              exclude: p.exclude,
+              signal: ctx.signal,
+            });
+          } finally {
+            release();
+          }
+        },
 
         mkdir: (p, ctx) => {
           // A taken name fails, or with unique the folder gets the first

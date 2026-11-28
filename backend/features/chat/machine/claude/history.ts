@@ -8,7 +8,7 @@ import type { Dirent } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { validSessionId } from '#shared/agents/kinds.ts';
-import { claudeFrame, eachClaude } from '#shared/agents/transcript/index.ts';
+import { MAX_LINE as TRANSCRIPT_MAX_LINE, claudeFrame, eachClaude, type ReadAt } from '#shared/agents/transcript/index.ts';
 import { formatRFC3339 } from '#shared/lib/gotime.ts';
 import { Notice, Transcript, noticeMethod } from '#shared/proto/agentproto/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
@@ -234,6 +234,189 @@ export async function sessionsOf(
   return { sessions, next };
 }
 
+/** Streaming depth-1 JSON scanner that extracts a line's top-level "uuid"
+ * string value in O(1) memory regardless of line length (up to MAX_LINE). */
+class UuidLineScanner {
+  private depth = 0;
+  private inStr = false;
+  private esc = false;
+  private expectKey = false;
+  private readingKey = false;
+  private afterKey = false;
+  private readingVal = false;
+  private key = '';
+  private val = '';
+  private found = '';
+  private failed = false;
+
+  reset(): void {
+    this.depth = 0;
+    this.inStr = false;
+    this.esc = false;
+    this.expectKey = false;
+    this.readingKey = false;
+    this.afterKey = false;
+    this.readingVal = false;
+    this.key = '';
+    this.val = '';
+    this.found = '';
+    this.failed = false;
+  }
+
+  feed(buf: Uint8Array, start: number, end: number): void {
+    if (this.found !== '' || this.failed) return;
+    for (let i = start; i < end; i++) {
+      const b = buf[i]!;
+      if (this.inStr) {
+        if (this.esc) {
+          this.esc = false;
+          if (this.readingKey) this.key += '?';
+          else if (this.readingVal) this.readingVal = false;
+          continue;
+        }
+        if (b === 0x5c /* \\ */) {
+          this.esc = true;
+          continue;
+        }
+        if (b === 0x22 /* " */) {
+          this.inStr = false;
+          if (this.readingKey) {
+            this.readingKey = false;
+            this.afterKey = true;
+          } else if (this.readingVal) {
+            this.readingVal = false;
+            this.found = this.val;
+            return;
+          }
+          continue;
+        }
+        if (this.readingKey) {
+          if (this.key.length < 8) this.key += String.fromCharCode(b);
+        } else if (this.readingVal) {
+          if (this.val.length < 128) this.val += String.fromCharCode(b);
+          else this.readingVal = false;
+        }
+        continue;
+      }
+
+      if (b === 0x20 || b === 0x09 || b === 0x0d) continue;
+
+      if (this.depth === 0) {
+        if (b === 0x7b /* { */) {
+          this.depth = 1;
+          this.expectKey = true;
+        } else {
+          this.failed = true;
+          return;
+        }
+        continue;
+      }
+
+      if (b === 0x22 /* " */) {
+        this.inStr = true;
+        if (this.depth === 1 && this.expectKey) {
+          this.expectKey = false;
+          this.readingKey = true;
+          this.key = '';
+        } else if (this.depth === 1 && this.readingVal) {
+          this.val = '';
+        }
+        continue;
+      }
+
+      if (this.depth === 1 && this.afterKey) {
+        this.afterKey = false;
+        if (b === 0x3a /* : */) {
+          if (this.key === 'uuid') this.readingVal = true;
+          continue;
+        }
+        this.failed = true;
+        return;
+      }
+
+      if (this.depth === 1 && this.readingVal) this.readingVal = false;
+
+      if (b === 0x7b /* { */ || b === 0x5b /* [ */) {
+        this.depth++;
+        this.expectKey = false;
+      } else if (b === 0x7d /* } */ || b === 0x5d /* ] */) {
+        this.depth--;
+        this.expectKey = false;
+        if (this.depth === 0) return;
+      } else if (b === 0x2c /* , */ && this.depth === 1) {
+        this.expectKey = true;
+      }
+    }
+  }
+
+  finish(): string {
+    const out = this.found;
+    this.reset();
+    return validSessionId(out) ? out : '';
+  }
+}
+
+/** Pass-through ReadAt proxy that captures each complete transcript line's
+ * top-level "uuid" keyed by its byte offset, with zero extra disk reads. */
+class UuidProxy implements ReadAt {
+  private readonly uuids = new Map<number, string>();
+  private readonly scanner = new UuidLineScanner();
+  private lineStart: number;
+  private lineLen = 0;
+  private cont = false;
+  private readonly fh: FileHandle;
+  private readonly start: number;
+
+  constructor(fh: FileHandle, start: number) {
+    this.fh = fh;
+    this.start = start;
+    this.lineStart = start;
+  }
+
+  async read(buffer: Uint8Array, offset: number, length: number, position: number): Promise<{ bytesRead: number }> {
+    const res = await this.fh.read(buffer, offset, length, position);
+    if (res.bytesRead === 0) {
+      if (this.lineLen > 0) {
+        const uuid = !this.cont && this.lineLen <= TRANSCRIPT_MAX_LINE ? this.scanner.finish() : (this.scanner.reset(), '');
+        if (uuid !== '') this.uuids.set(this.lineStart, uuid);
+        this.lineLen = 0;
+        this.cont = false;
+      }
+      return res;
+    }
+    if (position < this.start) {
+      // eachClaude's 1-byte probe at start - 1 to check whether start begins a line.
+      this.cont = !(res.bytesRead === 1 && buffer[offset] === 0x0a);
+      return res;
+    }
+    const end = offset + res.bytesRead;
+    let i = offset;
+    while (i < end) {
+      const nl = buffer.indexOf(0x0a, i);
+      const segEnd = nl >= 0 && nl < end ? nl : end;
+      this.lineLen += segEnd - i;
+      if (!this.cont && this.lineLen <= TRANSCRIPT_MAX_LINE) this.scanner.feed(buffer, i, segEnd);
+      if (nl >= 0 && nl < end) {
+        const uuid = !this.cont && this.lineLen <= TRANSCRIPT_MAX_LINE ? this.scanner.finish() : (this.scanner.reset(), '');
+        if (uuid !== '') this.uuids.set(this.lineStart, uuid);
+        this.lineStart = position + (nl - offset) + 1;
+        this.lineLen = 0;
+        this.cont = false;
+        i = nl + 1;
+      } else {
+        i = end;
+      }
+    }
+    return res;
+  }
+
+  take(off: number): string {
+    const u = this.uuids.get(off) ?? '';
+    if (u !== '') this.uuids.delete(off);
+    return u;
+  }
+}
+
 interface Checkpoint {
   offset: number;
   /** Events in the matching line through the item. */
@@ -245,7 +428,8 @@ interface Checkpoint {
 /** The events of a transcript in order: its turns end
  * once each (a turn that ends without a line saying so at the next prompt
  * or the transcript's end), the usage of each response left out, items
- * named as the live session names them. */
+ * named as the live session names them, and entryUuid set to each JSONL
+ * line's top-level transcript UUID. */
 async function walk(
   fh: FileHandle,
   size: number,
@@ -261,12 +445,14 @@ async function walk(
   // Keep the original value of counts changed since the last match. This
   // restores the start of its line without copying the whole map per match.
   const changed = new Map<string, number | undefined>();
+  const proxy = new UuidProxy(fh, start);
   await eachClaude(
-    fh,
+    proxy,
     start,
     size,
     {},
     (off, fr) => {
+      const uuid = proxy.take(off);
       const wasOpen = open;
       let ordinal = 0;
       const put = (ev: Event) => {
@@ -300,6 +486,14 @@ async function walk(
           if (h.sessionUpdate === 'usage_update') return;
           if (isChunk(h.sessionUpdate) && fr.message !== '') ev.item = itemOf(fr.message, base + Math.max(fr.blocks[k] ?? -1, 0));
           else if (h.toolCallId !== '') ev.item = h.toolCallId;
+          if (uuid !== '') ev.entryUuid = uuid;
+        } else if (ev.t === EventType.User) {
+          if (uuid !== '') {
+            ev.item = uuid;
+            ev.entryUuid = uuid;
+          }
+        } else if (ev.t === EventType.Notice) {
+          if (uuid !== '') ev.entryUuid = uuid;
         }
         put(ev);
       });

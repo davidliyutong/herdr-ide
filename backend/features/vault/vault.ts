@@ -15,7 +15,7 @@ import { performance } from 'node:perf_hooks';
 import { dirname, basename, join } from 'node:path';
 import { Fail } from '#kernel/fail.ts';
 import type { FeatureContext } from '#kernel/feature.ts';
-import type { Ctx } from '#kernel/http/env.ts';
+import type { Client, Ctx } from '#kernel/http/env.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { formatRFC3339 } from '#shared/lib/gotime.ts';
 import {
@@ -46,6 +46,7 @@ import {
   type Authenticator,
   type Guard,
   type StoreOptions,
+  type StoreVerifier,
   type Window,
 } from './store.ts';
 import {
@@ -90,6 +91,9 @@ export interface VaultOptions {
   lockCheckMs?: number;
   noisyEveryMs?: number;
   changedEveryMs?: number;
+  /** How often the file is looked at for what other hubs of the namespace
+   * wrote (Vault.reload). */
+  fileCheckMs?: number;
   accessLog?: Partial<AccessLogOptions>;
   keyStep?: () => void | Promise<void>;
   /** Run inside the key's lock between an authenticator's write and its
@@ -192,8 +196,9 @@ export class Vault {
 
   // ---- the store and the settings
 
-  /** The vault's file: the option, or vault[-<instance>].json beside the
-   * settings file; "" when the hub keeps none. */
+  /** The vault's file: the option, or vault.json beside the settings
+   * file, shared with the other hubs of the namespace; "" when the hub
+   * keeps none. */
   path(): string {
     if (this.o.path) return this.o.path;
     const sp = this.ctx.settings.path;
@@ -207,7 +212,7 @@ export class Vault {
     const path = this.path();
     if (!path) throw new Fail('unavailable', 503, 'the vault has no file (the hub keeps no settings)');
     try {
-      this.#store = Store.open(path, this.o.store);
+      this.#store = Store.open(path, { ...this.o.store, lockedElsewhere: () => this.#lockedElsewhere() });
     } catch (e) {
       const oe = e instanceof OpenError ? e : new OpenError('failed', String(e));
       this.ctx.logger(`vault: ${oe.message}`);
@@ -338,6 +343,18 @@ export class Vault {
     if (e) throw e;
   }
 
+  async passphraseCheckedWith(c: Ctx, sv: StoreVerifier, passphrase: string): Promise<void> {
+    this.slowDown(c);
+    let e: unknown = null;
+    try {
+      await sv.verifyPassphrase(passphrase, this.window(this.autoLockAfter()));
+    } catch (x) {
+      e = x;
+    }
+    this.tried(e);
+    if (e) throw e;
+  }
+
   /** Whether every Allow is verified: the guard's rule, or a guard that
    * does not open (which cannot say the rule is off). */
   async strict(s: Store): Promise<boolean> {
@@ -383,6 +400,29 @@ export class Vault {
     return false;
   }
 
+  /** Lock-held variant of verified() for atomic policy checks inside Store.#mu. */
+  async verifiedWith(c: Ctx, sv: StoreVerifier, f: Fresh, want: Purpose): Promise<boolean> {
+    if (f.proof) {
+      let kind: string;
+      try {
+        kind = await this.checkProofWith(c, sv, f.proof, want);
+      } catch (e) {
+        this.refuseProof(c, e, want);
+      }
+      this.audit(c, 'vault.proved', { ok: true, for: want.for, kind });
+      this.touch();
+      return true;
+    }
+    if (f.passphrase) {
+      const st = sv.status();
+      if (st.mode !== MODE_PASSPHRASE || st.locked) throw new VaultError('vault_locked', 'the vault is locked');
+      await this.passphraseCheckedWith(c, sv, f.passphrase);
+      this.touch();
+      return true;
+    }
+    return false;
+  }
+
   /** The passphrase again with a request that lets more out than a session
    * decides alone: none is 403 passphrase_required. */
   async passphraseAgain(c: Ctx, s: Store, passphrase: string | null | undefined): Promise<void> {
@@ -414,15 +454,44 @@ export class Vault {
    * that made it; ProofError when it does not hold. A proof marks its
    * authenticator used. */
   async checkProof(c: Ctx, s: Store, pb: ProofBody, want: Purpose): Promise<string> {
+    return this.checkProofCore(
+      c,
+      pb,
+      want,
+      () => s.guard(),
+      (id, count) => this.used(s, id, count),
+    );
+  }
+
+  async checkProofWith(c: Ctx, sv: StoreVerifier, pb: ProofBody, want: Purpose): Promise<string> {
+    return this.checkProofCore(
+      c,
+      pb,
+      want,
+      () => sv.guard(),
+      (id, count) =>
+        sv.recordProof(id, this.now(), count).catch((e) => {
+          throw isCode(e, 'not_found') ? proofError() : e;
+        }),
+    );
+  }
+
+  private async checkProofCore(
+    c: Ctx,
+    pb: ProofBody,
+    want: Purpose,
+    readGuard: () => Promise<Guard>,
+    markUsed: (id: string, count?: number) => Promise<void>,
+  ): Promise<string> {
     const n = this.gate.take(pb.nonce, want, false);
     if (!n) throw proofError();
-    const g = await s.guard();
+    const g = await readGuard();
     if (pb.mac) {
       const mac = /^[0-9a-fA-F]*$/.test(pb.mac) && pb.mac.length % 2 === 0 ? Buffer.from(pb.mac, 'hex') : null;
       if (!mac || !this.desktopCan(c) || !this.desktop!.proof(proofMessage(pb.nonce, want), mac)) throw proofError();
       const a = g.authenticators?.findLast((x) => x.kind === KIND_DESKTOP);
       if (!a) throw proofError();
-      await this.used(s, a.id);
+      await markUsed(a.id);
       return KIND_DESKTOP;
     }
     const { origin, rpId } = this.originOf(c);
@@ -433,7 +502,7 @@ export class Vault {
       (x) => x.kind === KIND_WEBAUTHN && x.origin === origin && x.rpId === rpId && unb64(x.credential).equals(cred),
     );
     if (!a) throw proofError();
-    await this.used(s, a.id, await assertionCount(a, pb, n.challenge));
+    await markUsed(a.id, await assertionCount(a, pb, n.challenge));
     return KIND_WEBAUTHN;
   }
 
@@ -514,6 +583,27 @@ export class Vault {
     await s.lock();
     this.gate.endAll();
     this.#lockCap = undefined;
+  }
+
+  /** Takes the file as another hub of the namespace left it
+   * (Store.reload): the pages load the vault again. */
+  async reload(): Promise<void> {
+    const s = this.#store;
+    if (!s || this.#stopped) return;
+    try {
+      if (await s.reload()) this.changed();
+    } catch (e) {
+      this.ctx.logger(`vault: rereading the file: ${(e as Error).message}`);
+    }
+  }
+
+  /** The store took a file another hub of the namespace wrote with another
+   * passphrase, which locked it: this hub's sessions end as a lock's do. */
+  #lockedElsewhere(): void {
+    this.gate.endAll();
+    this.#lockCap = undefined;
+    this.audit(null, 'vault.locked', { reason: 'passphrase_elsewhere' });
+    this.changed();
   }
 
   // ---- the automatic lock: a use is an unlock, a page's action through
@@ -1133,6 +1223,79 @@ export class Vault {
     this.#lockTimer = this.#changedLater = null;
     await this.#alog?.close();
   }
+
+  /** Resolves workspace-linked vault presets for injection into a new
+   * terminal or chat panel on machine, opened by a client of that kind.
+   * Never releases values while the vault plugin is disabled for that
+   * client, the vault is locked, the sealed policy is
+   * tampered, or the durable access log write fails. */
+  async workspaceEnv(machine: string, workspace: string, source: 'terminal' | 'chat', client: Client): Promise<WorkspaceEnvResult> {
+    const empty: WorkspaceEnvResult = { presets: [], env: {}, names: [], missing: [], locked: false };
+    if (!machine || !workspace) return empty;
+    if (!this.ctx.enabledFor(client)) return empty;
+    let s: Store;
+    try {
+      s = this.open();
+    } catch {
+      return empty;
+    }
+    let res: Awaited<ReturnType<Store['resolveWorkspaceEnv']>>;
+    try {
+      res = await s.resolveWorkspaceEnv(machine, workspace);
+    } catch (e) {
+      const corrupt = isCode(e, 'corrupt');
+      this.ctx.logger(`vault: resolving workspace presets for ${machine}/${workspace}: ${(e as Error).message}`);
+      if (corrupt) {
+        await this.record(null, 'vault.access', {
+          time: formatRFC3339(new Date()),
+          m: machine,
+          tool: source,
+          client: clip(workspace, 64),
+          result: 'corrupt',
+        }).catch(() => {});
+        return { ...empty, corrupt: true };
+      }
+      return empty;
+    }
+    if (!res.presets.length) return res;
+    if (res.locked) {
+      await this.record(null, 'vault.access', {
+        time: formatRFC3339(new Date()),
+        m: machine,
+        tool: source,
+        client: clip(workspace, 64),
+        result: 'vault_locked',
+      }).catch(() => {});
+      return res;
+    }
+    if (res.names.length > 0) {
+      const rec: Omit<Access, 'id'> = {
+        time: formatRFC3339(new Date()),
+        m: machine,
+        tool: source,
+        names: res.names,
+        client: clip(workspace, 64),
+        result: Result.Injected,
+      };
+      // Values leave only once the release record is durably written.
+      if (!(await this.record(null, 'vault.injected', rec))) {
+        for (const k of Object.keys(res.env)) res.env[k] = '';
+        return { presets: res.presets, env: {}, names: [], missing: res.missing, locked: false, logFailed: true };
+      }
+      this.touch();
+    }
+    return res;
+  }
+}
+
+export interface WorkspaceEnvResult {
+  presets: string[];
+  env: Record<string, string>;
+  names: string[];
+  missing: string[];
+  locked: boolean;
+  logFailed?: boolean;
+  corrupt?: boolean;
 }
 
 /** An unlock as a page sends it in POST session: the desktop app's entry

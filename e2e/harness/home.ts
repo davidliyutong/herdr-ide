@@ -60,9 +60,11 @@ export class TestHome {
     const rc = [`export PATH="${paths.fakeBin}:$PATH"`, `PS1='$ '`, ''].join('\n');
     writeFileSync(join(this.dir, '.bash_profile'), rc);
     writeFileSync(join(this.dir, '.bashrc'), rc);
-    const config = process.platform === 'darwin' ? join(this.dir, 'Library', 'Application Support') : join(this.dir, '.config');
-    mkdirSync(join(config, paths.slug), { recursive: true });
-    writeFileSync(join(config, paths.slug, `settings-${this.name}.json`), JSON.stringify(this.settings, null, 2));
+    // The hub's files are in its namespace's data directory, which the
+    // instance's nodes use too.
+    const data = join(this.dir, `.${paths.slug}-${this.name}`);
+    mkdirSync(data, { recursive: true, mode: 0o700 });
+    writeFileSync(join(data, 'settings.json'), JSON.stringify(this.settings, null, 2), { mode: 0o600 });
   }
 
   /** The environment of the instance's processes: nothing inherited but

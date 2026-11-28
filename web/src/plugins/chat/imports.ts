@@ -19,11 +19,12 @@ import { actions, terminalPlace } from '../../actions';
 import { sessionTerminal } from '../../agentTerminal';
 import { chatAdapter } from '../../conversation/kinds';
 import { t } from '../../i18n';
+import { useSettings } from '../../settings';
 import { useStore } from '../../state/store';
-import { ChatFailure, chatApi, reasonText } from './api';
-import { openChat } from './ops';
+import { ChatFailure, chatApi, isChatProviderEnabled, reasonText } from './api';
+import { chatWorkspaceFor, openChat, reportChatVault } from './ops';
 import type { ChatState, Session } from './protocol';
-import { chatGone, upsertState, useChats } from './state';
+import { chatGone, rememberAgents, upsertState, useChats } from './state';
 
 /** The most sessions of a kind kept from all the pages of its list. */
 export const MAX_SESSIONS = 1000;
@@ -33,16 +34,20 @@ export const MAX_SESSIONS = 1000;
  * knows the chat adapter of. While no host serves, a page that may make
  * changes starts one to ask (a GET starts none); a read-only page asks
  * none. */
-export async function chatAgents(m: string): Promise<string[]> {
+export async function chatAgents(m: string, o?: { refresh?: boolean; signal?: AbortSignal }): Promise<string[]> {
   let list;
   try {
-    list = await chatApi.agents(m);
+    list = await chatApi.agents(m, o);
   } catch (e) {
     if (!(e instanceof ChatFailure && e.code === 'not_running') || useStore.getState().readOnly) throw e;
-    list = await chatApi.startAgents(m);
+    list = await chatApi.startAgents(m, o);
   }
+  // The menus offer what it said too.
+  rememberAgents(m, list);
+  const values = useSettings.getState().values;
   const out: string[] = [];
-  for (const a of list) if (a.available && chatAdapter(a.kind) && !out.includes(a.kind)) out.push(a.kind);
+  for (const a of list)
+    if (a.available && chatAdapter(a.kind) && isChatProviderEnabled(values, a.kind) && !out.includes(a.kind)) out.push(a.kind);
   return out;
 }
 
@@ -76,8 +81,9 @@ export async function chatSessions(
   kind: string,
   cwd: string,
   cursor?: string,
+  o?: { refresh?: boolean; signal?: AbortSignal },
 ): Promise<{ sessions: PastSession[]; next?: string }> {
-  const page = await chatApi.sessions(m, kind, cwd, cursor);
+  const page = await chatApi.sessions(m, kind, cwd, cursor, o);
   const sessions = page.sessions.map((s) => pastSession(s, cwd));
   return page.nextCursor ? { sessions, next: page.nextCursor } : { sessions };
 }
@@ -156,7 +162,15 @@ export async function importSession(m: string, target: ImportTarget, from?: stri
   if (importing.has(key) || !cwd.startsWith('/')) return undefined;
   importing.add(key);
   try {
-    const chat = await chatApi.newChat(m, { kind, cwd, resume: session, import: true });
+    const workspace = chatWorkspaceFor(m, undefined, from);
+    const { chat, vault } = await chatApi.createChat(m, {
+      kind,
+      cwd,
+      resume: session,
+      import: true,
+      ...(workspace ? { workspace } : {}),
+    });
+    reportChatVault(vault);
     upsertState(m, chat);
     await openChat(m, chat.id, kind, from);
     return chat.id;

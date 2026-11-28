@@ -156,6 +156,125 @@ describe('history', () => {
     expect(await title(HEADLESS)).toEqual(['回复问候语', 1]);
     expect((await title(titled, 'msg_1/0'))[1]).toBe(0);
   });
+
+  test('records top-level transcript entryUuid across chunk boundaries, ignores nested uuid strings, and supports partial fork with emitted entryUuid', async () => {
+    const home = tempDir('chuuid');
+    const work = tempDir('chwork');
+    const proj = join(home, '.claude', 'projects', claudeEscape(work));
+    mkdirSync(proj, { recursive: true });
+    const sessId = '66666666-6666-4666-8666-666666666666';
+    const u1 = '20000000-0000-4000-8000-000000000001';
+    const a1 = '20000000-0000-4000-8000-000000000002';
+    const tr1 = '20000000-0000-4000-8000-000000000003';
+    const a2 = '20000000-0000-4000-8000-000000000004';
+    const u2 = '20000000-0000-4000-8000-000000000005';
+    const a3 = '20000000-0000-4000-8000-000000000006';
+    // Include a >70 KiB line with nested {"uuid":"fake-nested"} BEFORE the real top-level "uuid"
+    // so UuidProxy is exercised across >64 KiB read chunks and nested JSON objects.
+    const bigPad = 'x'.repeat(70_000);
+    const lines = [
+      {
+        type: 'user',
+        parentUuid: null,
+        sessionId: sessId,
+        cwd: work,
+        timestamp: '2026-11-22T10:00:00Z',
+        message: { role: 'user', content: 'first {"uuid":"fake-user-nested"} ' + bigPad },
+        uuid: u1,
+      },
+      {
+        type: 'assistant',
+        parentUuid: u1,
+        sessionId: sessId,
+        cwd: work,
+        timestamp: '2026-11-22T10:00:01Z',
+        message: {
+          id: 'msg_01',
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'toolu_01', name: 'Bash', input: { command: 'echo {"uuid":"fake-tool"}', uuid: 'fake-input' } },
+          ],
+        },
+        uuid: a1,
+      },
+      {
+        type: 'user',
+        parentUuid: a1,
+        sessionId: sessId,
+        cwd: work,
+        timestamp: '2026-11-22T10:00:02Z',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'toolu_01', content: '{"uuid":"fake-out"}', is_error: false }],
+        },
+        uuid: tr1,
+      },
+      {
+        type: 'assistant',
+        parentUuid: tr1,
+        sessionId: sessId,
+        cwd: work,
+        timestamp: '2026-11-22T10:00:03Z',
+        message: { id: 'msg_02', role: 'assistant', content: [{ type: 'text', text: 'answer one' }] },
+        uuid: a2,
+      },
+      {
+        type: 'user',
+        parentUuid: a2,
+        sessionId: sessId,
+        cwd: work,
+        timestamp: '2026-11-22T10:00:04Z',
+        message: { role: 'user', content: 'second prompt' },
+        uuid: u2,
+      },
+      {
+        type: 'assistant',
+        parentUuid: u2,
+        sessionId: sessId,
+        cwd: work,
+        timestamp: '2026-11-22T10:00:05Z',
+        message: { id: 'msg_03', role: 'assistant', content: [{ type: 'text', text: 'answer two' }] },
+        uuid: a3,
+      },
+    ];
+    writeFileSync(join(proj, `${sessId}.jsonl`), lines.map((l) => JSON.stringify(l)).join('\n') + '\n', { mode: 0o600 });
+
+    const env = { HOME: home };
+    const evs = await readHistory(hp(env, { cwd: work, sessionId: sessId }));
+    const users = evs.filter((e) => e.t === EventType.User);
+    expect(users.map((e) => [e.item, e.entryUuid])).toEqual([
+      [u1, u1],
+      [u2, u2],
+    ]);
+    const updates = evs.filter((e) => e.t === EventType.Update);
+    expect(updates.map((e) => [e.item, e.entryUuid])).toEqual([
+      ['toolu_01', a1],
+      ['toolu_01', tr1],
+      ['msg_02/0', a2],
+      ['msg_03/0', a3],
+    ]);
+
+    // Partial fork up to turn 1's emitted entryUuid (a2) succeeds and drops turn 2.
+    const a = claudeAdapter({ sdk: devSdk });
+    const forked = await a.fork!(
+      {
+        kind: 'claude',
+        argv: [],
+        env,
+        cwd: work,
+        procs: null as never,
+        logger: () => {},
+        sessionId: sessId,
+        upToMessageId: updates[2]!.entryUuid,
+        client: { name: 'test', version: '0' },
+      },
+      sig(),
+    );
+    const forkedText = await Bun.file(join(proj, `${forked.sessionId}.jsonl`)).text();
+    expect(forkedText).toContain('answer one');
+    expect(forkedText).not.toContain('second prompt');
+    expect(forkedText).not.toContain('answer two');
+  });
 });
 
 describe('sessions', () => {

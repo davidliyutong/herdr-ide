@@ -35,11 +35,15 @@ export class BrowserError extends PluginError {
 
 const failure = failureOf((code, message) => new BrowserError(code, message));
 
+const isAbortError = (e: unknown, signal?: AbortSignal | null): boolean =>
+  !!signal?.aborted || (typeof e === 'object' && e !== null && (e as { name?: unknown }).name === 'AbortError');
+
 async function send<T>(url: string, init?: RequestInit): Promise<T> {
   let r: Response;
   try {
     r = await fetch(url, init);
   } catch (e) {
+    if (isAbortError(e, init?.signal)) throw e;
     throw new BrowserError('network', e instanceof Error ? e.message : String(e));
   }
   return answer<T>(r, failure);
@@ -52,10 +56,11 @@ export const browserApi = {
   /** Makes or finds the forward of a machine's port; it counts as a use. */
   ensure: (m: string, port: number) => send<Forward>(forwardsUrl(m), jsonInit('POST', { port })),
   stop: (m: string, port: number) => send<{ ok: boolean }>(`${forwardsUrl(m)}/${port}`, { method: 'DELETE' }),
-  listening: (m: string) =>
-    send<{ ports: ListeningPort[] }>(`/api/m/${encodeURIComponent(m)}/p/browser/listening`, { cache: 'no-store' }).then(
-      (r) => r.ports ?? [],
-    ),
+  listening: (m: string, signal?: AbortSignal) =>
+    send<{ ports: ListeningPort[] }>(
+      `/api/m/${encodeURIComponent(m)}/p/browser/listening`,
+      signal ? { cache: 'no-store', signal } : { cache: 'no-store' },
+    ).then((r) => r.ports ?? []),
 };
 
 /** The forwards the hub has and whether this client can use them (it is
@@ -171,13 +176,19 @@ export const isLoopbackHost = (host: string): boolean => LOOPBACK.has(host.toLow
 const belowLocalhost = (host: string): boolean => host.toLowerCase().endsWith('.localhost');
 
 /**
- * The other loopback name of the one the UI's page is on, or undefined on
- * any other host. A cookie ignores ports, so a page of another service on
- * the UI's host name could read the UI's cookies and the reverse: a
- * forwarded page is on the name the UI is not on (the CSP allows frames
- * from these two names only).
+ * The loopback name a browser pane loads a forwarded or local service from,
+ * or undefined when the UI cannot safely frame one. In a browser, cookies
+ * ignore ports, so a page on the UI's host name would share its cookies: a
+ * forwarded page loads from the other loopback name (the CSP allows frames
+ * from these two names only). The desktop app renders panes in an isolated
+ * <webview> partition (persist:browser) and serves the UI from
+ * https://<slug>.localhost, so localhost is always safe and preferred.
  */
-export function otherHost(uiHost: string = globalThis.location?.hostname ?? ''): 'localhost' | '127.0.0.1' | undefined {
+export function otherHost(
+  uiHost: string = globalThis.location?.hostname ?? '',
+  webview: boolean = !!desktopShell?.browser,
+): 'localhost' | '127.0.0.1' | undefined {
+  if (webview) return 'localhost';
   const h = uiHost.toLowerCase();
   if (h === '127.0.0.1') return 'localhost';
   if (h === 'localhost') return '127.0.0.1';
@@ -251,9 +262,10 @@ function rest(url: URL): string {
 
 /** The address a frame loads for a page of a machine's port shown through
  * the forward on local port `local`: on the other loopback name than the
- * UI's, over http (the CSP allows no more). Undefined on any other host. */
-export function forwardedSrc(url: string, local: number, uiHost?: string): string | undefined {
-  const host = otherHost(uiHost);
+ * UI's in a browser (the CSP allows no more), or localhost in the desktop
+ * app's isolated webview partition. Undefined on any other host. */
+export function forwardedSrc(url: string, local: number, uiHost?: string, webview?: boolean): string | undefined {
+  const host = otherHost(uiHost, webview);
   if (!host) return undefined;
   try {
     return `http://${host}:${local}${rest(new URL(url))}`;
@@ -263,9 +275,10 @@ export function forwardedSrc(url: string, local: number, uiHost?: string): strin
 }
 
 /** The address a frame loads for a loopback page of this computer (no
- * forward): the same port on the other loopback name than the UI's. */
-export function loopbackSrc(url: string, uiHost?: string): string | undefined {
-  const host = otherHost(uiHost);
+ * forward): the same port on the other loopback name than the UI's in a
+ * browser, or localhost in the desktop app. */
+export function loopbackSrc(url: string, uiHost?: string, webview?: boolean): string | undefined {
+  const host = otherHost(uiHost, webview);
   if (!host) return undefined;
   try {
     const u = new URL(url);

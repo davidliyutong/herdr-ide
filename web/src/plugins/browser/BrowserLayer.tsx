@@ -7,6 +7,8 @@ import { createElement, useEffect, useLayoutEffect, useMemo, useRef, type ReactN
 import { terms, useTerms } from '../../state/terms';
 import * as L from '../../term/layout';
 import { desktopShell } from '../../shell';
+import { focusPaneInLayout } from '../../actions';
+import { detachedRecordForPane, isDetachedWindow, useDetachedTabs } from '../../detachedWindow';
 import {
   forgetFrames,
   frameElement,
@@ -61,11 +63,16 @@ export function BrowserLayer() {
   const shown = useFrames((s) => s.shown);
   const viewsList = useTerms(browserViewsOfLayouts);
   const views = useMemo(() => new Set(viewsList ? viewsList.split('\n') : []), [viewsList]);
+  const detachedRecords = useDetachedTabs((s) => s.records);
+  const detachedWin = isDetachedWindow();
 
   useEffect(() => {
-    // A view is alive while its machine's layout holds it; unknown while
-    // that layout is not read (the machine is away).
-    const alive = (fr: Frame) => (views.has(`${fr.m}|`) ? views.has(frameKey(fr.m, fr.id)) : undefined);
+    // A view is alive while its machine's layout holds it and it has not moved
+    // to a detached window; unknown while that layout is not read (away).
+    const alive = (fr: Frame) => {
+      if (!detachedWin && detachedRecordForPane(fr.m, L.viewKey(fr.id), detachedRecords)) return false;
+      return views.has(`${fr.m}|`) ? views.has(frameKey(fr.m, fr.id)) : undefined;
+    };
     const update = () => {
       const s = useFrames.getState();
       const next = nextFrames(s.frames, s.shown, alive, Date.now());
@@ -78,7 +85,7 @@ export function BrowserLayer() {
     // Frames off screen expire.
     const timer = window.setInterval(update, 60_000);
     return () => window.clearInterval(timer);
-  }, [shown, views]);
+  }, [shown, views, detachedRecords, detachedWin]);
 
   // With the plugin off the layer goes, and its frames with it.
   useEffect(() => () => useFrames.setState({ frames: {}, pages: {}, nav: {} }), []);
@@ -103,7 +110,7 @@ export function BrowserLayer() {
       setTimeout(() => {
         const k = focusedFrame();
         const fr = k ? useFrames.getState().frames[k] : undefined;
-        if (fr) terms.mutate(fr.m, (l) => L.focusPane(l, L.viewKey(fr.id)));
+        if (fr) terms.mutate(fr.m, (l) => focusPaneInLayout(l, L.viewKey(fr.id)));
       });
     window.addEventListener('blur', onBlur);
     return () => window.removeEventListener('blur', onBlur);

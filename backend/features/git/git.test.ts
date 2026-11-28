@@ -118,8 +118,17 @@ test('change audit', async () => {
 });
 
 test('query params', () => {
-  const q = new URLSearchParams('repo=/r&skip=300&limit=10&branch=main&branch=dev&remotes=1&rev=abc&parent=2&other=x&path=');
-  expect(queryParams(q)).toEqual({ repo: '/r', skip: 300, limit: 10, branches: ['main', 'dev'], remotes: true, rev: 'abc', parent: 2 });
+  const q = new URLSearchParams('repo=/r&skip=300&limit=10&branch=main&branch=dev&remotes=1&noFiles=1&rev=abc&parent=2&other=x&path=');
+  expect(queryParams(q)).toEqual({
+    repo: '/r',
+    skip: 300,
+    limit: 10,
+    branches: ['main', 'dev'],
+    remotes: true,
+    noFiles: true,
+    rev: 'abc',
+    parent: 2,
+  });
   for (const bad of ['skip=a', 'limit=1.5', 'parent=99999999999999999999'])
     expect(() => queryParams(new URLSearchParams(bad))).toThrow(expect.objectContaining({ code: 'bad_request', status: 400 }));
 });
@@ -245,4 +254,53 @@ test('settings', () => {
     expect(() => st.set(k, '', bad)).toThrow();
   st.set('git.graphPageSize', '', 500);
   expect(st.get('git.graphPageSize')).toBe(500);
+});
+
+test('caches reads within TTL, coalesces concurrent reads, and invalidates on write', async () => {
+  let now = 10_000;
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let statusCalls = 0;
+  const serve = async (h: Header, conn: AgentStream) => {
+    try {
+      const action = h.action ?? '';
+      if (action === 'status') {
+        statusCalls++;
+        if (statusCalls === 1) await gate;
+        await writeLine(conn.stream, { ok: true, plugin: { ahead: statusCalls, behind: 0, files: [] } });
+      } else {
+        await writeLine(conn.stream, { ok: true, plugin: {} });
+      }
+    } finally {
+      conn.reader.release();
+      closeStream(conn.stream);
+    }
+  };
+  const machines = testMachines([sshSpec('x')], { dial: agentDialer({ serve }) });
+  const tc = testHub({ features: [gitFeature({ now: () => now })], machines, settings: { ...ON } });
+  stops.push(running(tc.hub));
+  await waitFor('x ready', () => machines.get('x')!.ready);
+
+  // Two concurrent identical status reads coalesce onto one upstream call.
+  const [p1, p2] = [tc.request('GET', '/api/m/x/p/git/status?repo=/r'), tc.request('GET', '/api/m/x/p/git/status?repo=/r')];
+  await waitFor('one status call', () => statusCalls === 1);
+  release();
+  const [r1, r2] = await Promise.all([p1, p2]);
+  expect([r1.status, r2.status, statusCalls]).toEqual([200, 200, 1]);
+  expect(await r1.json()).toEqual({ ahead: 1, behind: 0, files: [] });
+  expect(await r2.json()).toEqual({ ahead: 1, behind: 0, files: [] });
+
+  // Within TTL: served from cache without asking the machine.
+  const r3 = await tc.request('GET', '/api/m/x/p/git/status?repo=/r');
+  expect([r3.status, statusCalls, await r3.json()]).toEqual([200, 1, { ahead: 1, behind: 0, files: [] }]);
+
+  // A write invalidates the cache immediately so the next read asks the machine.
+  expect((await tc.request('POST', '/api/m/x/p/git/stage', { body: '{"repo":"/r","all":true}' })).status).toBe(200);
+  const r4 = await tc.request('GET', '/api/m/x/p/git/status?repo=/r');
+  expect([r4.status, statusCalls, await r4.json()]).toEqual([200, 2, { ahead: 2, behind: 0, files: [] }]);
+
+  // Past TTL: asks the machine again.
+  now += 5000;
+  const r5 = await tc.request('GET', '/api/m/x/p/git/status?repo=/r');
+  expect([r5.status, statusCalls]).toEqual([200, 3]);
 });

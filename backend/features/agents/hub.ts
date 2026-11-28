@@ -16,6 +16,7 @@
 // only reads: a read-only hub answers it, and it is not audited. The
 // feature has no settings of its own.
 import { byId, validSessionId } from '#shared/agents/kinds.ts';
+import { CoalesceCache } from '#shared/lib/cache.ts';
 import { defineFeature } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
 import { agentsProtocol } from './protocol.ts';
@@ -24,10 +25,16 @@ import { agentsProtocol } from './protocol.ts';
 export const MAX_RESOLVING = 8;
 /** Bounds the directory of a resolve, in bytes. */
 export const MAX_CWD = 4096;
+/** How long a resolve answer is cached on the hub, in ms. Coalesces
+ * multi-tab layout restores asking for the same session. */
+export const RESOLVE_CACHE_TTL_MS = 5_000;
+const RESOLVE_CACHE_MAX = 256;
 
 export interface AgentsOptions {
   /** Resolves at once per machine (MAX_RESOLVING). */
   maxResolving?: number;
+  /** Clock function for the hub-side resolve cache (tests). */
+  now?: () => number;
 }
 
 /** Whether kind is an agent whose transcripts are read. */
@@ -92,6 +99,12 @@ export const agentsFeature = (o: AgentsOptions = {}) =>
       const limit = o.maxResolving ?? MAX_RESOLVING;
       /** The resolves under way, by machine. */
       const resolving = new Map<string, number>();
+      const resolveCache = new CoalesceCache<unknown>({
+        ttlMs: RESOLVE_CACHE_TTL_MS,
+        maxEntries: RESOLVE_CACHE_MAX,
+        now: o.now,
+      });
+      ctx.onForget((m) => resolveCache.invalidatePrefix(`${m}\0`, { abort: true }));
 
       ctx.machineApi.get('/resolve', async (c) => {
         const q = goQuery(new URL(c.req.url).search);
@@ -100,19 +113,29 @@ export const agentsFeature = (o: AgentsOptions = {}) =>
         if (kind === null || session === null || cwd === null || !transcriptKind(kind) || !validSessionId(session) || !validCwd(cwd))
           throw new Fail('bad_request', 400, 'kind: an agent with transcripts; session: its session id; cwd: an absolute directory');
         const m = c.var.machine;
-        const n = resolving.get(m.id) ?? 0;
-        if (n >= limit) throw new Fail('busy', 429, "too many resolves of the machine's sessions at once");
-        resolving.set(m.id, n + 1);
-        try {
-          // Only the answer's own members reach the page (resolveReply).
-          const r = await ctx.call(m, agentsProtocol, 'resolve', { kind, session, cwd }, { signal: c.req.raw.signal });
-          c.header('Cache-Control', 'no-store');
-          return c.json(r);
-        } finally {
-          const left = (resolving.get(m.id) ?? 1) - 1;
-          if (left > 0) resolving.set(m.id, left);
-          else resolving.delete(m.id);
+        const key = `${m.id}\0${kind}\0${session}\0${cwd}`;
+        const r = await resolveCache.get(key, { signal: c.req.raw.signal }, async (signal) => {
+          const n = resolving.get(m.id) ?? 0;
+          if (n >= limit) throw new Fail('busy', 429, "too many resolves of the machine's sessions at once");
+          resolving.set(m.id, n + 1);
+          try {
+            // Only the answer's own members reach the page (resolveReply).
+            return await ctx.call(m, agentsProtocol, 'resolve', { kind, session, cwd }, { signal });
+          } finally {
+            const left = (resolving.get(m.id) ?? 1) - 1;
+            if (left > 0) resolving.set(m.id, left);
+            else resolving.delete(m.id);
+          }
+        });
+        // Do not cache transient misses (not_found / other_cwd) for 5 s so newly
+        // created transcripts are found promptly (machine Resolver caches misses
+        // for 1 s); keep coalescing concurrent callers and caching ok / compressed.
+        const rep = r as { ok?: boolean; code?: string } | null;
+        if (!rep || (rep.ok !== true && rep.code !== 'compressed')) {
+          resolveCache.invalidate(key);
         }
+        c.header('Cache-Control', 'no-store');
+        return c.json(r as object);
       });
     },
   });

@@ -1,6 +1,6 @@
 // What the feature keeps in the hub's database
-// (hub[-<instance>]-<host>[-<id>].db beside the settings file, shared with
-// the other features; the Go hub's tables, so either hub reads what the
+// (hub-<host>[-<id>].db beside the settings file, shared with the other
+// features and the other hubs of the namespace; the Go hub's tables, so either hub reads what the
 // other wrote): the points of each account's window (usage_windows), the
 // accounts of the last poll (usage_accounts), the alerts fired
 // (usage_alerts) and each machine's last cost report (usage_machine_costs).
@@ -35,8 +35,8 @@ const MIGRATIONS = [
 	);`,
 ];
 
-/** The hub's database beside settingsFile (settings-dev.json →
- * hub-dev-<host>.db; #shared/store/hubdb.ts); "" for a hub without a
+/** The hub's database beside settingsFile (settings.json →
+ * hub-<host>.db; #shared/store/hubdb.ts); "" for a hub without a
  * settings file, which keeps no state. */
 export function hubDBFile(settingsFile: string): string {
   return hubDBBeside(settingsFile, 'settings');

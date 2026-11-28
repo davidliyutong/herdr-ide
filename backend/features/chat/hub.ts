@@ -18,10 +18,12 @@ import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { open } from '#kernel/agent.ts';
 import { defineFeature, type FeatureDef } from '#kernel/feature.ts';
 import { offline } from '#kernel/fail.ts';
+import type { Client } from '#kernel/http/env.ts';
 import type { Opener } from './hostconn.ts';
 import { ChatSwitchboard } from './switchboard.ts';
 import { SdkProvision, type SdkProvisionOptions } from './sdkprovision.ts';
 import { chatProtocol } from './protocol.ts';
+import { invalidateOverviews } from './overview.ts';
 import { routes } from './routes.ts';
 import { settings } from './settings.ts';
 import { DEFAULT_LIMITS, DEFAULT_TIMING, type Limits, type Timing } from './timing.ts';
@@ -40,6 +42,21 @@ export interface ChatOptions {
    * (sdkprovision.ts): the operator's directories, offline, the registry,
    * the cache (~/.<slug>/cache/npm by default). */
   sdk?: Partial<SdkProvisionOptions>;
+  /** Optional vault preset environment variables for a workspace's new
+   * chats (feature 30); none by default. */
+  workspaceEnv?: (
+    machine: string,
+    workspace: string,
+    client: Client,
+  ) => Promise<{
+    presets: string[];
+    env: Record<string, string>;
+    names: string[];
+    missing: string[];
+    locked: boolean;
+    logFailed?: boolean;
+    corrupt?: boolean;
+  }>;
 }
 
 export interface ChatFeature extends FeatureDef {
@@ -82,11 +99,12 @@ export function chatFeature(o: ChatOptions = {}): ChatFeature {
         limits: { ...DEFAULT_LIMITS, ...o.limits },
       });
       board = h;
-      routes(ctx, h, timing);
+      routes(ctx, h, timing, o.workspaceEnv);
       ctx.service('watch', (signal) => h.run(signal));
       ctx.onForget((m) => {
         h.forget(m);
         h.o.sdk.forget(m);
+        invalidateOverviews(h);
       });
     },
   });

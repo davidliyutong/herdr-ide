@@ -5,7 +5,9 @@
 // workspace of its machine in the sidebar into a new tab there. These are
 // edits of the machine's layout document (term/layout.ts).
 
+import { dockCurrentTab, isDetachedWindow } from './detachedWindow';
 import { trackDrag, type Box, type DragStart } from './drag';
+import { desktopShell } from './shell';
 import { terms } from './state/terms';
 import * as L from './term/layout';
 import { t } from './i18n';
@@ -15,6 +17,8 @@ export type DropTarget =
   | { kind: 'tab'; ws: string; index: number; rect: DOMRect }
   | { kind: 'newTab'; ws: string; rect: DOMRect }
   | { kind: 'workspace'; ws: string; rect: DOMRect };
+
+type PaneDragTarget = DropTarget | { kind: 'dock'; screenX: number; screenY: number };
 
 export interface DragSource {
   m: string;
@@ -97,12 +101,60 @@ export function dropped(l: L.Layout, src: DragSource, tg: DropTarget): L.Layout 
 
 /** Starts tracking a possible drag from a pane header. */
 export function startPaneDrag(ev: DragStart, src: DragSource) {
-  trackDrag(ev, {
+  const detached = isDetachedWindow();
+  // In the desktop app, probe whether the pointer is actually over the main
+  // window so the "Move Back to Main Window" ghost only shows when releasing
+  // will dock back (never over unrelated desktop space).
+  let overMain = !desktopShell?.windows;
+  let lastProbe = 0;
+  let probing = false;
+  let active = true;
+  const probeMain = (screenX: number, screenY: number) => {
+    const check = desktopShell?.windows?.isOverMain;
+    if (!check || probing) return;
+    const now = Date.now();
+    if (now - lastProbe < 40) return;
+    lastProbe = now;
+    probing = true;
+    void check(screenX, screenY)
+      .then((ok) => {
+        if (active) overMain = ok;
+      })
+      .catch(() => {
+        if (active) overMain = false;
+      })
+      .finally(() => {
+        probing = false;
+      });
+  };
+  trackDrag<PaneDragTarget>(ev, {
     label: src.label,
-    find: (x, y) => findTarget(src, x, y),
-    marker: (tg) => ({ box: markerRect(tg), zone: tg.kind === 'pane' ? tg.zone : tg.kind }),
+    ghost: (tg) =>
+      tg?.kind === 'dock' && overMain ? { label: `${src.label} · ↩ ${t('window.returnToMain')}`, detach: true } : { label: src.label },
+    find: (x, y, screen) => {
+      if (detached && (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight)) {
+        const screenX = screen?.screenX ?? x;
+        const screenY = screen?.screenY ?? y;
+        probeMain(screenX, screenY);
+        return { kind: 'dock', screenX, screenY };
+      }
+      if (desktopShell?.windows) overMain = false;
+      return findTarget(src, x, y);
+    },
+    marker: (tg) => (tg.kind === 'dock' ? undefined : { box: markerRect(tg), zone: tg.kind === 'pane' ? tg.zone : tg.kind }),
     drop: async (tg) => {
+      if (tg.kind === 'dock') {
+        if (desktopShell?.windows) {
+          if (await desktopShell.windows.isOverMain(tg.screenX, tg.screenY)) dockCurrentTab();
+        } else {
+          dockCurrentTab();
+        }
+        return;
+      }
       terms.mutate(src.m, (l) => dropped(l, src, tg));
+    },
+    end: () => {
+      active = false;
     },
     failed: (error) => t('pane.moveFailed', { error }),
   });

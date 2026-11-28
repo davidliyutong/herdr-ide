@@ -20,13 +20,28 @@ import { relativeTime } from '../../conversation/format';
 import { agentKind } from '../../conversation/kinds';
 import { locale, t } from '../../i18n';
 import { shortPath } from '../../lib/machine';
+import { useSettings } from '../../settings';
 import { useStore } from '../../state/store';
 import { terms, useTerms } from '../../state/terms';
 import * as L from '../../term/layout';
-import { reasonText } from './api';
+import { CHAT_PROVIDERS, ChatFailure, isChatProviderEnabled, reasonText } from './api';
 import { chatAgents, chatSessions, importSession, MAX_SESSIONS, type PastSession } from './imports';
 import { chatGone, useChats } from './state';
 import './chat.css';
+
+/** Maximum concurrent session-list requests fired at once from the panel. */
+const MAX_SESSION_CONCURRENCY = 3;
+
+const isAbortError = (e: unknown): boolean => e instanceof DOMException && e.name === 'AbortError';
+
+/** Maps session-listing failures cleanly: probe overload (probe_busy, or busy
+ * from an older host) never displays the turn-busy message. */
+function sessionErrorText(e: unknown): string {
+  if (e instanceof ChatFailure && (e.code === 'probe_busy' || e.code === 'busy')) {
+    return t('chat.reason.probe_busy');
+  }
+  return reasonText(e);
+}
 
 export interface PastSessionsProps {
   m: string;
@@ -80,6 +95,7 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
   const focused = useTerms(() => (cwd === undefined ? focusedDirectory(m) : undefined));
   const home = useStore((s) => s.machines[m]?.info?.home);
   const readOnly = useStore((s) => s.readOnly);
+  const providerSig = useSettings((s) => CHAT_PROVIDERS.map((k) => (isChatProviderEnabled(s.values, k) ? '1' : '0')).join(''));
   const dir = listedDirectory(cwd ?? focused, home);
   const [kinds, setKinds] = useState<string[] | undefined>(undefined);
   const [lists, setLists] = useState<Record<string, KindList>>({});
@@ -87,6 +103,12 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
   const [opening, setOpening] = useState<string | undefined>(undefined);
   // What the lists are of: an answer for another is dropped.
   const generation = useRef(0);
+  // Set when the user explicitly clicks Refresh so the next agents + sessions
+  // load bypasses the hub cache.
+  const forceRefresh = useRef(false);
+  // Active abort controllers for "Show More" pagination calls so directory
+  // switches or unmount abort in-flight probes cleanly.
+  const moreAborts = useRef(new Set<AbortController>());
   // The chats the sessions are listed with, as the page's chats are now:
   // gone (deleted, or removed by the machine's limits), archived or there.
   const listedIds = Object.values(lists).flatMap((l) => l.sessions.flatMap((s) => (s.chat ? [s.chat] : [])));
@@ -102,35 +124,69 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
 
   useEffect(() => {
     let gone = false;
+    const ac = new AbortController();
+    const refresh = forceRefresh.current;
     setKinds(undefined);
     if (readOnly) {
+      forceRefresh.current = false;
       setKinds([]);
       return;
     }
-    chatAgents(m).then(
+    chatAgents(m, { refresh, signal: ac.signal }).then(
       (k) => !gone && setKinds(k),
-      () => !gone && setKinds([]),
+      (e) => {
+        if (gone || isAbortError(e)) return;
+        forceRefresh.current = false;
+        setKinds([]);
+      },
     );
     return () => {
       gone = true;
+      ac.abort();
     };
-  }, [m, version, readOnly]);
+  }, [m, version, readOnly, providerSig]);
 
-  // Refresh reads the kinds again, whose answer reads the lists.
+  // Refresh reads the kinds again, whose answer reads the lists. Requests are
+  // bounded to MAX_SESSION_CONCURRENCY workers and aborted on directory change
+  // or unmount so stale probes never pile up on the machine.
   useEffect(() => {
     const gen = ++generation.current;
+    for (const c of moreAborts.current) c.abort();
+    moreAborts.current.clear();
     if (!kinds || !dir) {
+      if (!dir) forceRefresh.current = false;
       setLists({});
       return;
     }
-    setLists(Object.fromEntries(kinds.map((k) => [k, { sessions: [], loading: true }])));
-    for (const kind of kinds) {
-      const set = (l: KindList) => generation.current === gen && setLists((all) => ({ ...all, [kind]: l }));
-      chatSessions(m, kind, dir).then(
-        (page) => set({ sessions: newestFirst(page.sessions), next: page.next, loading: false }),
-        (e) => set({ sessions: [], loading: false, error: reasonText(e) }),
-      );
+    const refresh = forceRefresh.current;
+    forceRefresh.current = false;
+    if (kinds.length === 0) {
+      setLists({});
+      return;
     }
+    const ac = new AbortController();
+    setLists(Object.fromEntries(kinds.map((k) => [k, { sessions: [], loading: true }])));
+    let cursorIdx = 0;
+    const worker = async () => {
+      while (cursorIdx < kinds.length && !ac.signal.aborted && generation.current === gen) {
+        const kind = kinds[cursorIdx++];
+        const set = (l: KindList) => generation.current === gen && setLists((all) => ({ ...all, [kind]: l }));
+        try {
+          const page = await chatSessions(m, kind, dir, undefined, { refresh, signal: ac.signal });
+          set({ sessions: newestFirst(page.sessions), next: page.next, loading: false });
+        } catch (e) {
+          if (ac.signal.aborted || isAbortError(e)) return;
+          set({ sessions: [], loading: false, error: sessionErrorText(e) });
+        }
+      }
+    };
+    const count = Math.min(MAX_SESSION_CONCURRENCY, kinds.length);
+    for (let i = 0; i < count; i++) void worker();
+    return () => {
+      ac.abort();
+      for (const c of moreAborts.current) c.abort();
+      moreAborts.current.clear();
+    };
   }, [m, dir, kinds]);
 
   const more = useCallback(
@@ -138,13 +194,25 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
       const list = lists[kind];
       if (!dir || !list?.next || list.loading) return;
       const gen = generation.current;
+      const ac = new AbortController();
+      moreAborts.current.add(ac);
       const set = (f: (l: KindList) => KindList) =>
         generation.current === gen && setLists((all) => (all[kind] ? { ...all, [kind]: f(all[kind]) } : all));
       set((l) => ({ ...l, loading: true }));
-      chatSessions(m, kind, dir, list.next).then(
-        (page) => set((l) => ({ sessions: merged(l.sessions, page.sessions), next: page.next, loading: false })),
-        (e) => set((l) => ({ ...l, loading: false, error: reasonText(e) })),
-      );
+      chatSessions(m, kind, dir, list.next, { signal: ac.signal })
+        .then(
+          (page) => {
+            if (ac.signal.aborted) return;
+            set((l) => ({ sessions: merged(l.sessions, page.sessions), next: page.next, loading: false }));
+          },
+          (e) => {
+            if (ac.signal.aborted || isAbortError(e)) return;
+            set((l) => ({ ...l, loading: false, error: sessionErrorText(e) }));
+          },
+        )
+        .finally(() => {
+          moreAborts.current.delete(ac);
+        });
     },
     [m, dir, lists],
   );
@@ -188,7 +256,10 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
           className="icon sm"
           title={t('chat.sessions.refresh')}
           aria-label={t('chat.sessions.refresh')}
-          onClick={() => setVersion((v) => v + 1)}
+          onClick={() => {
+            forceRefresh.current = true;
+            setVersion((v) => v + 1);
+          }}
         >
           <RefreshCw />
         </button>

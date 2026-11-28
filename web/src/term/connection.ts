@@ -46,7 +46,13 @@ export interface Socket {
 
 const RETRY_MIN_MS = 500;
 
+/** Maximum concurrent in-flight attach requests on one connection (below the
+ * hub's MAX_PENDING_ATTACHES = 16 so reconnecting with many mounted terminals
+ * drains smoothly instead of bursting into busy errors). */
+export const MAX_CONCURRENT_ATTACHES = 8;
+
 type Reply = { resolve: (v: Record<string, unknown>) => void; reject: (e: TermError) => void };
+type AttachWaiter = { resolve: () => void; reject: (e: TermError) => void };
 
 /**
  * A connection to the hub's terminal protocol. It reconnects by itself and
@@ -69,6 +75,8 @@ export class TermConnection {
   private readonly attaching = new Map<number, StreamHandler>();
   private readonly streams = new Map<number, StreamHandler>();
   private readonly machines = new Set<string>();
+  private attachInFlight = 0;
+  private readonly attachQueue: AttachWaiter[] = [];
 
   constructor(private readonly open: () => Socket) {}
 
@@ -121,11 +129,14 @@ export class TermConnection {
     const wasUp = this.up;
     this.up = false;
     const waiting = [...this.replies.values()];
+    const queued = this.attachQueue.splice(0);
     const open = [...this.streams.values()];
     this.replies.clear();
     this.attaching.clear();
     this.streams.clear();
+    this.attachInFlight = 0;
     for (const r of waiting) r.reject(new TermError('unavailable'));
+    for (const q of queued) q.reject(new TermError('unavailable'));
     for (const s of open) s.closed('disconnected');
     if (wasUp) this.onConnection(false);
     if (this.closed) return;
@@ -213,23 +224,42 @@ export class TermConnection {
     return this.request({ t: 'call', m: machine, method, params });
   }
 
-  /** Attaches to a terminal and resolves with the stream's number. */
+  /** Attaches to a terminal and resolves with the stream's number. Queues
+   * beyond MAX_CONCURRENT_ATTACHES so reconnecting with many mounted terminals
+   * never overflows the hub's MAX_PENDING_ATTACHES limit. */
   async attach(o: AttachOptions, handler: StreamHandler): Promise<number> {
     if (!this.up) throw new TermError('unavailable');
-    const rid = this.rid; // the one request() takes next
-    this.attaching.set(rid, handler);
-    const msg = await this.request({
-      t: 'attach',
-      m: o.machine,
-      terminal: o.terminal,
-      cols: o.cols,
-      rows: o.rows,
-      history: o.history ?? 0,
-      observe: o.observe ?? false,
-      ...(o.display && !o.observe ? { display: o.display } : {}),
-    });
-    if (typeof msg.s !== 'number') throw new TermError('unavailable');
-    return msg.s;
+    const socket = this.socket;
+    if (this.attachInFlight >= MAX_CONCURRENT_ATTACHES) {
+      await new Promise<void>((resolve, reject) => {
+        this.attachQueue.push({ resolve, reject });
+      });
+      if (!this.up || this.socket !== socket) throw new TermError('unavailable');
+    } else {
+      this.attachInFlight++;
+    }
+    try {
+      const rid = this.rid; // the one request() takes next
+      this.attaching.set(rid, handler);
+      const msg = await this.request({
+        t: 'attach',
+        m: o.machine,
+        terminal: o.terminal,
+        cols: o.cols,
+        rows: o.rows,
+        history: o.history ?? 0,
+        observe: o.observe ?? false,
+        ...(o.display && !o.observe ? { display: o.display } : {}),
+      });
+      if (typeof msg.s !== 'number') throw new TermError('unavailable');
+      return msg.s;
+    } finally {
+      if (this.socket === socket && this.attachInFlight > 0) {
+        const next = this.up ? this.attachQueue.shift() : undefined;
+        if (next) next.resolve();
+        else this.attachInFlight--;
+      }
+    }
   }
 
   write(stream: number, data: Uint8Array, automatic = false): void {

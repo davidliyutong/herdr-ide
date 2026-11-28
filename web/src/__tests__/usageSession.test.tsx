@@ -23,6 +23,7 @@ import { UsageStatusItem } from '../plugins/usage/StatusItem';
 import {
   resetSessionReads,
   SESSION_KEEP,
+  SESSION_NOT_FOUND_RECHECK_MS,
   SESSION_RETRY_MS,
   SESSION_TIMEOUT_MS,
   SESSION_WORKING_EVERY,
@@ -141,12 +142,15 @@ beforeEach(() => {
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     const u = new URL(String(url), 'http://hub');
     if (u.pathname === '/api/m/local/p/usage/session') {
-      const session = u.searchParams.get('session')!;
-      reads.push(session);
+      const session = u.searchParams.get('session') ?? '';
+      const cwd = u.searchParams.get('cwd') ?? '';
+      const kind = u.searchParams.get('kind') ?? '';
+      const key = session || `${kind}:${cwd}`;
+      reads.push(key);
       if (hang)
         await new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
       if (hold) await hold;
-      const a = answers.get(session) ?? { status: 200, body: usage() };
+      const a = answers.get(key) ?? { status: 200, body: usage() };
       return { ok: a.status < 300, status: a.status, json: async () => a.body };
     }
     return { ok: false, status: 404, json: async () => ({}) };
@@ -282,6 +286,7 @@ describe('usage session item', () => {
     expect(item()!.getAttribute('aria-describedby')).toBe(card.id);
     const facts = [...card.querySelectorAll('dt')].map((dt) => [dt.textContent, dt.nextElementSibling!.textContent]);
     expect(facts).toEqual([
+      ['Session', S1.slice(0, 8)],
       ['Model', 'claude-opus-4-6'],
       ['Cost at API prices', '$1.23'],
       ['Context', '84.0k of 200.0k (42%)'],
@@ -338,10 +343,10 @@ describe('usage window in the status bar', () => {
         account('codex:c', ['local'], [10]),
       ]),
     });
-    // No agent: the tightest of all (Sonnet's).
+    // No agent: the tightest across preview accounts (claude:a 5h=40% and claude:b 5h=95% merge on the shared 5h cycle to 67.5% -> 68%).
     show([{ address: 't0' }], 't0');
     await set(() => root.render(createElement('div', null, createElement(UsageStatusItem), createElement(UsageSessionItem))));
-    expect(limit()!.textContent!.trim()).toBe('99% used');
+    expect(limit()!.textContent!.trim()).toBe('68% used');
     expect(limit()!.querySelector('.ai-logo')).toBeNull();
     // Claude Code on this machine with Opus: its account's weekly window,
     // not Sonnet's; the session item names the model.
@@ -357,6 +362,121 @@ describe('usage window in the status bar', () => {
     // Codex: its own account.
     await set(() => show([rec('t2', { agent: 'codex', agent_session: S3 })], 't2'));
     expect(limit()!.textContent!.trim()).toBe('10% used');
+    // Antigravity with model-only windows: followed even without a matching model name.
+    useUsage.setState((s) => ({
+      ...s,
+      snapshot: snap([
+        ...(s.snapshot?.accounts ?? []),
+        account('antigravity:a1', ['local'], [], {
+          email: 'a1@example.com',
+          windows: [{ kind: 'model', label: 'Gemini 3 Pro', usedPct: 60, resetsAt: now + 3600 }],
+        }),
+        account('antigravity:a2', ['local'], [], {
+          email: 'a2@example.com',
+          windows: [{ kind: 'model', label: 'Gemini 3 Pro', usedPct: 20, resetsAt: now + 7200 }],
+        }),
+      ]),
+    }));
+    await set(() => show([rec('t3', { agent: 'agy', agent_session: undefined, cwd: '/work/ag' })], 't3'));
+    expect(limit()!.textContent!.trim()).toBe('40% used');
+    // Hovering the status bar item shows merged Antigravity with per-account breakdown.
+    const statusAnchor = limit()!.parentElement!;
+    const hoverEvt = new MouseEvent('pointerover', { bubbles: true });
+    Object.defineProperty(hoverEvt, 'pointerType', { value: 'mouse' });
+    await set(() => void statusAnchor.dispatchEvent(hoverEvt));
+    await advance(HOVER_OPEN_MS);
+    const mergedLine = host.querySelector<HTMLElement>('.usage-hover [data-account="antigravity:merged"]')!;
+    expect(mergedLine.textContent).toContain('2 accounts');
+    expect(mergedLine.textContent).toContain('40% used');
+    expect([...mergedLine.querySelectorAll('.usage-hover-sub')].map((el) => el.textContent)).toEqual([
+      'a1@example.com60% used',
+      'a2@example.com20% used',
+    ]);
+    // Focused Chat pane: status bar window follows its agent without rendering terminal UsageSessionItem.
+    const chatLayout: L.Layout = {
+      version: 2,
+      selected: 0,
+      workspaces: [
+        {
+          id: 'w',
+          name: '',
+          cwd: '',
+          selected: 0,
+          tabs: [{ root: { view: { id: 'p1', plugin: 'chat', kind: 'chat', agent: 'codex', chat: S1 } }, focused: 'view:p1' }],
+        },
+      ],
+    };
+    await set(() => useTerms.setState({ machines: { local: { terminals: {}, layout: chatLayout } } }));
+    expect(limit()!.textContent!.trim()).toBe('10% used');
+    expect(item()).toBeNull();
+  });
+
+  it('resolves session usage by cwd for grok, kimi, opencode, agy and codex when unambiguous', async () => {
+    answers.set('grok:/work/repo', {
+      status: 200,
+      body: usage({ model: 'grok-4.6', cost: 0.42, contextUsed: 10_000, contextSize: 100_000 }),
+    });
+    show(
+      [rec('t1', { agent: 'grok', agent_session: undefined, agent_session_source: undefined, cwd: '/work/repo', foreground: { pid: 99 } })],
+      't1',
+    );
+    await render();
+    expect(reads).toEqual(['grok:/work/repo']);
+    expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$0.42');
+    expect(item()!.querySelector('.usage-session-ctx')!.textContent).toBe('10% ctx');
+    // Two live terminals of the same agent in the same cwd: ambiguous, do not fetch or misattribute.
+    reads = [];
+    await set(() =>
+      show(
+        [
+          rec('t1', { agent: 'kimi', agent_session: undefined, agent_session_source: undefined, cwd: '/work/shared' }),
+          rec('t2', { agent: 'kimi', agent_session: undefined, agent_session_source: undefined, cwd: '/work/shared' }),
+        ],
+        't1',
+      ),
+    );
+    expect(reads).toEqual([]);
+    expect(item()).toBeNull();
+  });
+
+  it('accepts confirmed OpenCode ses_* session ids and rejects guessed or malformed ones', async () => {
+    answers.set('ses_alpha123', {
+      status: 200,
+      body: usage({ model: 'deepseek-v4-flash', cost: 0.35, contextUsed: 5000, contextSize: 0 }),
+    });
+    show([rec('t1', { agent: 'opencode', agent_session: 'ses_alpha123', agent_session_source: 'pid', cwd: '/work/oc' })], 't1');
+    await render();
+    expect(reads).toEqual(['ses_alpha123']);
+    expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$0.35');
+    expect(item()!.querySelector('.usage-session-ctx')!.textContent).toBe('5k ctx');
+    // Guessed ses_* falls back to cwd when unambiguous; malformed ses_* is never queried and never falls back to cwd.
+    answers.set('opencode:/work/oc', {
+      status: 200,
+      body: usage({ model: 'deepseek-v4-flash', cost: 0.7, contextUsed: 8000, contextSize: 0 }),
+    });
+    reads = [];
+    await set(() =>
+      show([rec('t1', { agent: 'opencode', cwd: '/work/oc', agent_session: 'ses_beta456', agent_session_source: 'guess' })], 't1'),
+    );
+    expect(reads).toEqual(['opencode:/work/oc']);
+    expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$0.70');
+    reads = [];
+    await set(() =>
+      show([rec('t1', { agent: 'opencode', cwd: '/work/oc', agent_session: 'ses_../bad', agent_session_source: 'pid' })], 't1'),
+    );
+    expect(reads).toEqual([]);
+    expect(item()).toBeNull();
+    // Claude Code with a guessed session falls back to cwd when unambiguous.
+    answers.set('claude:/work/claude-proj', {
+      status: 200,
+      body: usage({ model: 'claude-sonnet-4-6', cost: 0.9, contextUsed: 50_000, contextSize: 200_000 }),
+    });
+    reads = [];
+    await set(() =>
+      show([rec('t1', { agent: 'claude', cwd: '/work/claude-proj', agent_session: S1, agent_session_source: 'guess' })], 't1'),
+    );
+    expect(reads).toEqual(['claude:/work/claude-proj']);
+    expect(item()!.querySelector('.usage-session-ctx')!.textContent).toBe('25% ctx');
   });
 });
 
@@ -448,7 +568,7 @@ describe('usage session reads', () => {
     );
   });
 
-  it('shows nothing for a session without a transcript yet, and asks again at its agent’s next status change', async () => {
+  it('shows nothing for a session without a transcript yet, re-checks periodically, and asks at its agent’s next status change', async () => {
     answers.set(S1, { status: 404, body: { error: 'not_found' } });
     const both = (focused: string, status = 'idle') =>
       show([rec('t1', { agent_status: status }), rec('t2', { agent_session: S2 })], focused);
@@ -456,17 +576,20 @@ describe('usage session reads', () => {
     await render();
     expect(reads).toEqual([S1]);
     expect(item()).toBeNull();
-    // Focused again later, its agent as it was: not asked.
-    await advance(20_000);
+    // Focused again within SESSION_NOT_FOUND_RECHECK_MS, its agent as it was: not asked again yet.
+    await advance(5_000);
     await set(() => both('t2'));
-    await advance(20_000);
+    await advance(5_000);
     await set(() => both('t1'));
     expect(reads).toEqual([S1, S2]);
     expect(item()).toBeNull();
+    // While focused and still not_found, re-checks after SESSION_NOT_FOUND_RECHECK_MS.
+    await advance(SESSION_NOT_FOUND_RECHECK_MS);
+    expect(reads).toEqual([S1, S2, S1]);
     // Its agent works: asked, and the transcript is there.
     answers.delete(S1);
-    await set(() => both('t1', 'working'));
-    expect(reads).toEqual([S1, S2, S1]);
+    await advance(SESSION_NOT_FOUND_RECHECK_MS);
+    expect(reads).toEqual([S1, S2, S1, S1]);
     expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$1.23');
   });
 
@@ -556,6 +679,25 @@ describe('usage session reads', () => {
     expect(reads).toHaveLength(13);
   });
 
+  it('aborts an in-flight session fetch when switching away to another pane', async () => {
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      if (init?.signal) signals.push(init.signal);
+      return await new Promise((_, reject) =>
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true }),
+      );
+    });
+    const both = (focused: string) => show([rec('t1'), rec('t2', { agent_session: S2 })], focused);
+    both('t1');
+    await render();
+    expect(signals).toHaveLength(1);
+    expect(signals[0].aborted).toBe(false);
+    await set(() => both('t2'));
+    expect(signals[0].aborted).toBe(true);
+    expect(signals).toHaveLength(2);
+    expect(signals[1].aborted).toBe(false);
+  });
+
   it('keeps the numbers of at most SESSION_KEEP sessions, the oldest leaving first', async () => {
     const id = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
     await render();
@@ -567,6 +709,129 @@ describe('usage session reads', () => {
     expect(Object.keys(kept)).toHaveLength(SESSION_KEEP);
     expect(kept[sessionKey('local', 'claude', id(0))]).toBeUndefined();
     expect(kept[sessionKey('local', 'claude', id(SESSION_KEEP))]).toBeDefined();
+  });
+
+  it('preserves cached usage when a session read aborts mid-body and retries immediately after rapid A -> B -> A switch', async () => {
+    // 1. Mid-body abort must not overwrite cached usage with empty zeros.
+    show([rec('t1', { agent_status: 'working' }), rec('t2', { agent_session: S2 })], 't1');
+    await render();
+    expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$1.23');
+
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      return {
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise((_, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+          }),
+      } as unknown as Response;
+    });
+    await advance(SESSION_WORKING_EVERY);
+    // Switch to t2 while t1's r.json() is in flight -> aborts t1's body read.
+    await set(() => show([rec('t1', { agent_status: 'working' }), rec('t2', { agent_session: S2 })], 't2'));
+    expect(useUsage.getState().sessions[sessionKey('local', 'claude', S1)]?.usage?.cost).toBeCloseTo(1.234, 3);
+
+    // 2. Rapid A -> B -> A while A's read is in flight starts a fresh read for A immediately and ignores the aborted one.
+    resetSessionReads();
+    useUsage.setState({ sessions: {} });
+    const pending: Array<{ url: string; signal?: AbortSignal; resolve: (r: Response) => void }> = [];
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      return new Promise<Response>((resolve) => {
+        pending.push({ url: String(url), signal: init?.signal ?? undefined, resolve });
+      });
+    });
+    await set(() => show([rec('t1', { agent_session: S1 }), rec('t2', { agent_session: S2 })], 't1'));
+    expect(pending).toHaveLength(1);
+    await set(() => show([rec('t1', { agent_session: S1 }), rec('t2', { agent_session: S2 })], 't2'));
+    expect(pending[0].signal?.aborted).toBe(true);
+    expect(pending).toHaveLength(2);
+    // Switch straight back to t1 before read 1 settles -> read 3 for t1 starts immediately!
+    await set(() => show([rec('t1', { agent_session: S1 }), rec('t2', { agent_session: S2 })], 't1'));
+    expect(pending[1].signal?.aborted).toBe(true);
+    expect(pending).toHaveLength(3);
+    expect(pending[2].url).toContain(S1);
+    // Late settlement of aborted read 1 is ignored; read 3 updates the display.
+    await set(() => pending[0].resolve(new Response(JSON.stringify(usage({ cost: 9.99 })), { status: 200 })));
+    expect(item()).toBeNull();
+    await set(() => pending[2].resolve(new Response(JSON.stringify(usage({ cost: 2.5 })), { status: 200 })));
+    expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$2.50');
+  });
+
+  it('keeps targetKey stable across transient foreground pid changes on cwd-matched agents and passes cost to AccountLine', async () => {
+    answers.set('grok:/work/g', { status: 200, body: usage({ model: 'grok-4', cost: 0.42 }) });
+    show(
+      [
+        rec('t1', {
+          agent: 'grok',
+          agent_session: undefined,
+          agent_session_source: undefined,
+          cwd: '/work/g',
+          foreground: { pid: 100, name: 'grok', cwd: '/work/g' },
+        }),
+      ],
+      't1',
+    );
+    await render();
+    expect(reads).toEqual(['grok:/work/g']);
+    // Open hover card.
+    const anchor = item()!.parentElement!;
+    const over = new MouseEvent('pointerover', { bubbles: true });
+    Object.defineProperty(over, 'pointerType', { value: 'mouse' });
+    await set(() => void anchor.dispatchEvent(over));
+    await advance(HOVER_OPEN_MS + 10);
+    expect(host.querySelector('.usage-session-hover')).not.toBeNull();
+    // Transient foreground pid change does not change targetKey, refetch, or close the hover card.
+    await set(() =>
+      show(
+        [
+          rec('t1', {
+            agent: 'grok',
+            agent_session: undefined,
+            agent_session_source: undefined,
+            cwd: '/work/g',
+            foreground: { pid: 101, name: 'grok', cwd: '/work/g' },
+          }),
+        ],
+        't1',
+      ),
+    );
+    expect(reads).toEqual(['grok:/work/g']);
+    expect(host.querySelector('.usage-session-hover')).not.toBeNull();
+
+    // P2-16: hover card passes cost report to AccountLine so hybrid member sub-row shows blended 50% (not raw 100%).
+    const cHyb = account('claude:hyb', ['m1'], [], {
+      plan: 'Pro',
+      windows: [{ kind: 'weekly', usedPct: 100, resetsAt: now + 86400, windowSec: 604800 }],
+      credits: { unit: 'usd', enabled: true, limit: 50, used: 0 },
+    });
+    const cMax = account('claude:max', ['m2'], [], {
+      plan: 'Max 20x',
+      windows: [{ kind: 'weekly', usedPct: 20, resetsAt: now + 86400, windowSec: 604800 }],
+    });
+    useUsage.setState({
+      snapshot: snap([cHyb, cMax]),
+      cost: {
+        generatedAt: now,
+        days: 90,
+        weekHours: 168,
+        monthHours: 750,
+        machines: {},
+        rows: [],
+        recentSince: now - 8 * 86400,
+        recent: [
+          { at: now - 3600, provider: 'claude', machine: 'm1', tokens: 1000, requests: 1, cost: 50, priced: true },
+          { at: now - 3600, provider: 'claude', machine: 'm2', tokens: 1000, requests: 1, cost: 400, priced: true },
+        ],
+      },
+    });
+    await set(() => show([rec('t1', { agent: 'claude', agent_session: S1 })], 't1'));
+    const anchor2 = item()!.parentElement!;
+    const over2 = new MouseEvent('pointerover', { bubbles: true });
+    Object.defineProperty(over2, 'pointerType', { value: 'mouse' });
+    await set(() => void anchor2.dispatchEvent(over2));
+    await advance(HOVER_OPEN_MS + 10);
+    expect(host.querySelector('[data-member="claude:hyb"]')?.textContent).toContain('50% used');
   });
 });
 
@@ -594,7 +859,11 @@ describe('usage session in the status bar', () => {
     show([rec('t1')], 't1');
     await set(() => root.render(createElement(StatusBar, { connected: true, chord: false })));
     expect(host.querySelector('[data-status-widget="usage.session"] .usage-session-item')).not.toBeNull();
-    await set(() => host.querySelector<HTMLButtonElement>('.status-widgets-btn')!.click());
+    await set(() =>
+      host
+        .querySelector<HTMLElement>('footer.statusbar')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 600 })),
+    );
     const entry = useMenu.getState().menu!.entries.find((e) => isItem(e) && e.label === t('usage.session.title'));
     expect(entry).toBeDefined();
     await set(() => {

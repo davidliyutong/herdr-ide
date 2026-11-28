@@ -356,6 +356,57 @@ describe('stat', () => {
       return es[0].exists && es[0].size === 3;
     }, 'the stats to end');
   });
+
+  test('briefly queues transient stat bursts beyond max slots instead of returning busy immediately', async () => {
+    const real = (p: string) => import('node:fs/promises').then((m) => m.stat(p));
+    const f = await files({
+      statWaitMs: 2000,
+      maxStatting: 2,
+      stat: async (p) => {
+        await Bun.sleep(15);
+        return real(p);
+      },
+    });
+    for (let i = 0; i < 6; i++) write(`${f.home}/q${i}`, `v${i}`);
+    const results = await Promise.all(Array.from({ length: 6 }, (_, i) => f.act('stat', { paths: [`~/q${i}`] }) as Promise<Entry[]>));
+    expect(results.every((es) => es[0].exists && !es[0].error)).toBe(true);
+  });
+});
+
+describe('find concurrency gate', () => {
+  test('caps concurrent files.find walks, returns busy when wait expires, and frees slots after completion', async () => {
+    let active = 0;
+    let peak = 0;
+    const releases: Array<() => void> = [];
+    const f = await files({
+      maxFinding: 2,
+      findSlotWaitMs: 60,
+      find: async () => {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise<void>((r) => releases.push(r));
+        active--;
+        return { matches: [] };
+      },
+    });
+    const p1 = f.act('find', { dir: '~', query: 'a' });
+    const p2 = f.act('find', { dir: '~', query: 'b' });
+    await until(() => releases.length === 2, 'two finds active');
+    expect(peak).toBe(2);
+
+    // A third concurrent find waits findSlotWaitMs and then fails with busy.
+    expect(await f.code('find', { dir: '~', query: 'c' })).toBe('busy');
+    expect(peak).toBe(2);
+
+    // Releasing active walks allows subsequent finds to run cleanly.
+    for (const r of releases.splice(0)) r();
+    await Promise.all([p1, p2]);
+    const p4 = f.act('find', { dir: '~', query: 'd' });
+    await until(() => releases.length === 1, 'fourth find active');
+    releases.shift()!();
+    await p4;
+    expect(active).toBe(0);
+  });
 });
 
 describe('saving', () => {

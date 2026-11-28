@@ -12,6 +12,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import registry from '../../../spec/generated/registry.json';
+import { chatKinds } from '../conversation/kinds';
 import { hasMessage, setLocale, t } from '../i18n';
 import { chatPlugin } from '../plugins/chat';
 import * as P from '../plugins/chat/protocol';
@@ -35,28 +36,68 @@ describe('the chat plugin', () => {
     expect(enableSetting(chatPlugin, 'browser')).toBe('plugins.chat.enabled');
     expect(pluginOn(chatPlugin)).toBe(true);
     expect(chatPlugin.settings?.section).toBe('chat');
+    expect(chatPlugin.settings?.layout).toBeDefined();
+    expect(chatPlugin.paneViews?.chat.iconFor).toBeDefined();
     const defaults = registry.settings as Record<string, unknown>;
     expect(defaults['plugins.chat.enabled']).toBe(true);
     expect(defaults['chat.permissionMode']).toBe('default');
     expect(defaults['chat.allowFullAccess']).toBe(false);
-    expect(Object.keys(defaults).filter((k) => k.startsWith('chat.'))).toEqual([
+    expect(
+      Object.keys(defaults)
+        .filter((k) => k.startsWith('chat.'))
+        .sort(),
+    ).toEqual([
       'chat.allowFullAccess',
+      'chat.handoffMaxKB',
       'chat.idleStopMinutes',
+      'chat.lastModel.agy',
+      'chat.lastModel.claude',
+      'chat.lastModel.codex',
+      'chat.lastModel.grok',
+      'chat.lastModel.kimi',
       'chat.maxChatMB',
       'chat.maxChats',
       'chat.maxLive',
       'chat.maxTotalMB',
+      'chat.model.agy',
+      'chat.model.claude',
+      'chat.model.codex',
+      'chat.model.grok',
+      'chat.model.kimi',
       'chat.permissionMode',
+      'chat.permissionMode.agy',
+      'chat.permissionMode.claude',
+      'chat.permissionMode.codex',
+      'chat.permissionMode.grok',
+      'chat.permissionMode.kimi',
+      'chat.providers.agy',
+      'chat.providers.claude',
+      'chat.providers.codex',
+      'chat.providers.grok',
+      'chat.providers.kimi',
       'chat.retentionDays',
+      'chat.visibleModels.agy',
+      'chat.visibleModels.claude',
+      'chat.visibleModels.codex',
+      'chat.visibleModels.grok',
+      'chat.visibleModels.kimi',
     ]);
+    for (const k of ['claude', 'codex', 'agy', 'kimi', 'grok']) {
+      expect(defaults[`chat.permissionMode.${k}`]).toBe('inherit');
+      expect(defaults[`chat.providers.${k}`]).toBe(true);
+      expect(defaults[`chat.visibleModels.${k}`]).toEqual([]);
+      expect([defaults[`chat.model.${k}`], defaults[`chat.lastModel.${k}`]]).toEqual(['', '']);
+    }
     for (const mode of P.MODES) expect(registry.i18n).toContain(`settings.chat.permissionMode.${mode}`);
     definePlugins([chatPlugin]);
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response('{}', { status: 500 })),
     );
-    expect(newTabGroups('a').map((g) => g.map((i) => i.id))).toEqual([['chat.claude', 'chat.codex', 'chat.kimi', 'chat.grok']]);
+    expect(newTabGroups('a').map((g) => g.map((i) => i.id))).toEqual([['chat.claude', 'chat.codex', 'chat.agy', 'chat.kimi', 'chat.grok']]);
+    expect(chatKinds().map((k) => k.id)).toEqual(['claude', 'codex', 'agy', 'kimi', 'grok']);
     vi.unstubAllGlobals();
+    expect(hasMessage('chat.newTab.agy')).toBe(true);
     expect(chatPlugin.panels?.map((p) => p.id)).toEqual(['chat']);
     expect(chatPlugin.statusItems?.map((i) => (typeof i === 'object' ? i.id : ''))).toEqual(['chat.usage']);
     expect(Object.keys(chatPlugin.commands ?? {})).toEqual(['chat.new']);
@@ -103,7 +144,10 @@ describe('the chat plugin', () => {
     expect(P.STATES_PATH).toBe('/api/p/chat/states');
     expect([P.MAX_SUBS, P.MAX_SUBS_PER_MACHINE, P.MAX_PAGE_ID]).toEqual([32, 16, 64]);
     expect(P.MAX_STDERR).toBe(2048);
-    expect(P.REQUEST_OPS).toContain('trust');
+    expect(P.REQUEST_OPS).toEqual(expect.arrayContaining(['trust', 'models', 'fork', 'switch', 'export']));
+    expect(P.COMMAND_OPS).toEqual(expect.arrayContaining(['steer_queued', 'stop_task', 'rewind']));
+    expect(P.DELIVERIES).toEqual(['queue', 'steer', 'interrupt']);
+    expect(P.TASK_KINDS).toEqual(['shell', 'subagent', 'monitor', 'workflow', 'other']);
   });
 
   it('says every code of an error the page may receive in words, but the generic ones', () => {

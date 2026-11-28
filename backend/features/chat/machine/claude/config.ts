@@ -69,6 +69,27 @@ export function modelsOf(v: unknown): Model[] {
   return out;
 }
 
+/** The models of initialize or supportedModels as chatproto.ModelOption[]. */
+export function modelOptionsOf(v: unknown): chat.ModelOption[] {
+  const out: chat.ModelOption[] = [];
+  for (const m of modelsOf(v)) {
+    if (m.value === '') continue;
+    const opt: chat.ModelOption = {
+      value: m.value,
+      name: cut(firstOf(m.displayName, m.value), MAX_TEXT),
+      images: true,
+    };
+    const d = cut(m.description, MAX_TEXT);
+    if (d) opt.description = d;
+    if (m.supportsEffort && m.levels.length > 0) {
+      opt.efforts = [EFFORT_DEFAULT, ...m.levels];
+      opt.defaultEffort = EFFORT_DEFAULT;
+    }
+    out.push(opt);
+  }
+  return out;
+}
+
 /** The slash commands of initialize or commands_changed, as the chat
  * states them. */
 export function slashCommands(v: unknown): chat.SlashCommand[] {
@@ -212,6 +233,11 @@ export class Config {
         effort: levels.length > 0,
         model: this.models.length > 0,
         cancelQueued: true,
+        steer: true,
+        stopTask: true,
+        fork: true,
+        rewind: true,
+        rewindFiles: true,
       },
     };
   }

@@ -51,7 +51,7 @@ export async function terminal(page: Page, term: TermClient, count = 1): Promise
 export async function newChat(page: Page): Promise<Locator> {
   await page.locator('button.new-tab-kinds').first().click();
   await page.getByRole('menuitem', { name: /Kimi Code (?:Chat|对话)/ }).click();
-  const pane = page.locator('.pane:has(> .pane-header.focused) .chat-pane');
+  const pane = page.locator('.pane:has(> .pane-header.focused):has(.chat-pane)');
   await expect(pane.locator('.chat-state')).toHaveText(/^(?:Ready|就绪)$/);
   return pane;
 }

@@ -19,7 +19,7 @@ import { t } from '../i18n';
 import { VaultPanel, passStrength } from '../plugins/vault/VaultPanel';
 import { VaultApprovals } from '../plugins/vault/Approvals';
 import { SetupGuide } from '../plugins/vault/SetupGuide';
-import { endSession, loadVault, openSession, useVault, vaultApi, vaultMessage } from '../plugins/vault/api';
+import { endSession, errorText, loadVault, openSession, useVault, vaultApi, VaultError, vaultMessage } from '../plugins/vault/api';
 import { mcpCommand, setupSnippets } from '../plugins/vault/setup';
 import { pluginMessage } from '../plugins/registry';
 import '../plugins';
@@ -65,6 +65,14 @@ describe('vault', () => {
   let accessLog: unknown[];
   /** The auto-lock the list says (the setting's). */
   let autoLock: { after: number; setting: number; lockAt?: string };
+  let mockVariables: Array<{
+    name: string;
+    description: string;
+    machines: string[];
+    injectOnly: boolean;
+    created: string;
+    updated: string;
+  }>;
 
   beforeEach(async () => {
     calls = [];
@@ -74,6 +82,10 @@ describe('vault', () => {
     failPut = sessionGone = false;
     pending = [];
     autoLock = { after: 3600, setting: 3600, lockAt: new Date(Date.now() + 59 * 60_000 + 30_000).toISOString() };
+    mockVariables = [
+      { name: 'GITHUB_TOKEN', description: 'for gh', machines: ['*'], injectOnly: false, created: '', updated: '' },
+      { name: 'DB_PASS', description: '', machines: [], injectOnly: true, created: '', updated: '' },
+    ];
     accessLog = [{ time: '2026-01-01T00:00:00Z', m: 'm1', tool: 'get', names: ['GITHUB_TOKEN'], result: 'approved' }];
     await endSession().catch(() => undefined);
     useVault.setState({ status: undefined, variables: [], log: [], requests: {}, error: undefined, session: false });
@@ -95,10 +107,7 @@ describe('vault', () => {
           session: sent,
           idle: 600,
           autoLock,
-          variables: [
-            { name: 'GITHUB_TOKEN', description: 'for gh', machines: ['*'], injectOnly: false, created: '', updated: '' },
-            { name: 'DB_PASS', description: '', machines: [], injectOnly: true, created: '', updated: '' },
-          ],
+          variables: mockVariables.slice(),
         });
       }
       if (url === '/api/p/vault/log') return json({ log: accessLog });
@@ -454,7 +463,7 @@ describe('vault', () => {
     ];
     await act(async () => root.render(createElement('div', null, createElement(VaultPanel), createElement(VaultApprovals))));
     await flush();
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')][1].click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][data-tab="log"]')!.click());
     // Without a session the log is not asked for: the hub shows it to a
     // session only.
     expect(calls.some((c) => c.url === '/api/p/vault/log')).toBe(false);
@@ -524,5 +533,41 @@ describe('vault', () => {
       mcpServers: { 'veldr-vault': { command: '/home/u/.veldr/bin/veldr-mcp', args: [] } },
     });
     expect(setupSnippets({ home: '/home/a b' }).claude).toContain("'/home/a b/.veldr/bin/veldr-mcp'");
+  });
+
+  it('maps overloaded server error codes to distinct localized messages', () => {
+    expect(errorText(new VaultError('busy', 'another passphrase is being checked'))).toBe(t('vault.error.busy'));
+    expect(errorText(new VaultError('busy', 'another file is being encrypted or read; try again in a moment'))).toBe(
+      t('vault.error.file_busy'),
+    );
+    expect(errorText(new VaultError('full', 'too many variables'))).toBe(t('vault.error.full'));
+    expect(errorText(new VaultError('full', 'too many groups'))).toBe(t('vault.error.full_groups'));
+    expect(errorText(new VaultError('full', 'too many presets'))).toBe(t('vault.error.full_presets'));
+    expect(errorText(new VaultError('full', 'too many workspace links'))).toBe(t('vault.error.full_links'));
+    expect(errorText(new VaultError('not_found', 'no such variable'))).toBe(t('vault.error.not_found'));
+    expect(errorText(new VaultError('not_found', 'no such group'))).toBe(t('vault.error.group_not_found'));
+    expect(errorText(new VaultError('not_found', 'no such preset'))).toBe(t('vault.error.preset_not_found'));
+    expect(errorText(new VaultError('not_found', 'no such authenticator'))).toBe(t('vault.error.authenticator_not_found'));
+    expect(errorText(new VaultError('not_found', 'no such exemption'))).toBe(t('vault.error.exemption_not_found'));
+    expect(errorText(new VaultError('not_found', 'no such request (answered or expired)'))).toBe(t('vault.error.request_not_found'));
+    expect(errorText(new VaultError('exists', 'a variable of that name exists'))).toBe(t('vault.error.exists'));
+    expect(errorText(new VaultError('exists', 'a group of that name exists'))).toBe(t('vault.error.group_exists'));
+    expect(errorText(new VaultError('exists', 'a preset of that name exists'))).toBe(t('vault.error.preset_exists'));
+  });
+
+  it('prevents an earlier slow loadVault() from overwriting a newer loadVault()', async () => {
+    let releaseFirst!: () => void;
+    hold = new Promise((r) => (releaseFirst = r));
+    const first = loadVault();
+    hold = undefined;
+    // Newer load sees an updated variable list.
+    mockVariables.push({ name: 'NEW_VAR', description: '', machines: ['*'], injectOnly: false, created: '', updated: '' });
+    await loadVault();
+    expect(useVault.getState().variables.map((v) => v.name)).toContain('NEW_VAR');
+    // Stale first load now resolves with old snapshot -> must be discarded.
+    mockVariables.pop();
+    releaseFirst();
+    await first;
+    expect(useVault.getState().variables.map((v) => v.name)).toContain('NEW_VAR');
   });
 });

@@ -135,13 +135,41 @@ export const Op = {
   /** Reports the running chat host's status, metadata, and active headless
    * agent sessions (Response.hostStatus). */
   HostStatus: 'host_status',
+  /** Lists the models an agent kind offers (Response.models,
+   * Response.fetchedAt). Without Request.refresh, returns the host's cached
+   * list (empty when never fetched); with Request.refresh, probes the agent
+   * and updates the cache. */
+  Models: 'models',
+  /** Forks Request.chat (up to Request.upToSeq, or its end) into a new chat
+   * (Response.chat), using the agent's native fork where supported and a
+   * context-seeded handoff otherwise. */
+  Fork: 'fork',
+  /** Exports context from Request.chat (up to Request.upToSeq, or its end)
+   * and opens a new chat of Request.targetKind in the same directory seeded
+   * with that handoff (Response.chat). */
+  Switch: 'switch',
+  /** Exports Request.chat's conversation (up to Request.upToSeq, or its end)
+   * as a bounded Markdown handoff digest (Response.markdown). */
+  Export: 'export',
 } as const;
 export type Op = (typeof Op)[keyof typeof Op];
 
+/** How a prompt sent while a turn runs is delivered. */
+export const Delivery = {
+  /** Wait in the FIFO queue until the running turn completes (default). */
+  Queue: 'queue',
+  /** Inject into the running turn where the agent supports mid-turn steering. */
+  Steer: 'steer',
+  /** Cancel only the active turn (preserving unrelated queued messages) and
+   * run this prompt immediately. */
+  Interrupt: 'interrupt',
+} as const;
+export type Delivery = (typeof Delivery)[keyof typeof Delivery];
+
 /** The operations of a Command. Each is answered by an EventType.Ack. */
 export const CommandOp = {
-  /** Sends Command.content to the agent. While a turn runs the host queues
-   * the message, or steers it into the running turn where the agent can
+  /** Sends Command.content to the agent. While a turn runs, Command.delivery
+   * selects queuing (default), mid-turn steering or interrupt-and-send
    * (EventType.Queued); a chat in State.Sleeping or State.Closed is resumed
    * first, unless another process runs its session (Code.InTerminal). A
    * prompt with the clientId of one of the chat's last 256 prompts its log
@@ -164,7 +192,11 @@ export const CommandOp = {
   SetConfig: 'set_config',
   /** Withdraws the queued message Command.message before the agent took it. */
   CancelQueued: 'cancel_queued',
-  /** Compacts (summarizes) the conversation's context. */
+  /** Promotes the queued message Command.message to be sent immediately via
+   * Command.delivery ('steer' or 'interrupt', defaulting to 'steer'). */
+  SteerQueued: 'steer_queued',
+  /** Compacts (summarizes) the conversation's context, optionally guided by
+   * Command.instructions. */
   Compact: 'compact',
   /** Sets the chat's title to Command.title. */
   Rename: 'rename',
@@ -172,6 +204,13 @@ export const CommandOp = {
    * terminal: the chat is then Chat.handedOff. Refused with Code.Busy while a
    * turn runs. */
   Handoff: 'handoff',
+  /** Terminates a running background task or subagent named by Command.task
+   * (BackgroundTask.id). */
+  StopTask: 'stop_task',
+  /** Rewinds an idle chat to just before the EventType.User at Command.seq,
+   * optionally restoring file checkpoints (Command.restoreFiles) and
+   * immediately sending edited Command.content. */
+  Rewind: 'rewind',
 } as const;
 export type CommandOp = (typeof CommandOp)[keyof typeof CommandOp];
 
@@ -183,6 +222,22 @@ export interface Options {
   model?: string;
   effort?: string;
   mode?: string;
+  /** The models to start with when the agent does not offer model (or none
+   * is given), in the order they are tried (at most MAX_START_MODELS): the
+   * first the agent lists is used; none of them leaves the agent's own.
+   * A model the agent no longer offers never reaches it. */
+  models?: string[];
+}
+
+/** The most Options.models of a new chat. */
+export const MAX_START_MODELS = 64;
+
+/** The models a chat starts with, in the order to try them: Options.model,
+ * then Options.models, without repeats or empty values. */
+export function startModels(o: Options): string[] {
+  const out: string[] = [];
+  for (const m of [o.model ?? '', ...(o.models ?? [])]) if (m !== '' && !out.includes(m)) out.push(m);
+  return out;
 }
 
 /** The permission modes of the host's settings (HostSettings.defaultMode,
@@ -220,6 +275,9 @@ export interface Request {
   import?: boolean;
   /** What Op.New's chat starts with. */
   options?: Options;
+  /** Additional environment variables for Op.New's agent process (kept in
+   * memory only, never persisted to the journal or logged). */
+  env?: Record<string, string>;
   /** The chat of Op.Attach, Op.Close, Op.Delete, Op.Archive, Op.Unarchive
    * and Op.Seen. */
   chat?: string;
@@ -237,6 +295,45 @@ export interface Request {
   cursor?: string;
   /** Op.Configure's. */
   settings?: HostSettings;
+  /** Forces a fresh probe for Op.Models instead of returning cached models. */
+  refresh?: boolean;
+  /** Inclusive upper sequence number bound for Op.Fork, Op.Switch and Op.Export. */
+  upToSeq?: number;
+  /** Optional title for Op.Fork's new chat. */
+  title?: string;
+  /** Destination agent kind for Op.Switch. */
+  targetKind?: string;
+  /** Output format for Op.Export: 'markdown' (default) or 'json' (raw events). */
+  format?: 'markdown' | 'json';
+  /** Optional UTF-8 byte budget for Markdown export or handoff digest (Op.Export, Op.Switch, Op.Fork). */
+  maxBytes?: number;
+}
+
+/** Lossless raw JSON export of a chat and its stored events (Op.Export with format 'json'). */
+export interface ChatExport {
+  version: number;
+  /** RFC 3339 timestamp when the export was produced. */
+  exportedAt: string;
+  chat: {
+    id: string;
+    kind: string;
+    title: string;
+    cwd: string;
+    sessionId: string;
+    state: string;
+    created: string;
+    updated: string;
+    seq: number;
+    agentVersion?: string;
+    closed?: string;
+    archived?: string;
+    usage?: Usage;
+  };
+  upToSeq?: number;
+  /** True when earlier events were omitted to keep the export under the wire limit. */
+  truncated?: boolean;
+  omittedEvents?: number;
+  events: Event[];
 }
 
 /** The host's answer to a Request: ok with the members of the operation,
@@ -248,7 +345,7 @@ export interface Response {
   agents?: AgentStatus[];
   /** Answers Op.Chats. */
   chats?: Chat[];
-  /** Answers Op.New and Op.Attach. */
+  /** Answers Op.New, Op.Attach, Op.Fork and Op.Switch. */
   chat?: Chat;
   /** Answers Op.Attach: the lowest sequence number still stored, or the
    * next one's when none is. A client whose from is lower than first-1
@@ -264,6 +361,69 @@ export interface Response {
   trusted?: TrustedFolder[];
   /** Answers Op.HostStatus. */
   hostStatus?: HostStatus;
+  /** Answers Op.Models: available models for Request.kind, and when fetched (RFC 3339). */
+  models?: ModelOption[];
+  fetchedAt?: string;
+  /** Answers Op.Export (format 'markdown'): bounded Markdown conversation digest. */
+  markdown?: string;
+  /** Answers Op.Export (format 'json'): structured raw chat metadata and stored events. */
+  data?: ChatExport;
+}
+
+/** A model offered by an agent kind (Op.Models). */
+export interface ModelOption {
+  value: string;
+  name: string;
+  description?: string;
+  /** Effort / thought-level values supported by this model, when known. */
+  efforts?: string[];
+  defaultEffort?: string;
+  /** Whether the model accepts image inputs, when known. */
+  images?: boolean;
+}
+
+/** The kind of a running or recent background task (BackgroundTask.kind). */
+export const TaskKind = {
+  Shell: 'shell',
+  Subagent: 'subagent',
+  Monitor: 'monitor',
+  Workflow: 'workflow',
+  Other: 'other',
+} as const;
+export type TaskKind = (typeof TaskKind)[keyof typeof TaskKind];
+
+/** The lifecycle state of a background task (BackgroundTask.status). */
+export const TaskStatus = {
+  Running: 'running',
+  Pending: 'pending',
+  Completed: 'completed',
+  Failed: 'failed',
+  Stopped: 'stopped',
+} as const;
+export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
+
+/** A background task or subagent tracked by a live chat session (Chat.tasks). */
+export interface BackgroundTask {
+  id: string;
+  kind: TaskKind;
+  status: TaskStatus;
+  description: string;
+  command?: string;
+  agentType?: string;
+  /** Tool call id in the conversation timeline that spawned this task. */
+  toolCallId?: string;
+  parentTaskId?: string;
+  /** OS process id, when known. */
+  pid?: number;
+  /** True when detached/running in the background. */
+  backgrounded?: boolean;
+  /** True when CommandOp.StopTask can terminate this task. */
+  stoppable?: boolean;
+  /** RFC 3339. */
+  startedAt?: string;
+  tokens?: number;
+  toolUses?: number;
+  durationMs?: number;
 }
 
 /** A directory the user trusted on the machine (Op.Trusted). */
@@ -438,6 +598,8 @@ export interface Chat {
   commands?: SlashCommand[];
   /** The session's context and cost, once known. */
   usage?: Usage;
+  /** Running background tasks and subagents while the agent process is live. */
+  tasks?: BackgroundTask[];
   /** What the chat's agent can do. */
   capabilities: Capabilities;
 }
@@ -498,6 +660,16 @@ export interface Capabilities {
   model: boolean;
   /** CommandOp.CancelQueued. */
   cancelQueued: boolean;
+  /** Mid-turn steering via Delivery.Steer (CommandOp.Prompt / SteerQueued). */
+  steer?: boolean;
+  /** CommandOp.StopTask for running background tasks/subagents. */
+  stopTask?: boolean;
+  /** Native session fork (Op.Fork; host falls back to context-seeded fork when false). */
+  fork?: boolean;
+  /** CommandOp.Rewind (truncate conversation history to an earlier user turn). */
+  rewind?: boolean;
+  /** CommandOp.Rewind with restoreFiles: true (file checkpoints). */
+  rewindFiles?: boolean;
 }
 
 /** The categories of a ConfigOption the UIs know; others are the agents'. */
@@ -553,6 +725,8 @@ export interface Usage {
   /** The agent's own measure of the context in use, when it gives one; else
    * used/size. */
   percentage?: number;
+  /** True after manual compaction until the agent reports fresh context usage. */
+  stale?: boolean;
   /** The session's cost so far. */
   cost?: Cost;
   /** The subscription's rate limit windows the agent reports. */
@@ -620,6 +794,9 @@ export interface HostSettings {
   maxChatBytes?: number;
   /** The permission mode of a chat whose Options name none (MODES). */
   defaultMode?: string;
+  /** Optional per-agent-kind permission mode overrides (each in MODES);
+   * takes precedence over defaultMode when Options.mode is omitted. */
+  defaultModes?: Record<string, string>;
   /** Allows full access (Mode.Full, a ConfigValue.full): without it the
    * host refuses a chat or a configuration that asks for it, and a chat that
    * had it starts its agent again in Mode.Default (the notice
@@ -627,9 +804,11 @@ export interface HostSettings {
   allowFull?: boolean;
 }
 
-/** HostSettings as clampHostSettings returns them: every member set but
- * allowFull, which is there only when true. */
-export type ClampedHostSettings = Required<Omit<HostSettings, 'allowFull'>> & Pick<HostSettings, 'allowFull'>;
+/** HostSettings as clampHostSettings returns them: every member set except
+ * allowFull (present only when true) and defaultModes (present only when
+ * non-empty). */
+export type ClampedHostSettings = Required<Omit<HostSettings, 'allowFull' | 'defaultModes'>> &
+  Pick<HostSettings, 'allowFull' | 'defaultModes'>;
 
 const MIB = 1 << 20;
 
@@ -637,13 +816,17 @@ const MIB = 1 << 20;
 export const defaultHostSettings = (): ClampedHostSettings => clampHostSettings({});
 
 /** s with each member within its bounds: a member left out or 0 its
- * default, one out of its bounds the nearest bound, and a defaultMode that is
- * no mode, or Mode.Full without allowFull, Mode.Default. What is no number
- * (settings read from JSON are not checked) counts as left out, and a
- * fraction is cut to a whole number. */
+ * default, one out of its bounds the nearest bound, and a defaultMode (or
+ * per-kind defaultModes entry) that is no mode, or Mode.Full without
+ * allowFull, clamped to Mode.Default. What is no number (settings read from
+ * JSON are not checked) counts as left out, and a fraction is cut to a whole
+ * number. */
 export function clampHostSettings(s: HostSettings): ClampedHostSettings {
   const allowFull = s.allowFull === true;
-  const mode = typeof s.defaultMode === 'string' ? s.defaultMode : '';
+  const clampMode = (raw: unknown): Mode => {
+    const m = typeof raw === 'string' ? raw : '';
+    return (MODES as readonly string[]).includes(m) && !(m === Mode.Full && !allowFull) ? (m as Mode) : Mode.Default;
+  };
   const out: ClampedHostSettings = {
     idleStopMinutes: clamp(s.idleStopMinutes, IDLE_STOP_MINUTES_DEFAULT, IDLE_STOP_MINUTES_MIN, IDLE_STOP_MINUTES_MAX),
     maxLive: clamp(s.maxLive, MAX_LIVE_DEFAULT, MAX_LIVE_MIN, MAX_LIVE_MAX),
@@ -651,8 +834,17 @@ export function clampHostSettings(s: HostSettings): ClampedHostSettings {
     retentionDays: clamp(s.retentionDays, RETENTION_DAYS_DEFAULT, RETENTION_DAYS_MIN, RETENTION_DAYS_MAX),
     maxTotalBytes: clamp(s.maxTotalBytes, MAX_TOTAL_MB_DEFAULT * MIB, MAX_TOTAL_MB_MIN * MIB, MAX_TOTAL_MB_MAX * MIB),
     maxChatBytes: clamp(s.maxChatBytes, MAX_CHAT_MB_DEFAULT * MIB, MAX_CHAT_MB_MIN * MIB, MAX_CHAT_MB_MAX * MIB),
-    defaultMode: (MODES as readonly string[]).includes(mode) && !(mode === Mode.Full && !allowFull) ? mode : Mode.Default,
+    defaultMode: clampMode(s.defaultMode),
   };
+  if (s.defaultModes && typeof s.defaultModes === 'object' && !Array.isArray(s.defaultModes)) {
+    const perKind: Record<string, string> = {};
+    for (const [k, v] of Object.entries(s.defaultModes)) {
+      if (typeof k !== 'string' || !k || k.length > 64) continue;
+      if (typeof v !== 'string' || !(MODES as readonly string[]).includes(v)) continue;
+      perKind[k] = v === Mode.Full && !allowFull ? Mode.Default : v;
+    }
+    if (Object.keys(perKind).length > 0) out.defaultModes = perKind;
+  }
   if (allowFull) out.allowFull = true;
   return out;
 }
@@ -702,6 +894,9 @@ export const EventType = {
   /** The answer to the Command Event.id, with Event.error when it was
    * refused. Acks have no sequence number and are not stored. */
   Ack: 'ack',
+  /** The chat's log was rewound/truncated to Event.seq; live clients reload
+   * from the truncated head. Never stored. */
+  Reset: 'reset',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 
@@ -748,6 +943,8 @@ export const By = {
   Cancel: 'cancel',
   /** The turn or the chat ended. */
   Ended: 'ended',
+  /** An async question was superseded by a newer prompt or question. */
+  Superseded: 'superseded',
 } as const;
 
 /** A line of an attached connection: something a chat did, or the answer
@@ -779,6 +976,9 @@ export interface Event {
   /** The id of the item an EventType.Update belongs to: a message, a
    * thought, a tool call. */
   item?: string;
+  /** Transcript entry UUID (e.g. Claude Code JSONL line UUID), distinct from
+   * item, used for native rewind (resumeSessionAt/rewindFiles) and partial fork. */
+  entryUuid?: string;
   /** The tool call id of the subagent the event belongs to; left out for the
    * main agent's. */
   parent?: string;
@@ -811,6 +1011,11 @@ export interface Event {
    * EventType.QuestionDone was answered, by Question.id. */
   questions?: Question[];
   answers?: Record<string, string[]>;
+  /** True on EventType.Question when the question is non-blocking (does not
+   * hold the turn in State.Waiting and survives Turn.End). */
+  async?: boolean;
+  /** Optional auto-resolution timeout in milliseconds for an async question. */
+  autoResolutionMs?: number;
   /** The chat as it is now (EventType.Info). */
   chat?: Chat;
   /** method and params are a notice's (EventType.Notice). */
@@ -858,6 +1063,8 @@ export interface Question {
   allowOther?: boolean;
   /** The answer is not to be shown as typed (a password). */
   secret?: boolean;
+  /** The user may submit without answering this question. */
+  optional?: boolean;
   options?: QuestionOption[];
 }
 
@@ -894,10 +1101,21 @@ export interface Command {
   /** config and value are the option CommandOp.SetConfig sets and its value. */
   config?: string;
   value?: string;
-  /** The queued message CommandOp.CancelQueued withdraws. */
+  /** The queued message CommandOp.CancelQueued withdraws or
+   * CommandOp.SteerQueued promotes. */
   message?: string;
+  /** How CommandOp.Prompt or CommandOp.SteerQueued is delivered while busy. */
+  delivery?: Delivery;
   /** CommandOp.Rename's. */
   title?: string;
+  /** CommandOp.StopTask's BackgroundTask.id. */
+  task?: string;
+  /** CommandOp.Rewind's target EventType.User sequence number. */
+  seq?: number;
+  /** CommandOp.Rewind: also restore file checkpoints when supported. */
+  restoreFiles?: boolean;
+  /** CommandOp.Compact: optional compaction guidance. */
+  instructions?: string;
 }
 
 /** The codes of a ChatError. */
@@ -912,6 +1130,8 @@ export const Code = {
   /** A turn runs, the chat still starts, or a chat works or waits
    * (Op.Shutdown). */
   Busy: 'busy',
+  /** Too many session listings or model probes run at once. */
+  ProbeBusy: 'probe_busy',
   /** The agent's program, the session, the permission or the question is
    * not there. */
   NotFound: 'not_found',

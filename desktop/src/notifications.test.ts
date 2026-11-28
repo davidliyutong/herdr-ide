@@ -4,8 +4,10 @@ import type { NotificationTarget } from '../../web/src/shell';
 import {
   createNotifications,
   MAX_ACTIVE_NOTIFICATIONS,
+  MAX_BADGE_COUNT,
   MAX_NOTIFY_BODY,
   MAX_NOTIFY_TITLE,
+  parseBadgeCount,
   parseNotificationOptions,
   parseNotificationTarget,
   sanitizeTag,
@@ -102,6 +104,7 @@ interface FakeHandle extends NativeNotificationHandle {
 
 function fakeFactory() {
   const created: FakeHandle[] = [];
+  const badges: number[] = [];
   let supported = true;
   let mainShown = 0;
   const manager = createNotifications({
@@ -134,10 +137,14 @@ function fakeFactory() {
     showMain: () => {
       mainShown++;
     },
+    setBadgeCount: (n) => {
+      badges.push(n);
+    },
   });
   return {
     manager,
     created,
+    badges,
     setSupported: (v: boolean) => {
       supported = v;
     },
@@ -229,4 +236,22 @@ test('bounds active notifications and handles unsupported OS cleanly', () => {
   f.setSupported(false);
   assert.equal(f.manager.supported(), false);
   assert.equal(f.manager.show({ title: 'Ignored' }), false);
+});
+
+test('parseBadgeCount and setBadgeCount validate counts and closeAll clears the badge', () => {
+  assert.equal(parseBadgeCount(0), 0);
+  assert.equal(parseBadgeCount(5), 5);
+  assert.equal(parseBadgeCount(MAX_BADGE_COUNT + 50), MAX_BADGE_COUNT);
+  for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, '3', null, undefined, {}]) {
+    assert.equal(parseBadgeCount(bad), undefined, JSON.stringify(bad));
+  }
+
+  const f = fakeFactory();
+  f.manager.setBadgeCount(4);
+  f.manager.setBadgeCount(-2);
+  f.manager.setBadgeCount('bad');
+  f.manager.setBadgeCount(0);
+  f.manager.setBadgeCount(20000);
+  f.manager.closeAll();
+  assert.deepEqual(f.badges, [4, 0, MAX_BADGE_COUNT, 0]);
 });

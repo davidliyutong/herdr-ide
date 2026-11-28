@@ -2,7 +2,7 @@
 // spec/vectors/chat/acp (testdata/fakeagent.ts), its records compared with
 // the golden files of the same scenarios (testdata/golden).
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { ChatProtoError } from '#shared/proto/chatproto/index.ts';
@@ -206,13 +206,18 @@ describe('the ACP adapter', () => {
     expect([c.usage?.used, c.usage?.size]).toEqual([25008, 256000]);
     expect(c.capabilities).toEqual({
       images: true,
-      compact: false,
+      compact: true,
       queue: true,
       plan: false,
       questions: false,
       effort: true,
       model: true,
       cancelQueued: true,
+      steer: false,
+      stopTask: false,
+      fork: false,
+      rewind: false,
+      rewindFiles: false,
     });
     expect(c.agentVersion).toBeTruthy();
     h.golden('grok-session');
@@ -553,6 +558,24 @@ describe('the ACP adapter', () => {
     expect(h.log.lines.join('\n')).toContain('no model "no-such-model" to start with');
   });
 
+  test("a chat's models: the first the agent offers of Options.model, then Options.models (one withdrawn is passed over)", async () => {
+    const h = new Harness();
+    const steps = h.rec('kimi', '01-initialize').concat(h.rec('kimi', '02-session-new'));
+    const sid = `"sessionId":"${SID}"`;
+    steps.push(
+      msgLine(
+        'out',
+        `{"jsonrpc":"2.0","id":3,"method":"session/set_config_option","params":{${sid},"configId":"model","value":"kimi-code/k3"}}`,
+      ),
+      msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{}}`),
+    );
+    const p = h.params(steps);
+    p.options = { model: 'kimi-code/withdrawn', models: ['kimi-code/also-gone', 'kimi-code/k3', 'kimi-code/k3-256k'] };
+    const s = await h.start(p);
+    await h.close(s);
+    expect(optionOf(h.host.chat.config ?? [], chat.Category.Model)?.currentValue).toBe('kimi-code/k3');
+  });
+
   test("an agent's session modes without a configuration option of category mode: an option of the chat's own, set by session/set_mode", async () => {
     const h = new Harness();
     const steps = h.rec('kimi', '01-initialize').concat(h.rec('kimi', '02-session-new'));
@@ -590,6 +613,14 @@ describe('the ACP adapter', () => {
       const res = m.result as Record<string, Record<string, unknown>> | undefined;
       if (!res?.agentCapabilities) return false;
       res.agentCapabilities.promptCapabilities = {};
+      return true;
+    });
+    // An agent without a /compact command: the recording advertises one in an
+    // update after session/new's answer, which a start may or may not have seen.
+    edit(steps, (m) => {
+      const u = (m.params as { update?: { sessionUpdate?: string; availableCommands?: { name: string }[] } } | undefined)?.update;
+      if (u?.sessionUpdate !== 'available_commands_update' || !u.availableCommands) return false;
+      u.availableCommands = u.availableCommands.filter((c) => c.name !== 'compact');
       return true;
     });
     const s = await h.start(h.params(steps));
@@ -669,6 +700,573 @@ describe('the ACP adapter', () => {
     };
     await h.turn(s, promptOf(write));
     expect(before).toBeGreaterThan(0);
+    await h.close(s);
+  });
+
+  test('Antigravity (agy) ACP: config options, dynamic thought_level, auto marked full, 1M context, /compact, and session/close', async () => {
+    const h = new Harness();
+    const steps = h.rec('agy', '01-initialize').concat(h.rec('agy', '02-session-new'), h.rec('agy', '03-prompt-and-config'));
+    const p = h.params(steps);
+    p.kind = 'agy';
+    const s = await h.start(p);
+    expect(s.id).toBe('00000000-0000-4000-8000-0000000000a1');
+    // agy emits available_commands_update and usage_update right after session/new returns.
+    for (let i = 0; i < 200 && (!h.host.chat.capabilities.compact || h.host.chat.usage?.size !== 1048576); i++) {
+      await Bun.sleep(5);
+    }
+    const c = h.host.chat;
+    expect(c.agentVersion).toBe('1.5.18');
+    expect(c.capabilities).toEqual({
+      images: true,
+      compact: true,
+      queue: true,
+      plan: false,
+      questions: false,
+      effort: true,
+      model: true,
+      cancelQueued: true,
+      steer: false,
+      stopTask: false,
+      fork: false,
+      rewind: false,
+      rewindFiles: false,
+    });
+    const modeOpt = optionOf(c.config ?? [], chat.Category.Mode)!;
+    expect(modeOpt.options?.find((o) => o.value === 'auto')?.full).toBe(true);
+    for (const safe of ['default', 'accept-edits', 'plan']) {
+      expect(modeOpt.options?.find((o) => o.value === safe)?.full).toBeUndefined();
+    }
+    expect([c.usage?.used, c.usage?.size]).toEqual([0, 1048576]);
+
+    // Turn 1: prompt + thought + reply + usage update.
+    expect((await h.turn(s, [{ type: 'text', text: 'Reply with hi' }])).stopReason).toBe('end_turn');
+    expect([h.host.chat.usage?.used, h.host.chat.usage?.size]).toEqual([12400, 1048576]);
+
+    // Switching model dynamically updates thought_level options.
+    await s.setConfig('model', 'claude-opus-5-5', never());
+    expect(optionOf(h.host.chat.config ?? [], chat.Category.Model)?.currentValue).toBe('claude-opus-5-5');
+    expect(optionOf(h.host.chat.config ?? [], chat.Category.ThoughtLevel)?.options?.map((o) => o.value)).toEqual(['low', 'medium', 'high']);
+
+    // Manual /compact with custom instructions emits Notice.Command, Compacting, Compacted and runs a turn.
+    await s.compact(never(), 'keep decisions');
+    expect((await h.host.await("compact turn's end", turnOver)).stopReason).toBe('end_turn');
+    expect(h.host.events.some((ev) => ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Command))).toBe(true);
+    expect(h.host.events.some((ev) => ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Compacting))).toBe(true);
+    expect(h.host.events.some((ev) => ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Compacted))).toBe(true);
+    expect(h.host.chat.usage?.used).toBe(4200);
+    expect(h.host.chat.usage?.stale).toBeUndefined();
+
+    // Graceful close calls session/close (checked strictly by fakeagent script).
+    await h.close(s);
+  });
+
+  test('ACP /compact resets usage to 0 (stale) when agent omits post-compact usage or reports a summarization spike, and preserves size', async () => {
+    const h = new Harness();
+    const sid = '00000000-0000-4000-8000-0000000000a1';
+    const steps = h
+      .rec('agy', '01-initialize')
+      .concat(h.rec('agy', '02-session-new'))
+      .concat([
+        // Turn 1: establishes 12400 / 1048576 usage.
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"hello"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"usage_update","used":12400,"size":1048576}}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}`),
+        // Turn 2 (/compact): emits a summarization spike >= 12400 (must be ignored) and no smaller post-compact update.
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"/compact"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"usage_update","used":15000,"size":1048576}}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}`),
+        // Turn 3 (normal turn): reports fresh smaller usage omitting size -> preserves 1048576 and clears stale.
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":5,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"next"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"usage_update","used":3100}}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":6,"method":"session/close","params":{"sessionId":"${sid}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":6,"result":{}}`),
+      ]);
+    const p = h.params(steps);
+    p.kind = 'agy';
+    const s = await h.start(p);
+    for (let i = 0; i < 200 && (!h.host.chat.capabilities.compact || h.host.chat.usage?.size !== 1048576); i++) {
+      await Bun.sleep(5);
+    }
+
+    await h.turn(s, [{ type: 'text', text: 'hello' }]);
+    expect(h.host.chat.usage).toMatchObject({ used: 12400, size: 1048576 });
+
+    await s.compact(never());
+    expect((await h.host.await("compact turn's end", turnOver)).stopReason).toBe('end_turn');
+    expect(h.host.chat.usage).toMatchObject({ used: 0, size: 1048576, stale: true });
+    expect(h.host.events.some((ev) => ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Compacting))).toBe(true);
+    expect(h.host.events.some((ev) => ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Compacted))).toBe(true);
+
+    // Next normal turn clears stale and preserves 1M window even when size is omitted.
+    await h.turn(s, [{ type: 'text', text: 'next' }]);
+    expect(h.host.chat.usage).toMatchObject({ used: 3100, size: 1048576 });
+    expect(h.host.chat.usage?.stale).toBeUndefined();
+
+    await h.close(s);
+  });
+
+  test('Antigravity (agy) session/list filters out sessions from other workspaces', async () => {
+    const h = new Harness();
+    const steps = h.rec('agy', '01-initialize').concat(h.rec('agy', '04-list'));
+    const { sessions, next } = await h.a.sessions({ ...h.params(steps), kind: 'agy', cursor: '' }, never());
+    expect(next).toBe('');
+    expect(sessions.map((s) => `${s.sessionId} ${s.title}`)).toEqual([
+      '00000000-0000-4000-8000-0000000000a1 Work session newer',
+      '00000000-0000-4000-8000-0000000000a3 Work session older',
+    ]);
+  });
+
+  test('Antigravity (agy) ACP invoke_subagent normalizes call, streams child transcript under parent, and clears tasks', async () => {
+    const h = new Harness();
+    const parentSid = '00000000-0000-4000-8000-0000000000a1';
+    const childSid = '00000000-0000-4000-8000-0000000000b2';
+    const agyDir = join(h.dir, '.gemini', 'antigravity-cli');
+    const parentLog = join(agyDir, 'brain', parentSid, '.system_generated', 'logs', 'transcript.jsonl');
+    const childLog = join(agyDir, 'brain', childSid, '.system_generated', 'logs', 'transcript.jsonl');
+    const steps = h
+      .rec('agy', '01-initialize')
+      .concat(h.rec('agy', '02-session-new'))
+      .concat([
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"${parentSid}","prompt":[{"type":"text","text":"run ls in subagent"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${parentSid}","update":{"sessionUpdate":"tool_call","toolCallId":"call_sub_1","name":"invoke_subagent","kind":"other","title":"Run invoke_subagent","status":"in_progress","rawInput":{"TypeName":"self","Role":"Shell Runner","Prompt":"Run ls"}}}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${parentSid}","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_sub_1","name":"invoke_subagent","kind":"other","title":"Run invoke_subagent","status":"completed","rawInput":{"TypeName":"self","Role":"Shell Runner","Prompt":"Run ls"}}}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":4,"method":"session/close","params":{"sessionId":"${parentSid}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":4,"result":{}}`),
+      ]);
+    const p = h.params(steps);
+    p.kind = 'agy';
+    p.env = { ...p.env, HOME: h.dir };
+    const s = await h.start(p);
+
+    // Pre-create parent and child transcript files after session opens so onTurnEnd drains them cleanly.
+    mkdirSync(join(agyDir, 'brain', parentSid, '.system_generated', 'logs'), { recursive: true });
+    mkdirSync(join(agyDir, 'brain', childSid, '.system_generated', 'logs'), { recursive: true });
+    writeFileSync(
+      parentLog,
+      [
+        JSON.stringify({
+          step_index: 2,
+          type: 'GENERIC',
+          content: `Created the following subagent:\n{"conversationId":"${childSid}","logAbsoluteUri":"file://${childLog}"}`,
+        }),
+        JSON.stringify({
+          step_index: 4,
+          type: 'SYSTEM_MESSAGE',
+          content: `[Message] sender=${childSid} content=README.md`,
+        }),
+      ].join('\n') + '\n',
+    );
+    writeFileSync(
+      childLog,
+      [
+        JSON.stringify({
+          step_index: 1,
+          type: 'PLANNER_RESPONSE',
+          thinking: 'Listing files.',
+          tool_calls: [{ name: 'run_command', args: { CommandLine: '"ls"' } }],
+        }),
+        JSON.stringify({
+          step_index: 2,
+          type: 'GENERIC',
+          content: 'Command exited with code 0.\n\nCommand output:\nREADME.md\n',
+        }),
+      ].join('\n') + '\n',
+    );
+
+    expect((await h.turn(s, [{ type: 'text', text: 'run ls in subagent' }])).stopReason).toBe('end_turn');
+    const nested = h.host.events.filter((ev) => ev.parent === 'call_sub_1');
+    expect(nested.some((ev) => (ev.update as Record<string, unknown>).kind === 'execute')).toBe(true);
+    expect(nested.some((ev) => (ev.update as Record<string, unknown>).sessionUpdate === 'agent_thought_chunk')).toBe(true);
+    const parentDone = h.host.events.filter((ev) => !ev.parent && ev.item === 'call_sub_1').at(-1)!.update as Record<string, unknown>;
+    expect(parentDone.kind).toBe('think');
+    expect(parentDone.title).toBe('Shell Runner');
+    expect(parentDone.status).toBe('completed');
+    expect(h.host.chat.tasks).toBeUndefined();
+    await h.close(s);
+  });
+
+  test('models() probes ACP models from configOptions and closes cleanly; enriches Grok efforts', async () => {
+    const h = new Harness();
+    const agySteps = h
+      .rec('agy', '01-initialize')
+      .concat(h.rec('agy', '02-session-new').slice(0, 2))
+      .concat([
+        msgLine('out', `{"jsonrpc":"2.0","id":3,"method":"session/close","params":{"sessionId":"00000000-0000-4000-8000-0000000000a1"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{}}`),
+      ]);
+    const agyModels = await h.a.models!({ ...h.params(agySteps), kind: 'agy' }, never());
+    expect(agyModels).toEqual([
+      { value: 'gemini-4-neon', name: 'Gemini 4 Neon', images: true },
+      { value: 'claude-opus-5-5', name: 'Claude Opus 5.5', images: true },
+      { value: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B', images: true },
+    ]);
+
+    const h2 = new Harness();
+    const grokSteps = h2.rec('grok', '01-initialize').concat(h2.rec('grok', '02-session-new-yolo-off'));
+    // Strip _meta from session/new expectation since models() sends empty mcpServers without newSessionMeta.
+    edit(grokSteps, (m) => {
+      if (m.method !== 'session/new') return false;
+      delete (m.params as Record<string, unknown>)._meta;
+      return true;
+    });
+    const grokModels = await h2.a.models!({ ...h2.params(grokSteps), kind: 'grok' }, never());
+    expect(grokModels.length).toBeGreaterThan(0);
+    expect(grokModels[0]?.images).toBe(true);
+  });
+
+  test('session/resume -32603 hinting session/load falls back to session/load; missing session maps to not_found', async () => {
+    const h = new Harness();
+    const sid = '00000000-0000-4000-8000-0000000000a9';
+    const fallbackSteps = h
+      .rec('agy', '01-initialize')
+      .concat([
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":2,"method":"session/resume","params":{"sessionId":"${sid}","cwd":"${h.dir}","mcpServers":[]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"Failed to read session ${sid}; retry, or load it with session/load"}}`,
+        ),
+        msgLine('out', `{"jsonrpc":"2.0","id":3,"method":"session/load","params":{"sessionId":"${sid}","cwd":"${h.dir}","mcpServers":[]}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{}}`),
+      ]);
+    const p = h.params(fallbackSteps);
+    p.resume = sid;
+    const s = await h.start(p);
+    expect(s.id).toBe(sid);
+    await h.close(s);
+
+    const h2 = new Harness();
+    const missingSteps = h2
+      .rec('agy', '01-initialize')
+      .concat([
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":2,"method":"session/resume","params":{"sessionId":"${sid}","cwd":"${h2.dir}","mcpServers":[]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"Failed to read session ${sid}; retry, or load it with session/load"}}`,
+        ),
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/load","params":{"sessionId":"${sid}","cwd":"${h2.dir}","mcpServers":[]}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Failed to read session ${sid}"}}`),
+      ]);
+    const p2 = h2.params(missingSteps);
+    p2.resume = sid;
+    expect((await rejects(h2.a.start(p2, h2.host, AbortSignal.timeout(PATIENCE)))).code).toBe(chat.Code.NotFound);
+  });
+
+  test('fork() calls session/fork when advertised and rejects unsupported otherwise', async () => {
+    const h = new Harness();
+    const forkedId = 'session_00000000-0000-4000-8000-000000000099';
+    const forkSteps = h
+      .rec('kimi', '01-initialize')
+      .concat([
+        msgLine('out', `{"jsonrpc":"2.0","id":2,"method":"session/fork","params":{"sessionId":"${SID}","cwd":"${h.dir}","mcpServers":[]}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":2,"result":{"sessionId":"${forkedId}"}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":3,"method":"session/close","params":{"sessionId":"${forkedId}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{}}`),
+      ]);
+    expect(await h.a.fork!({ ...h.params(forkSteps), sessionId: SID }, never())).toEqual({ sessionId: forkedId });
+
+    const h2 = new Harness();
+    const noFork = h2.rec('agy', '01-initialize');
+    expect((await rejects(h2.a.fork!({ ...h2.params(noFork), sessionId: SID }, never()))).code).toBe(chat.Code.Unsupported);
+
+    // Partial forks must throw Unsupported without spawning an agent so the
+    // host falls back to a consistent context-seeded fork.
+    const h3 = new Harness();
+    const base = { ...h3.params([]), sessionId: SID };
+    for (const partial of [{ partial: true }, { upToMessageId: 'u1' }, { beforeTurnId: 't2' }, { lastTurnId: 't1' }]) {
+      expect((await rejects(h3.a.fork!({ ...base, ...partial }, never()))).code).toBe(chat.Code.Unsupported);
+    }
+  });
+
+  test('delivery interrupt cancels only the active turn and preserves unrelated queued messages; steer is unsupported', async () => {
+    const h = new Harness();
+    const run = h.rec('kimi', '05-execute-permission');
+    const upTo: Step[] = [];
+    for (const st of run) {
+      upTo.push(st);
+      if (st.msg?.method === 'session/request_permission') break;
+    }
+    const sid = `"sessionId":"${SID}"`;
+    const steps = h
+      .rec('kimi', '01-initialize')
+      .concat(h.rec('kimi', '02-session-new'), upTo)
+      .concat([
+        msgLine('out', `{"jsonrpc":"2.0","method":"session/cancel","params":{${sid}}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":1,"result":{"outcome":{"outcome":"cancelled"}}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":5,"result":{"stopReason":"cancelled"}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":6,"method":"session/prompt","params":{${sid},"prompt":[{"type":"text","text":"urgent"}]}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn"}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":7,"method":"session/prompt","params":{${sid},"prompt":[{"type":"text","text":"later"}]}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":7,"result":{"stopReason":"end_turn"}}`),
+      ]);
+    const s = await h.start(h.params(steps));
+    await s.prompt(prompt(s, promptOf(run)));
+    await h.host.permissionAfter(0);
+    await s.prompt(prompt(s, [{ type: 'text', text: 'later' }], 'q1', 'c1'));
+    expect(
+      (await rejects(s.prompt({ ...prompt(s, [{ type: 'text', text: 'nope' }], 'q-steer'), delivery: chat.Delivery.Steer }))).code,
+    ).toBe(chat.Code.Unsupported);
+    expect((await rejects(s.steerQueued('q1', 'steer', never()))).code).toBe(chat.Code.Unsupported);
+    await s.prompt({ ...prompt(s, [{ type: 'text', text: 'urgent' }], 'q-int', 'c-int'), delivery: chat.Delivery.Interrupt });
+    expect((await h.host.await('cancelled active turn', turnOver)).stopReason).toBe('cancelled');
+    const taken1 = await h.host.await(
+      'interrupt prompt taken first',
+      (ev) => ev.t === chat.EventType.Queued && ev.state === chat.QueuedState.Taken,
+    );
+    expect(taken1.message).toBe('q-int');
+    expect((await h.host.await('interrupt turn end', turnOver)).stopReason).toBe('end_turn');
+    const taken2 = await h.host.await(
+      'unrelated queued prompt preserved',
+      (ev) => ev.t === chat.EventType.Queued && ev.state === chat.QueuedState.Taken,
+    );
+    expect(taken2.message).toBe('q1');
+    expect((await h.host.await('queued turn end', turnOver)).stopReason).toBe('end_turn');
+    await h.close(s);
+  });
+
+  test('an ACP agent without native modes (Grok) gets client-enforced permission modes via allow_once', async () => {
+    const h = new Harness();
+    const write = h.rec('grok', '04-permission-write');
+    const exec = h.rec('grok', '05c-execute-permission');
+    const steps = h.rec('grok', '01-initialize').concat(h.rec('grok', '02-session-new-yolo-off'), write, exec);
+    const p = h.params(steps);
+    p.newSessionMeta = { yoloMode: false };
+    p.options = { mode: chat.Mode.AcceptEdits };
+    // Only the execute turn should reach the host; file write is auto-approved.
+    h.host.answers = ['allow-once'];
+    const s = await h.start(p);
+
+    const modeOpt = optionOf(h.host.chat.config ?? [], chat.Category.Mode)!;
+    expect(modeOpt.id).toBe('mode');
+    expect(modeOpt.currentValue).toBe(chat.Mode.AcceptEdits);
+    expect(modeOpt.options).toEqual([
+      { value: chat.Mode.Default, name: 'Default' },
+      { value: chat.Mode.AcceptEdits, name: 'Accept Edits' },
+      { value: chat.Mode.Full, name: 'Full Access', full: true },
+    ]);
+    expect((await rejects(s.setConfig('mode', 'bogus', never()))).code).toBe(chat.Code.BadRequest);
+
+    expect((await h.turn(s, promptOf(write))).stopReason).toBe('end_turn');
+    expect(h.host.perms).toHaveLength(0);
+    expect((await h.turn(s, promptOf(exec))).stopReason).toBe('end_turn');
+    expect(h.host.perms).toHaveLength(1);
+    expect(h.host.perms[0]?.kind).toBe(chat.PermissionKind.Command);
+    await h.close(s);
+
+    // Switching to full access locally auto-approves both writes and commands without any RPC.
+    const h2 = new Harness();
+    const write2 = h2.rec('grok', '04-permission-write');
+    const exec2 = h2.rec('grok', '05c-execute-permission');
+    const steps2 = h2.rec('grok', '01-initialize').concat(h2.rec('grok', '02-session-new-yolo-off'), write2, exec2);
+    const p2 = h2.params(steps2);
+    p2.newSessionMeta = { yoloMode: false };
+    h2.host.answers = [];
+    const s2 = await h2.start(p2);
+    expect(optionOf(h2.host.chat.config ?? [], chat.Category.Mode)?.currentValue).toBe(chat.Mode.Default);
+    await s2.setConfig('mode', chat.Mode.Full, never());
+    expect(optionOf(h2.host.chat.config ?? [], chat.Category.Mode)?.currentValue).toBe(chat.Mode.Full);
+    expect((await h2.turn(s2, promptOf(write2))).stopReason).toBe('end_turn');
+    expect((await h2.turn(s2, promptOf(exec2))).stopReason).toBe('end_turn');
+    expect(h2.host.perms).toHaveLength(0);
+    await h2.close(s2);
+
+    // Starting directly in Mode.Full initializes clientMode before takeConfig (no default flash)
+    // and auto-approves Grok tool permissions whose kind comes from _meta["x.ai/tool"].kind = "write".
+    const h3 = new Harness();
+    const sid = '00000000-0000-4000-8000-000000000001';
+    const steps3 = h3
+      .rec('grok', '01-initialize')
+      .concat(h3.rec('grok', '02-session-new-yolo-off'))
+      .concat([
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"write file"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","id":10,"method":"session/request_permission","params":{"sessionId":"${sid}","toolCall":{"toolCallId":"tc-w","title":"write","_meta":{"x.ai/tool":{"kind":"write"}}},"options":[{"optionId":"allow-once","name":"Yes","kind":"allow_once"},{"optionId":"reject-once","name":"No","kind":"reject_once"}]}}`,
+        ),
+        msgLine('out', '{"jsonrpc":"2.0","id":10,"result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}'),
+        msgLine('in', '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'),
+        msgLine('out', `{"jsonrpc":"2.0","id":4,"method":"session/close","params":{"sessionId":"${sid}"}}`),
+        msgLine('in', '{"jsonrpc":"2.0","id":4,"result":{}}'),
+      ]);
+    const p3 = h3.params(steps3);
+    p3.newSessionMeta = { yoloMode: false };
+    p3.options = { mode: chat.Mode.AcceptEdits };
+    h3.host.answers = [];
+    const seenModes: string[] = [];
+    const origUpdate = h3.host.update.bind(h3.host);
+    h3.host.update = (fn) => {
+      origUpdate(fn);
+      const mv = optionOf(h3.host.chat.config ?? [], chat.Category.Mode)?.currentValue;
+      if (mv) seenModes.push(mv);
+    };
+    const s3 = await h3.start(p3);
+    expect(seenModes).toEqual([chat.Mode.AcceptEdits]);
+    expect((await h3.turn(s3, [{ type: 'text', text: 'write file' }])).stopReason).toBe('end_turn');
+    expect(h3.host.perms).toHaveLength(0);
+    await h3.close(s3);
+  });
+
+  test('Antigravity (agy) maps host Mode.Full to ACP mode "auto" on start when allowFull is enabled', async () => {
+    const h = new Harness();
+    const sid = '00000000-0000-4000-8000-0000000000a1';
+    const autoCfg =
+      '[{"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"auto","options":[{"value":"default","name":"Review"},{"value":"accept-edits","name":"Accept Edits"},{"value":"auto","name":"Auto"},{"value":"plan","name":"Plan"}]}]';
+    const steps = h
+      .rec('agy', '01-initialize')
+      .concat(h.rec('agy', '02-session-new'))
+      .concat([
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/set_config_option","params":{"configId":"mode","sessionId":"${sid}","value":"auto"}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{"configOptions":${autoCfg}}}`),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"current_mode_update","currentModeId":"auto"}}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"config_option_update","configOptions":${autoCfg}}}}`,
+        ),
+        msgLine('out', `{"jsonrpc":"2.0","id":4,"method":"session/close","params":{"sessionId":"${sid}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":4,"result":{}}`),
+      ]);
+    const p = h.params(steps);
+    p.kind = 'agy';
+    p.options = { mode: chat.Mode.Full };
+    p.settings = { ...p.settings, allowFull: true };
+    const s = await h.start(p);
+    const mode = optionOf(h.host.chat.config ?? [], chat.Category.Mode);
+    expect(mode?.currentValue).toBe('auto');
+    expect(mode?.options?.find((v) => v.value === 'auto')?.full).toBe(true);
+    expect(mode?.options?.find((v) => v.value === 'accept-edits')?.full).toBeUndefined();
+    await h.close(s);
+  });
+
+  test('prompt handoffContext goes on wire only (clean User/Queued), queued /compact invalidates usage, and models() updates live sessions', async () => {
+    const h = new Harness();
+    const sid = '00000000-0000-4000-8000-0000000000a1';
+    const steps = h
+      .rec('agy', '01-initialize')
+      .concat(h.rec('agy', '02-session-new'))
+      .concat([
+        // Turn 1: wire prompt carries handoffContext before user text.
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"<handoff_context>\\nprior context\\n</handoff_context>"},{"type":"text","text":"continue work"}]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"${sid}","update":{"sessionUpdate":"usage_update","used":9000,"size":1048576}}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}`),
+        // Turn 2: queued /compact triggered after Turn 1 finishes while queued.
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"${sid}","prompt":[{"type":"text","text":"/compact"}]}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}`),
+        // setConfig for a model discovered by adapter.models() refresh!
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":5,"method":"session/set_config_option","params":{"configId":"model","sessionId":"${sid}","value":"gemini-5-preview"}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","id":5,"result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gemini-5-preview","options":[{"value":"gemini-5-preview","name":"Gemini 5 Preview"}]}]}}`,
+        ),
+        msgLine('out', `{"jsonrpc":"2.0","id":6,"method":"session/close","params":{"sessionId":"${sid}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":6,"result":{}}`),
+      ]);
+    const p = h.params(steps);
+    p.kind = 'agy';
+    const s = await h.start(p);
+
+    // Send prompt with handoffContext (recorded: false so adapter emits EventType.User) AND queue /compact behind it.
+    await s.prompt({
+      content: [{ type: 'text', text: 'continue work' }],
+      handoffContext: '<handoff_context>\nprior context\n</handoff_context>',
+      message: 'm1',
+      clientId: 'c1',
+      recorded: false,
+    });
+    await s.prompt({
+      content: [{ type: 'text', text: '/compact' }],
+      message: 'm2',
+      clientId: 'c2',
+      recorded: false,
+    });
+    expect((await h.host.await('turn 1 end', turnOver)).stopReason).toBe('end_turn');
+    expect((await h.host.await('queued /compact end', turnOver)).stopReason).toBe('end_turn');
+
+    // Stored User event MUST NOT contain handoffContext.
+    const userEv = h.host.events.find((e) => e.t === chat.EventType.User);
+    expect(userEv?.content).toEqual([{ type: 'text', text: 'continue work' }]);
+    // Queued /compact emitted Notice.Compacting and marked usage stale.
+    expect(h.host.events.some((e) => e.t === chat.EventType.Notice && e.method === noticeMethod(Notice.Compacting))).toBe(true);
+    expect(h.host.chat.usage).toMatchObject({ used: 0, size: 1048576, stale: true });
+
+    // Before models() refresh, setting an unknown model fails with BadRequest.
+    expect((await rejects(s.setConfig('model', 'gemini-5-preview', never()))).code).toBe(chat.Code.BadRequest);
+
+    // Probe models() returning gemini-5-preview: propagates to live Agy session automatically!
+    const probeSteps = h
+      .rec('agy', '01-initialize')
+      .concat([
+        msgLine('out', `{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"${h.dir}","mcpServers":[]}}`),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","id":2,"result":{"sessionId":"${sid}","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gemini-5-preview","options":[{"value":"gemini-5-preview","name":"Gemini 5 Preview"}]}]}}`,
+        ),
+        msgLine('out', `{"jsonrpc":"2.0","id":3,"method":"session/close","params":{"sessionId":"${sid}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{}}`),
+      ]);
+    const refreshed = await h.a.models!({ ...h.params(probeSteps), kind: 'agy' }, never());
+    expect(refreshed.map((m) => m.value)).toEqual(['gemini-5-preview']);
+
+    // Live session now accepts gemini-5-preview via setConfig!
+    await s.setConfig('model', 'gemini-5-preview', never());
+    expect(optionOf(h.host.chat.config ?? [], chat.Category.Model)?.currentValue).toBe('gemini-5-preview');
     await h.close(s);
   });
 });

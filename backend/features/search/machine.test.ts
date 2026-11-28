@@ -130,6 +130,40 @@ describe('search', () => {
     expect(await codeOf(search({ dir, query: '(', regex: true }))).toBe('bad_regex');
   });
 
+  test('the walker’s expressions are RE2’s: no expression or text holds the node; lookaround and backreferences are bad_regex', async () => {
+    const rr = await start({ findRg: () => '' });
+    const dir = join(rr.home, 'p');
+    tree(dir, {
+      // A long run of one letter: a backtracking engine tries exponentially
+      // many ways through (a+)+ and (a|aa)* before it fails.
+      'run.txt': 'a'.repeat(200_000) + '\n',
+      'crlf.txt': 'one\r\nend needle\r\n',
+      // One line of near a megabyte with a match every few bytes.
+      'wide.txt': 'ab '.repeat(300_000),
+    });
+    const timed = async (p: Partial<SearchParams>) => {
+      const began = performance.now();
+      const res = await search({ dir, regex: true, caseSensitive: true, ...p });
+      return { res, ms: performance.now() - began };
+    };
+    let t = await timed({ query: '(a+)+$', include: 'run.txt' });
+    expect(t.ms).toBeLessThan(2000);
+    expect(summary(t.res)).toEqual(['run.txt:1:1']);
+    t = await timed({ query: '(a|aa)*b', include: 'run.txt' });
+    expect(t.ms).toBeLessThan(2000);
+    expect(summary(t.res)).toEqual([]);
+    // Each line is looked at without its "\r", the whole file as well.
+    expect(summary((await timed({ query: 'needle$' })).res)).toEqual(['crlf.txt:2:5']);
+    expect(summary((await timed({ query: '^end' })).res)).toEqual(['crlf.txt:2:1']);
+    // Matches past the limit are not looked for.
+    t = await timed({ query: 'ab', include: 'wide.txt', maxResults: MAX_RESULTS });
+    expect(t.ms).toBeLessThan(2000);
+    expect(t.res.matchCount).toBe(MAX_RESULTS);
+    expect(t.res.reason).toBe('max_results');
+    for (const query of ['(?=a)', '(?<=a)b', '(a)\\1'])
+      expect([query, await codeOf(search({ dir, query, regex: true }))]).toEqual([query, 'bad_regex']);
+  });
+
   test('the walker reads a line that is not UTF-8 as the Go agent did', async () => {
     const rr = await start({ findRg: () => '' });
     tree(rr.home, { 'bad.txt': Buffer.from([0x61, 0xff, ...Buffer.from('needle 😀needle\n')]) });
@@ -298,6 +332,10 @@ describe('patterns', () => {
     };
     for (const [p, w] of Object.entries(want)) expect([p, m.any(p)]).toEqual([p, w]);
     expect(new Matcher(['[!a]?.txt', 'ü*.md']).self('ü1.md')).toBe(true);
+    // Stars before a letter that never comes: time linear in the name.
+    const began = performance.now();
+    expect(new Matcher(['*a*a*a*a*a*a*a*a*a*a*a*a*b', 'x/*a*a*a*a*a*a*a*a*a*a*a*a*b']).any('x/' + 'a'.repeat(250))).toBe(false);
+    expect(performance.now() - began).toBeLessThan(2000);
     expect(rgGlobs(['src', 'a/b'], ['*.min.js', '/out']).slice(SKIPPED.length)).toEqual([
       '--glob=src',
       '--glob=**/src/**',

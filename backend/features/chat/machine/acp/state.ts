@@ -19,6 +19,25 @@ export const MAX_TEXT = 2000;
 export const LEGACY_MODE_ID = 'mode';
 export const LEGACY_MODE_ID_ALT = '_mode';
 
+/** Client-enforced permission mode option for ACP agents (such as Grok) that
+ * advertise neither a mode configOption nor legacy session modes. Enforced in
+ * the adapter's session/request_permission handler via allow_once only, so the
+ * agent's own configuration files are never modified. */
+export function clientModeOption(id: string, currentValue: string = chat.Mode.Default): chat.ConfigOption {
+  return {
+    id,
+    name: 'Mode',
+    category: chat.Category.Mode,
+    type: chat.CONFIG_SELECT,
+    currentValue,
+    options: [
+      { value: chat.Mode.Default, name: 'Default' },
+      { value: chat.Mode.AcceptEdits, name: 'Accept Edits' },
+      { value: chat.Mode.Full, name: 'Full Access', full: true },
+    ],
+  };
+}
+
 /** s cut to n characters (code points). */
 export function clip(s: string, n: number): string {
   let i = 0;
@@ -162,14 +181,16 @@ export const cloneConfig = (opts: readonly chat.ConfigOption[]): chat.ConfigOpti
 
 /** For each of the host's permission modes, the ids an agent's mode of that
  * meaning has, as the agents name them. A mode the agent has none of is
- * left at the agent's default: Kimi Code's "auto" approves what it deems
- * safe, which is not acceptEdits, and an agent without a full-access mode
- * keeps asking. */
+ * left at the agent's default. For Mode.Full, explicit full-access values
+ * (such as Kimi Code's "yolo") take precedence over "auto", while agents whose
+ * autonomous full-access mode is named "auto" (such as Antigravity's
+ * "Run autonomously") map cleanly to it (still gated by allowFullAccess via
+ * markFull). */
 export const MODE_CANDIDATES: Readonly<Record<string, readonly string[]>> = {
   [chat.Mode.Default]: ['default', 'ask'],
   [chat.Mode.AcceptEdits]: ['acceptEdits', 'accept_edits', 'accept-edits'],
   [chat.Mode.Plan]: ['plan'],
-  [chat.Mode.Full]: ['yolo', 'bypassPermissions', 'full', 'full-access', 'full_access'],
+  [chat.Mode.Full]: ['yolo', 'bypassPermissions', 'full', 'full-access', 'full_access', 'auto'],
 };
 
 /** Whether an agent's mode is known not to give it full access. */
@@ -292,4 +313,63 @@ export function contextSizes(raw: unknown): Map<string, number> {
     if (a.modelId !== '' && n !== undefined && n > 0 && out.size < MAX_CONFIG_VALUES) out.set(a.modelId, n);
   }
   return out;
+}
+
+/** Extracts available models for Op.Models from a session/new response's
+ * configOptions (category "model") with fallback to legacy
+ * models.availableModels, enriching effort metadata where available. */
+export function modelOptions(rawConfig: unknown, rawModels: unknown, images: boolean): chat.ModelOption[] {
+  const effortsByModel = new Map<string, { efforts: string[]; defaultEffort?: string }>();
+  const legacy: chat.ModelOption[] = [];
+  if (isObj(rawModels) && Array.isArray(rawModels.availableModels)) {
+    for (const m of rawModels.availableModels) {
+      if (!isObj(m) || typeof m.modelId !== 'string' || m.modelId === '') continue;
+      if (legacy.length >= MAX_CONFIG_VALUES) break;
+      const name = typeof m.name === 'string' && m.name ? clip(m.name, MAX_NAME) : clip(m.modelId, MAX_NAME);
+      const description = typeof m.description === 'string' && m.description ? clip(m.description, MAX_TEXT) : undefined;
+      let efforts: string[] | undefined;
+      let defaultEffort: string | undefined;
+      if (isObj(m._meta) && Array.isArray(m._meta.reasoningEfforts)) {
+        const vals: string[] = [];
+        for (const e of m._meta.reasoningEfforts) {
+          if (!isObj(e)) continue;
+          const v = typeof e.value === 'string' && e.value ? e.value : typeof e.id === 'string' ? e.id : '';
+          if (!v) continue;
+          vals.push(v);
+          if (e.default === true && !defaultEffort) defaultEffort = v;
+        }
+        if (vals.length > 0) {
+          efforts = vals;
+          if (!defaultEffort && typeof m._meta.reasoningEffort === 'string' && vals.includes(m._meta.reasoningEffort)) {
+            defaultEffort = m._meta.reasoningEffort;
+          }
+          effortsByModel.set(m.modelId, { efforts, ...(defaultEffort ? { defaultEffort } : {}) });
+        }
+      }
+      legacy.push({
+        value: m.modelId,
+        name,
+        ...(description ? { description } : {}),
+        ...(efforts ? { efforts } : {}),
+        ...(defaultEffort ? { defaultEffort } : {}),
+        ...(images ? { images: true } : {}),
+      });
+    }
+  }
+  const cfg = configOptions(rawConfig);
+  const modelOpt = cfg ? optionOf(cfg, chat.Category.Model) : undefined;
+  if (modelOpt?.options?.length) {
+    return modelOpt.options.map((v) => {
+      const eff = effortsByModel.get(v.value);
+      return {
+        value: v.value,
+        name: v.name || v.value,
+        ...(v.description ? { description: v.description } : {}),
+        ...(eff?.efforts ? { efforts: eff.efforts } : {}),
+        ...(eff?.defaultEffort ? { defaultEffort: eff.defaultEffort } : {}),
+        ...(images ? { images: true } : {}),
+      };
+    });
+  }
+  return legacy;
 }

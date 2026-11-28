@@ -7,6 +7,7 @@ import { isUtf8 } from 'node:buffer';
 import { constants, type Dirent } from 'node:fs';
 import { open, readdir } from 'node:fs/promises';
 import { posix } from 'node:path';
+import { RE2JS } from 're2js';
 import { Fail } from '#shared/lib/fail.ts';
 import { Collector, type Result } from './collector.ts';
 import type { Span } from './excerpt.ts';
@@ -20,13 +21,29 @@ const BINARY_SNIFF = 8 << 10;
 /** Bounds the top-level .gitignore read. */
 const MAX_GITIGNORE = 256 << 10;
 
+/** A query's expressions: re for a line; any, when it can tell, for a
+ * whole file at once (MULTILINE, over its lines joined by "\n"), null when
+ * the expression names the text's own start or end or turns flags off. */
+export interface Compiled {
+  re: RE2JS;
+  any: RE2JS | null;
+}
+
 /** The regular expression of a query: its text quoted unless it is a
- * regular expression, case-insensitive unless asked otherwise. The walker
- * reads expressions as JavaScript's (with Unicode), ripgrep as its own. */
-export function compile(q: Pick<Query, 'query' | 'regex' | 'caseSensitive'>): RegExp {
-  const expr = q.regex ? q.query : q.query.replace(/[\\^$.*+?()[\]{}|/]/g, '\\$&');
+ * regular expression, case-insensitive unless asked otherwise. Expressions
+ * are RE2's (re2js), of the family of ripgrep's: matching takes time linear
+ * in the text whatever the expression, so no query can hold the node's
+ * thread; backreferences and lookaround are refused (bad_regex). */
+export function compile(q: Pick<Query, 'query' | 'regex' | 'caseSensitive'>): Compiled {
+  const expr = q.regex ? q.query : RE2JS.quote(q.query);
+  const flags = q.caseSensitive ? 0 : RE2JS.CASE_INSENSITIVE;
   try {
-    return new RegExp(expr, q.caseSensitive ? 'gu' : 'giu');
+    const re = RE2JS.compile(expr, flags);
+    // \A and \z anchor at the whole text, and a flag group that turns flags
+    // off ("(?-m)") could turn MULTILINE off: a look at the whole file could
+    // then miss a line's match.
+    const whole = !q.regex || !/\\[Az]|\(\?[a-zA-Z]*-/.test(expr);
+    return { re, any: whole ? RE2JS.compile(expr, flags | RE2JS.MULTILINE) : null };
   } catch (e) {
     throw new Fail('bad_regex', 400, (e as Error).message);
   }
@@ -45,18 +62,31 @@ function wordAt(text: string, s: number, e: number): boolean {
   return true;
 }
 
-/** The matches in a line of text (UTF-16 indices); empty matches find
- * nothing to show. */
-export function lineMatches(re: RegExp, text: string, whole: boolean): Span[] {
+/** The matches in a line of text (UTF-16 indices), at most max of them;
+ * empty matches find nothing to show. */
+export function lineMatches(re: RE2JS, text: string, whole: boolean, max = Infinity): Span[] {
   const out: Span[] = [];
-  re.lastIndex = 0;
-  for (const m of text.matchAll(re)) {
-    const s = m.index;
-    const e = s + m[0].length;
+  const m = re.matcher(text);
+  while (out.length < max && m.find()) {
+    const s = m.start();
+    const e = m.end();
     if (e === s || (whole && !wordAt(text, s, e))) continue;
     out.push([s, e]);
   }
   return out;
+}
+
+/** The UTF-8 offsets of spans (ascending UTF-16 indices of text), counted
+ * once along the text rather than from its start for each. */
+function byteSpans(text: string, spans: Span[]): Span[] {
+  let at = 0;
+  let bytes = 0;
+  const to = (k: number) => {
+    bytes += Buffer.byteLength(text.slice(at, k));
+    at = k;
+    return bytes;
+  };
+  return spans.map(([s, e]) => [to(s), to(e)]);
 }
 
 /** The patterns of the top-level .gitignore of dir (the walker's
@@ -121,28 +151,21 @@ async function readText(p: string, buf: Buffer): Promise<Buffer | null> {
 }
 
 /** Adds the matches of each line of data to c; false once c is full. */
-export function searchText(c: Collector, re: RegExp, whole: boolean, rel: string, data: Buffer): boolean {
+export function searchText(c: Collector, q: Compiled, whole: boolean, rel: string, data: Buffer): boolean {
+  // A line's matches past the limit are dropped: none are looked for.
+  const left = () => c.limit - c.res.matchCount;
   if (isUtf8(data)) {
     const text = data.toString('utf8');
-    // Most files have no match: one look at the whole text first.
-    const any = new RegExp(re.source, re.flags.replace('g', '') + 'm');
-    if (!any.test(text)) return true;
+    // Most files have no match: one look at the whole text first, its lines
+    // ended by "\n" alone, as each line is looked at without its "\r".
+    if (q.any && !q.any.matcher(text.replace(/\r\n/g, '\n').replace(/\r$/, '')).find()) return true;
     const lines = text.split('\n');
     if (lines.at(-1) === '') lines.pop();
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].endsWith('\r') ? lines[i].slice(0, -1) : lines[i];
-      const found = lineMatches(re, line, whole);
+      const found = lineMatches(q.re, line, whole, left());
       if (!found.length) continue;
-      const bytes = (k: number) => Buffer.byteLength(line.slice(0, k));
-      if (
-        !c.add(
-          rel,
-          i + 1,
-          Buffer.from(line, 'utf8'),
-          found.map(([s, e]) => [bytes(s), bytes(e)]),
-        )
-      )
-        return false;
+      if (!c.add(rel, i + 1, Buffer.from(line, 'utf8'), byteSpans(line, found))) return false;
     }
     return true;
   }
@@ -154,7 +177,7 @@ export function searchText(c: Collector, re: RegExp, whole: boolean, rel: string
     at = nl < 0 ? data.length : nl + 1;
     if (line.at(-1) === 0x0d) line = line.subarray(0, -1);
     const { text, byteAt } = decodeMapped(line);
-    const found = lineMatches(re, text, whole);
+    const found = lineMatches(q.re, text, whole, left());
     if (
       found.length &&
       !c.add(

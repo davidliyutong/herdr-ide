@@ -544,10 +544,11 @@ interface ShowParams {
   rev?: string;
   rev2?: string;
   parent?: number;
+  noFiles?: boolean;
 }
 
 /** A commit's changes against one of its parents, or the changes between
- * two commits. */
+ * two commits (or metadata only when noFiles is set). */
 export async function show(r: Repo, p: ShowParams): Promise<Obj> {
   const rev = await r.rev(p.rev);
   const out: Obj = { base: '', target: rev, files: [] };
@@ -573,6 +574,7 @@ export async function show(r: Repo, p: ShowParams): Promise<Obj> {
       message,
     };
     out.target = f[0];
+    if (p.noFiles) return out;
     const n = Math.max(p.parent ?? 0, 1);
     if (parents.length === 0) out.base = await emptyTree(r);
     else if (n > parents.length) throw badParams(`no parent ${n}`);

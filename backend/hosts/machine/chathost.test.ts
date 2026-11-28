@@ -21,10 +21,11 @@ test('the host has every adapter; a kind without a chat is refused, the host goe
   // Every adapter is there: Claude Code's, Codex's and the ACP kinds'
   // (their programs are not installed here; the test host looks in the
   // system's PATH only).
-  const agents = await h.request({ op: chat.Op.Agents, kinds: ['claude', 'codex', 'kimi', 'opencode'] });
+  const agents = await h.request({ op: chat.Op.Agents, kinds: ['claude', 'codex', 'agy', 'kimi', 'opencode'] });
   expect(agents.agents).toEqual([
     { kind: 'claude', available: false, reason: 'not_found' },
     { kind: 'codex', available: false, reason: 'not_found' },
+    { kind: 'agy', available: false, reason: 'not_found' },
     { kind: 'kimi', available: false, reason: 'not_found' },
     { kind: 'opencode', available: false, reason: 'unsupported' },
   ]);

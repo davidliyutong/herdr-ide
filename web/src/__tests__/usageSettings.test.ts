@@ -39,7 +39,12 @@ const usage = (key: string, type: SettingDef['type'], group: string, order: numb
 const defs: SettingDef[] = [
   usage('usage.refresh', 'enum', 'usageRefresh', 10, { enum: ['manual', 'adaptive'] }),
   usage('usage.statusBar', 'bool', 'usageAlerts', 18),
-  usage('usage.prices', 'list', 'usageSpend', 22, { item: 'string' }),
+  usage('usage.statusBarWindow', 'enum', 'usageAlerts', 19, { default: 'auto', enum: ['auto', '5h', '7d', 'both'] }),
+  usage('usage.statusBarProvider', 'enum', 'usageAlerts', 20, {
+    default: 'auto',
+    enum: ['auto', 'claude', 'codex', 'grok', 'antigravity', 'kimi'],
+  }),
+  usage('usage.prices', 'list', 'usageSpend', 24, { item: 'string' }),
   usage('usage.providers.claude', 'bool', 'usageClaude', 30),
   usage('usage.claudeKeychain', 'bool', 'usageClaude', 31),
   usage('usage.providers.codex', 'bool', 'usageCodex', 34),
@@ -107,7 +112,13 @@ describe('the AI usage settings page', () => {
     values['usage.providers.codex'] = { value: false, source: 'global' };
     values['usage.claudeKeychain'] = { value: false, source: 'global' };
     await open({ page: 'usage' }, values);
-    expect(shown('usage.refresh') && shown('usage.statusBar') && shown('usage.prices')).toBe(true);
+    expect(
+      shown('usage.refresh') &&
+        shown('usage.statusBar') &&
+        shown('usage.statusBarWindow') &&
+        shown('usage.statusBarProvider') &&
+        shown('usage.prices'),
+    ).toBe(true);
     // The providers' own settings are on their pages.
     expect(shown('usage.providers.claude') || shown('usage.claudeKeychain') || shown('usage.codexHomes')).toBe(false);
     const groups = [...host.querySelectorAll('.settings-group')].map((h) => h.textContent);
@@ -262,9 +273,20 @@ describe('the AI usage settings page', () => {
     expect(serializePrices(Array.from({ length: 51 }, (_, i) => row(`m${i}`, '1', '2')))).toBeUndefined();
   });
 
+  it('toggles a provider directly from the first-level list without opening its sub-page', async () => {
+    await open({ page: 'usage' });
+    const sw = () => providerRow('codex').querySelector<HTMLButtonElement>('[role="switch"]')!;
+    expect(sw().getAttribute('aria-checked')).toBe('true');
+    await act(async () => sw().click());
+    await vi.waitFor(() => expect(useSettings.getState().values['usage.providers.codex']?.value).toBe(false));
+    expect(q('.usage-settings-provider')).toBeNull();
+    expect(sw().getAttribute('aria-checked')).toBe('false');
+    expect(providerRow('codex').classList.contains('off')).toBe(true);
+  });
+
   it('shows a read-only hub’s settings without letting them change', async () => {
     await open({ page: 'usage' }, state(), true);
-    expect(providerRow('opencode').disabled).toBe(false);
+    expect(providerRow('opencode').querySelector<HTMLButtonElement>('[role="switch"]')!.disabled).toBe(true);
     await act(async () => providerRow('opencode').click());
     expect(q<HTMLInputElement>('[data-key="usage.providers.opencode"] input')!.disabled).toBe(true);
   });

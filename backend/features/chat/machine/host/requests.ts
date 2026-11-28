@@ -36,6 +36,10 @@ const settings = z.object({
   maxTotalBytes: int,
   maxChatBytes: int,
   defaultMode: str,
+  defaultModes: z
+    .record(z.string(), z.string())
+    .nullish()
+    .transform((v) => v ?? undefined),
   allowFull: bool,
 });
 
@@ -53,12 +57,22 @@ const request = z.object({
     .object({ model: str, effort: str, mode: str })
     .nullish()
     .transform((v) => v ?? undefined),
+  env: z
+    .record(z.string(), z.string())
+    .nullish()
+    .transform((v) => v ?? undefined),
   chat: str,
   from: seq,
   noCatchUp: bool,
   seq: seq,
   cursor: str,
   settings: settings.nullish().transform((v) => v ?? undefined),
+  refresh: bool,
+  upToSeq: seq,
+  title: str,
+  targetKind: str,
+  format: str,
+  maxBytes: int,
 });
 
 const command = z.object({
@@ -85,7 +99,12 @@ const command = z.object({
   config: str,
   value: str,
   message: str,
+  delivery: str,
   title: str,
+  task: str,
+  seq: seq,
+  restoreFiles: bool,
+  instructions: str,
 });
 
 export type Request = z.output<typeof request>;

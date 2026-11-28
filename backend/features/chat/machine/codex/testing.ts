@@ -442,7 +442,7 @@ export class FakeRun {
 export function policyProblems(f: FakeRun): string[] {
   const out: string[] = [];
   for (let n = 1; n <= f.started(); n++) {
-    for (const m of ['thread/start', 'thread/resume'])
+    for (const m of ['thread/start', 'thread/resume', 'thread/fork'])
       for (const p of f.requests(n, m))
         if (p.sandbox !== 'read-only' || p.approvalPolicy !== 'on-request' || p.approvalsReviewer !== 'user')
           out.push(`process ${n}: ${m} with ${JSON.stringify(p)}`);

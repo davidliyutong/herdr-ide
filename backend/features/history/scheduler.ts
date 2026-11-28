@@ -45,6 +45,8 @@ export interface SchedulerOptions {
   ready: () => string[];
   /** Wakes the scheduler when a machine becomes ready or stops being ready. */
   onReadyChange?: (wake: (machine: string, ready: boolean) => void) => () => void;
+  /** Wakes the scheduler when a machine's terminal core becomes ready. */
+  onTerminalCoreReady?: (wake: (machine: string) => void) => () => void;
   settings: Settings;
   /** Whether the feature is on (for any client), and the setting that
    * switches it. */
@@ -95,6 +97,9 @@ export class Scheduler {
   private connected = new Set<string>();
   /** The code a machine's last capture failed with, logged when it changes. */
   private readonly failed = new Map<string, string>();
+  /** Machines whose terminal core became ready while a capture was in flight
+   * (so a not_running outcome from before the core started retries at once). */
+  private readonly retryNotRunning = new Set<string>();
   /** What step started and has not ended. */
   private readonly tasks = new Set<Promise<void>>();
   private wake?: () => void;
@@ -110,7 +115,19 @@ export class Scheduler {
     const off = this.o.settings.onChange((c) => this.settingsChanged(c));
     const unwatch = this.o.onReadyChange?.((m, ready) => {
       if (ready === this.connected.has(m)) return;
-      if (!ready) this.connected.delete(m);
+      if (!ready) {
+        this.connected.delete(m);
+        this.retryNotRunning.delete(m);
+      }
+      this.wake?.();
+    });
+    const unwatchCore = this.o.onTerminalCoreReady?.((m) => {
+      if (this.busy.has(m)) {
+        this.retryNotRunning.add(m);
+        return;
+      }
+      if (this.failed.get(m) !== 'not_running') return;
+      this.next.delete(m);
       this.wake?.();
     });
     try {
@@ -132,6 +149,7 @@ export class Scheduler {
     } finally {
       off();
       unwatch?.();
+      unwatchCore?.();
       await this.idle();
     }
   }
@@ -145,6 +163,7 @@ export class Scheduler {
   forget(m: string): void {
     for (const s of [this.next, this.on, this.clearing, this.failed]) s.delete(m);
     this.connected.delete(m);
+    this.retryNotRunning.delete(m);
     this.wake?.();
   }
 
@@ -254,7 +273,12 @@ export class Scheduler {
       }
       const code = this.codeOf(err, deadline);
       done();
-      if (!this.clearing.has(m)) this.next.set(m, this.now() + s.everyMs);
+      const retryNow = code === 'not_running' && this.retryNotRunning.delete(m);
+      if (!retryNow) this.retryNotRunning.delete(m);
+      if (!this.clearing.has(m)) {
+        if (retryNow) this.next.delete(m);
+        else this.next.set(m, this.now() + s.everyMs);
+      }
       const changed = (this.failed.get(m) ?? '') !== code;
       if (code) this.failed.set(m, code);
       else this.failed.delete(m);

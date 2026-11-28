@@ -4,18 +4,23 @@
 // Nothing listens on the machine for it: the hub opens a stream per
 // connection.
 import { connect, type Socket } from 'node:net';
+import { CoalesceCache } from '#shared/lib/cache.ts';
 import { Fail } from '#shared/lib/fail.ts';
 import { closeStream } from '#shared/proto/yamux.ts';
 import { defineMachine } from '#machine/feature.ts';
 import { pipe } from '#machine/hcop.ts';
 import { browserProtocol } from './protocol.ts';
-import { listening, tidy } from './machine/listening.ts';
+import { listening, tidy, type Port } from './machine/listening.ts';
 
 export interface BrowserMachineOptions {
   /** Bounds connecting to a service of the machine itself (5 s). */
   dialMs?: number;
   /** Bounds looking for the listening ports (10 s). */
   listeningMs?: number;
+  /** How long a listening-ports scan is reused on the machine (2 s). */
+  listeningCacheMs?: number;
+  /** Clock function for the machine-side listening cache (tests). */
+  now?: () => number;
 }
 
 /** Connects to port of host within timeoutMs. */
@@ -43,52 +48,61 @@ function dialTCP(host: string, port: number, timeoutMs: number, signal: AbortSig
 }
 
 export function browserMachine(o: BrowserMachineOptions = {}) {
-  return defineMachine(browserProtocol, () => ({
-    actions: {
-      // Connects the stream to the port of this machine's loopback, answers,
-      // and then carries bytes both ways until either side ends. Only
-      // loopback is dialed: the hub reaches what a program of this machine
-      // could, not the machine's network.
-      dial: async (p, ctx, s) => {
-        let c: Socket | null = null;
-        let last: unknown;
-        for (const host of ['127.0.0.1', '::1']) {
-          try {
-            c = await dialTCP(host, p.port, o.dialMs ?? 5000, ctx.signal);
-            break;
-          } catch (e) {
-            ctx.signal.throwIfAborted();
-            last = e;
+  return defineMachine(browserProtocol, () => {
+    const listeningCache = new CoalesceCache<Port[]>({
+      ttlMs: o.listeningCacheMs ?? 2_000,
+      maxEntries: 1,
+      now: o.now,
+    });
+    return {
+      actions: {
+        // Connects the stream to the port of this machine's loopback, answers,
+        // and then carries bytes both ways until either side ends. Only
+        // loopback is dialed: the hub reaches what a program of this machine
+        // could, not the machine's network.
+        dial: async (p, ctx, s) => {
+          let c: Socket | null = null;
+          let last: unknown;
+          for (const host of ['127.0.0.1', '::1']) {
+            try {
+              c = await dialTCP(host, p.port, o.dialMs ?? 5000, ctx.signal);
+              break;
+            } catch (e) {
+              ctx.signal.throwIfAborted();
+              last = e;
+            }
           }
-        }
-        if (!c) throw new Fail('refused', 502, `nothing answers on port ${p.port} of the machine: ${(last as Error).message}`);
-        const sock = c;
-        sock.on('error', () => {});
-        try {
-          await s.reply();
-        } catch {
-          sock.destroy();
-          return;
-        }
-        const end = () => {
-          sock.destroy();
-          closeStream(s.stream);
-        };
-        if (ctx.signal.aborted) {
-          end();
-          return;
-        }
-        ctx.signal.addEventListener('abort', end, { once: true });
-        try {
-          await pipe(s, sock);
-        } finally {
-          ctx.signal.removeEventListener('abort', end);
-        }
+          if (!c) throw new Fail('refused', 502, `nothing answers on port ${p.port} of the machine: ${(last as Error).message}`);
+          const sock = c;
+          sock.on('error', () => {});
+          try {
+            await s.reply();
+          } catch {
+            sock.destroy();
+            return;
+          }
+          const end = () => {
+            sock.destroy();
+            closeStream(s.stream);
+          };
+          if (ctx.signal.aborted) {
+            end();
+            return;
+          }
+          ctx.signal.addEventListener('abort', end, { once: true });
+          try {
+            await pipe(s, sock);
+          } finally {
+            ctx.signal.removeEventListener('abort', end);
+          }
+        },
+        listening: async (_, ctx) => {
+          const ports = await listeningCache.get('listening', { signal: ctx.signal, timeoutMs: o.listeningMs ?? 10_000 }, async (signal) =>
+            tidy(await listening(signal)),
+          );
+          return { ports };
+        },
       },
-      listening: async (_, ctx) => {
-        const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(o.listeningMs ?? 10_000)]);
-        return { ports: tidy(await listening(signal)) };
-      },
-    },
-  }));
+    };
+  });
 }

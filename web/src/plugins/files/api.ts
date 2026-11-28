@@ -26,6 +26,29 @@ export interface Result {
   failed?: Record<string, string>;
 }
 
+/** One file or directory returned by GET /api/m/{id}/p/files/find. */
+export interface FindMatch {
+  path: string;
+  rel: string;
+  name: string;
+  is_dir?: boolean;
+}
+
+export interface FindResult {
+  matches: FindMatch[];
+  truncated?: boolean;
+}
+
+export interface FindParams {
+  dir: string;
+  query: string;
+  match?: 'fuzzy' | 'name';
+  regex?: boolean;
+  hidden?: boolean;
+  exclude?: readonly string[];
+  limit?: number;
+}
+
 /** A failure with the code the hub or the machine gave. */
 export class FilesError extends PluginError {
   constructor(code: string, message: string) {
@@ -50,11 +73,14 @@ export class ConflictError extends FilesError {
 
 /** A failure as the user reads it. */
 export const errorText = makeErrorText(FilesError, 'files.error', {
-  // The message is the cause's code.
-  special: (e) =>
-    e.code === 'partial_write'
-      ? t(e.message.endsWith('no_space') ? 'files.error.partial_write.no_space' : 'files.error.partial_write')
-      : undefined,
+  // The message is the cause's code; also distinguish legacy agents' EROFS
+  // (code 'read_only' with OS message) from hub read-only mode.
+  special: (e) => {
+    if (e.code === 'partial_write')
+      return t(e.message.endsWith('no_space') ? 'files.error.partial_write.no_space' : 'files.error.partial_write');
+    if (e.code === 'read_only' && e.message && e.message !== 'read-only mode') return t('files.error.read_only_fs');
+    return undefined;
+  },
 });
 
 const base = (m: string) => `/api/m/${encodeURIComponent(m)}/p/files`;
@@ -92,6 +118,23 @@ export const filesApi = {
    * long for proxies, that changes nothing). */
   async stat(m: string, paths: string[]): Promise<Entry[]> {
     return (await post<{ entries?: Entry[] }>(m, 'stat', { paths })).entries ?? [];
+  },
+
+  /** Bounded recursive file/directory search below dir. */
+  async find(m: string, p: FindParams, signal?: AbortSignal): Promise<FindResult> {
+    const q = new URLSearchParams({ dir: p.dir });
+    if (p.query) q.set('query', p.query);
+    if (p.match) q.set('match', p.match);
+    if (p.regex) q.set('regex', '1');
+    if (p.hidden !== undefined) q.set('hidden', p.hidden ? '1' : '0');
+    if (p.limit !== undefined) q.set('limit', String(p.limit));
+    if (p.exclude !== undefined) {
+      if (p.exclude.length === 0) q.append('exclude', '');
+      else for (const pat of p.exclude) q.append('exclude', pat);
+    }
+    const r = await fetch(`${base(m)}/find?${q}`, { cache: 'no-store', signal });
+    const data = await answer<FindResult>(r, failure);
+    return { matches: Array.isArray(data.matches) ? data.matches : [], truncated: data.truncated };
   },
 
   /** Shows path in the file manager of the hub's own computer (Finder on

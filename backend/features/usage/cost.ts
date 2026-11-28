@@ -37,6 +37,9 @@ export interface MachineCost {
   retries?: number;
   unpriced?: string[];
   failed?: string[];
+  /** True when the host is actively disabled by the user (cached data is
+   * kept without emitting read errors). */
+  disabled?: boolean;
 }
 
 /** GET /api/p/usage/cost. */
@@ -73,6 +76,8 @@ export interface SpendDeps {
   ready(): string[];
   /** Whether a machine is still configured (a removed one's report goes). */
   known(m: string): boolean;
+  /** Whether a machine is actively disabled by the user. */
+  disabled?(m: string): boolean;
   /** The providers on and the Codex homes. */
   options(): { providers: string[]; codexHomes: string[] };
   /** The user's prices and the key that tells them apart. */
@@ -124,6 +129,9 @@ export class Spend {
   private loaded = false;
   private loading?: Promise<void>;
   private readOnly = false;
+  /** Bumped on invalidate()/forget() so an in-flight report() cannot write
+   * stale pre-invalidation state back into this.cache after finishing. */
+  private epoch = 0;
   /** The scans under way, by machine. */
   readonly flights = new Map<string, { key: string; done: Promise<CostReport> }>();
 
@@ -136,6 +144,7 @@ export class Spend {
    * which is not served to others. */
   async report(days: number, tz: number, signal: AbortSignal): Promise<{ rep: Report; etag: string }> {
     await this.load();
+    const ep = this.epoch;
     const prices = this.d.prices();
     const o = this.d.options();
     const key = [days, tz, [...o.providers].sort().join(','), [...o.codexHomes].sort().join('\0'), prices.key].join('|');
@@ -168,17 +177,26 @@ export class Spend {
       recentSince,
       recent: [],
     };
-    const add = (m: string, r: CostReport) => {
-      rep.machines[m] = { files: r.files, retries: r.retries, unpriced: r.unpriced, failed: r.failed };
+    const isDisabled = (m: string) => this.d.disabled?.(m) === true;
+    const add = (m: string, r: CostReport, disabled = false) => {
+      rep.machines[m] = disabled
+        ? { files: r.files, retries: r.retries, unpriced: r.unpriced, disabled: true }
+        : { files: r.files, retries: r.retries, unpriced: r.unpriced, failed: r.failed };
       for (const row of r.rows) rep.rows.push({ ...row, machine: m });
       for (const s of r.recent ?? []) rep.recent.push({ ...s, machine: m });
     };
     await Promise.all(
       ready.map(async (m) => {
         try {
-          add(m, await this.machine(m, key, params, prices.key, signal));
+          add(m, await this.machine(m, key, params, prices.key, signal), isDisabled(m));
         } catch (e) {
-          rep.machines[m] = { error: codeOf(e), files: 0 };
+          if (isDisabled(m)) {
+            const r = this.cached(m, key, params, prices.key);
+            if (r) add(m, r, true);
+            else rep.machines[m] = { files: 0, disabled: true };
+          } else {
+            rep.machines[m] = { error: codeOf(e), files: 0 };
+          }
         }
       }),
     );
@@ -189,7 +207,7 @@ export class Spend {
       .sort();
     for (const m of others) {
       const r = this.cached(m, key, params, prices.key);
-      if (r) add(m, r);
+      if (r) add(m, r, isDisabled(m));
     }
     rep.machines = sortedKeys(rep.machines);
     rep.rows.sort(
@@ -202,7 +220,7 @@ export class Spend {
     );
     rep.recent.sort((a, b) => cmp(a.machine, b.machine) || a.at - b.at || cmp(a.provider, b.provider));
     const out = { rep, etag: jsonETag('c', { ...rep, generatedAt: 0 }) };
-    if (signal.aborted) return out;
+    if (signal.aborted || this.epoch !== ep) return out;
     // Fresh from when the scans ended, however long they took.
     this.cache.set(key, { at: this.d.now(), ...out });
     while (this.cache.size > COST_KEEP) {
@@ -326,9 +344,16 @@ export class Spend {
     await this.loading;
   }
 
+  /** Invalidates cached assembled reports (e.g. when a host is disabled). */
+  invalidate(): void {
+    this.epoch++;
+    this.cache.clear();
+  }
+
   /** Drops what is kept of a removed machine. */
   forget(m: string): void {
     for (const [k, e] of this.entries) if (e.machine === m) this.entries.delete(k);
+    this.epoch++;
     this.cache.clear();
     if (!this.readOnly) void this.d.store.deleteMachineCosts(m);
   }

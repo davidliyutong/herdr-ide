@@ -52,11 +52,15 @@ const MAX_ENTRIES = 1024;
 const base = (m: string) => `/api/m/${encodeURIComponent(m)}/p/history`;
 const fail = failureOf((code, message) => new HistoryError(code, message));
 
+const isAbortError = (e: unknown, signal?: AbortSignal | null): boolean =>
+  !!signal?.aborted || (typeof e === 'object' && e !== null && (e as { name?: unknown }).name === 'AbortError');
+
 /** A request to the hub; one that does not reach it fails as network. */
 async function send(url: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(url, { cache: 'no-store', ...init });
   } catch (e) {
+    if (isAbortError(e, init?.signal)) throw e;
     throw new HistoryError('network', e instanceof Error ? e.message : String(e));
   }
 }
@@ -89,8 +93,8 @@ export function parseList(v: unknown): HistoryList {
 }
 
 /** The snapshots machine m keeps. */
-export async function listHistory(m: string): Promise<HistoryList> {
-  return parseList(await answer<unknown>(await send(base(m)), fail));
+export async function listHistory(m: string, signal?: AbortSignal): Promise<HistoryList> {
+  return parseList(await answer<unknown>(await send(base(m), signal ? { signal } : undefined), fail));
 }
 
 /** One generation's bytes, with the program and the time it is of, and the
@@ -138,8 +142,11 @@ async function boundedBody(r: Response, max: number): Promise<Uint8Array> {
 /** The bytes of one generation of terminal's snapshot on machine m: the
  * terminal's first paint as the terminal core sent it, without titles. At
  * most HISTORY_MAX_BYTES. */
-export async function readHistory(m: string, terminal: string, generation: Generation): Promise<HistoryBytes> {
-  const r = await send(`${base(m)}/read?terminal=${encodeURIComponent(terminal)}&generation=${generation}`);
+export async function readHistory(m: string, terminal: string, generation: Generation, signal?: AbortSignal): Promise<HistoryBytes> {
+  const r = await send(
+    `${base(m)}/read?terminal=${encodeURIComponent(terminal)}&generation=${generation}`,
+    signal ? { signal } : undefined,
+  );
   if (!r.ok) throw fail(r, await jsonBody(r));
   const bytes = await boundedBody(r, HISTORY_MAX_BYTES);
   const header = (name: string) => count(Number(r.headers.get(name) ?? NaN)) ?? 0;
@@ -156,9 +163,12 @@ export async function readHistory(m: string, terminal: string, generation: Gener
  * page replaced by terminal `to`, to `to` as its previous generation (the
  * machine keeps one of `to` taken later, and removes `from`'s): whether
  * one was moved. */
-export async function adoptHistory(m: string, from: string, to: string): Promise<boolean> {
+export async function adoptHistory(m: string, from: string, to: string, signal?: AbortSignal): Promise<boolean> {
   const q = new URLSearchParams({ from, to });
-  const j = await answer<{ adopted?: unknown }>(await send(`${base(m)}/adopt?${q}`, { method: 'POST' }), fail);
+  const j = await answer<{ adopted?: unknown }>(
+    await send(`${base(m)}/adopt?${q}`, signal ? { method: 'POST', signal } : { method: 'POST' }),
+    fail,
+  );
   return j?.adopted === true;
 }
 

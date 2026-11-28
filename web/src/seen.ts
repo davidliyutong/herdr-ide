@@ -9,6 +9,13 @@ import { useStore } from './state/store';
 import { useTerms } from './state/terms';
 import * as L from './term/layout';
 import { onViewStatus, viewSeen, viewStatus } from './plugins/registry';
+import { isDetachedWindow } from './detachedWindow';
+import { parseGuiPath } from './gui/state';
+
+function isMainWindowPage(): boolean {
+  if (isDetachedWindow()) return false;
+  return typeof location === 'undefined' || !parseGuiPath(location.pathname);
+}
 
 export function terminalOnScreen(m: string, terminal: string): boolean {
   if (useStore.getState().machineId !== m) return false;
@@ -45,6 +52,7 @@ export function pageFocused(): boolean {
  * focused pane of the tab shown, while the page is visible and has the
  * focus. None on a read-only page: seen changes what every client shows. */
 function doneLookedAt(): { m: string; view: L.PluginView; key: string } | undefined {
+  if (!isMainWindowPage()) return undefined;
   const s = useStore.getState();
   const m = s.machineId;
   const layout = m ? useTerms.getState().machines[m]?.layout : undefined;
@@ -61,6 +69,7 @@ let looked: string | undefined;
  * was seen (ViewStatusDef.seen); once each time that starts (the status
  * becomes done, the pane gets the focus, the page comes back). */
 export function noteViewSeen() {
+  if (!isMainWindowPage()) return;
   const at = doneLookedAt();
   const was = looked;
   looked = at?.key;
@@ -71,6 +80,7 @@ export function noteViewSeen() {
  * machine shown, the layouts, the zoomed pane, the page's visibility and
  * focus) and checks again, once per burst of changes; returns the stop. */
 export function followViewsSeen(): () => void {
+  if (!isMainWindowPage()) return () => {};
   let queued = false;
   const check = () => {
     if (queued) return;

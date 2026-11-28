@@ -63,10 +63,16 @@ export function appWindowPreferences(preload: string) {
 
 // The main window may play notification sounds before the first click
 // (after a restart, for example); other windows keep the default policy.
-// It alone may hold <webview> tags: the browser panes show any web page in
-// them (guestPreferences decides each attach).
+// The main window and detached tab windows may hold <webview> tags: browser
+// panes show any web page in them (guestPreferences decides each attach).
 export function mainWindowPreferences(preload: string) {
   return { ...appWindowPreferences(preload), autoplayPolicy: 'no-user-gesture-required' as const, webviewTag: true };
+}
+
+/** Detached tab windows: app session, sandboxed preload, and <webview> support
+ * for browser panes, keeping the default autoplay policy. */
+export function detachedWindowPreferences(preload: string) {
+  return { ...appWindowPreferences(preload), webviewTag: true };
 }
 
 /** The session partition of the browser panes' webviews; its cookies,
@@ -83,14 +89,17 @@ export const BROWSER_PARTITION = 'persist:browser';
  * Electron's default on Windows and Linux. DNS over HTTPS keeps its default. */
 export const hostResolver: ConfigureHostResolverOptions = { enableBuiltInResolver: false };
 
+const normalizeHost = (host: string) => host.toLowerCase().replace(/\.+$/, '');
+
 /** Whether url names the app's own host (origin's), under any scheme and
- * port; an origin that does not read counts as the app's, so that nothing
- * is taken for another page by mistake. A guest's session does not
- * intercept the app's origin, so such an address never reaches the hub:
- * a page there would be another program's passing for the app. */
+ * port (including trailing-dot FQDN spellings); an origin that does not read
+ * counts as the app's, so that nothing is taken for another page by mistake.
+ * A guest's session does not intercept the app's origin, so such an address
+ * never reaches the hub: a page there would be another program's passing for
+ * the app. */
 function leadsToHub(url: string, origin: string): boolean {
   try {
-    return new URL(url).hostname.toLowerCase() === new URL(origin).hostname.toLowerCase();
+    return normalizeHost(new URL(url).hostname) === normalizeHost(new URL(origin).hostname);
   } catch {
     return true;
   }

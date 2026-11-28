@@ -596,3 +596,161 @@ test('an idle backend closes its connection', async () => {
   c.send({ t: 'sub', m: 'x' });
   while ((await c.until('backend')).state !== 'ready');
 });
+
+// Disabling a machine whose terminal core was stopped rests its backend
+// without retry churn, and re-enabling the machine clears the stopped flag
+// so the terminal core starts automatically once the machine reconnects.
+test('disabling with a stopped core rests quietly and re-enabling starts the core again', async () => {
+  const r = await start({ options: { timing: { backoffMinMs: 20, backoffMaxMs: 40 } } });
+  const c = await r.client();
+  await c.ready();
+  const mc = r.machines.get('x')!;
+  await waitFor('ready', () => mc.state().hc?.state === 'ready');
+
+  // Stop core (as "Also stop terminal core" does before disable), then disable.
+  expect((await r.tc.request('POST', '/api/m/x/hc/stop')).status).toBe(200);
+  while ((await c.until('backend')).code !== 'stopped');
+  expect(r.backend().stopped).toBe(true);
+
+  r.machines.setEnabled('x', false);
+  await waitFor('disabled', () => mc.state().status === 'disabled');
+  while ((await c.until('backend')).code !== 'machine_offline');
+  const actionsWhileDisabled = r.sim.actions.length;
+  await sleep(100);
+  // Backend rests while disabled: no ensure/status churn.
+  expect(r.sim.actions.length).toBe(actionsWhileDisabled);
+
+  // Re-enabling clears stopped and brings the terminal core back automatically.
+  r.machines.setEnabled('x', true);
+  await waitFor('machine ready again', () => mc.state().status === 'ready');
+  await waitFor('terminal core ready again', () => mc.state().hc?.state === 'ready');
+  expect(r.backend().stopped).toBe(false);
+  while ((await c.until('backend')).state !== 'ready');
+  expect((await c.until('snapshot')).terminals).toHaveLength(1);
+});
+
+test('terminal.run stages vault env ephemerally out of terminal.run.env, strips internal argv, and drops on failure', async () => {
+  const calls: Array<{ m: string; ws: string }> = [];
+  const r = await start({
+    ssh: '10.0.0.1 1234 10.0.0.2 22',
+    options: {
+      paneEnv: () => ({ DISPLAY: ':99' }),
+      workspaceEnv: async (m, ws) => {
+        calls.push({ m: m.id, ws });
+        return {
+          env: { VAULT_SECRET: 's3cr3t-value', DISPLAY: ':wrong', CLIENT_OVERRIDE: 'from-vault' },
+          names: ['VAULT_SECRET', 'DISPLAY', 'CLIENT_OVERRIDE'],
+          presets: ['p1'],
+          missing: [],
+          locked: false,
+        };
+      },
+    },
+  });
+  const c = await r.client();
+  await c.ready();
+  const res = await c.call(1, 'terminal.run', {
+    keep: true,
+    workspace: 'ws-42',
+    argv: ['claude', '--resume'],
+    env: { CLIENT_OVERRIDE: 'from-client', BUN_BE_BUN: '1' },
+  });
+  // Returned terminal record preserves explicit target argv without exposing `term-env` or token.
+  expect(res.result).toEqual({ address: 't2', argv: ['claude', '--resume'] });
+  expect(calls).toEqual([{ m: 'x', ws: 'ws-42' }]);
+
+  const runCall = r.sim.core!.calls.find((x) => x.method === 'terminal.run')!;
+  const params = runCall.params as Record<string, unknown>;
+  expect(params.workspace).toBeUndefined();
+  // Core receives client/display/ssh env ONLY — never vault secrets and never BUN_* foreign runtime vars.
+  expect(params.env).toEqual({
+    CLIENT_OVERRIDE: 'from-client',
+    DISPLAY: ':99',
+    SSH_CLIENT: '10.0.0.1 1234 22',
+    SSH_CONNECTION: '10.0.0.1 1234 10.0.0.2 22',
+  });
+  expect(JSON.stringify(runCall)).not.toContain('s3cr3t-value');
+  expect(JSON.stringify(runCall)).not.toContain('VAULT_SECRET');
+
+  // Staged payload carries only effective vault secrets + moved BUN_* client vars + target argv.
+  expect(r.sim.stagedEnvs).toHaveLength(1);
+  expect(r.sim.stagedEnvs[0]).toMatchObject({
+    env: { VAULT_SECRET: 's3cr3t-value', BUN_BE_BUN: '1' },
+    argv: ['claude', '--resume'],
+  });
+  const token = r.sim.stagedEnvs[0].token;
+  expect((params.argv as string[]).slice(-4)).toEqual(['term-env', token, 'claude', '--resume']);
+
+  // Events, snapshots and terminal.list also strip internal `term-env <token>` argv.
+  r.sim.core!.list = {
+    terminals: [
+      { address: 't2', state: 'live', argv: params.argv, foreground: { pid: 55, name: 'x', argv: (params.argv as string[]).slice(0, -2) } },
+    ],
+    hidden_finished: 0,
+  };
+  const listed = (await c.call(2, 'terminal.list')).result as { terminals: Array<Record<string, unknown>> };
+  expect(listed.terminals[0].argv).toEqual(['claude', '--resume']);
+  expect(listed.terminals[0].foreground).toBeUndefined();
+  expect(JSON.stringify(listed)).not.toContain(token);
+
+  r.sim.core!.event('created', 't2', { address: 't2', state: 'live', argv: (params.argv as string[]).slice(0, -2) });
+  const created = await c.until('event');
+  expect(created).toMatchObject({ type: 'created', terminal: 't2', data: { address: 't2', state: 'live', argv: [] } });
+  expect(JSON.stringify(created)).not.toContain(token);
+
+  // `line` parameter is moved to staged payload and omitted from core params.
+  const lineRes = await c.call(3, 'terminal.run', { workspace: 'ws-42', line: 'echo hi' });
+  expect(lineRes.result).toEqual({ address: 't2', argv: [] });
+  const lineCall = r.sim.core!.calls.at(-1)!.params as Record<string, unknown>;
+  expect(lineCall.line).toBeUndefined();
+  expect(r.sim.stagedEnvs[1]).toMatchObject({ env: { VAULT_SECRET: 's3cr3t-value' }, line: 'echo hi' });
+
+  // Audit records names only, never secret values.
+  const auditRec = r.tc.audit.records().find((a) => a.event === 'terminal.run');
+  expect(auditRec).toMatchObject({
+    client_env: ['BUN_BE_BUN', 'CLIENT_OVERRIDE'],
+    vault_env: ['VAULT_SECRET'],
+    vault_presets: ['p1'],
+  });
+  expect(r.tc.audit.text()).not.toContain('s3cr3t-value');
+
+  // If terminal.run on herdr-core fails after staging, the hub drops the staged token.
+  r.sim.core!.drop();
+  const failed = await c.call(4, 'terminal.run', { workspace: 'ws-42' });
+  expect(failed.error).toBeTruthy();
+  await waitFor('staged token dropped on failure', () => r.sim.stagedEnvs[2]?.dropped === true);
+});
+
+test('a node of an earlier release, which cannot stage vault env, starts the terminal without it', async () => {
+  const r = await start({
+    ssh: '10.0.0.1 1234 10.0.0.2 22',
+    options: {
+      paneEnv: () => ({ DISPLAY: ':99' }),
+      workspaceEnv: async () => ({
+        env: { VAULT_SECRET: 's3cr3t-value' },
+        names: ['VAULT_SECRET'],
+        presets: ['p1'],
+        missing: [],
+        locked: false,
+      }),
+    },
+  });
+  r.sim.termEnvUnknown = true;
+  const c = await r.client();
+  await c.ready();
+  const res = await c.call(1, 'terminal.run', { workspace: 'ws-42', argv: ['/bin/sh'], env: { CLIENT_X: '1' } });
+  expect(res.error).toBeUndefined();
+  const params = r.sim.core!.calls.find((x) => x.method === 'terminal.run')!.params as Record<string, unknown>;
+  expect(params.argv).toEqual(['/bin/sh']);
+  expect(params.env).toEqual({
+    CLIENT_X: '1',
+    DISPLAY: ':99',
+    SSH_CLIENT: '10.0.0.1 1234 22',
+    SSH_CONNECTION: '10.0.0.1 1234 10.0.0.2 22',
+  });
+  expect(JSON.stringify(params)).not.toContain('s3cr3t-value');
+  expect(r.sim.stagedEnvs).toEqual([]);
+  const auditRec = r.tc.audit.records().find((a) => a.event === 'terminal.run');
+  expect(auditRec).toMatchObject({ vault_unsupported: ['VAULT_SECRET'], env: ['DISPLAY', 'SSH_CLIENT', 'SSH_CONNECTION'] });
+  expect(auditRec?.vault_env).toBeUndefined();
+});

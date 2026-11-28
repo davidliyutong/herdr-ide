@@ -3,13 +3,24 @@
 // credit for as it draws. Calls reach the terminal core only through the
 // allowlist; terminals that are none of the clients' are answered as
 // terminals that do not exist; a read-only client only observes.
+import { isForeignRuntimeVar } from '#shared/lib/bunenv.ts';
 import type { Logger } from '#shared/lib/log.ts';
-import { HIDDEN_LABEL, isChatHostName } from '#shared/proto/agentproto/index.ts';
+import {
+  HIDDEN_LABEL,
+  isChatHostName,
+  MAX_BODY,
+  MAX_INLINE,
+  Op,
+  type Header,
+  type TermEnvStageParams,
+} from '#shared/proto/agentproto/index.ts';
 import { HCError, type AttachParams, type Conn, type Output, type Stream } from '#shared/proto/hc/index.ts';
 import type { Audit, AuditFields, Who } from '#kernel/audit.ts';
 import { CloseCode, type Channel, type ChannelHandlers, type Message } from '#kernel/channel.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
+import { AgentError } from '#kernel/machines/transport/session.ts';
+import type { Client } from '#kernel/http/env.ts';
 import {
   addEnv,
   AUDITED_METHODS,
@@ -24,7 +35,7 @@ import {
 } from './allowlist.ts';
 import { NotClients, type Backend, type ClientStream, type Subscriber } from './backend.ts';
 import { Code, frame, FrameKind, goQuote, parseInbound, resizeFrame, type Inbound } from './messages.ts';
-import { hiddenRecord, isObject, otherMachine } from './records.ts';
+import { cleanRecord, hiddenRecord, isObject, otherMachine } from './records.ts';
 import type { Timing } from './timing.ts';
 
 export interface ClientDeps {
@@ -40,6 +51,13 @@ export interface ClientDeps {
   /** The variables of the machine's ssh session for new terminals
    * (sshenv.ts); the client's own stay. */
   sshEnv(m: Machine): Record<string, string> | null;
+  /** Optional vault preset environment variables for a workspace's new
+   * terminals; names only are audited, never values. */
+  workspaceEnv?(
+    m: Machine,
+    workspace: string,
+    client: Client,
+  ): Promise<{ env: Record<string, string>; names: string[]; presets: string[] } | undefined>;
   timing: Timing;
   /** A client whose channel holds more unsent bytes than this stopped
    * reading: it is disconnected. Output is credited (a stream has at most
@@ -80,6 +98,9 @@ interface Subscription {
 export class TermClient implements Subscriber {
   private readonly ch: Channel;
   private readonly who: Who;
+  /** Which kind of client this is: vault presets reach its terminals only
+   * where the vault is enabled for it. */
+  private readonly client: Client;
   private readonly d: ClientDeps;
   private readonly life = new AbortController();
   private readonly attached = new Map<number, TermStream>();
@@ -90,9 +111,10 @@ export class TermClient implements Subscriber {
   private closed = false;
   private overflowed = false;
 
-  constructor(ch: Channel, who: Who, d: ClientDeps) {
+  constructor(ch: Channel, who: Who, client: Client, d: ClientDeps) {
     this.ch = ch;
     this.who = who;
+    this.client = client;
     this.d = d;
     d.audit.log(who, 'term.connect');
   }
@@ -368,38 +390,161 @@ export class TermClient implements Subscriber {
     const signal = AbortSignal.any([this.life.signal, AbortSignal.timeout(this.d.timing.callMs)]);
     if (params && (await this.refuseTargets(sub.b, sub.conn, m, params, signal))) return;
     const ev: AuditFields = { machine: m.m, terminal: params?.terminal ?? null, argv: params?.argv ?? null };
+    let stagedToken = '';
+    const mc = m.method === 'terminal.run' ? this.d.machines.get(m.m) : undefined;
     if (m.method === 'terminal.run') {
+      // Hub-only parameter naming the workspace whose linked vault presets
+      // should be injected; stripped before reaching the terminal core.
+      let workspace = '';
+      if (params && 'workspace' in params) {
+        if (typeof params.workspace !== 'string' || Buffer.byteLength(params.workspace) > 128 || /[\x00-\x1f\x7f]/.test(params.workspace))
+          return this.fail(m.rid, 'usage');
+        workspace = params.workspace;
+        delete params.workspace;
+      }
       // The audit entry names the variables the client gave, not their
       // values, which may be secrets.
       const given = envOf(params?.env);
       if (given === undefined) return this.fail(m.rid, 'usage');
       if (given && Object.keys(given).length) ev.client_env = Object.keys(given).sort();
       ev.cwd = params?.cwd ?? null;
-      const mc = this.d.machines.get(m.m);
       if (mc) {
-        const p: Params = params ?? {};
+        const p: Params = { ...(params ?? {}) };
         const added: string[] = [];
+        const display = this.d.paneEnv(mc);
+        const ssh = this.d.sshEnv(mc);
+        // Workspace-linked vault presets (feature 30): staged in memory on the
+        // machine's node (Op.TermEnv) and consumed once via <run>/env.sock +
+        // execve, never sent in terminal.run.env (which herdr-core persists to
+        // terminals.json and reuses on kept-terminal recovery). Precedence:
+        // virtual display > client env > vault preset > ssh env.
+        const vaultEnv: Record<string, string> = {};
+        let vaultPresets: string[] = [];
+        if (workspace && this.d.workspaceEnv) {
+          const resolved = await this.d.workspaceEnv(mc, workspace, this.client);
+          if (resolved && Object.keys(resolved.env).length) {
+            for (const [k, val] of Object.entries(resolved.env)) {
+              if ((given && k in given) || (display && k in display)) continue;
+              vaultEnv[k] = val;
+            }
+            vaultPresets = resolved.presets;
+          }
+        }
+        const vaultNames = Object.keys(vaultEnv).sort();
+        const clientEnv = p.env;
         // New programs get the machine's virtual display (feature 14): its
         // variables replace any the client gave, so a client cannot point
-        // them elsewhere.
-        const display = this.d.paneEnv(mc);
-        if (display && Object.keys(display).length) {
-          const names = addEnv(p, display, true);
-          if (!names) return this.fail(m.rid, 'usage');
-          added.push(...names);
+        // them elsewhere. Programs on an ssh machine learn that their
+        // terminal is shown elsewhere; what the client gave stays.
+        const plain = (): boolean => {
+          if (display && Object.keys(display).length) {
+            const names = addEnv(p, display, true);
+            if (!names) return false;
+            added.push(...names);
+          }
+          if (ssh && Object.keys(ssh).length) {
+            const names = addEnv(p, ssh, false);
+            if (!names) return false;
+            added.push(...names);
+          }
+          if (added.length) {
+            ev.env = [...new Set(added)].sort();
+            params = p;
+          }
+          return true;
+        };
+        let staged = false;
+        if (vaultNames.length > 0) {
+          let runArgv: string[] | undefined;
+          if (p.argv !== undefined && p.argv !== null) {
+            if (
+              !Array.isArray(p.argv) ||
+              !p.argv.every((a): a is string => typeof a === 'string' && !a.includes('\0')) ||
+              (p.argv.length > 0 && p.argv[0] === '')
+            ) {
+              return this.fail(m.rid, 'usage');
+            }
+            if (p.argv.length > 0) runArgv = p.argv;
+          }
+          let runLine: string | undefined;
+          if (p.line !== undefined && p.line !== null) {
+            if (typeof p.line !== 'string' || p.line.includes('\0')) return this.fail(m.rid, 'usage');
+            runLine = p.line;
+          }
+          if (runArgv && runLine !== undefined) return this.fail(m.rid, 'usage');
+          const stageEnv: Record<string, string> = { ...vaultEnv };
+          const coreGiven: Record<string, string> = {};
+          if (given) {
+            for (const [k, val] of Object.entries(given)) {
+              if (display && k in display) continue;
+              // Keep BUN_* client vars off the `term-env` Bun binary itself
+              // while still handing them to the execve'd user program.
+              if (isForeignRuntimeVar(k)) stageEnv[k] = val;
+              else coreGiven[k] = val;
+            }
+          }
+          for (const [k, val] of Object.entries(stageEnv)) {
+            if (k === '' || k.includes('=') || k.includes('\0') || val.includes('\0')) return this.fail(m.rid, 'usage');
+          }
+          if (Object.keys(coreGiven).length > 0) p.env = coreGiven;
+          else delete p.env;
+          ev.vault_env = vaultNames;
+          ev.vault_presets = vaultPresets;
+          added.push(...vaultNames);
+          if (display && Object.keys(display).length) {
+            const names = addEnv(p, display, true);
+            if (!names) return this.fail(m.rid, 'usage');
+            added.push(...names);
+          }
+          if (ssh && Object.keys(ssh).length) {
+            const sshOnly = Object.fromEntries(Object.entries(ssh).filter(([k]) => !(k in stageEnv)));
+            if (Object.keys(sshOnly).length) {
+              const names = addEnv(p, sshOnly, false);
+              if (!names) return this.fail(m.rid, 'usage');
+              added.push(...names);
+            }
+          }
+          ev.env = [...new Set(added)].sort();
+          const stagePayload: TermEnvStageParams = {
+            env: stageEnv,
+            ...(runArgv ? { argv: runArgv } : {}),
+            ...(runLine !== undefined ? { line: runLine } : {}),
+          };
+          const encoded = Buffer.from(JSON.stringify(stagePayload));
+          if (encoded.length > MAX_BODY) return this.fail(m.rid, 'usage');
+          const h: Header =
+            encoded.length > MAX_INLINE
+              ? { op: Op.TermEnv, action: 'stage', params_length: encoded.length }
+              : { op: Op.TermEnv, action: 'stage', params: stagePayload };
+          try {
+            const rep = await mc.request(h, {
+              signal,
+              timeoutMs: this.d.timing.callMs,
+              ...(encoded.length > MAX_INLINE ? { body: encoded } : {}),
+            });
+            if (!rep.termenv?.token || !Array.isArray(rep.termenv.launch) || rep.termenv.launch.length === 0) {
+              return this.fail(m.rid, 'unavailable');
+            }
+            stagedToken = rep.termenv.token;
+            p.argv = rep.termenv.launch;
+            delete p.line;
+            params = p;
+            staged = true;
+          } catch (e) {
+            if (!unknownOp(e)) return this.fail(m.rid, 'unavailable');
+            // A node of an earlier release (AGENTS.md rule 7) cannot stage
+            // values: the terminal starts without them, and the audit entry
+            // says which it did not get.
+            if (clientEnv === undefined) delete p.env;
+            else p.env = clientEnv;
+            added.length = 0;
+            delete ev.vault_env;
+            delete ev.vault_presets;
+            delete ev.env;
+            ev.vault_unsupported = vaultNames;
+          }
         }
-        // Programs on an ssh machine learn that their terminal is shown
-        // elsewhere; what the client gave stays.
-        const ssh = this.d.sshEnv(mc);
-        if (ssh && Object.keys(ssh).length) {
-          const names = addEnv(p, ssh, false);
-          if (!names) return this.fail(m.rid, 'usage');
-          added.push(...names);
-        }
-        if (added.length) {
-          ev.env = added.sort();
-          params = p;
-        }
+        if (!staged && !plain()) return this.fail(m.rid, 'usage');
       }
     }
     if (AUDITED_METHODS.has(m.method)) this.audit(m.method, ev);
@@ -407,7 +552,13 @@ export class TermClient implements Subscriber {
     try {
       result = await sub.conn.call(m.method, params ?? NULL_PARAMS, { signal });
     } catch (e) {
+      if (stagedToken && mc) {
+        void mc.request({ op: Op.TermEnv, action: 'drop', params: { token: stagedToken } }, { timeoutMs: 5000 }).catch(() => {});
+      }
       return this.failErr(m.rid, e);
+    }
+    if ((m.method === 'terminal.run' || m.method === 'terminal.get') && isObject(result)) {
+      result = cleanRecord(result);
     }
     if (m.method === 'terminal.list') {
       result = sub.b.visible(result);
@@ -534,4 +685,10 @@ export class TermClient implements Subscriber {
       } else this.send(resizeFrame(id, out.cols, out.rows));
     }
   }
+}
+
+/** Whether e is a node's refusal of an op it does not know (a node of an
+ * earlier release). */
+function unknownOp(e: unknown): boolean {
+  return e instanceof AgentError && typeof e.reply?.error === 'string' && e.reply.error.startsWith('unknown op');
 }

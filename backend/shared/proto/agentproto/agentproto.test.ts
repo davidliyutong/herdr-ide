@@ -113,16 +113,42 @@ describe('proto', () => {
     expect(olderVersion('v1.2.3', 'v1.2.3-1-gabc')).toBe(true);
     expect(olderVersion('v1.10.0', 'v1.9.9')).toBe(false);
     expect(olderVersion('dev', 'v1.0.0')).toBe(false);
+    // Dirty builds at the same commit are ordered by their build timestamp
+    // (scripts/version.sh appends ".<unix seconds>").
+    expect(olderVersion('v1.2.3-4-gabc', 'v1.2.3-4-gabc-dirty')).toBe(true);
+    expect(olderVersion('v1.2.3-4-gabc-dirty', 'v1.2.3-4-gabc')).toBe(false);
+    expect(olderVersion('v1.2.3-4-gabc-dirty', 'v1.2.3-4-gabc-dirty')).toBe(false);
+    expect(olderVersion('v1.2.3-4-gabc-dirty', 'v1.2.3-4-gabc-dirty.1700000001')).toBe(true);
+    expect(olderVersion('v1.2.3-4-gabc', 'v1.2.3-4-gabc-dirty.1700000001')).toBe(true);
+    expect(olderVersion('v1.2.3-4-gabc-dirty.1700000001', 'v1.2.3-4-gabc')).toBe(false);
+    expect(olderVersion('v1.2.3-4-gabc-dirty.1700000001', 'v1.2.3-4-gabc-dirty.1700000002')).toBe(true);
+    expect(olderVersion('v1.2.3-4-gabc-dirty.1700000002', 'v1.2.3-4-gabc-dirty.1700000001')).toBe(false);
+    expect(olderVersion('v1.2.3-4-gabc-dirty.1700000002', 'v1.2.3-4-gabc-dirty.1700000002')).toBe(false);
+    expect(olderVersion('v1.2.3-4-gabc-dirty.1700000002', 'v1.2.3-5-gdef')).toBe(true);
   });
 
-  // A build is newer by its version when both are known, else by when its
-  // executable was written.
+  // A build is newer by its version when both are known and ordered, else by
+  // when its executable was written.
   test('node build order', () => {
     const a = { build: 'a', version: 'v1.2.0', exe_time: 2 };
     const b = { build: 'b', version: 'v1.3.0', exe_time: 1 };
     const dev1 = { build: 'c', version: 'dev', exe_time: 1 };
     const dev2 = { build: 'd', version: 'dev', exe_time: 2 };
-    expect([newer(b, a), newer(a, b), newer(dev2, dev1), newer(dev1, dev2), newer(a, a)]).toEqual([true, false, true, false, false]);
+    const dirty1 = { build: 'e', version: 'v1.2.0-4-gabc-dirty.1700000001', exe_time: 2 };
+    const dirty2 = { build: 'f', version: 'v1.2.0-4-gabc-dirty.1700000002', exe_time: 1 };
+    const plain1 = { build: 'g', version: 'v1.2.0-4-gabc-dirty', exe_time: 1 };
+    const plain2 = { build: 'h', version: 'v1.2.0-4-gabc-dirty', exe_time: 2 };
+    expect([
+      newer(b, a),
+      newer(a, b),
+      newer(dev2, dev1),
+      newer(dev1, dev2),
+      newer(a, a),
+      newer(dirty2, dirty1),
+      newer(dirty1, dirty2),
+      newer(plain2, plain1),
+      newer(plain1, plain2),
+    ]).toEqual([true, false, true, false, false, true, false, true, false]);
   });
 
   // The detect op's additions are absent while empty.

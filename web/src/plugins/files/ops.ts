@@ -17,7 +17,7 @@ import { isMac, keyLabel } from '../../keys';
 import { renameKeyHint } from '../../rowKeys';
 import * as L from '../../term/layout';
 import { terms } from '../../state/terms';
-import { unsavedPanes, withView } from '../../state/panes';
+import { withView } from '../../state/panes';
 import { useStore, type ToastKind } from '../../state/store';
 import { useTransfers } from '../../transfers';
 import type { MenuEntry } from '../../contextMenu';
@@ -95,13 +95,6 @@ export function badName(name: string): string | undefined {
 
 // ---- opening ----
 
-/** The file editors of the shown workspace of m. */
-function editors(m: string): L.PluginView[] {
-  const l = terms.layout(m);
-  const ws = l && L.selectedWorkspace(l);
-  return ws ? L.pluginViews(ws, 'files', 'editor').map((v) => v.view) : [];
-}
-
 /** Opens a file in the editor, as VS Code does, in a tab of the workspace
  * as terminals open: a preview (a single click) shows it in the
  * workspace's preview editor, which the next preview replaces unless it
@@ -110,19 +103,23 @@ function editors(m: string): L.PluginView[] {
  * preview) unless this is a preview too. With side, the editor opens
  * split beside the focused pane instead (Open to the Side), unless that
  * pane's tab shows the file already. Media files show in the same editor,
- * as Quick Look shows them. With line (1-based) and col, the editor
- * shows that place with the cursor there (a search's match): `reveal`
- * changes each time, so the same place is shown again after the user
- * moved away. */
-export function openEditor(m: string, path: string, o: { preview?: boolean; side?: boolean; line?: number; col?: number } = {}) {
-  const preview = !!o.preview && !o.side;
-  const at = o.line && o.line > 0 ? { line: o.line, col: o.col && o.col > 0 ? o.col : 1, reveal: Date.now() } : {};
-  const view = { plugin: 'files', kind: 'editor', path, ...at };
-  const tab = !o.side;
-  if (editors(m).some((v) => v.path === path))
-    return actions.openView(m, preview ? view : { ...view, preview: false }, { reuse: (v) => v.path === path, tab });
-  const replaceable = (v: L.PluginView) => preview && v.preview === true && !unsavedPanes(m, [L.viewKey(v.id)]).length;
-  return actions.openView(m, { ...view, preview }, { reuse: replaceable, tab });
+ * as Quick Look shows them. With line (1-based), col and optional endLine /
+ * endCol, the editor shows that place with the cursor/selection there. */
+export function openEditor(
+  m: string,
+  path: string,
+  o: {
+    preview?: boolean;
+    side?: boolean;
+    line?: number;
+    col?: number;
+    endLine?: number;
+    endCol?: number;
+    from?: string;
+    focus?: boolean;
+  } = {},
+) {
+  return actions.openEditor(m, path, o);
 }
 
 /** Opens files in editors to keep, one after the other (a selection's). */
@@ -151,7 +148,7 @@ export function openPath(m: string, path: string, dir: boolean, preview = false)
 
 /** Shows a file in the preview editor and gives the keyboard back to el. */
 export async function quickLook(m: string, path: string, el?: HTMLElement | null) {
-  await openEditor(m, path, { preview: true });
+  await openEditor(m, path, { preview: true, focus: false });
   el?.focus();
 }
 
@@ -191,6 +188,24 @@ export function revealInExplorer(m: string, path: string) {
 
 /** Show in Explorer of the editor pane. */
 export const reveal = revealInExplorer;
+
+/** A link to path (PluginDef.openFolder): when the machine says it is a
+ * folder, the explorer reveals it and expands it, and this resolves true;
+ * a file, a path not there or a stat that fails resolves false, for the
+ * caller to open it as a file (whose pane then says what went wrong). */
+export async function openFolder(m: string, path: string): Promise<boolean> {
+  if (!isPluginOn('files')) return false;
+  let entry;
+  try {
+    [entry] = await filesApi.stat(m, [path]);
+  } catch {
+    return false;
+  }
+  if (!entry?.exists || !entry.is_dir || entry.error) return false;
+  revealInExplorer(m, entry.path);
+  setExpanded(entry.path, true);
+  return true;
+}
 
 /** Whether Reveal in Finder is offered for each machine's paths here, as
  * the hub said: only for its own machine, to a page on its computer

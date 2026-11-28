@@ -11,7 +11,7 @@
 // keys settings.<key>, settings.<key>.desc, settings.<key>.<option> and
 // settings.group.<id>; a setting without them shows its key.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, Copy as CopyIcon, Ellipsis, FileJson, Lock, Minus, Plus, Search, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
@@ -34,7 +34,7 @@ import {
 } from '../settings';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { DeployProgress } from './DeployProgress';
-import { FontPicker } from './settings/FontPicker';
+import { FontPicker, type FontPickerKind } from './settings/FontPicker';
 import { desktopShell } from '../shell';
 import { notificationPermission, onPermissionChange, requestNotifyPermission } from '../notify';
 import { ZOOM_KEY } from '../zoom';
@@ -46,7 +46,7 @@ import { PluginHeader, PluginsPage } from './settings/PluginsPage';
 import { Performance } from './settings/Performance';
 import { Picker, type PickerItem } from './Picker';
 import { useReturnFocus } from './useDismiss';
-import { acceptRisk, allPlugins, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
+import { acceptRisk, ensurePluginLoaded, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
 import type { PluginDef, PluginSettingsDef } from '../plugins/api';
 
 export function settingLabel(key: string): string {
@@ -214,6 +214,11 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   ];
   const current = pages.some((p) => p.id === page) ? page : pages[0]?.id;
   const currentPlugin = plugins.find((p) => p.id === pages.find((x) => x.id === current)?.plugin);
+  const currentPluginId = currentPlugin?.id;
+  useEffect(() => {
+    if (currentPluginId)
+      void ensurePluginLoaded(currentPluginId).catch((err) => console.warn(`plugin ${currentPluginId}: failed to load`, err));
+  }, [currentPluginId]);
   const CurrentExtra = currentPlugin?.settings?.section === current ? currentPlugin.settings.extra : undefined;
   const currentLayout = currentPlugin?.settings?.section === current ? currentPlugin.settings.layout : undefined;
   /** A page's name: its section's, else its plugin's (a page for extra alone). */
@@ -427,7 +432,7 @@ function OpenFileButton({ file, which }: { file: string; which: 'settings' | 'ke
       onClick={() => {
         if (canOpen) {
           useStore.getState().openSettings(false);
-          void actions.openPath(local.id, file, 1);
+          void actions.openPath(local.id, file, { line: 1 });
         } else {
           void navigator.clipboard?.writeText(file).catch(() => {});
           useStore.getState().toast(t('transfers.copied', { path: file }));
@@ -501,9 +506,25 @@ function SectionView({
         schemes.map((d) => (
           <ThemeColors key={d.key} theme={d.key.endsWith('.dark') ? 'dark' : 'light'} scheme={d} readOnly={readOnly} onError={setError} />
         ))}
-      {Layout ? <Layout readOnly={readOnly} defs={plain} rows={rowsOf} lead={header} visit={visit} /> : rowsOf(plain)}
+      {Layout ? (
+        <Suspense fallback={null}>
+          <Layout
+            readOnly={readOnly}
+            defs={plain}
+            rows={rowsOf}
+            lead={header}
+            footer={footer ? <Suspense fallback={null}>{footer}</Suspense> : undefined}
+            machine={machine?.id}
+            visit={visit}
+          />
+        </Suspense>
+      ) : (
+        <>
+          {rowsOf(plain)}
+          {footer && <Suspense fallback={null}>{footer}</Suspense>}
+        </>
+      )}
       {fullDiskAccess && <FullDiskAccess readOnly={readOnly} />}
-      {footer}
       {id === 'gui' && machine && machine.kind !== 'local' && (
         <div className="setting">
           <div className="setting-head">
@@ -651,8 +672,14 @@ function Control({
   onChange(v: SettingValue): void;
 }) {
   // A plugin's own control for the setting (PluginSettingsDef.controls).
-  const Own = allPlugins().find((p) => p.settings?.controls?.[d.key])?.settings?.controls?.[d.key];
-  if (Own) return <Own d={d} value={value} disabled={disabled} onChange={onChange} />;
+  const plugins = usePluginList((s) => s.list);
+  const Own = plugins.find((p) => p.settings?.controls?.[d.key])?.settings?.controls?.[d.key];
+  if (Own)
+    return (
+      <Suspense fallback={null}>
+        <Own d={d} value={value} disabled={disabled} onChange={onChange} />
+      </Suspense>
+    );
   switch (d.type) {
     case 'bool':
       return (
@@ -705,12 +732,19 @@ function Control({
       );
     case 'list':
       return <ListEditor d={d} value={value as string[]} disabled={disabled} onChange={onChange} />;
-    default:
-      return d.key === 'terminal.fontFamily' ? (
-        <FontPicker value={String(value)} disabled={disabled} onChange={onChange} />
+    default: {
+      const fontKind: Record<string, FontPickerKind> = {
+        'terminal.fontFamily': 'terminal',
+        'terminal.cjkFontFamily': 'terminal-cjk',
+        'appearance.uiFontFamily': 'ui',
+        'appearance.uiCjkFontFamily': 'ui-cjk',
+      };
+      return fontKind[d.key] ? (
+        <FontPicker kind={fontKind[d.key]} value={String(value)} disabled={disabled} onChange={onChange} />
       ) : (
         <TextInput d={d} value={String(value)} disabled={disabled} onChange={onChange} />
       );
+    }
   }
 }
 

@@ -1,4 +1,5 @@
-import { Columns2, Ellipsis, FileDiff, GitGraph, Maximize2, Minimize2, PanelRight, RotateCw, Rows2, X } from 'lucide-react';
+import { Columns2, CornerDownLeft, Ellipsis, FileDiff, GitGraph, Maximize2, Minimize2, PanelRight, RotateCw, Rows2, X } from 'lucide-react';
+import { dockCurrentTab, isDetachedWindow } from '../detachedWindow';
 import { useStore } from '../state/store';
 import { terms } from '../state/terms';
 import * as L from '../term/layout';
@@ -22,8 +23,14 @@ export function PaneActions({ m, pane, leaf, zoomed }: { m: string; pane: string
   const readOnly = useStore((s) => s.readOnly);
   const code = usePluginOn('vscode');
   const terminal = L.isTerminalLeaf(leaf);
+  const detached = isDetachedWindow();
   return (
     <span className="pane-actions" onMouseDown={(e) => (e.target as HTMLElement).closest('button') && e.preventDefault()}>
+      {detached && (
+        <button title={t('window.returnToMain')} aria-label={t('window.returnToMain')} onClick={() => dockCurrentTab()}>
+          <CornerDownLeft />
+        </button>
+      )}
       {terminal && <PaneGuiButton m={m} terminal={pane} />}
       {!readOnly && (
         <>

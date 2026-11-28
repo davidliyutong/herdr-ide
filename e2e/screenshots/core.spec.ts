@@ -26,11 +26,12 @@ test.beforeEach(async ({ app, instance }) => {
   await showPanel(app, 'chat');
   await capture(app, instance, 'chat', async () => {
     await showPanel(app, 'chat');
-    await expect(app.locator('.chat-pane')).toContainText('Training review');
-    if (!(await app.locator('.chat-pane .conv-diff').isVisible()))
-      await app.locator('.chat-pane [role="log"] button').filter({ hasText: 'train.py' }).nth(1).click();
-    await expect(app.locator('.chat-pane .conv-diff')).toBeVisible();
-    await expect(app.locator('.chat-pane')).toContainText(/Waiting for you|等待你的回复/);
+    const chatHost = app.locator('.pane:has(.chat-pane)');
+    await expect(chatHost).toContainText('Training review');
+    if (!(await chatHost.locator('.conv-diff').isVisible()))
+      await chatHost.locator('[role="log"] button').filter({ hasText: 'train.py' }).nth(1).click();
+    await expect(chatHost.locator('.conv-diff')).toBeVisible();
+    await expect(chatHost.locator('.chat-state')).toHaveText(/^(?:Waiting for you|等待你的回复)$/);
   });
 });
 

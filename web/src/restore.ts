@@ -23,7 +23,7 @@
 // its id when the machine confirmed that session for the terminal's
 // directory (confirmSession), else the directory's latest.
 import * as L from './term/layout';
-import { isLive, type TerminalRecord } from './term/protocol';
+import { CORE_ENDED, isLive, type TerminalRecord } from './term/protocol';
 import { agentOf, agentSession } from './lib/machine';
 import { agentKind, isSessionId, resumeCommand } from './conversation/kinds';
 import { jsonBody } from './lib/pluginApi';
@@ -37,11 +37,26 @@ export const AGENT_FORGET_MS = 30_000;
  * continues the directory's latest conversation instead. */
 export const RESOLVE_TIMEOUT_MS = 3_000;
 
-const CORE_ENDED = new Set(['stopped_by_restart', 'holder_lost', 'server_stop', 'host_shutdown']);
-
 /** Whether a terminal ended because its core or its machine did, not its program. */
 export function endedWithCore(r: TerminalRecord | undefined): boolean {
   return !!r && r.state === 'finished' && typeof r.reason === 'string' && CORE_ENDED.has(r.reason);
+}
+
+/** Whether a terminal record is a kept terminal waiting for its shell to come
+ * back (lost, starting, or restarting after a reboot): never pruned from the
+ * layout while the terminal core restarts it. */
+export function keptWhileRestarting(r: TerminalRecord | undefined): boolean {
+  if (!r || isLive(r)) return false;
+  if (r.state !== 'finished') return true;
+  return r.keep === true && !r.reason;
+}
+
+/** Terminals named in layout that have no record because the terminal core
+ * started empty (for example after a host was powered off or disabled longer
+ * than finished records are retained): restored in place rather than pruned. */
+export function missingOnEmptyCore(layout: L.Layout, records: readonly TerminalRecord[]): string[] {
+  if (records.length > 0) return [];
+  return L.layoutTerminals(layout);
 }
 
 /** Whether an agent can be brought back: its kind continues the
@@ -81,11 +96,13 @@ export function rememberAgents(
   layout: L.Layout,
   record: (address: string) => TerminalRecord | undefined,
   gone: (address: string) => boolean,
+  restarted?: (address: string) => boolean,
 ): L.Layout {
   return L.mapTerminals(layout, (leaf) => {
     const r = record(leaf.terminal);
     if (!r || !isLive(r) || typeof r.pid !== 'number') return leaf;
-    if (resumable(leaf.agent) && leaf.pid !== r.pid) return { ...without(leaf, 'agent', 'pid'), resume: leaf.agent };
+    if (resumable(leaf.agent) && (leaf.pid !== r.pid || restarted?.(leaf.terminal)))
+      return { ...without(leaf, 'agent', 'pid'), resume: leaf.agent };
     const agent = agentOf(r);
     if (resumable(agent)) {
       const kept = leaf.agent === undefined || leaf.agent === agent ? leaf.session : undefined;
@@ -150,6 +167,12 @@ function askableDirectory(path: string | undefined): path is string {
   return typeof path === 'string' && path.startsWith('/') && !path.includes('\0') && new TextEncoder().encode(path).length <= 4096;
 }
 
+/** HTTP statuses from the resolve route that may succeed on a short retry
+ * (concurrency cap 429 busy when many agent panes restore at once after a
+ * reboot, or brief transport/gateway errors). */
+const RETRYABLE_RESOLVE = new Set([429, 502, 503, 504]);
+const RESOLVE_RETRY_MS = 200;
+
 /** Whether the machine m confirms that the agent kept the session's
  * transcript and the session ran in the directory cwd (the agents plugin's
  * resolve route). False for every other answer (another directory, no such
@@ -162,18 +185,38 @@ export function confirmSession(m: string, agent: string, session: string, cwd: s
     return Promise.resolve(false);
   }
   return new Promise((done) => {
+    let settled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(retryTimer);
+      done(ok);
+    };
     const abort = new AbortController();
     const timer = setTimeout(() => {
       abort.abort();
-      done(false);
+      finish(false);
     }, RESOLVE_TIMEOUT_MS);
     const query = new URLSearchParams({ kind: agent, session, cwd });
-    fetch(`/api/m/${encodeURIComponent(m)}/p/agents/resolve?${query}`, { cache: 'no-store', signal: abort.signal })
-      .then(async (r) => r.ok && (await jsonBody(r)).ok === true)
-      .then(
-        (ok) => done(ok),
-        () => done(false),
-      )
-      .finally(() => clearTimeout(timer));
+    const url = `/api/m/${encodeURIComponent(m)}/p/agents/resolve?${query}`;
+    let delay = RESOLVE_RETRY_MS;
+    const attempt = () => {
+      if (settled) return;
+      fetch(url, { cache: 'no-store', signal: abort.signal })
+        .then(async (r) => {
+          if (r.ok) return finish((await jsonBody(r)).ok === true);
+          if (RETRYABLE_RESOLVE.has(r.status) && !settled && !abort.signal.aborted) {
+            const wait = delay;
+            delay *= 2;
+            retryTimer = setTimeout(attempt, wait);
+            return;
+          }
+          finish(false);
+        })
+        .catch(() => finish(false));
+    };
+    attempt();
   });
 }

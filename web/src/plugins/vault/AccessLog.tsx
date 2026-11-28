@@ -12,6 +12,7 @@ import { Picker } from '../../components/Picker';
 const OUTCOME: Record<string, 'ok' | 'asked' | 'refused' | 'info'> = {
   allowed: 'ok',
   exempted: 'ok',
+  injected: 'ok',
   revealed: 'ok',
   exported: 'ok',
   approved: 'asked',
@@ -22,6 +23,11 @@ const OUTCOME: Record<string, 'ok' | 'asked' | 'refused' | 'info'> = {
 function resultText(result: string): string {
   const key = `vault.result.${result}`;
   return hasMessage(key) ? t(key) : result;
+}
+
+function toolText(tool: string): string {
+  const key = `vault.tool.${tool}`;
+  return hasMessage(key) ? t(key) : tool;
 }
 
 /** The machine filter's value of a page's records (machine ''). */
@@ -99,7 +105,7 @@ export function AccessLog() {
                     <span className="vault-entry-body">
                       <span className="vault-entry-line">
                         <span className={`vault-outcome ${OUTCOME[a.result] ?? 'refused'}`}>{resultText(a.result)}</span>
-                        <span className="vault-entry-tool">{t(`vault.tool.${a.tool}` as 'vault.tool.get')}</span>
+                        <span className="vault-entry-tool">{toolText(a.tool)}</span>
                         {(a.count ?? 1) > 1 && <span className="muted">{t('vault.log.count', { count: a.count ?? 1 })}</span>}
                       </span>
                       {(a.names ?? []).length > 0 && (

@@ -433,13 +433,115 @@ describe('the chat source', () => {
     const source = new ChatSourceImpl('m', A);
     await flush();
     expect(await source.suggestFiles!('src')).toEqual([
-      { path: '/w/p/src', label: 'src/' },
+      { path: '/w/p/src', label: 'src/', isDir: true },
       { path: '/w/p/resrc', label: 'resrc' },
     ]);
     expect(await source.suggestFiles!('src/ma')).toEqual([{ path: '/w/p/src/main.ts', label: 'src/main.ts' }]);
     expect(String(fetch.mock.calls.at(-1)![0])).toContain(encodeURIComponent('/w/p/src'));
     expect((await source.suggestFiles!('.e')).map((f) => f.label)).toEqual(['.env']);
     expect(await source.suggestFiles!('a b')).toEqual([]);
+  });
+
+  it('uses recursive /p/files/find for @ queries when available and sends steer/stopTask/rewind commands', async () => {
+    hub.chat(A, { kind: 'claude', state: 'idle', cwd: '/w/p' });
+    const fetch = vi.fn(async (url: string) => {
+      if (String(url).includes('/p/files/find')) {
+        return new Response(
+          JSON.stringify({
+            matches: [
+              { path: '/w/p/web/src/Composer.tsx', rel: 'web/src/Composer.tsx', name: 'Composer.tsx' },
+              { path: '/w/p/web/src', rel: 'web/src', name: 'src', is_dir: true },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ dir: { name: '' }, entries: [] }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetch);
+    const source = new ChatSourceImpl('m', A);
+    const seen: unknown[] = [];
+    source.subscribe((ev) => seen.push(ev));
+    await flush();
+    expect(await source.suggestFiles!('Composer')).toEqual([
+      { path: '/w/p/web/src/Composer.tsx', label: 'web/src/Composer.tsx' },
+      { path: '/w/p/web/src', label: 'web/src/', isDir: true },
+    ]);
+    await source.send([{ type: 'text', text: 'now' }], 'c1', 'steer');
+    await source.steerQueued('q1', 'interrupt');
+    await source.stopTask('t9');
+    await source.compact('focus on errors');
+    await source.rewind(4, { content: [{ type: 'text', text: 'edited' }], clientId: 'c2', restoreFiles: true });
+    expect(hub.ops('command').map((c) => c.cmd)).toEqual([
+      { op: 'prompt', content: [{ type: 'text', text: 'now' }], clientId: 'c1', delivery: 'steer' },
+      { op: 'steer_queued', message: 'q1', delivery: 'interrupt' },
+      { op: 'stop_task', task: 't9' },
+      { op: 'compact', instructions: 'focus on errors' },
+      { op: 'rewind', seq: 4, content: [{ type: 'text', text: 'edited' }], clientId: 'c2', restoreFiles: true },
+    ]);
+    // Reset event broadcast from rewind clears local log and re-attaches cleanly.
+    hub.event(A, { seq: 3, live: true, t: 'reset' as never });
+    await flush();
+    expect(seen.some((e) => (e as { t?: string }).t === 'reset')).toBe(true);
+    expect(hub.ops('attach').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('defers reset detach until an in-flight rewind command receives its ack', async () => {
+    hub.auto = false;
+    const source = new ChatSourceImpl('m', A);
+    const seen: unknown[] = [];
+    source.subscribe((ev) => seen.push(ev));
+    hub.open();
+    const firstAttach = hub.ops('attach')[0];
+    hub.push({ t: 'attached', sub: firstAttach.sub, chat: { id: A, kind: 'claude', state: 'idle' }, first: 1 });
+    hub.push({ t: 'event', sub: firstAttach.sub, ev: { seq: 1, t: 'user', content: [{ type: 'text', text: 'first' }] } });
+    hub.push({ t: 'event', sub: firstAttach.sub, ev: { seq: 2, t: 'user', content: [{ type: 'text', text: 'second' }] } });
+    await flush();
+
+    const rewinding = source.rewind(2, { content: [{ type: 'text', text: 'edited' }], clientId: 'c2' });
+    await flush();
+    const cmd = hub.ops('command')[0];
+    expect(cmd.cmd).toMatchObject({ op: 'rewind', seq: 2 });
+
+    // Server broadcasts EventType.Reset BEFORE acknowledging the rewind command.
+    hub.push({ t: 'event', sub: firstAttach.sub, ev: { seq: 1, live: true, t: 'reset' } });
+    await flush();
+    // Must not detach yet while rewind is still awaiting its ack.
+    expect(hub.ops('detach')).toEqual([]);
+    expect(seen.some((e) => (e as { t?: string }).t === 'reset')).toBe(false);
+
+    // Ack arrives: rewind resolves cleanly, then source emits reset, detaches, and re-attaches from 0.
+    hub.push({ t: 'ack', id: cmd.id });
+    await expect(rewinding).resolves.toBeUndefined();
+    await flush();
+    expect(seen.some((e) => (e as { t?: string }).t === 'reset')).toBe(true);
+    expect(hub.ops('detach')).toEqual([{ op: 'detach', sub: firstAttach.sub }]);
+    expect(hub.ops('attach')).toHaveLength(2);
+    expect(hub.ops('attach')[1].from).toBeUndefined();
+    source.stop();
+  });
+
+  it('clears cached usage on reset and resolves userTurns previews for Codex Queued(taken) without content', async () => {
+    hub.chat(A, { kind: 'codex', state: 'idle', usage: { used: 4200, size: 200_000 } }, [
+      { seq: 1, t: 'user', content: [{ type: 'text', text: 'first turn' }] },
+      { seq: 2, t: 'queued', state: 'waiting', message: 'q-steer', content: [{ type: 'text', text: 'queued follow-up' }] },
+      { seq: 3, t: 'queued', state: 'taken', message: 'q-steer' },
+    ]);
+    const source = new ChatSourceImpl('m', A);
+    await flush();
+    expect(useChats.getState().live[liveKey('m', A)]?.usage).toMatchObject({ used: 4200, size: 200_000 });
+    expect(source.userTurns()).toEqual([
+      { seq: 1, text: 'first turn' },
+      { seq: 3, text: 'queued follow-up' },
+    ]);
+
+    // After rewind reset to a fresh chat with no usage, live usage MUST be cleared (never stuck at 4200).
+    hub.chat(A, { kind: 'codex', state: 'idle' }, []);
+    hub.event(A, { seq: 0, live: true, t: 'reset' as never });
+    await flush();
+    await flush();
+    expect(useChats.getState().live[liveKey('m', A)]?.usage).toBeUndefined();
+    source.stop();
   });
 
   it('is kept a while after the last pane let go of it, then detached', async () => {

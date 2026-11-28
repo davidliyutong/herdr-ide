@@ -107,8 +107,35 @@ function monacoWithoutMaps(): Plugin {
   };
 }
 
+// Preloads the terminal emulator WebAssembly binary in index.html so the
+// browser fetches it in parallel with the entry script rather than waiting
+// until TerminalView mounts and evaluates the wasm URL.
+function preloadWasm(): Plugin {
+  return {
+    name: 'preload-wasm',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, ctx) {
+        if (!ctx.bundle) return html;
+        const wasm = Object.keys(ctx.bundle).find((name) => /(?:^|\/)ghostty-vt-[^/]+\.wasm$/.test(name));
+        if (!wasm) return html;
+        return {
+          html,
+          tags: [
+            {
+              tag: 'link',
+              attrs: { rel: 'preload', href: `/${wasm}`, as: 'fetch', crossorigin: '' },
+              injectTo: 'head',
+            },
+          ],
+        };
+      },
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), brand(), bundledLicenses(), katexWoff2(), monacoWithoutMaps()],
+  plugins: [react(), brand(), bundledLicenses(), katexWoff2(), monacoWithoutMaps(), preloadWasm()],
   worker: { plugins: () => [monacoWithoutMaps()] },
   build: {
     outDir: 'dist',

@@ -38,13 +38,13 @@ export class SessionError extends Error {
 }
 
 /** The transcript formats with sessions (Kind.transcript). */
-export const Format = { Claude: 'claude', Codex: 'codex' } as const;
+export const Format = { Claude: 'claude', Codex: 'codex', Agy: 'agy' } as const;
 export type Format = (typeof Format)[keyof typeof Format];
 
 /** The format of a kind with sessions; null for any other kind. */
 export function formatOf(kind: string): Format | null {
   const t = byId(kind)?.transcript;
-  return t === Format.Claude || t === Format.Codex ? t : null;
+  return t === Format.Claude || t === Format.Codex || t === Format.Agy ? t : null;
 }
 
 /** Bounds of what one call reads. */
@@ -156,6 +156,15 @@ export function clean(p: string): string {
 
 /** Whether two directories are the same path once cleaned. */
 export const samePath = (a: string, b: string): boolean => a !== '' && b !== '' && clean(a) === clean(b);
+
+/** Whether two directories name the same location, resolving symlinks when
+ * cleaned paths differ (e.g. macOS /tmp vs /private/tmp). */
+export async function sameDir(files: Files, a: string, b: string): Promise<boolean> {
+  if (samePath(a, b)) return true;
+  if (a === '' || b === '') return false;
+  const [ra, rb] = await Promise.all([files.realpath(a), files.realpath(b)]);
+  return samePath(ra || a, rb || b);
+}
 
 /** The non-empty strings of s, without duplicates, in order. */
 export const uniq = (...s: string[]): string[] => [...new Set(s.filter((x) => x !== ''))];

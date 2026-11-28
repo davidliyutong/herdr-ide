@@ -3,7 +3,18 @@
 // The metrics are those Chromium (the desktop app) measured on macOS at
 // 40 px.
 import { describe, expect, it } from 'vitest';
-import { fixedPitch, pickMonospace, printableName, uniqueNames, type Measure, type TextBox } from '../terminal/localFonts';
+import {
+  fixedPitch,
+  hasCjkGlyphs,
+  isTextFont,
+  pickCjk,
+  pickMonospace,
+  pickUiFonts,
+  printableName,
+  uniqueNames,
+  type Measure,
+  type TextBox,
+} from '../terminal/localFonts';
 
 interface FontMetrics {
   /** Advance of each character (ten of them are ten times as wide). */
@@ -80,5 +91,43 @@ describe('the list', () => {
   it('lists the fixed-pitch families sorted, from a list with duplicates and garbage', () => {
     const families = ['Wingdings 2', 'Menlo', 'Helvetica', '???®™??-', 'Ayuthaya', 'BIZ UDGothic', 'menlo', 'CMU Typewriter Text'];
     expect(pickMonospace(families, (f) => fixedPitch(f, measure))).toEqual(['BIZ UDGothic', 'CMU Typewriter Text', 'Menlo']);
+  });
+
+  it('lists proportional UI text fonts while dropping symbols and uninstalled fallbacks', () => {
+    expect(isTextFont('Helvetica', measure)).toBe(true);
+    expect(isTextFont('Menlo', measure)).toBe(true);
+    expect(isTextFont('Wingdings 2', measure)).toBe(false);
+    expect(isTextFont('Not Installed Mono', measure)).toBe(false);
+    expect(pickUiFonts(['Wingdings 2', 'Helvetica', 'Menlo', 'Not Installed Mono'], (f) => isTextFont(f, measure))).toEqual([
+      'Helvetica',
+      'Menlo',
+    ]);
+  });
+
+  it('identifies CJK-capable families and filters out Latin-only or missing families', () => {
+    const cjkBoxes: Record<string, TextBox> = {
+      'PingFang SC': { width: 240, ascent: 35, descent: 5 },
+      'LXGW WenKai': { width: 240, ascent: 33, descent: 6 },
+      'Sarasa Mono SC': { width: 240, ascent: 34, descent: 6 },
+    };
+    const genericCjk: Record<string, TextBox> = {
+      serif: { width: 240, ascent: 34, descent: 7 },
+      'sans-serif': { width: 240, ascent: 35, descent: 5 },
+      monospace: { width: 240, ascent: 33, descent: 8 },
+    };
+    const cjkMeasure: Measure = (font) => {
+      const m = /"([^"]*)"/.exec(font);
+      if (m && cjkBoxes[m[1]]) return cjkBoxes[m[1]];
+      const generic = font.endsWith('sans-serif') ? 'sans-serif' : font.endsWith('monospace') ? 'monospace' : 'serif';
+      return genericCjk[generic];
+    };
+    expect(hasCjkGlyphs('PingFang SC', cjkMeasure)).toBe(true);
+    expect(hasCjkGlyphs('LXGW WenKai', cjkMeasure)).toBe(true);
+    expect(hasCjkGlyphs('Menlo', cjkMeasure)).toBe(false);
+    expect(hasCjkGlyphs('Helvetica', cjkMeasure)).toBe(false);
+    expect(pickCjk(['Menlo', 'PingFang SC', 'Helvetica', 'LXGW WenKai', 'pingfang sc'], (f) => hasCjkGlyphs(f, cjkMeasure))).toEqual([
+      'LXGW WenKai',
+      'PingFang SC',
+    ]);
   });
 });

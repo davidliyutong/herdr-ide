@@ -31,6 +31,9 @@ export const Notice = {
   Imported: 'imported',
   UntrustedFolder: 'untrusted_folder',
   FullAccessOff: 'full_access_off',
+  Forked: 'forked',
+  Switched: 'switched',
+  Rewound: 'rewound',
 } as const;
 
 /** The method of a notice: an ACP extension method, "_<slug>/<name>". */

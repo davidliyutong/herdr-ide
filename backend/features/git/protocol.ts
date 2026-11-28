@@ -39,6 +39,8 @@ export const params = z.object({
   rev: str,
   rev2: str,
   parent: int,
+  /** show: return only the commit's metadata, without its changed files. */
+  noFiles: flag,
   /** A blob's side: worktree, index, head or a revision. */
   source: str,
   /** The log's page, branches (all when empty) and remote branches. */

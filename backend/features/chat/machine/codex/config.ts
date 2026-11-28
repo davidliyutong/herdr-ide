@@ -2,13 +2,14 @@
 // parameters of its threads and turns, and its configuration options (the
 // models model/list offers, their efforts, the modes).
 import * as chat from '#shared/proto/chatproto/index.ts';
-import { Mode, MODES, type Capabilities, type ConfigOption, type SlashCommand } from '#shared/proto/chatproto/index.ts';
+import { Mode, MODES, type Capabilities, type ConfigOption, type ModelOption, type SlashCommand } from '#shared/proto/chatproto/index.ts';
 import type {
   AskForApproval,
   ClientRequests,
   Model,
   ReasoningEffortOption,
   SandboxPolicy,
+  ThreadForkParams,
   ThreadResumeParams,
   ThreadStartParams,
   TurnStartParams,
@@ -107,6 +108,27 @@ export function threadParams(resume: string, cwd: string, model: string): Thread
   };
   if (model !== '') p.model = model;
   if (resume !== '') return { ...p, threadId: resume, excludeTurns: true } satisfies ThreadResumeParams;
+  return p;
+}
+
+/** thread/fork's parameters: always read-only, asking the user, without
+ * hydrating turns, so forking never writes ~/.codex/config.toml. */
+export function forkParams(
+  threadId: string,
+  cwd: string,
+  o: { model?: string; beforeTurnId?: string; lastTurnId?: string } = {},
+): ThreadForkParams {
+  const p: ThreadForkParams = {
+    threadId,
+    cwd,
+    approvalPolicy: 'on-request',
+    approvalsReviewer: 'user',
+    sandbox: 'read-only',
+    excludeTurns: true,
+  };
+  if (o.model) p.model = o.model;
+  if (o.beforeTurnId) p.beforeTurnId = o.beforeTurnId;
+  else if (o.lastTurnId) p.lastTurnId = o.lastTurnId;
   return p;
 }
 
@@ -212,6 +234,22 @@ export class Models {
     return out;
   }
 
+  /** Models in chatproto's standalone Op.Models shape. */
+  toModelOptions(): ModelOption[] {
+    return this.list.map((m) => {
+      const value = Models.slug(m);
+      const efforts = (m.supportedReasoningEfforts ?? []).map((e) => e.reasoningEffort);
+      return {
+        value,
+        name: m.displayName || value,
+        ...(m.description ? { description: m.description } : {}),
+        ...(efforts.length > 0 ? { efforts } : {}),
+        ...(m.defaultReasoningEffort ? { defaultEffort: m.defaultReasoningEffort } : {}),
+        images: this.images(value),
+      };
+    });
+  }
+
   /** What a chat with st's model can do. */
   capabilities(st: Settings): Capabilities {
     return {
@@ -222,7 +260,12 @@ export class Models {
       questions: true,
       effort: (this.efforts(st.model) ?? []).length > 0,
       model: this.list.length > 0,
-      cancelQueued: false,
+      cancelQueued: true,
+      steer: true,
+      stopTask: true,
+      fork: true,
+      rewind: true,
+      rewindFiles: false,
     };
   }
 }

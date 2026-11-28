@@ -4,9 +4,10 @@
 import { afterEach, expect, test } from 'bun:test';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
+import { defineFeature } from '#kernel/feature.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, running, sshSpec, testHub, testMachines, waitFor } from '#kernel/testing.ts';
-import { monitorFeature } from './hub.ts';
+import { MONITOR_CACHE_TTL_MS, monitorFeature } from './hub.ts';
 import { settings } from './settings.ts';
 
 const ON = { 'plugins.monitor.enabled': true };
@@ -120,4 +121,122 @@ test('settings', () => {
   const st = new Settings('', { modules: [settings] });
   expect([st.get('monitor.refreshSeconds'), st.get('monitor.statusBar'), st.get('monitor.confirmKill')]).toEqual([2, true, true]);
   expect(() => st.set('monitor.refreshSeconds', '', 31)).toThrow();
+});
+
+test('caches and coalesces metrics/processes, invalidates processes on signal, and aborts on machine forget', async () => {
+  let now = 10_000;
+  let metricsCalls = 0;
+  let procCalls = 0;
+  let holdMetrics = false;
+  let releaseMetrics!: () => void;
+  let metricsStreamClosed = false;
+
+  const makeMetrics = (n: number) => ({
+    hostname: 'box',
+    os: 'linux',
+    arch: 'amd64',
+    uptimeSec: n,
+    timestampMs: now,
+    cpu: { usagePct: n, cores: 2, load1: 0, load5: 0, load15: 0 },
+    memory: { totalBytes: 1, usedBytes: 1, availableBytes: 0, usedPct: 100, swapTotalBytes: 0, swapUsedBytes: 0 },
+    gpus: null,
+    network: { rxBytesPerSec: 0, txBytesPerSec: 0, rxBytes: 0, txBytes: 0 },
+    diskIO: { readBytesPerSec: 0, writeBytesPerSec: 0, readBytes: 0, writeBytes: 0 },
+    disks: [],
+    sensors: { temps: [] },
+  });
+  const makeProcs = (n: number) => ({ processes: [], total: n, cores: 2, memTotalBytes: 1, timestampMs: now });
+
+  const serve = async (h: Header, conn: AgentStream) => {
+    try {
+      if (h.op !== Op.Plugin || h.plugin !== 'monitor') return void (await writeLine(conn.stream, { ok: false, error: 'unsupported' }));
+      const params = (h.params_length ? await readBody(conn.reader, h.params_length) : (h.params ?? {})) as Record<string, unknown>;
+      if (h.action === 'metrics') {
+        const n = ++metricsCalls;
+        if (holdMetrics) {
+          conn.stream.on('error', () => {});
+          conn.stream.resume();
+          await new Promise<void>((r) => {
+            releaseMetrics = r;
+            conn.stream.once('close', () => {
+              metricsStreamClosed = true;
+              r();
+            });
+          });
+          return;
+        }
+        await writeLine(conn.stream, { ok: true, plugin: makeMetrics(n) } satisfies Reply);
+      } else if (h.action === 'processes') {
+        const n = ++procCalls;
+        await Bun.sleep(10);
+        await writeLine(conn.stream, { ok: true, plugin: makeProcs(n) } satisfies Reply);
+      } else if (h.action === 'signal') {
+        await writeLine(conn.stream, {
+          ok: true,
+          plugin: { ok: true, pid: params.pid as number, signal: params.signal as string },
+        } satisfies Reply);
+      }
+    } catch {
+      // stream closed by abort
+    } finally {
+      conn.reader.release();
+      closeStream(conn.stream);
+    }
+  };
+
+  let forgetMachine!: (id: string) => void;
+  const forgetProbe = defineFeature({
+    id: 'forget-probe',
+    toggle: false,
+    setup(ctx) {
+      forgetMachine = ctx.forget;
+    },
+  });
+  const machines = testMachines([sshSpec('x')], { dial: agentDialer({ serve }) });
+  const tc = testHub({ features: [monitorFeature({ now: () => now }), forgetProbe], machines, settings: { ...ON } });
+  stops.push(running(tc.hub));
+  await waitFor('x ready', () => machines.get('x')!.ready);
+
+  // Concurrent /processes calls coalesce into a single machine request, then serve cached within TTL.
+  const [p1, p2] = await Promise.all([
+    tc.request('GET', '/api/m/x/p/monitor/processes'),
+    tc.request('GET', '/api/m/x/p/monitor/processes'),
+  ]);
+  expect([(await p1.json()) as { total: number }, (await p2.json()) as { total: number }]).toEqual([
+    expect.objectContaining({ total: 1 }),
+    expect.objectContaining({ total: 1 }),
+  ]);
+  expect(procCalls).toBe(1);
+
+  const m1 = await tc.request('GET', '/api/m/x/p/monitor/metrics');
+  const m2 = await tc.request('GET', '/api/m/x/p/monitor/metrics');
+  expect([((await m1.json()) as { uptimeSec: number }).uptimeSec, ((await m2.json()) as { uptimeSec: number }).uptimeSec]).toEqual([1, 1]);
+  expect(metricsCalls).toBe(1);
+
+  // POST /signal invalidates the processes cache immediately while keeping metrics cached.
+  const sig = await tc.request('POST', '/api/m/x/p/monitor/signal', { body: '{"pid":4242,"signal":"TERM"}' });
+  expect(sig.status).toBe(200);
+  const p3 = await tc.request('GET', '/api/m/x/p/monitor/processes');
+  expect(((await p3.json()) as { total: number }).total).toBe(2);
+  expect(procCalls).toBe(2);
+  const m3 = await tc.request('GET', '/api/m/x/p/monitor/metrics');
+  expect(((await m3.json()) as { uptimeSec: number }).uptimeSec).toBe(1);
+  expect(metricsCalls).toBe(1);
+
+  // Advancing past MONITOR_CACHE_TTL_MS expires the cache; onForget aborts an in-flight call and clears cached entries.
+  now += MONITOR_CACHE_TTL_MS;
+  holdMetrics = true;
+  const inflight = tc.request('GET', '/api/m/x/p/monitor/metrics');
+  await waitFor('metrics call in flight', () => metricsCalls === 2);
+  forgetMachine('x');
+  const aborted = await inflight;
+  expect(aborted.status).toBeGreaterThanOrEqual(400);
+  await waitFor('in-flight stream aborted on forget', () => metricsStreamClosed);
+  releaseMetrics();
+
+  // Cached processes entry for x was also cleared by onForget.
+  holdMetrics = false;
+  const p4 = await tc.request('GET', '/api/m/x/p/monitor/processes');
+  expect(((await p4.json()) as { total: number }).total).toBe(3);
+  expect(procCalls).toBe(3);
 });

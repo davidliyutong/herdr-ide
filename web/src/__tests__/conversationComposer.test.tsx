@@ -10,28 +10,35 @@
 // read-only.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, createElement } from 'react';
+import { act, createElement, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { placeConfigMenu } from '../conversation/Composer';
+import { APP_SLUG } from '../brand';
+import { clearDrafts, Composer, matchSlashCommands, placeConfigMenu, UsageLine, type ComposerProps } from '../conversation/Composer';
 import { errorText } from '../conversation/parts';
 import { Conversation } from '../conversation/Conversation';
 import { MAX_IMAGE, type ChatEvent, type ContentBlock, type SourceEvent } from '../conversation/model';
-import type { ChatSource, FileSuggestion } from '../conversation/source';
+import type { ChatSource, Delivery, FileSuggestion } from '../conversation/source';
 import { setLocale, t } from '../i18n';
+import { endPathsDrag, startPathsDrag } from '../pathsDrag';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class FakeSource implements ChatSource {
+  id?: string;
   readOnly?: boolean;
+  constructor(id?: string) {
+    this.id = id;
+  }
   events: SourceEvent[] = [];
   subs = new Set<(ev: SourceEvent) => void>();
-  send = vi.fn(async (_content: ContentBlock[], _clientId: string) => {});
+  send = vi.fn(async (_content: ContentBlock[], _clientId: string, _delivery?: Delivery) => {});
   cancel = vi.fn(async () => {});
   respond = vi.fn(async () => {});
   answer = vi.fn(async () => {});
   setConfig = vi.fn(async (_id: string, _value: string) => {});
   cancelQueued = vi.fn(async (_message: string) => {});
-  compact = vi.fn(async () => {});
+  steerQueued?: ReturnType<typeof vi.fn<(message: string, delivery?: 'steer' | 'interrupt') => Promise<void>>>;
+  compact = vi.fn(async (_instructions?: string) => {});
   suggestFiles?: (query: string) => Promise<FileSuggestion[]>;
   subscribe(fn: (ev: SourceEvent) => void) {
     this.subs.add(fn);
@@ -51,6 +58,7 @@ const next = () => ++seq;
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  clearDrafts();
   seq = 0;
   host = document.createElement('div');
   document.body.append(host);
@@ -59,6 +67,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  clearDrafts();
   setLocale('en');
 });
 
@@ -209,7 +218,7 @@ describe('the list at the caret', () => {
     await show(s);
     await type('look at @src/a');
     await until(() => options().length === 2);
-    expect(s.suggestFiles).toHaveBeenLastCalledWith('src/a');
+    expect(s.suggestFiles).toHaveBeenLastCalledWith('src/a', expect.any(AbortSignal));
     expect(options()).toEqual(['src/app.ts', 'src/api.ts']);
     const ta = field();
     expect(ta.getAttribute('aria-activedescendant')).toBe(qa('[role="option"]')[0].id);
@@ -254,10 +263,43 @@ describe('the list at the caret', () => {
     await type('/comp');
     await key({ key: 'Tab' });
     expect(field().value).toBe('/compact ');
+    // Valid leading slash command is highlighted in the backdrop layer.
+    expect(q('.conv-field')?.getAttribute('data-valid-slash')).toBe('/compact');
+    expect(q('.conv-slash-highlight')?.textContent).toBe('/compact');
     await key({ key: 'Enter' });
     expect(s.compact).toHaveBeenCalledTimes(1);
     expect(s.send).not.toHaveBeenCalled();
     expect(field().value).toBe('');
+  });
+
+  it('ranks exact, prefix, segment-prefix and substring slash commands, re-opens dismissed menu on Tab, and highlights only valid commands', async () => {
+    expect(
+      matchSlashCommands([{ name: 'plan-review' }, { name: 'codex:plan' }, { name: 'replan' }, { name: 'plan' }], 'plan').map(
+        (c) => c.name,
+      ),
+    ).toEqual(['plan', 'plan-review', 'codex:plan', 'replan']);
+
+    const s = new FakeSource();
+    s.emit(
+      info({
+        capabilities: caps({ compact: true }),
+        commands: [{ name: 'plan-review' }, { name: 'plan', description: 'Enter plan' }],
+      }),
+    );
+    await show(s);
+    await type('/plan');
+    // Exact match comes first and valid command is highlighted.
+    expect(options()).toEqual(['/plan', '/plan-review']);
+    expect(q('.conv-slash-highlight')?.textContent).toBe('/plan');
+    // Dismiss with Escape, then press Tab to re-open the menu instead of guessing blindly.
+    await key({ key: 'Escape' });
+    expect(q('[role="listbox"]')).toBeNull();
+    await key({ key: 'Tab' });
+    expect(q('[role="listbox"]')).not.toBeNull();
+    expect(options()).toEqual(['/plan', '/plan-review']);
+    // Unrecognized command is not highlighted.
+    await type('/unknowncmd');
+    expect(q('.conv-slash-highlight')).toBeNull();
   });
 });
 
@@ -377,8 +419,18 @@ describe('the chat’s options', () => {
     await settle();
     expect(model.disabled).toBe(false);
     expect(model.dataset.value).toBe('claude-opus-5-5');
-    // The new model has a choice of effort.
-    expect(qa('button.conv-select')).toHaveLength(3);
+    // The new model has a choice of effort, combined into the Model + Effort trigger and flyout submenu.
+    expect(qa('button.conv-select')).toHaveLength(2);
+    expect(model.dataset.effort).toBe('high');
+    expect(model.textContent).toContain('Opus');
+    expect(model.textContent).toContain('High');
+    await click(model);
+    const effortRow = document.body.querySelector<HTMLElement>('.conv-me-effort-row')!;
+    expect(effortRow).not.toBeNull();
+    await click(effortRow);
+    expect(menuOptions('thought_level').map((o) => o.textContent)).toEqual(['Low', 'High']);
+    await click(menuOptions('thought_level')[0]);
+    expect(s.setConfig).toHaveBeenCalledWith('effort', 'low');
     s.setConfig.mockImplementationOnce(async () => {
       throw Object.assign(new Error('x'), { code: 'busy' });
     });
@@ -387,6 +439,32 @@ describe('the chat’s options', () => {
     await settle();
     expect(q('[role="alert"]')?.textContent).toContain(t('conversation.error.busy', { agent: 'Claude Code' }));
     expect(mode.dataset.value).toBe('default');
+  });
+
+  it('displays Antigravity "Extra" and raw "xhigh" effort options clearly as XHigh while preserving protocol values', async () => {
+    const s = new FakeSource();
+    const effortOpt = {
+      id: 'thought_level',
+      name: 'Thinking Level',
+      category: 'thought_level',
+      type: 'select',
+      currentValue: 'high',
+      options: [
+        { value: 'low', name: 'Low' },
+        { value: 'medium', name: 'Medium' },
+        { value: 'high', name: 'High' },
+        { value: 'xhigh', name: 'Extra' },
+      ],
+    };
+    s.emit(info({ config: [effortOpt] }));
+    await show(s);
+    const btn = q<HTMLButtonElement>('button.conv-select[data-config="thought_level"]')!;
+    await click(btn);
+    expect(menuOptions('thought_level').map((o) => o.textContent)).toEqual(['Low', 'Medium', 'High', 'XHigh']);
+    await click(menuOptions('thought_level')[3]);
+    expect(s.setConfig).toHaveBeenCalledWith('thought_level', 'xhigh');
+    await emit(s, info({ config: [{ ...effortOpt, currentValue: 'xhigh' }] }));
+    expect(btn.textContent).toBe('XHigh');
   });
 
   it('support keyboard navigation and upward popover positioning near the bottom', async () => {
@@ -505,13 +583,14 @@ describe('a message sent while a turn runs', () => {
     expect(field().placeholder).toBe(t('conversation.composer.queuePlaceholder', { agent: 'Claude Code' }));
     await type('and also this');
     await key({ key: 'Enter' });
-    const [content, clientId] = s.send.mock.calls[0];
+    const [content, clientId, delivery] = s.send.mock.calls[0];
     expect(content).toEqual([{ type: 'text', text: 'and also this' }]);
+    expect(delivery).toBe('queue');
     await emit(s, { seq: next(), t: 'queued', message: 'q1', clientId, state: 'queued', content });
     const items = qa('.conv-queued-item');
     expect(items).toHaveLength(1);
     expect(items[0].querySelector('.conv-queued-text')?.textContent).toBe('and also this');
-    await click(items[0].querySelector('button'));
+    await click(items[0].querySelector('button[data-action="withdraw"]'));
     expect(s.cancelQueued).toHaveBeenCalledWith('q1');
     await emit(s, { seq: next(), t: 'queued', message: 'q1', state: 'cancelled' });
     expect(qa('.conv-queued-item')).toHaveLength(0);
@@ -656,12 +735,592 @@ describe('a read-only composer', () => {
     await show(s, true);
     expect(field().disabled).toBe(true);
     expect(q<HTMLButtonElement>('button.conv-select')!.disabled).toBe(true);
-    expect(q<HTMLButtonElement>('.conv-attach')!.disabled).toBe(true);
+    expect(q<HTMLButtonElement>('.conv-plus-btn')!.disabled).toBe(true);
     expect(q<HTMLButtonElement>('.conv-send')!.disabled).toBe(true);
     expect(q('.conv-stop')).toBeNull();
     expect(q('.conv-queued-item button')).toBeNull();
     await paste([png('a.png')]);
     await settle(20);
     expect(qa('.conv-attachment')).toHaveLength(0);
+  });
+});
+
+async function renderComposer(overrides: Partial<ComposerProps> & { source: ChatSource }) {
+  const inputRef = createRef<HTMLTextAreaElement>();
+  const props: ComposerProps = {
+    agent: 'Claude Code',
+    kind: 'claude',
+    queued: [],
+    working: false,
+    waiting: false,
+    readOnly: false,
+    allowFull: true,
+    onShowWaiting: () => {},
+    inputRef,
+    ...overrides,
+  };
+  await act(async () => root.render(createElement(Composer, props)));
+  await settle();
+  return props;
+}
+
+describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
+  it('#1 renders circular session context ring with hover/click details and cost, hiding rate-limit windows', async () => {
+    await act(async () =>
+      root.render(
+        createElement(UsageLine, {
+          usage: {
+            used: 60_000,
+            size: 200_000,
+            cost: { amount: 0.75, currency: 'USD' },
+            limits: [{ id: '5h', label: '5h', usedPercent: 95, resetsAt: Math.round(Date.now() / 1000) + 3600 }],
+          },
+        }),
+      ),
+    );
+    const ring = q<HTMLButtonElement>('.conv-ctx-ring-btn')!;
+    expect(ring.getAttribute('role')).toBe('meter');
+    expect(ring.getAttribute('aria-valuenow')).toBe('30');
+    await click(ring);
+    const pop = document.body.querySelector<HTMLElement>('.conv-ctx-popover')!;
+    expect(pop).not.toBeNull();
+    expect(pop.querySelector('.conv-ctx-pct')?.textContent).toBe('30%');
+    expect(pop.querySelector('.conv-usage-cost')?.textContent).toBe('$0.75');
+    expect(pop.querySelector('.conv-usage-limit')).toBeNull();
+  });
+
+  it('#3 filters model picker options by visibleModels, preserves currentValue, and omits More models', async () => {
+    const s = new FakeSource();
+    const modelOption = {
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select' as const,
+      currentValue: 'claude-haiku-5-5',
+      options: [
+        { value: 'claude-haiku-5-5', name: 'Haiku' },
+        { value: 'claude-sonnet-5-5', name: 'Sonnet' },
+        { value: 'claude-opus-5-5', name: 'Opus' },
+      ],
+    };
+    const onModelChosen = vi.fn();
+    await renderComposer({
+      source: s,
+      chat: { config: [modelOption], commands: [], capabilities: caps({ model: true }) },
+      modelPicker: { visibleModels: ['claude-opus-5-5'], onModelChosen },
+    });
+    const btn = q<HTMLButtonElement>('button.conv-select[data-config="model"]')!;
+    await click(btn);
+    const menu = document.body.querySelector<HTMLElement>('.conv-select-menu[data-config="model"]')!;
+    const labels = Array.from(menu.querySelectorAll<HTMLElement>('[role="option"]')).map((o) => o.dataset.value);
+    // Current model (Haiku) stays visible alongside the allowlisted Opus; Sonnet is hidden; no "More models" footer.
+    expect(labels).toEqual(['claude-haiku-5-5', 'claude-opus-5-5']);
+    expect(menu.querySelector('.conv-select-manage')).toBeNull();
+    // A model chosen, once the chat took it, is told (for chat.lastModel.<kind>).
+    await click(menu.querySelector<HTMLElement>('[role="option"][data-value="claude-opus-5-5"]'));
+    await settle();
+    expect(s.setConfig).toHaveBeenCalledWith('model', 'claude-opus-5-5');
+    expect(onModelChosen).toHaveBeenCalledWith('claude-opus-5-5');
+  });
+
+  it('#4 supports Slack-style queue edit, steer, clear-all, and explicit steer/interrupt while working', async () => {
+    const s = new FakeSource();
+    s.steerQueued = vi.fn(async () => {});
+    const queued = [
+      {
+        message: 'q1',
+        content: [
+          { type: 'resource_link' as const, uri: 'file:///w/src/a.ts', name: 'src/a.ts' },
+          { type: 'text' as const, text: 'first queued' },
+        ],
+      },
+      { message: 'q2', content: [{ type: 'text' as const, text: 'second queued' }] },
+    ];
+    await renderComposer({
+      source: s,
+      working: true,
+      queued,
+      chat: { config: [], commands: [], capabilities: caps({ queue: true, cancelQueued: true, steer: true }) },
+    });
+    expect(q('.conv-queued-head')?.textContent).toContain(t('conversation.queued.heading', { n: 2 }));
+    expect(q('.conv-queued-chip')?.textContent).toContain('a.ts');
+
+    // Steer a queued item immediately.
+    await click(q('.conv-queued-item[data-message="q2"] button[data-action="steer"]'));
+    expect(s.steerQueued).toHaveBeenCalledWith('q2', 'steer');
+
+    // Edit moves queued text + file link back into composer after withdrawing.
+    await click(q('.conv-queued-item[data-message="q1"] button[data-action="edit"]'));
+    await settle();
+    expect(s.cancelQueued).toHaveBeenCalledWith('q1');
+    expect(field().value).toBe('first queued');
+    expect(qa('.conv-file-chip').map((c) => c.textContent)).toEqual(['src/a.ts']);
+
+    // Clear all withdraws every queued message.
+    s.cancelQueued.mockClear();
+    await click(q('.conv-queued-clear'));
+    await settle();
+    expect(s.cancelQueued).toHaveBeenCalledWith('q1');
+    expect(s.cancelQueued).toHaveBeenCalledWith('q2');
+
+    // Explicit steer button & Cmd+Enter send with delivery 'steer'.
+    await click(q('.conv-steer'));
+    await settle();
+    expect(s.send.mock.calls[0][2]).toBe('steer');
+    expect(s.send.mock.calls[0][0]).toEqual([
+      { type: 'resource_link', uri: 'file:///w/src/a.ts', name: 'src/a.ts' },
+      { type: 'text', text: 'first queued' },
+    ]);
+
+    await type('urgent change');
+    await key({ key: 'Enter', metaKey: true });
+    expect(s.send.mock.calls[1][2]).toBe('steer');
+  });
+
+  it('#4 preserves image attachments alongside text and file links when editing a queued message', async () => {
+    const s = new FakeSource();
+    const imgBlock = { type: 'image' as const, mimeType: 'image/png', data: 'AAAAAAAAAAA=' };
+    const queued = [
+      {
+        message: 'q-img',
+        content: [
+          imgBlock,
+          { type: 'resource_link' as const, uri: 'file:///w/src/a.ts', name: 'src/a.ts' },
+          { type: 'text' as const, text: 'check screenshot' },
+        ],
+      },
+      {
+        message: 'q-img-only',
+        content: [{ type: 'image' as const, mimeType: 'image/jpeg', data: 'BBBB' }],
+      },
+    ];
+    await renderComposer({
+      source: s,
+      working: true,
+      queued,
+      chat: { config: [], commands: [], capabilities: caps({ queue: true, cancelQueued: true, images: true }) },
+    });
+
+    await click(q('.conv-queued-item[data-message="q-img"] button[data-action="edit"]'));
+    await settle();
+    expect(s.cancelQueued).toHaveBeenCalledWith('q-img');
+    expect(field().value).toBe('check screenshot');
+    expect(qa('.conv-file-chip').map((c) => c.textContent)).toEqual(['src/a.ts']);
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.src)).toEqual(['data:image/png;base64,AAAAAAAAAAA=']);
+
+    // Image-only queued message also restores without inserting empty newlines.
+    await click(q('.conv-queued-item[data-message="q-img-only"] button[data-action="edit"]'));
+    await settle();
+    expect(field().value).toBe('check screenshot');
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.src)).toEqual([
+      'data:image/jpeg;base64,BBBB',
+      'data:image/png;base64,AAAAAAAAAAA=',
+    ]);
+
+    // Re-sending includes the restored images, file chip, and text.
+    await key({ key: 'Enter' });
+    expect(s.send.mock.calls[0][0]).toEqual([
+      { type: 'image', mimeType: 'image/jpeg', data: 'BBBB' },
+      imgBlock,
+      { type: 'resource_link', uri: 'file:///w/src/a.ts', name: 'src/a.ts' },
+      { type: 'text', text: 'check screenshot' },
+    ]);
+  });
+
+  it('#4 falls back to interrupt delivery when steer is unsupported', async () => {
+    const s = new FakeSource();
+    await renderComposer({
+      source: s,
+      working: true,
+      chat: { config: [], commands: [], capabilities: caps({ queue: true, steer: false }) },
+    });
+    await type('stop and do this');
+    const steerBtn = q<HTMLButtonElement>('.conv-steer')!;
+    expect(steerBtn.dataset.delivery).toBe('interrupt');
+    await click(steerBtn);
+    await settle();
+    expect(s.send.mock.calls[0][2]).toBe('interrupt');
+  });
+
+  it('#5 drills into directories on @ autocomplete, attaches space-containing paths as chips, and opens FilePicker without images cap', async () => {
+    const s = new FakeSource();
+    s.suggestFiles = vi.fn(async (query: string) => {
+      if (query === 's') {
+        return [
+          { path: '/w/src', label: 'src/', isDir: true },
+          { path: '/w/my doc.md', label: 'my doc.md' },
+        ];
+      }
+      if (query === 'src/') {
+        return [{ path: '/w/src/index.ts', label: 'src/index.ts' }];
+      }
+      return [];
+    });
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ dir: { name: 'w' }, entries: [{ name: 'notes.md', is_dir: false, size: 12 }] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await renderComposer({
+        source: s,
+        base: { m: 'local', dir: '/w' },
+        chat: { config: [], commands: [], capabilities: caps({ images: false }) },
+      });
+
+      // Directory selection inserts @src/ without trailing space and drills down.
+      await type('@s');
+      await until(() => options().length === 2);
+      await key({ key: 'Enter' });
+      expect(field().value).toBe('@src/');
+      await until(() => options().length === 1 && options()[0] === 'src/index.ts');
+
+      // Space-containing path from @ becomes a removable file chip instead of broken @ text.
+      await type('check @s');
+      await until(() => options().length === 2);
+      await key({ key: 'ArrowDown' });
+      await key({ key: 'Enter' });
+      expect(field().value).toBe('check ');
+      expect(qa('.conv-file-chip').map((c) => c.textContent)).toEqual(['my doc.md']);
+
+      // Attach-file item lives inside the `+` menu and works even when caps.images is false.
+      await click(q<HTMLButtonElement>('.conv-plus-btn')!);
+      const pickBtn = document.body.querySelector<HTMLButtonElement>('.conv-plus-menu .conv-attach-file')!;
+      expect(pickBtn).not.toBeNull();
+      expect(document.body.querySelector('.conv-plus-menu .conv-attach')).toBeNull();
+      await click(pickBtn);
+      await until(() => document.body.querySelector('.file-picker-row[data-path="/w/notes.md"]'));
+      await click(document.body.querySelector('.file-picker-row[data-path="/w/notes.md"]'));
+      await click(document.body.querySelector('.file-picker-foot .primary'));
+      await settle();
+      expect(qa('.conv-file-chip').map((c) => c.textContent)).toEqual(['my doc.md', 'notes.md']);
+
+      await key({ key: 'Enter' });
+      expect(s.send.mock.calls[0][0]).toEqual([
+        { type: 'resource_link', uri: 'file:///w/my%20doc.md', name: 'my doc.md' },
+        { type: 'resource_link', uri: 'file:///w/notes.md', name: 'notes.md' },
+        { type: 'text', text: 'check' },
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('attaches the file explorer’s rows of its machine dropped on it as files (folders too), refusing rows of another machine', async () => {
+    const s = new FakeSource();
+    await renderComposer({ source: s, base: { m: 'local', dir: '/w' }, chat: { config: [], commands: [], capabilities: caps({}) } });
+    const box = q('.conv-box')!;
+    /** Drags rows of machine m from the explorer over the box and drops them. */
+    async function dropRows(m: string, paths: string[], dirs: string[] = []) {
+      const data = new Map<string, string>();
+      const dt = {
+        types: [] as string[],
+        dropEffect: 'none',
+        setData(type: string, value: string) {
+          data.set(type, value);
+          this.types = [...data.keys()];
+        },
+        getData: (type: string) => data.get(type) ?? '',
+      };
+      startPathsDrag(dt as unknown as DataTransfer, { m, paths, dirs });
+      const over = new Event('dragover', { bubbles: true, cancelable: true });
+      Object.defineProperty(over, 'dataTransfer', { value: dt });
+      await act(async () => void box.dispatchEvent(over));
+      const ev = new Event('drop', { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, 'dataTransfer', { value: dt });
+      await act(async () => void box.dispatchEvent(ev));
+      endPathsDrag();
+      return { over, ev };
+    }
+    const other = await dropRows('remote', ['/w/a.ts']);
+    expect([other.over.defaultPrevented, other.ev.defaultPrevented]).toEqual([false, false]);
+    expect(qa('.conv-file-chip')).toHaveLength(0);
+    const own = await dropRows('local', ['/w/src', '/w/my doc.md', '/etc/hosts'], ['/w/src']);
+    expect([own.over.defaultPrevented, own.ev.defaultPrevented]).toEqual([true, true]);
+    expect(qa('.conv-file-chip').map((c) => c.textContent)).toEqual(['src', 'my doc.md', '/etc/hosts']);
+    await type('look');
+    await key({ key: 'Enter' });
+    expect(s.send.mock.calls[0][0]).toEqual([
+      { type: 'resource_link', uri: 'file:///w/src', name: 'src' },
+      { type: 'resource_link', uri: 'file:///w/my%20doc.md', name: 'my doc.md' },
+      { type: 'resource_link', uri: 'file:///etc/hosts', name: '/etc/hosts' },
+      { type: 'text', text: 'look' },
+    ]);
+  });
+
+  it('#7 supports Markdown list continuation on Shift+Enter, bold shortcut, and Write/Preview toggle in the + menu', async () => {
+    const s = new FakeSource();
+    await renderComposer({ source: s });
+    await type('- first item');
+    field().setSelectionRange(12, 12);
+    const ev = await key({ key: 'Enter', shiftKey: true });
+    expect(ev.defaultPrevented).toBe(true);
+    expect(field().value).toBe('- first item\n- ');
+
+    // Bold shortcut wraps selected word.
+    await type('hello world');
+    field().setSelectionRange(6, 11);
+    await key({ key: 'b', ctrlKey: true });
+    expect(field().value).toBe('hello **world**');
+
+    // Toggle Markdown preview from the + menu.
+    await click(q<HTMLButtonElement>('.conv-plus-btn')!);
+    const toggle = document.body.querySelector<HTMLButtonElement>('.conv-plus-menu .conv-preview-toggle')!;
+    await click(toggle);
+    expect(field().hidden).toBe(true);
+    expect(q('.conv-composer-preview')).not.toBeNull();
+    await click(q<HTMLButtonElement>('.conv-plus-btn')!);
+    await click(document.body.querySelector<HTMLButtonElement>('.conv-plus-menu .conv-preview-toggle')!);
+    expect(field().hidden).toBe(false);
+    expect(q('.conv-composer-preview')).toBeNull();
+  });
+
+  it('#8 renders project directory and Git branch at the bottom-left of the composer meta bar', async () => {
+    const s = new FakeSource();
+    await renderComposer({
+      source: s,
+      kind: 'agy',
+      agent: 'Antigravity',
+      base: { m: 'local', dir: '/home/u/projects/webherdr' },
+      branch: 'main',
+    });
+    expect(q('.conv-meta-left .conv-project')?.textContent).toBe('webherdr');
+    expect(q('.conv-meta-left .conv-project')?.getAttribute('title')).toContain('/home/u/projects/webherdr');
+    expect(q('.conv-meta-left .conv-branch')?.textContent).toBe('main');
+  });
+
+  it('#9 compacts context via clicking the context ring popover and via /compact instructions', async () => {
+    const s = new FakeSource();
+    await renderComposer({
+      source: s,
+      usage: { used: 100_000, size: 200_000 },
+      chat: { config: [], commands: [], capabilities: caps({ compact: true }) },
+    });
+    const btn = q<HTMLButtonElement>('.conv-compact-btn')!;
+    expect(btn.disabled).toBe(false);
+    expect(btn.title).toContain(t('conversation.compact.clickHint'));
+    await click(btn);
+    const pop = document.body.querySelector<HTMLElement>('.conv-compact-popover')!;
+    expect(pop).not.toBeNull();
+    const input = pop.querySelector<HTMLInputElement>('.conv-compact-input')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'keep tests');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // IME composition Enter must not submit compaction prematurely.
+    await act(async () => {
+      const ime = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      Object.defineProperty(ime, 'isComposing', { value: true });
+      input.dispatchEvent(ime);
+    });
+    expect(s.compact).not.toHaveBeenCalled();
+    expect(document.body.querySelector('.conv-compact-popover')).not.toBeNull();
+    await click(pop.querySelector('.conv-compact-actions .primary'));
+    await settle();
+    expect(s.compact).toHaveBeenCalledWith('keep tests');
+    expect(document.body.querySelector('.conv-compact-popover')).toBeNull();
+
+    // While compacting: spinner shown in ring and running label inside details popover.
+    await renderComposer({
+      source: s,
+      usage: { used: 100_000, size: 200_000 },
+      activity: 'compacting',
+      chat: { config: [], commands: [], capabilities: caps({ compact: true }) },
+    });
+    expect(q('.conv-compact-btn .conv-spin')).not.toBeNull();
+    await click(q('.conv-compact-btn')!);
+    expect(document.body.querySelector('.conv-ctx-popover')?.textContent).toContain(t('conversation.compact.running'));
+    await click(q('.conv-compact-btn')!);
+
+    // Slash command with instructions forwards them too.
+    s.compact.mockClear();
+    await renderComposer({
+      source: s,
+      chat: { config: [], commands: [], capabilities: caps({ compact: true }) },
+    });
+    await type('/compact preserve diff');
+    await key({ key: 'Enter' });
+    expect(s.compact).toHaveBeenCalledWith('preserve diff');
+
+    // Stale/invalidated context usage after compact renders 0% with data-stale="true" and waiting hint.
+    await renderComposer({
+      source: s,
+      usage: { used: 0, size: 1_048_576, stale: true },
+      chat: { config: [], commands: [], capabilities: caps({ compact: true }) },
+    });
+    const staleBtn = q<HTMLButtonElement>('.conv-compact-btn')!;
+    expect(staleBtn.dataset.stale).toBe('true');
+    expect(staleBtn.getAttribute('aria-valuenow')).toBe('0');
+    expect(staleBtn.title).toContain(t('conversation.usage.stale'));
+    await click(staleBtn);
+    const stalePop = document.body.querySelector<HTMLElement>('.conv-ctx-popover')!;
+    expect(stalePop.textContent).toContain('0%');
+    expect(stalePop.textContent).toContain(t('conversation.usage.stale'));
+  });
+
+  it('persists pasted images, attached files, and text across unmount/remount and clears them on send', async () => {
+    const s1 = new FakeSource('chat-draft-img');
+    s1.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s1);
+
+    await type('explain this screenshot');
+    await paste([png('shot-1.png', 10), png('shot-2.png', 12)]);
+    await until(() => qa('.conv-attachment').length === 2);
+
+    // Simulate switching away to another workspace/window (unmounting the chat pane).
+    await act(async () => root.unmount());
+    root = createRoot(host);
+
+    // Remount with a fresh ChatSource instance for the same chat id.
+    const s2 = new FakeSource('chat-draft-img');
+    s2.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s2);
+
+    expect(field().value).toBe('explain this screenshot');
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.alt)).toEqual(['shot-1.png', 'shot-2.png']);
+
+    // Removing an image updates the persisted draft so a subsequent remount reflects it.
+    await click(qa('.conv-attachment-remove')[0]);
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.alt)).toEqual(['shot-2.png']);
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    const s3 = new FakeSource('chat-draft-img');
+    s3.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s3);
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.alt)).toEqual(['shot-2.png']);
+
+    // Sending sends the restored image + text and clears the persisted draft.
+    await key({ key: 'Enter' });
+    expect(s3.send).toHaveBeenCalledTimes(1);
+    expect(s3.send.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ type: 'image', mimeType: 'image/png' }),
+      { type: 'text', text: 'explain this screenshot' },
+    ]);
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    const s4 = new FakeSource('chat-draft-img');
+    s4.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s4);
+    expect(field().value).toBe('');
+    expect(qa('.conv-attachment')).toHaveLength(0);
+  });
+
+  it('keeps an image pasted right before switching away while FileReader is still in flight', async () => {
+    const s1 = new FakeSource('chat-inflight-img');
+    s1.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s1);
+
+    // Paste and immediately unmount before FileReader finishes.
+    await paste([png('fast-switch.png', 16)]);
+    await act(async () => root.unmount());
+    await settle(20);
+
+    // Returning to the chat restores the decoded image.
+    root = createRoot(host);
+    const s2 = new FakeSource('chat-inflight-img');
+    s2.emit(info({ capabilities: caps({ images: true }) }));
+    await show(s2);
+    await until(() => qa('.conv-attachment').length === 1);
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.alt)).toEqual(['fast-switch.png']);
+  });
+
+  it('syncs pasted image drafts across windows via BroadcastChannel', async () => {
+    const channels = new Set<{ name: string; onmessage: ((ev: MessageEvent) => void) | null }>();
+    class FakeBroadcastChannel {
+      onmessage: ((ev: MessageEvent) => void) | null = null;
+      constructor(readonly name: string) {
+        channels.add(this);
+      }
+      postMessage(data: unknown) {
+        for (const ch of channels) {
+          if (ch !== this && ch.name === this.name) ch.onmessage?.({ data } as MessageEvent);
+        }
+      }
+      close() {
+        channels.delete(this);
+      }
+    }
+    vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel);
+    try {
+      clearDrafts();
+      // Simulate a detached window mounting empty while a peer window holds a draft with an image.
+      const peer = new FakeBroadcastChannel(`${APP_SLUG}:composer-drafts`);
+      peer.onmessage = (ev) => {
+        const msg = ev.data as { type?: string; id?: string };
+        if (msg.type === 'need' && msg.id === 'chat-peer-img') {
+          peer.postMessage({
+            type: 'draft',
+            id: 'chat-peer-img',
+            reply: true,
+            draft: {
+              text: 'from main window',
+              attachments: [{ id: 'a99', name: 'peer.png', mimeType: 'image/png', data: 'AAAA', size: 3 }],
+              attachedFiles: [],
+              mentions: [],
+            },
+          });
+        }
+      };
+
+      const s = new FakeSource('chat-peer-img');
+      s.emit(info({ capabilities: caps({ images: true }) }));
+      await show(s);
+
+      expect(field().value).toBe('from main window');
+      expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.alt)).toEqual(['peer.png']);
+      peer.close();
+    } finally {
+      clearDrafts();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('renders Grok permission mode selector and allows switching to full access when enabled', async () => {
+    const s = new FakeSource('grok-mode-chat');
+    await renderComposer({
+      source: s,
+      kind: 'grok',
+      agent: 'Grok',
+      allowFull: true,
+      chat: {
+        config: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'grok-4.7',
+            options: [{ value: 'grok-4.7', name: 'Grok 4.7' }],
+          },
+          {
+            id: 'mode',
+            name: 'Mode',
+            category: 'mode',
+            type: 'select',
+            currentValue: 'default',
+            options: [
+              { value: 'default', name: 'Default' },
+              { value: 'acceptEdits', name: 'Accept Edits' },
+              { value: 'full', name: 'Full Access', full: true },
+            ],
+          },
+        ],
+        commands: [],
+        capabilities: caps({ images: true, model: true }),
+      },
+    });
+
+    const modeBtn = q<HTMLButtonElement>('button.conv-select[data-config="mode"]')!;
+    expect(modeBtn).not.toBeNull();
+    expect(modeBtn.dataset.value).toBe('default');
+    await click(modeBtn);
+    const fullOpt = document.body.querySelector<HTMLElement>('.conv-select-menu[data-config="mode"] [data-value="full"]')!;
+    expect(fullOpt).not.toBeNull();
+    expect(fullOpt.getAttribute('aria-disabled')).toBeNull();
+    await click(fullOpt);
+    await settle();
+    expect(s.setConfig).toHaveBeenCalledWith('mode', 'full');
   });
 });

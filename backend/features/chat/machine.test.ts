@@ -228,6 +228,27 @@ describe('the chat feature on a machine', () => {
     fresh.c.close();
   });
 
+  test('an idle host of an older dirty build at the same commit makes way for a newer dirty build', async () => {
+    const m = new FakeMachine();
+    machines.push(m);
+    const vOld = 'v0.5.0-219-gb30fecf-dirty.1795770000';
+    const vNew = 'v0.5.0-219-gb30fecf-dirty.1795784576';
+    await hostOf(m, { TEST_HOST_VERSION: vOld });
+    const old = m.live(CHAT_HOST_NAME)!;
+    // An even older dirty build never downgrades it.
+    const older = await open(m, { version: 'v0.5.0-219-gb30fecf-dirty.1795760000' });
+    expect(older.c.hello?.host.version).toBe(vOld);
+    expect(older.c.hello?.host.pid).toBe(old.child.pid!);
+    older.c.close();
+    // A newer dirty build at the same commit replaces the idle host.
+    m.env = { TEST_HOST_VERSION: vNew };
+    const fresh = await open(m, { version: vNew });
+    expect(fresh.c.hello?.host.version).toBe(vNew);
+    expect(fresh.c.hello?.host.pid).not.toBe(old.child.pid!);
+    await old.exited;
+    fresh.c.close();
+  });
+
   test('a host of another protocol that does not make way: upgrading', async () => {
     const m = new FakeMachine();
     machines.push(m);

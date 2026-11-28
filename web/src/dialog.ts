@@ -8,6 +8,10 @@ import { t } from './i18n';
 export interface NewWorkspace {
   cwd: string;
   label: string;
+  /** Vault preset ids to link to this workspace (omitted when unset/unchanged). */
+  presets?: string[];
+  /** Vault passphrase when verifyEachAllow requires confirmation to link presets. */
+  passphrase?: string;
 }
 
 export type DialogRequest =
@@ -32,9 +36,9 @@ export type DialogRequest =
       kind: 'workspace';
       m: string;
       cwd: string;
-      /** Set when an existing workspace is edited: its name. Its directory
-       * may then be left empty. */
-      edit?: { name: string };
+      /** Set when an existing workspace is edited: its name (and id, to load
+       * linked vault presets). Its directory may then be left empty. */
+      edit?: { name: string; id?: string };
       resolve(v: NewWorkspace | undefined): void;
     }
   | { kind: 'download'; m: string; dir: string; resolve(v: undefined): void }
@@ -157,10 +161,10 @@ export function newWorkspaceDialog(m: string, cwd: string): Promise<NewWorkspace
   return new Promise((resolve) => show({ kind: 'workspace', m, cwd, resolve }));
 }
 
-/** Asks for a workspace's new name and directory (empty: its new terminals
- * start in the focused one's). */
-export function editWorkspaceDialog(m: string, cwd: string, name: string): Promise<NewWorkspace | undefined> {
-  return new Promise((resolve) => show({ kind: 'workspace', m, cwd, edit: { name }, resolve }));
+/** Asks for a workspace's new name, directory (empty: its new terminals
+ * start in the focused one's) and optional linked vault presets. */
+export function editWorkspaceDialog(m: string, cwd: string, name: string, id?: string): Promise<NewWorkspace | undefined> {
+  return new Promise((resolve) => show({ kind: 'workspace', m, cwd, edit: id ? { name, id } : { name }, resolve }));
 }
 
 /** Lets the user choose entries of directory dir (and the directories

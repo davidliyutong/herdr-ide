@@ -19,6 +19,7 @@
 // A forwarded service is another site than the UI: it gets a port of its
 // own, hence an origin of its own, which the hub's Origin guard refuses.
 import { z } from 'zod';
+import { CoalesceCache } from '#shared/lib/cache.ts';
 import { defineFeature, type FeatureDef } from '#kernel/feature.ts';
 import { open } from '#kernel/agent.ts';
 import { Fail, offline } from '#kernel/fail.ts';
@@ -31,6 +32,10 @@ import { DEFAULT_IDLE, settings } from './settings.ts';
 
 /** Bounds a forward's JSON. */
 const MAX_BODY = 4 << 10;
+
+/** How long a machine's listening ports are cached on the hub, in ms. */
+export const LISTENING_CACHE_TTL_MS = 3_000;
+const LISTENING_CACHE_MAX = 128;
 
 export interface BrowserOptions extends Pick<ForwardsOptions, 'now' | 'maxForwards' | 'maxConns' | 'useEveryMs' | 'listen'> {
   /** How often idle forwards are looked for (30 s). */
@@ -102,8 +107,16 @@ export function browserFeature(o: BrowserOptions = {}): BrowserFeature {
         clearInterval(t);
         fw.close();
       });
-      // A removed machine's forwards end.
-      ctx.onForget((m) => fw.closeWhere((f) => f.m === m));
+      const listeningCache = new CoalesceCache<unknown[]>({
+        ttlMs: LISTENING_CACHE_TTL_MS,
+        maxEntries: LISTENING_CACHE_MAX,
+        now: o.now,
+      });
+      // A removed machine's forwards and cached ports end.
+      ctx.onForget((m) => {
+        fw.closeWhere((f) => f.m === m);
+        listeningCache.invalidate(m, { abort: true });
+      });
 
       ctx.api.get('/forwards', (c) => json(c, { forwards: fw.list(), available: c.var.sameHost }));
 
@@ -126,8 +139,12 @@ export function browserFeature(o: BrowserOptions = {}): BrowserFeature {
       });
 
       ctx.machineApi.get('/listening', async (c) => {
-        const r = await ctx.call(c.var.machine, browserProtocol, 'listening', {}, { signal: c.req.raw.signal });
-        return json(c, { ports: r.ports });
+        const m = c.var.machine;
+        const ports = await listeningCache.get(m.id, { signal: c.req.raw.signal }, async (signal) => {
+          const r = await ctx.call(m, browserProtocol, 'listening', {}, { signal });
+          return r.ports;
+        });
+        return json(c, { ports });
       });
     },
   });

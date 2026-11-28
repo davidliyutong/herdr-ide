@@ -13,6 +13,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: () => {} } })
 import { useStore } from '../state/store';
 import { FakeHub, settle } from './fakeTerms';
 import type { MachineState } from '../lib/machine';
+import * as L from '../term/layout';
 import { Sidebar } from '../components/Sidebar';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -185,6 +186,96 @@ describe('Sidebar machines', () => {
     expect(items().map((e) => e.querySelector('.ws-name')?.textContent)).toEqual(['site', '~', 'notes']);
   });
 
+  it('prioritizes fixed workspace path basename even when its only terminal cds elsewhere', async () => {
+    const hub = new FakeHub();
+    const tab = (t: string) => ({ root: { terminal: t }, focused: t });
+    hub.machine('gpu', [FakeHub.term('t1', { cwd: '/tmp/other' }), FakeHub.term('t2', { cwd: '/home/u/dynamic' })], {
+      version: 2,
+      workspaces: [
+        { id: 'fixedws1', name: '', cwd: '/home/u/projects/veldr', tabs: [tab('t1')], selected: 0 },
+        { id: 'freews01', name: '', cwd: '', tabs: [tab('t2')], selected: 0 },
+      ],
+      selected: 0,
+    });
+    hub.install();
+    await act(async () =>
+      useStore
+        .getState()
+        .setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]),
+    );
+    await act(async () => useStore.getState().selectMachine('gpu'));
+    await act(async () => hub.model.subscribe('gpu'));
+    await act(settle);
+    const names = () => Array.from(host.querySelectorAll<HTMLElement>('.ws-item[data-ws-id] .ws-name')).map((e) => e.textContent);
+    // Fixed-path workspace stays 'veldr' despite t1 being in /tmp/other; unpinned follows 'dynamic'.
+    expect(names()).toEqual(['veldr', 'dynamic']);
+
+    // Explicit manual rename still takes precedence over fixed path.
+    await act(async () => hub.model.mutate('gpu', (l) => L.renameWorkspace(l, 'fixedws1', 'Custom')));
+    await act(settle);
+    expect(names()).toEqual(['Custom', 'dynamic']);
+
+    // Clearing the fixed path falls back to dynamic terminal cwd.
+    await act(async () => hub.model.mutate('gpu', (l) => L.editWorkspace(l, 'fixedws1', '', '')));
+    await act(settle);
+    expect(names()).toEqual(['other', 'dynamic']);
+  });
+
+  it('hides blue unread dots on muted workspaces/tabs and in the inbox, restoring when unmuted', async () => {
+    const hub = new FakeHub();
+    hub.machine(
+      'gpu',
+      [FakeHub.term('t1', { agent: 'claude', agent_status: 'blocked' }), FakeHub.term('t2', { agent: 'codex', agent_status: 'done' })],
+      {
+        version: 2,
+        workspaces: [
+          {
+            id: 'aaaaaaaa',
+            name: 'api',
+            cwd: '/srv/api',
+            tabs: [
+              { root: { terminal: 't1' }, focused: 't1' },
+              { root: { terminal: 't2' }, focused: 't2' },
+            ],
+            selected: 0,
+          },
+        ],
+        selected: 0,
+      },
+    );
+    hub.install();
+    await act(async () =>
+      useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]),
+    );
+    await act(async () => useStore.getState().selectMachine('gpu'));
+    await act(async () => hub.model.subscribe('gpu'));
+    await act(settle);
+
+    const wsRow = () => host.querySelector<HTMLElement>('.ws-item[data-ws-id="aaaaaaaa"]')!;
+    expect(wsRow().querySelector('.dot-blocked')).not.toBeNull();
+    expect(host.querySelectorAll('.inbox-item')).toHaveLength(2);
+
+    // Muting tab 0 (blocked) hides its blue dot from the workspace and inbox; tab 1 (done) remains.
+    await act(async () => hub.model.mutate('gpu', (l) => L.muteTab(l, 'aaaaaaaa', 0, true)));
+    await act(settle);
+    expect(wsRow().querySelector('.dot-blocked')).toBeNull();
+    expect(wsRow().querySelector('.dot-done')).not.toBeNull();
+    expect(host.querySelectorAll('.inbox-item')).toHaveLength(1);
+
+    // Muting the workspace hides all unread/attention dots on it and in the inbox.
+    await act(async () => hub.model.mutate('gpu', (l) => L.muteWorkspace(l, 'aaaaaaaa', true)));
+    await act(settle);
+    expect(wsRow().querySelector('.dot')).toBeNull();
+    expect(wsRow().querySelector('.ws-muted')).not.toBeNull();
+    expect(host.querySelectorAll('.inbox-item')).toHaveLength(0);
+
+    // Unmuting the workspace and tab restores the blue dot and inbox items.
+    await act(async () => hub.model.mutate('gpu', (l) => L.muteTab(L.muteWorkspace(l, 'aaaaaaaa', false), 'aaaaaaaa', 0, false)));
+    await act(settle);
+    expect(wsRow().querySelector('.dot-blocked')).not.toBeNull();
+    expect(host.querySelectorAll('.inbox-item')).toHaveLength(2);
+  });
+
   it('folds disabled machines until opened, and unfolds them once enabled', async () => {
     const head = () => host.querySelector<HTMLElement>('.machine-head')!;
     const enable = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Enable Machine');
@@ -252,7 +343,21 @@ describe('Sidebar machines', () => {
       ]),
     );
     expect(host.querySelector('.machine-status')?.textContent).toContain('connection refused');
-    expect(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Retry')).toBeDefined();
+    const btns = Array.from(host.querySelectorAll<HTMLButtonElement>('.machine-status button'));
+    expect(btns.map((b) => b.textContent)).toEqual(['Retry', 'Disable']);
+    // Quick Disable beside Retry disables an offline machine directly without confirmation.
+    const { useDialog } = await import('../dialog');
+    useDialog.setState({ current: undefined });
+    await act(async () => btns[1].click());
+    expect(useDialog.getState().current).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/m/gpu/enabled',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ enabled: false }) }),
+    );
+    // Neither Retry nor Disable is offered read-only.
+    await act(async () => useStore.getState().setReadOnly(true));
+    expect(host.querySelectorAll('.machine-status button')).toHaveLength(0);
+    await act(async () => useStore.getState().setReadOnly(false));
   });
 
   it('says the local machine needs Linux or macOS where no agent runs on it', async () => {
@@ -276,9 +381,9 @@ describe('Sidebar machines', () => {
     const machine = { id: 'gpu', label: 'gpu', kind: 'ssh', status: 'auth_required', enabled: true } as unknown as MachineState;
     await act(async () => useStore.getState().setMachines([machine]));
     const buttons = () => Array.from(host.querySelectorAll('.machine-status button')).map((b) => b.textContent);
-    expect(buttons()).toEqual(['Sign in…', 'Retry']);
+    expect(buttons()).toEqual(['Sign in…', 'Retry', 'Disable']);
     await act(async () => useStore.setState({ sshLogin: false }));
-    expect(buttons()).toEqual(['Retry']);
+    expect(buttons()).toEqual(['Retry', 'Disable']);
     expect(host.querySelector('.machine-status')?.textContent).toContain('ssh-add');
     useStore.setState({ sshLogin: true });
   });

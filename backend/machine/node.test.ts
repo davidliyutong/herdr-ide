@@ -142,16 +142,20 @@ describe('the node', () => {
     }));
 });
 
-test('a build is newer by its version when both are known, else by when it was written', () => {
+test('a build is newer by its version when both are known and ordered, else by when it was written', () => {
   const a: NodeInfo = { build: 'a', version: 'v1.2.0', exe_time: 2 };
   const b: NodeInfo = { build: 'b', version: 'v1.3.0', exe_time: 1 };
   const dev1: NodeInfo = { build: 'c', version: 'dev', exe_time: 1 };
   const dev2: NodeInfo = { build: 'd', version: 'dev', exe_time: 2 };
+  const dirty1: NodeInfo = { build: 'e', version: 'v1.2.0-4-gabc-dirty.1700000001', exe_time: 2 };
+  const dirty2: NodeInfo = { build: 'f', version: 'v1.2.0-4-gabc-dirty.1700000002', exe_time: 1 };
   expect(newer(b, a)).toBe(true);
   expect(newer(a, b)).toBe(false);
   expect(newer(dev2, dev1)).toBe(true);
   expect(newer(dev1, dev2)).toBe(false);
   expect(newer(a, a)).toBe(false);
+  expect(newer(dirty2, dirty1)).toBe(true);
+  expect(newer(dirty1, dirty2)).toBe(false);
 });
 
 describe('peers', () => {

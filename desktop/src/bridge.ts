@@ -59,10 +59,18 @@ export const channels = {
   notifyShow: 'desktop:notify-show',
   /** page → shell: closes an active native notification by tag. */
   notifyClose: 'desktop:notify-close',
+  /** page → shell: sets the OS app/dock badge count (non-negative integer, 0 clears). */
+  notifyBadge: 'desktop:notify-badge',
   /** shell → page: target of a clicked native notification (NotificationTarget). */
   notifyClick: 'desktop:notify-click',
   /** page → shell: whether the page takes notification click events. */
   notifyClickWanted: 'desktop:notify-click-wanted',
+  /** page → shell, answered: open (or focus) a standalone detached tab window. */
+  windowOpenTab: 'desktop:window-open-tab',
+  /** detached page → shell: bring the main window forward (dock back). */
+  windowFocusMain: 'desktop:window-focus-main',
+  /** detached page → shell, answered: whether a screen point lies over the main window. */
+  windowIsOverMain: 'desktop:window-is-over-main',
   /** frame → shell, any frame of the app's origin: a channel to the hub
    * (id, path, WebSocket subprotocols; frames.ts). */
   openChannel: 'desktop:open-channel',

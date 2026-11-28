@@ -10,7 +10,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Conversation, SHOWN_ITEMS, stickToEnd, type ConversationHandle, type ConversationProps } from '../conversation/Conversation';
+import {
+  clearSavedScrolls,
+  Conversation,
+  SHOWN_ITEMS,
+  stickToEnd,
+  type ConversationHandle,
+  type ConversationProps,
+} from '../conversation/Conversation';
 import { MAX_DIFF_LINES } from '../conversation/diff';
 import {
   CHAT_NOTICES,
@@ -29,6 +36,7 @@ import { t } from '../i18n';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class FakeSource implements ChatSource {
+  id?: string;
   readOnly?: boolean;
   events: SourceEvent[] = [];
   subs = new Set<(ev: SourceEvent) => void>();
@@ -66,6 +74,7 @@ const notice = (method: string, params?: unknown): ChatEvent => ({ seq: next(), 
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  clearSavedScrolls();
   seq = 0;
   host = document.createElement('div');
   document.body.append(host);
@@ -137,16 +146,17 @@ describe('stickToEnd', () => {
 });
 
 describe('the conversation view’s messages', () => {
-  it('shows the user’s text as typed and the agent’s as Markdown with tables and formulas', async () => {
+  it('shows the user’s prompt and the agent’s reply as compact Markdown with tables and formulas', async () => {
     const s = new FakeSource();
     s.emit(
       prompt('a **table**\nand a formula'),
       say('| Name | Value |\n| --- | --- |\n| a | 1 |\n\nand $$E=mc^2$$ here\n\n$$\nx^2\n$$', 'm1'),
     );
     await show(s);
-    const user = q('.conv-user-text')!;
-    expect(user.textContent).toBe('a **table**\nand a formula');
-    expect(user.querySelector('strong')).toBeNull();
+    await until(() => q('.conv-user-text strong'));
+    expect(q('.conv-user-text strong')?.textContent).toBe('table');
+    // Multi-line user messages preserve single newlines as explicit line breaks.
+    expect(qa('.conv-user-text p br')).toHaveLength(1);
     await until(() => q('.conv-agent table'));
     expect(qa('.conv-agent th').map((th) => th.textContent)).toEqual(['Name', 'Value']);
     expect(qa('.conv-agent td').map((td) => td.textContent)).toEqual(['a', '1']);
@@ -174,7 +184,7 @@ describe('the conversation view’s messages', () => {
 
   it('reads the agent’s last message out, and nothing else', async () => {
     const s = new FakeSource();
-    s.emit(prompt('hi'), say('**Hello** there', 'm1'));
+    s.emit(prompt('hi'), say('<!-- hidden -->**Hello** there', 'm1'));
     await show(s);
     expect(q('[role="log"]')?.getAttribute('aria-live')).toBe('off');
     const live = qa('[aria-live="polite"]');
@@ -182,6 +192,63 @@ describe('the conversation view’s messages', () => {
     expect(live[0].textContent).toBe('Hello there');
     await emit(s, prompt('more'));
     expect(live[0].textContent).toBe('');
+  });
+
+  it('uses unified compact Markdown in Agent Native View: hides HTML comments, renders safe HTML & alerts, resolves relative links/images, and strips XSS', async () => {
+    const s = new FakeSource();
+    const onOpenFile = vi.fn();
+    s.emit(
+      say(
+        [
+          '<!-- hidden single -->',
+          '<!--',
+          'hidden multi',
+          '',
+          'still hidden',
+          '-->',
+          '> [!NOTE]',
+          '> Useful callout',
+          '',
+          '<details open><summary>Trace</summary>',
+          '',
+          'Hit <kbd>Enter</kbd> to see <mark>result</mark>.',
+          '',
+          '</details>',
+          '',
+          '<table><thead><tr><th align="center">Col</th></tr></thead><tbody><tr><td>Val</td></tr></tbody></table>',
+          '',
+          '<img src="./plot.png" alt="Plot" width="240" onerror="alert(1)">',
+          '',
+          '[Open doc](./docs/guide.md) and <a href="javascript:alert(1)">bad</a>',
+          '',
+          '<script>alert(1)</script><iframe src="javascript:alert(1)"></iframe><svg onload="alert(1)"></svg><style>body{color:red}</style>',
+        ].join('\n'),
+        'm1',
+      ),
+    );
+    await show(s, { base: { m: 'box', dir: '/home/u/proj' }, onOpenFile });
+    await until(() => q('.conv-agent details summary'));
+    const md = q('.conv-agent .markdown')!;
+    expect(md.classList.contains('markdown-compact')).toBe(true);
+    expect(md.textContent).not.toContain('hidden single');
+    expect(md.textContent).not.toContain('hidden multi');
+    expect(md.textContent).not.toContain('color:red');
+    expect(md.querySelector('.md-alert-note .md-alert-body')?.textContent).toContain('Useful callout');
+    expect(md.querySelector('details summary')?.textContent).toBe('Trace');
+    expect(md.querySelector('kbd')?.textContent).toBe('Enter');
+    expect(md.querySelector('mark')?.textContent).toBe('result');
+    expect(md.querySelector('table td')?.textContent).toBe('Val');
+    const img = md.querySelector('img')!;
+    expect(img.getAttribute('src')).toBe('/api/m/box/file?path=%2Fhome%2Fu%2Fproj%2Fplot.png');
+    expect(img.getAttribute('width')).toBe('240');
+    expect(img.getAttribute('onerror')).toBeNull();
+    const docLink = [...md.querySelectorAll('a')].find((a) => a.textContent === 'Open doc')!;
+    await click(docLink);
+    expect(onOpenFile).toHaveBeenCalledWith('/home/u/proj/docs/guide.md', undefined);
+    expect([...md.querySelectorAll('a')].find((a) => a.textContent === 'bad')).toBeUndefined();
+    for (const tag of ['script', 'iframe', 'style']) expect(md.querySelector(tag)).toBeNull();
+    expect(md.querySelector('svg:not(.md-alert-icon)')).toBeNull();
+    expect(md.querySelector('[onload]')).toBeNull();
   });
 
   it('shows a thought as one line that opens when it has text', async () => {
@@ -251,6 +318,11 @@ describe('the conversation view’s messages', () => {
       notice(CHAT_NOTICES.restarted, { mode: 'full' }),
       notice(CHAT_NOTICES.restarted, { mode: 'yolo' }),
       notice(CHAT_NOTICES.handedOff),
+      notice(CHAT_NOTICES.forked),
+      notice(CHAT_NOTICES.switched, { fromKind: 'claude' }),
+      notice(CHAT_NOTICES.switched),
+      notice(CHAT_NOTICES.rewound),
+      notice(CHAT_NOTICES.rewound, { restoreFiles: true }),
     );
     await show(s);
     expect(qa('.conv-notice-text').map((n) => n.textContent)).toEqual([
@@ -265,11 +337,61 @@ describe('the conversation view’s messages', () => {
       t('conversation.notice.restartedFor', { mode: t('conversation.mode.full') }),
       t('conversation.notice.restartedFor', { mode: 'yolo' }),
       t('conversation.notice.handedOff'),
+      t('conversation.notice.forked'),
+      t('conversation.notice.switchedFrom', { agent: 'Claude Code' }),
+      t('conversation.notice.switched'),
+      t('conversation.notice.rewound'),
+      t('conversation.notice.rewoundFiles'),
     ]);
     expect(qa('.conv-notice.error')).toHaveLength(1);
     expect(q('.conv-notice .conv-pre')).toBeNull();
     await click(q('.conv-notice .conv-link'));
     expect(q('.conv-notice .conv-pre')?.textContent).toBe('Tokens: 12k');
+  });
+
+  it('shows structured handoff transfer summary and opens the previous chat on click', async () => {
+    const opened: Array<[string, string | undefined]> = [];
+    const s = new FakeSource();
+    s.emit(
+      notice(CHAT_NOTICES.switched, {
+        fromChat: 'c0123456789abcdef',
+        fromKind: 'claude',
+        injection: 'native_history',
+        totalTurns: 12,
+        keptTurns: 4,
+        omittedTurns: 8,
+        estimatedTokens: 3200,
+      }),
+      notice(CHAT_NOTICES.switched, {
+        fromChat: 'c1111111111111111',
+        fromKind: 'codex',
+        injection: 'attributed_context',
+        totalTurns: 3,
+        keptTurns: 3,
+        omittedTurns: 0,
+        estimatedTokens: 450,
+      }),
+    );
+    await show(s, { onOpenChat: (id, kind) => opened.push([id, kind]) });
+    expect(qa('.conv-notice-text').map((n) => n.textContent)).toEqual([
+      t('conversation.notice.switchedBudgetedNative', {
+        agent: 'Claude Code',
+        kept: 4,
+        total: 12,
+        omitted: 8,
+        tokens: '3.2k',
+      }),
+      t('conversation.notice.switchedFull', {
+        agent: 'Codex',
+        kept: 3,
+        tokens: '450',
+      }),
+    ]);
+    const links = qa('.conv-notice .conv-link');
+    expect(links).toHaveLength(2);
+    expect(links[0]!.textContent).toBe(t('conversation.notice.openSourceChat'));
+    await click(links[0]!);
+    expect(opened).toEqual([['c0123456789abcdef', 'claude']]);
   });
 
   it('says how to start while there is no conversation, and that entries are not shown', async () => {
@@ -680,7 +802,7 @@ describe('the conversation view’s composer', () => {
     expect(q<HTMLTextAreaElement>('textarea')!.value).toBe('');
   });
 
-  it('shows how much of the context the session uses, its cost and the tightest limit', async () => {
+  it('shows how much of the context the session uses and its cost, without rate-limit windows', async () => {
     const s = new FakeSource();
     s.emit(update({ sessionUpdate: 'usage_update', used: 50_000, size: 200_000 }));
     await show(s);
@@ -704,15 +826,14 @@ describe('the conversation view’s composer', () => {
         },
       },
     });
-    // No size: tokens.
+    // No size: tokens; rate-limit windows are rendered in the status bar by the AI Usage plugin, not here (#1).
     expect(q('[role="meter"]')).toBeNull();
-    expect(q('.conv-usage-tokens')?.textContent).toBe(t('conversation.usage.tokens', { n: '1k' }));
-    expect(q('.conv-usage-cost')?.textContent).toBe('$1.50');
-    const limit = q('.conv-usage-limit')!;
-    expect(limit.dataset.level).toBe('high');
-    expect(limit.textContent).toContain(t('conversation.usage.limit', { window: '7d', pct: 91 }));
-    expect(limit.textContent).toContain('in 2 hours');
-    expect(limit.title).toContain(t('conversation.usage.limit', { window: '5h', pct: 40 }));
+    await click(q('.conv-ctx-ring-btn')!);
+    const pop = document.body.querySelector<HTMLElement>('.conv-ctx-popover')!;
+    expect(pop.querySelector('.conv-usage-tokens')?.textContent).toBe(t('conversation.usage.tokens', { n: '1k' }));
+    expect(pop.querySelector('.conv-usage-cost')?.textContent).toBe('$1.50');
+    expect(pop.querySelector('.conv-usage-limit')).toBeNull();
+    await click(q('.conv-ctx-ring-btn')!);
     // The agent's own measure.
     await emit(s, { seq: next(), t: 'info', chat: { usage: { used: 1000, size: 0, percentage: 12 } } });
     expect(q('[role="meter"]')?.getAttribute('aria-valuenow')).toBe('12');
@@ -840,11 +961,271 @@ describe('the conversation view’s list', () => {
     expect(q('.conv-jump')).toBeNull();
   });
 
+  it('leaves the end on the smallest move up, so new output no longer pulls a slow scroll back; a wheel up leaves it at once', async () => {
+    const s = new FakeSource();
+    s.emit(prompt('a'), say('b'));
+    await show(s);
+    const log = q('[role="log"]')!;
+    let height = 2000;
+    let top = 1500;
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => height });
+    Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 500 });
+    Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => (top = Math.min(v, height - 500)) });
+    const scrolled = () => act(async () => void log.dispatchEvent(new Event('scroll')));
+    await scrolled();
+    expect(q('.conv-jump')).toBeNull();
+    // Content that got shorter clamps the list at its end: still there.
+    height = 1990;
+    top = 1490;
+    await scrolled();
+    expect(q('.conv-jump')).toBeNull();
+    // Three pixels up, well within the slack: away, and output stays put.
+    top = 1487;
+    await scrolled();
+    expect(q('.conv-jump')).not.toBeNull();
+    height = 2400;
+    await emit(s, say('c'));
+    expect(top).toBe(1487);
+    // Back down near the end: it holds there again.
+    top = 1890;
+    await scrolled();
+    expect(q('.conv-jump')).toBeNull();
+    // A wheel up leaves the end before any scroll event says so.
+    await act(async () => void log.dispatchEvent(new WheelEvent('wheel', { deltaY: -4, bubbles: true })));
+    expect(q('.conv-jump')).not.toBeNull();
+    height = 2600;
+    await emit(s, say('d'));
+    expect(top).toBe(1890);
+  });
+
+  it('keeps the item read away from the end drawn while items come past the window', async () => {
+    const s = new FakeSource();
+    for (let i = 0; i < SHOWN_ITEMS; i++) s.emit(prompt(`p${i}`));
+    await show(s);
+    const log = q('[role="log"]')!;
+    let top = 0;
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 20000 });
+    Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 500 });
+    Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => (top = v) });
+    await act(async () => void log.dispatchEvent(new Event('scroll')));
+    expect(q('.conv-jump')).not.toBeNull();
+    expect(q('.conv-user-text')?.textContent).toBe('p0');
+    for (let i = SHOWN_ITEMS; i < SHOWN_ITEMS + 5; i++) await emit(s, prompt(`p${i}`));
+    // The reader's item stays; the window grew instead.
+    expect(q('.conv-user-text')?.textContent).toBe('p0');
+    expect(qa('.conv-item')).toHaveLength(SHOWN_ITEMS + 5);
+    // Back at the end the window holds the newest again.
+    await click(q('.conv-jump'));
+    expect(qa('.conv-item')).toHaveLength(SHOWN_ITEMS);
+    expect(q('.conv-user-text')?.textContent).toBe('p5');
+  });
+
   it('starts over when its source starts over', async () => {
     const s = new FakeSource();
     s.emit(prompt('old'));
     await show(s);
-    await emit(s, { t: 'reset' }, prompt('new'));
+    await emit(s, { t: 'reset', seq: 99 }, prompt('new'));
     expect(qa('.conv-user-text').map((e) => e.textContent)).toEqual(['new']);
+  });
+
+  it('preserves browsing scroll state across unmount/remount for stopped chats and across shown toggles', async () => {
+    const s = new FakeSource();
+    s.id = 'chat-scroll-1';
+    s.emit(prompt('first'), say('reply one'), prompt('second'), say('reply two'));
+    await show(s);
+    const log = q('[role="log"]')!;
+    let top = 420;
+    let hiddenHeight = false;
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => (hiddenHeight ? 0 : 2000) });
+    Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => (hiddenHeight ? 0 : 500) });
+    Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => (top = v) });
+    await act(async () => void log.dispatchEvent(new Event('scroll')));
+    expect(q('.conv-jump')).not.toBeNull();
+
+    // Hiding the kept pane (display: none -> clientHeight 0, browser resets scrollTop to 0)
+    // and showing it again restores the saved scrollTop before paint.
+    hiddenHeight = true;
+    top = 0;
+    await show(s, { shown: false });
+    await act(async () => void log.dispatchEvent(new Event('scroll')));
+    hiddenHeight = false;
+    await show(s, { shown: true });
+    expect(top).toBe(420);
+    expect(q('.conv-jump')).not.toBeNull();
+
+    // Unmounting and remounting a stopped chat restores the exact saved scroll position.
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    let restoredTop = 0;
+    await act(async () => root.render(createElement(Conversation, { source: s, kind: 'claude' })));
+    const log2 = q('[role="log"]')!;
+    Object.defineProperty(log2, 'scrollHeight', { configurable: true, get: () => 2000 });
+    Object.defineProperty(log2, 'clientHeight', { configurable: true, get: () => 500 });
+    Object.defineProperty(log2, 'scrollTop', { configurable: true, get: () => restoredTop, set: (v: number) => (restoredTop = v) });
+    // Trigger layout update after mocking jsdom geometry.
+    await emit(s, say('more text while away'));
+    expect(restoredTop).toBe(420);
+    expect(q('.conv-jump')).not.toBeNull();
+  });
+});
+
+describe('user message edit & rewind and fork-from-here (#6)', () => {
+  it('offers Edit & Rewind (with optional restoreFiles) and Fork from here when idle and capable', async () => {
+    const s = new FakeSource();
+    const rewind = vi.fn(async () => {});
+    const onFork = vi.fn(async () => {});
+    Object.assign(s, { rewind });
+    const first = prompt('original prompt');
+    s.emit(
+      { seq: next(), t: 'info', chat: { state: 'idle', capabilities: { rewind: true, rewindFiles: true, fork: true } } },
+      first,
+      say('answer'),
+    );
+    await show(s, { onFork });
+
+    const editBtn = q<HTMLButtonElement>(`button[aria-label="${t('conversation.user.editRewind')}"]`)!;
+    const forkBtn = q<HTMLButtonElement>(`button[aria-label="${t('conversation.user.forkHere')}"]`)!;
+    expect(editBtn).not.toBeNull();
+    expect(forkBtn).not.toBeNull();
+
+    // Fork-from-here passes the message seq.
+    await click(forkBtn);
+    expect(onFork).toHaveBeenCalledWith(first.seq);
+
+    // Clicking Edit & Rewind opens inline editor with warning and restoreFiles checkbox.
+    await click(editBtn);
+    const input = q<HTMLTextAreaElement>('.conv-edit-input')!;
+    expect(input.value).toBe('original prompt');
+    expect(q('.conv-edit-warn')?.textContent).toContain(t('conversation.rewind.warning'));
+    const restoreBox = q<HTMLInputElement>('.conv-edit-check input[type="checkbox"]')!;
+    expect(restoreBox.checked).toBe(false);
+    await click(restoreBox);
+    expect(restoreBox.checked).toBe(true);
+    await act(async () => setValue(input, 'edited prompt'));
+    await click(q('.conv-edit-actions .primary'));
+    await settle();
+
+    expect(rewind).toHaveBeenCalledWith(first.seq, {
+      content: [text('edited prompt')],
+      clientId: expect.any(String),
+      restoreFiles: true,
+    });
+    expect(q('.conv-user-edit')).toBeNull();
+  });
+
+  it('hides restoreFiles when caps.rewindFiles is false, reports rewind errors, and hides actions while working or read-only', async () => {
+    const s = new FakeSource();
+    const rewind = vi.fn(async () => {
+      throw Object.assign(new Error('offline'), { code: 'offline' });
+    });
+    const onFork = vi.fn();
+    Object.assign(s, { rewind });
+    s.emit({ seq: next(), t: 'info', chat: { state: 'idle', capabilities: { rewind: true, rewindFiles: false } } }, prompt('try edit'));
+    await show(s, { onFork });
+
+    await click(q(`button[aria-label="${t('conversation.user.editRewind')}"]`));
+    expect(q('.conv-edit-check')).toBeNull();
+    await click(q('.conv-edit-actions .primary'));
+    await settle();
+    expect(q('.conv-user-edit [role="alert"]')?.textContent).toBe(t('conversation.error.offline'));
+
+    // Escape closes editor.
+    await act(async () => {
+      q<HTMLTextAreaElement>('.conv-edit-input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(q('.conv-user-edit')).toBeNull();
+
+    // Hidden while working.
+    await emit(s, { seq: next(), t: 'state', state: 'working' });
+    expect(q('.conv-user-actions')).toBeNull();
+
+    // Hidden when readOnly.
+    await emit(s, { seq: next(), t: 'state', state: 'idle' });
+    await show(s, { onFork, readOnly: true });
+    expect(q('.conv-user-actions')).toBeNull();
+  });
+
+  it('supports truncate-only native rewind prefilling the composer, reports unsupported rewind on ACP, and warns before lossy in-message fork', async () => {
+    // 1. Native rewind-only prefills the rewound prompt text into the composer.
+    const nativeSrc = new FakeSource();
+    nativeSrc.id = 'native-rewind-chat';
+    const nativeRewind = vi.fn(async () => {});
+    Object.assign(nativeSrc, { rewind: nativeRewind });
+    const turn = prompt('rewrite this prompt');
+    nativeSrc.emit(
+      { seq: next(), t: 'info', chat: { state: 'idle', capabilities: { rewind: true, rewindFiles: false, fork: true } } },
+      turn,
+      say('claude reply'),
+    );
+    await show(nativeSrc, { kind: 'claude' });
+
+    await click(q<HTMLButtonElement>(`button[aria-label="${t('conversation.user.rewind')}"]`));
+    expect(q('.conv-user-rewind')).not.toBeNull();
+    await click(q('.conv-edit-actions .primary'));
+    await settle();
+    expect(nativeRewind).toHaveBeenCalledWith(turn.seq, {});
+    expect(q<HTMLTextAreaElement>('textarea.conv-input')?.value).toBe('rewrite this prompt');
+
+    // 2. ACP agent without native rewind/fork (agy): shows explicit unsupported rewind notice
+    //    (never invokes source.rewind) and warns that in-message fork is lossy before proceeding.
+    const agySrc = new FakeSource();
+    agySrc.id = 'acp-unsupported-chat';
+    const agyRewind = vi.fn(async () => {});
+    const onFork = vi.fn();
+    Object.assign(agySrc, { rewind: agyRewind });
+    const agyTurn = prompt('agy prompt');
+    agySrc.emit(
+      { seq: next(), t: 'info', chat: { state: 'idle', capabilities: { rewind: false, rewindFiles: false, fork: false } } },
+      agyTurn,
+      say('agy reply'),
+      notice(CHAT_NOTICES.forked, { native: false }),
+    );
+    await show(agySrc, { kind: 'agy', onFork });
+
+    expect(qa('.conv-notice-text').map((n) => n.textContent)).toContain(t('conversation.notice.forkedLossy'));
+    expect(q(`button[aria-label="${t('conversation.user.editRewind')}"]`)).toBeNull();
+    const unsupBtn = q<HTMLButtonElement>(`button[aria-label="${t('conversation.user.rewindUnsupported', { agent: 'Antigravity' })}"]`)!;
+    expect(unsupBtn).not.toBeNull();
+    expect(unsupBtn.classList.contains('is-unsupported')).toBe(true);
+    await click(unsupBtn);
+    expect(q('.conv-user-info')?.textContent).toContain(t('conversation.rewind.unsupported', { agent: 'Antigravity' }));
+    expect(agyRewind).not.toHaveBeenCalled();
+    await click(q('.conv-user-info .conv-edit-actions button'));
+    expect(q('.conv-user-info')).toBeNull();
+
+    // Clicking Fork on a lossy turn opens inline confirmation rather than forking immediately.
+    const forkBtn = q<HTMLButtonElement>(`button[aria-label="${t('conversation.user.forkHere')}"]`)!;
+    expect(forkBtn.dataset.lossy).toBe('true');
+    await click(forkBtn);
+    expect(onFork).not.toHaveBeenCalled();
+    expect(q('.conv-user-fork-lossy')?.textContent).toContain(t('conversation.fork.lossyWarning', { agent: 'Antigravity' }));
+    await click(q('.conv-user-fork-lossy .conv-edit-actions .primary'));
+    await settle();
+    expect(onFork).toHaveBeenCalledWith(agyTurn.seq);
+
+    // 3. ACP agent with full-session fork only (kimi): earlier turn warns lossy, last turn forks natively without warning.
+    const kimiSrc = new FakeSource();
+    kimiSrc.id = 'kimi-fork-chat';
+    const onKimiFork = vi.fn();
+    const k1 = prompt('kimi first');
+    const k2 = prompt('kimi second');
+    kimiSrc.emit(
+      { seq: next(), t: 'info', chat: { state: 'idle', capabilities: { rewind: false, rewindFiles: false, fork: true } } },
+      k1,
+      say('kimi a1'),
+      k2,
+      say('kimi a2'),
+    );
+    await show(kimiSrc, { kind: 'kimi', onFork: onKimiFork });
+    const forkBtns = qa<HTMLButtonElement>(`button[aria-label="${t('conversation.user.forkHere')}"]`);
+    expect(forkBtns).toHaveLength(2);
+    expect(forkBtns[0].dataset.lossy).toBe('true');
+    expect(forkBtns[1].dataset.lossy).toBeUndefined();
+    await click(forkBtns[1]);
+    expect(onKimiFork).toHaveBeenCalledWith(k2.seq);
+    expect(q('.conv-user-fork-lossy')).toBeNull();
+    await click(forkBtns[0]);
+    expect(onKimiFork).toHaveBeenCalledTimes(1);
+    expect(q('.conv-user-fork-lossy')).not.toBeNull();
   });
 });

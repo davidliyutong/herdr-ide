@@ -15,10 +15,21 @@ import type { Change, Store } from '#kernel/config/settings/index.ts';
 import type { AgentEvent, Machines } from '#kernel/machines/manager.ts';
 import { Adapter, chatSpec } from '#shared/agents/kinds.ts';
 import { Configurer } from './configure.ts';
+import {
+  AGENTS_CACHE_TTL_MS,
+  ProbeCache,
+  SESSIONS_CACHE_MAX,
+  SESSIONS_CACHE_TTL_MS,
+  machinePrefix,
+  overlaySessionChats,
+  sessionsCacheKey,
+  type CachedAgent,
+  type CachedSessions,
+} from './cache.ts';
 import type { EnsureOptions, SdkProvision } from './sdkprovision.ts';
 import { HostLink, readError, type HostConn, type Opener, type Response } from './hostconn.ts';
 import { ChatPage } from './page.ts';
-import { hostSettings } from './settings.ts';
+import { hostSettings, isHostSettingKey } from './settings.ts';
 import type { Limits, Timing } from './timing.ts';
 import { Watcher } from './watch.ts';
 import { HubCode, type StatesData } from './wire.ts';
@@ -56,9 +67,22 @@ export class ChatSwitchboard {
   readonly watch: Watcher;
   /** The pages' WebSockets. */
   readonly pages = new Set<ChatPage>();
+  /** Hub-side bounded TTL + in-flight coalescing caches for expensive probes. */
+  readonly sessionsCache: ProbeCache<CachedSessions>;
+  readonly agentsCache: ProbeCache<CachedAgent[]>;
 
   constructor(o: SwitchboardOptions) {
     this.o = o;
+    this.sessionsCache = new ProbeCache<CachedSessions>({
+      ttlMs: SESSIONS_CACHE_TTL_MS,
+      maxEntries: SESSIONS_CACHE_MAX,
+      now: o.now,
+    });
+    this.agentsCache = new ProbeCache<CachedAgent[]>({
+      ttlMs: AGENTS_CACHE_TTL_MS,
+      maxEntries: 256,
+      now: o.now,
+    });
     this.link = new HostLink({
       open: o.open,
       helloMs: o.timing.helloMs,
@@ -81,6 +105,7 @@ export class ChatSwitchboard {
       broadcast: o.broadcast,
       publishAgent: o.publishAgent,
       turnedOff: () => this.closePages(HubCode.PluginDisabled),
+      onOffline: (m) => this.invalidateMachine(m),
       version: o.version,
       now: o.now,
       logger: o.logger,
@@ -132,6 +157,66 @@ export class ChatSwitchboard {
     } finally {
       c.close();
     }
+  }
+
+  /** Lists available chat agent kinds for machine m with hub-side TTL caching
+   * and in-flight coalescing. Never caches errors (e.g. not_running). A
+   * listing that starts the chat host is never answered by one that does
+   * not (which fails with not_running while the host is down). */
+  async agents(m: string, o: { kinds: string[]; start: boolean; refresh?: boolean; signal: AbortSignal }): Promise<CachedAgent[]> {
+    const key = `${m}\0${o.start ? 'start' : 'peek'}\0${o.kinds.join(',')}`;
+    const list = await this.agentsCache.get(
+      key,
+      { refresh: o.refresh, signal: o.signal, timeoutMs: this.o.timing.shortMs },
+      async (sharedSignal) => {
+        const res = await this.request(m, { op: chat.Op.Agents, kinds: o.kinds }, { start: o.start, agent: false, signal: sharedSignal });
+        return (res.agents ?? [])
+          .filter((a) => o.kinds.includes(a.kind))
+          .map((a) => ({
+            kind: a.kind,
+            available: a.available ?? false,
+            ...(a.version ? { version: a.version } : {}),
+            ...(a.reason ? { reason: a.reason } : {}),
+          }));
+      },
+    );
+    return list.map((a) => ({ ...a }));
+  }
+
+  /** Lists an agent's earlier sessions for (m, kind, cwd, cursor) with hub-side
+   * TTL + LRU caching, in-flight deduplication, and live chat-id overlay. */
+  async sessions(
+    m: string,
+    o: { kind: string; cwd: string; cursor: string; refresh?: boolean; signal: AbortSignal },
+  ): Promise<CachedSessions> {
+    const key = sessionsCacheKey(m, o.kind, o.cwd, o.cursor);
+    const cached = await this.sessionsCache.get(
+      key,
+      { refresh: o.refresh, signal: o.signal, timeoutMs: this.o.timing.sessionsMs },
+      async (sharedSignal) => {
+        const res = await this.request(
+          m,
+          { op: chat.Op.Sessions, kind: o.kind, cwd: o.cwd, ...(o.cursor ? { cursor: o.cursor } : {}) },
+          { start: true, agent: true, signal: sharedSignal },
+        );
+        return {
+          sessions: (res.sessions ?? []) as unknown as chat.Session[],
+          nextCursor: res.nextCursor ?? '',
+        };
+      },
+    );
+    const states = this.watch.snapshot().machines[m]?.states;
+    return {
+      sessions: overlaySessionChats(cached.sessions, o.kind, states),
+      nextCursor: cached.nextCursor,
+    };
+  }
+
+  /** Invalidates all hub-side probe caches for machine m (host stop, disconnect, forget). */
+  invalidateMachine(m: string): void {
+    const prefix = machinePrefix(m);
+    this.sessionsCache.invalidatePrefix(prefix);
+    this.agentsCache.invalidatePrefix(prefix);
   }
 
   /** Attaches to a chat without its log, sends it a handoff and waits for
@@ -198,7 +283,7 @@ export class ChatSwitchboard {
     const some = new Set<string>();
     for (const c of changes) {
       if (c.key.startsWith('plugins.')) this.watch.poke();
-      else if (c.key.startsWith('chat.')) {
+      else if (isHostSettingKey(c.key)) {
         if (c.machine === '') all = true;
         else some.add(c.machine);
       }
@@ -222,6 +307,7 @@ export class ChatSwitchboard {
 
   /** Drops what the hub keeps of a removed machine. */
   forget(m: string): void {
+    this.invalidateMachine(m);
     this.watch.forget(m);
     this.config.forget(m);
   }

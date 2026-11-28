@@ -74,8 +74,41 @@ import type { Logger } from '#shared/lib/log.ts';
 import type * as chat from '#shared/proto/chatproto/index.ts';
 import type { AgentProcesses } from './agentproc.ts';
 
+/** Declarative capabilities & runtime characteristics of an Adapter, consumed
+ * by Host/Chat so core orchestration never switches on adapter names. */
+export interface AdapterMeta {
+  /** 'process' resolves and spawns spec.argv[0] via PATH (default);
+   * 'embedded' runs in-process inside the chat host (no PATH lookup, pid = 0). */
+  runtime: 'process' | 'embedded';
+  /** Preferred handoff delivery strategy when switching into this adapter. */
+  handoffInjection?: 'native_history' | 'attributed_context';
+  /** Which native boundary key partial fork requires ('message' for Claude
+   * upToMessageId, 'turn' for Codex beforeTurnId/lastTurnId, 'any', or 'none'). */
+  partialForkBy?: 'message' | 'turn' | 'any' | 'none';
+}
+
+/** Input passed to Adapter.prepareConfig so adapters can supply initial
+ * configuration options (e.g. client-enforced ACP permission mode) before
+ * a chat starts or wakes, without leaking adapter logic into Host. */
+export interface PrepareConfigContext {
+  kind: string;
+  config?: chat.ConfigOption[];
+  options: chat.Options;
+  fromJournal: boolean;
+  settings: chat.ClampedHostSettings;
+}
+
 /** Drives one protocol of coding agents. */
 export interface Adapter {
+  /** Declarative runtime & handoff/fork metadata; defaults to process runtime,
+   * attributed_context handoff, and 'any' partial fork hint. */
+  readonly meta?: AdapterMeta;
+  /** Optional availability probe for embedded runtimes (when meta.runtime is
+   * 'embedded', Host calls this instead of lookPath(spec.argv[0])). */
+  available?(env: Record<string, string>, signal: AbortSignal): Promise<boolean>;
+  /** Optional pre-start/journal-load config normalizer (e.g. injecting a
+   * client-enforced permission mode option for ACP agents without native modes). */
+  prepareConfig?(ctx: PrepareConfigContext): chat.ConfigOption[] | undefined;
   /** Runs the agent for a chat: a new session, or p.resume's. Resolves once
    * the session exists (its id known) or rejects when it did not come to
    * be; the session's events then go to sink until it is done. signal
@@ -101,32 +134,56 @@ export interface Adapter {
    * p.sessionId; null when none does, or when it cannot be told. Its start
    * refuses such a session too. */
   inTerminal?(p: HistoryParams, signal: AbortSignal): Promise<chat.ChatError | null>;
+  /** Lists the models the agent kind offers, reusing a live connection or
+   * running a short-lived probe. */
+  models?(p: ModelsParams, signal: AbortSignal): Promise<chat.ModelOption[]>;
+  /** Forks an existing session on disk or through the agent's protocol,
+   * optionally slicing up to a turn/message boundary. */
+  fork?(p: ForkParams, signal: AbortSignal): Promise<ForkResult>;
 }
 
-/** An agent process running one session. */
+/** An agent runtime executing one session (an external process group, or an
+ * in-process embedded runtime with pid === 0). */
 export interface Session {
   /** The agent's id of the session. */
   readonly id: string;
-  /** The id of the agent's process, the leader of its process group; 0
-   * while none runs. The host signals the group itself: SIGKILL when the
-   * agent outlives close()'s grace, SIGTERM and then SIGKILL when it is
-   * told to stop at once (a signal of the terminal core). */
+  /** The id of the agent's process, the leader of its process group; 0 for an
+   * in-process embedded runtime or when no process runs. The host signals the
+   * group only when pid > 0. */
   readonly pid: number;
-  /** Starts a turn with p.content, or, while one runs, queues it for the
-   * agent or steers it into the running turn (a queued event under
-   * p.message tells which, and when the agent took it). */
+  /** Starts a turn with p.content, or, while one runs, queues, steers or
+   * interrupts according to p.delivery (a queued event under p.message tells
+   * which, and when the agent took it). */
   prompt(p: PromptParams, signal: AbortSignal): Promise<void>;
   /** Cancels the running turn; what waits on the agent's side (its
-   * permission requests) ends with it. */
-  cancel(signal: AbortSignal): Promise<void>;
+   * permission requests) ends with it. When opts.keepQueue is true, queued
+   * messages wait for the next turn instead of being cancelled. */
+  cancel(signal: AbortSignal, opts?: { keepQueue?: boolean }): Promise<void>;
   /** Withdraws the queued message of that id (a PromptParams.message)
    * before the agent took it. */
   cancelQueued(message: string, signal: AbortSignal): Promise<void>;
+  /** Promotes the queued message of that id to steer into the active turn or
+   * interrupt the active turn and run immediately. */
+  steerQueued?(message: string, delivery: 'steer' | 'interrupt', signal: AbortSignal): Promise<void>;
   /** Sets the configuration option id (a ConfigOption of the chat) to value,
    * one of its values. */
   setConfig(id: string, value: string, signal: AbortSignal): Promise<void>;
-  /** Compacts the conversation's context. */
-  compact(signal: AbortSignal): Promise<void>;
+  /** Updates the session's known model list after an Op.Models refresh so
+   * subsequent setConfig(model) calls accept newly discovered models. */
+  updateModels?(models: readonly chat.ModelOption[]): void;
+  /** Compacts the conversation's context, optionally guided by instructions. */
+  compact(signal: AbortSignal, instructions?: string): Promise<void>;
+  /** Terminates a running background task or subagent by its BackgroundTask.id. */
+  stopTask?(taskId: string, signal: AbortSignal): Promise<void>;
+  /** Rewinds an idle session to just before the named message/turn boundary,
+   * optionally reverting file edits when capabilities.rewindFiles is true. */
+  rewind?(p: RewindParams, signal: AbortSignal): Promise<RewindResult>;
+  /** Appends structured handoff messages directly into a fresh session's
+   * model-visible history without starting a turn (e.g. Codex
+   * `thread/inject_items`). Throws Code.Unsupported when the running agent
+   * version does not support direct injection so the host falls back to
+   * prompt-time attributed context injection. */
+  injectHistory?(messages: readonly HandoffMessage[], signal: AbortSignal): Promise<void>;
   /** Ends the agent process gracefully; resolves once it is gone or signal
    * ends. */
   close(signal: AbortSignal): Promise<void>;
@@ -219,13 +276,73 @@ export interface HistoryParams extends RunParams {
   after: string;
 }
 
+/** What models probes. */
+export interface ModelsParams extends RunParams {
+  client: ClientInfo;
+}
+
+/** What fork clones. */
+export interface ForkParams extends RunParams {
+  /** Source session id to fork from. */
+  sessionId: string;
+  /** True when forking strictly before the end of the source chat (partial slice). */
+  partial?: boolean;
+  /** Optional native message id (inclusive) to slice up to (Claude upToMessageId). */
+  upToMessageId?: string;
+  /** Optional native turn id immediately after the last kept turn (Codex beforeTurnId). */
+  beforeTurnId?: string;
+  /** Optional native turn id of the last kept turn (Codex lastTurnId). */
+  lastTurnId?: string;
+  /** Optional title for the forked session. */
+  title?: string;
+  client: ClientInfo;
+}
+
+export interface ForkResult {
+  sessionId: string;
+}
+
+/** What rewind rolls back. */
+export interface RewindParams {
+  /** Native message uuid of the user turn being rewound/replaced (Claude rewindFiles). */
+  userMessageId?: string;
+  /** Native message uuid of the last message before the rewound turn (Claude resumeSessionAt). */
+  resumeBeforeId?: string;
+  /** Native turn id of the turn being rewound/replaced (Codex thread/revert beforeTurnId). */
+  beforeTurnId?: string;
+  /** Also restore file checkpoints from userMessageId onward when supported. */
+  restoreFiles?: boolean;
+}
+
+export interface RewindResult {
+  /** New session id if rewinding branched to a new session id. */
+  sessionId?: string;
+  /** True when the rewound session is now a brand-new empty session with no
+   * persisted conversation yet (so a later sleep/wake must start fresh instead
+   * of passing --resume). */
+  fresh?: boolean;
+}
+
+/** A structured conversation message for native history injection on handoff. */
+export interface HandoffMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  /** Agent kind id that authored an assistant message (e.g. 'claude', 'codex'). */
+  agentKind?: string;
+}
+
 /** A message of the user. */
 export interface PromptParams {
   /** ACP content blocks (text, image, resource_link), checked by the host
-   * against MAX_PROMPT and MAX_IMAGE. */
+   * against MAX_PROMPT and MAX_IMAGE. Always the user's untouched content
+   * (never includes handoff context, so stored User/Queued events stay clean). */
   content: unknown[];
-  /** The host's id of the message, which queued events and cancelQueued
-   * name. */
+  /** Optional attributed handoff context prepended ONLY on the wire to the
+   * agent for backends without native history injection. Never written into
+   * EventType.User or EventType.Queued. */
+  handoffContext?: string;
+  /** The host's id of the message, which queued events, cancelQueued and
+   * steerQueued name. */
   message: string;
   /** The page's id of the message, for the user and queued events; "" for
    * none. */
@@ -236,6 +353,10 @@ export interface PromptParams {
    * adapter that finds none emits the user event (content, clientId)
    * itself, before the turn's start. */
   recorded: boolean;
+  /** Delivery mode when a turn is already active (default: Delivery.Queue). */
+  delivery?: chat.Delivery;
+  /** Stable UUIDv4 matching EventType.User.item for native rewind/fork mapping. */
+  uuid?: string;
 }
 
 /** A permission the agent asks. */
@@ -261,6 +382,12 @@ export interface QuestionRequest {
   /** The tool call that asks, as an ACP ToolCall, when there is one. */
   toolCall?: unknown;
   parent: string;
+  /** Non-blocking question: does not hold chat in State.Waiting and survives Turn.End. */
+  async?: boolean;
+  /** Optional auto-resolution timeout in milliseconds (Codex non-blocking requestUserInput). */
+  autoResolutionMs?: number;
+  /** Correlating item id (e.g. agentMessage itemId) for deduplicating inline vs card UI. */
+  item?: string;
 }
 
 /** The user's answers by Question.id (option labels or the user's own

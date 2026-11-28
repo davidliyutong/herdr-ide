@@ -55,6 +55,8 @@ export function statusOf(code: string): number {
     case HubCode.Offline:
     case NOT_RUNNING:
       return 409;
+    case Code.ProbeBusy:
+      return 429;
     case Code.TooLarge:
       return 413;
     case HubCode.ReadOnly:

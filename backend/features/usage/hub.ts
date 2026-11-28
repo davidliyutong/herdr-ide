@@ -21,6 +21,7 @@
 // as usage.refresh and usage.deepseek_key.
 import { z } from 'zod';
 import { byId, validSessionId } from '#shared/agents/kinds.ts';
+import { CoalesceCache } from '#shared/lib/cache.ts';
 import { defineFeature } from '#kernel/feature.ts';
 import { Fail, offline } from '#kernel/fail.ts';
 import { readBody } from '#kernel/http/app.ts';
@@ -35,12 +36,36 @@ import { Usage, type UsageDeps } from './usage.ts';
  * agent and may search its session directories. */
 export const MAX_SESSION_READS = 8;
 
-/** The provider whose prices a kind's sessions are priced with: an agent
- * whose transcripts are the logs the spend reads (Claude Code's, Codex's). */
+/** How long a session usage read is cached on the hub, in ms. Shorter than
+ * the client's SESSION_MIN_GAP (10 s) so normal polling stays fresh while
+ * multi-tab reads and rapid terminal switches coalesce and hit cache. */
+export const SESSION_CACHE_FRESH = 5_000;
+const SESSION_CACHE_MAX = 256;
+
+/** The providers whose sessions can be priced on the machines. */
+export const SESSION_PROVIDERS: ReadonlySet<string> = new Set(['claude', 'codex', 'grok', 'kimi', 'antigravity', 'opencode']);
+
+/** The provider whose prices a kind's sessions are priced with: every
+ * coding agent whose logs or databases the spend reads (Claude Code,
+ * Codex, Grok, Kimi Code, Antigravity, OpenCode). */
 export function sessionProvider(kind: string): string | undefined {
-  const k = byId(kind);
-  const p = k?.usageProvider;
-  return p && (p === 'claude' || p === 'codex') && k.transcript === p ? p : undefined;
+  const p = byId(kind)?.usageProvider;
+  return p && SESSION_PROVIDERS.has(p) ? p : undefined;
+}
+
+const OPENCODE_SESSION_ID = /^ses_[A-Za-z0-9_-]{4,128}$/;
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Whether s is a valid session identifier for kind's usage lookup: a
+ * lower-case UUID, or OpenCode's ses_* identifier for opencode. */
+export function validUsageSessionId(kind: string, session: string): boolean {
+  if (validSessionId(session)) return true;
+  return kind === 'opencode' && OPENCODE_SESSION_ID.test(session);
+}
+
+/** Whether s is an absolute POSIX directory path bounded to 4096 bytes. */
+export function validSessionCwd(cwd: string): boolean {
+  return cwd.startsWith('/') && Buffer.byteLength(cwd) <= 4096 && !cwd.includes('\0') && !LONE_SURROGATE.test(cwd);
 }
 
 export interface UsageOptions {
@@ -72,6 +97,7 @@ export const usageFeature = (o: UsageOptions = {}) =>
           return [...ready.filter((m) => m.kind === 'local'), ...ready.filter((m) => m.kind !== 'local')].map((m) => m.id);
         },
         known: (m) => ctx.machines.get(m) !== undefined,
+        disabled: (m) => ctx.machines.get(m)?.state().status === 'disabled',
         readOnly: () => ctx.readOnly,
         enabled: () => ctx.enabledFor('desktop') || ctx.enabledFor('browser'),
         broadcast: (s) => ctx.broadcast(s),
@@ -90,7 +116,15 @@ export const usageFeature = (o: UsageOptions = {}) =>
           await store.close();
         }
       });
-      ctx.onForget((m) => usage.forget(m));
+      const sessionCache = new CoalesceCache<unknown>({
+        ttlMs: SESSION_CACHE_FRESH,
+        maxEntries: SESSION_CACHE_MAX,
+        now: o.now,
+      });
+      ctx.onForget((m) => {
+        usage.forget(m);
+        sessionCache.invalidatePrefix(`${m}\0`, { abort: true });
+      });
 
       const query = (c: Ctx) => new URL(c.req.url).searchParams;
       /** The answer, or 304 when If-None-Match is its ETag. */
@@ -131,25 +165,55 @@ export const usageFeature = (o: UsageOptions = {}) =>
         const q = query(c);
         const kind = q.get('kind') ?? '';
         const session = q.get('session') ?? '';
+        const cwd = q.get('cwd') ?? '';
+        const pidRaw = q.get('pid') ?? '';
         const provider = sessionProvider(kind);
-        if (!provider || !validSessionId(session))
-          throw new Fail('bad_request', 400, 'kind: an agent whose sessions are priced; session: its session id');
-        if (!usage.options().providers.includes(provider)) throw new Fail('provider_off', 404);
-        const m = c.var.machine;
-        const n = reads.get(m.id) ?? 0;
-        if (n >= MAX_SESSION_READS) throw new Fail('busy', 429, "too many reads of the machine's sessions at once");
-        reads.set(m.id, n + 1);
-        try {
-          // Decoded by the protocol's schema: nothing else an agent
-          // answered reaches the page.
-          return c.json(
-            await ctx.call(m, usageProtocol, 'session', { kind, session, prices: usage.prices().own }, { signal: c.req.raw.signal }),
-          );
-        } finally {
-          const left = (reads.get(m.id) ?? 1) - 1;
-          if (left > 0) reads.set(m.id, left);
-          else reads.delete(m.id);
+        let pid: number | undefined;
+        if (pidRaw) {
+          if (!/^[1-9]\d{0,9}$/.test(pidRaw) || Number(pidRaw) > 0x7fffffff)
+            throw new Fail('bad_request', 400, 'pid: a positive process id');
+          pid = Number(pidRaw);
         }
+        const hasSession = session !== '';
+        const hasCwd = cwd !== '';
+        const valid =
+          !!provider &&
+          ((hasSession && validUsageSessionId(kind, session) && (!hasCwd || validSessionCwd(cwd))) ||
+            (!hasSession && hasCwd && validSessionCwd(cwd)));
+        if (!valid) throw new Fail('bad_request', 400, 'kind: an agent whose sessions are priced; session or cwd: its session');
+        const opts = usage.options();
+        if (!opts.providers.includes(provider)) throw new Fail('provider_off', 404);
+        const m = c.var.machine;
+        const prices = usage.prices();
+        const codexHomes = provider === 'codex' && opts.codexHomes.length ? opts.codexHomes : undefined;
+        const cacheKey = `${m.id}\0${JSON.stringify([kind, session, cwd, pid ?? null, codexHomes ?? null, prices.key])}`;
+        const res = await sessionCache.get(cacheKey, { signal: c.req.raw.signal }, async (signal) => {
+          const n = reads.get(m.id) ?? 0;
+          if (n >= MAX_SESSION_READS) throw new Fail('busy', 429, "too many reads of the machine's sessions at once");
+          reads.set(m.id, n + 1);
+          try {
+            // Decoded by the protocol's schema: nothing else an agent
+            // answered reaches the page.
+            const params: {
+              kind: string;
+              session: string;
+              cwd?: string;
+              pid?: number;
+              codexHomes?: string[];
+              prices?: typeof prices.own;
+            } = { kind, session };
+            if (hasCwd) params.cwd = cwd;
+            if (pid !== undefined) params.pid = pid;
+            if (codexHomes) params.codexHomes = codexHomes;
+            if (prices.own) params.prices = prices.own;
+            return await ctx.call(m, usageProtocol, 'session', params, { signal });
+          } finally {
+            const left = (reads.get(m.id) ?? 1) - 1;
+            if (left > 0) reads.set(m.id, left);
+            else reads.delete(m.id);
+          }
+        });
+        return c.json(res as object);
       });
     },
   });

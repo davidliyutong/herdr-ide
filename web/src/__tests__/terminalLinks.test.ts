@@ -10,8 +10,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import { safeUrl } from '../terminal/links';
+import { linksAround, safeUrl, type RowText } from '../terminal/links';
 import { openLink } from '../terminal/openLink';
+import * as L from '../term/layout';
+import { useStore } from '../state/store';
+import type { MachineState } from '../lib/machine';
+import { useSettings } from '../settings';
+import { definePlugins } from '../plugins/registry';
+import { filesPlugin } from '../plugins/files';
+import { useTree } from '../plugins/files/tree';
+import { vscodePlugin } from '../plugins/vscode';
+import { surfaceMenu } from '../menus';
+import { isItem } from '../contextMenu';
+import { FakeHub, settle } from './fakeTerms';
+import { vscodeOn } from './fakeSettings';
 
 describe('safeUrl', () => {
   const cases: [string, boolean][] = [
@@ -76,5 +88,219 @@ describe('openLink', () => {
     ])
       openLink({ kind: 'url', text }, { m: 'a' });
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+describe('openLink default file routing (File Explorer preview vs VS Code)', () => {
+  let hub: FakeHub;
+  const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+  /** The folders the machine has, as its stat answers. */
+  let folders: string[] = [];
+
+  beforeEach(async () => {
+    posts.length = 0;
+    folders = [];
+    definePlugins([vscodePlugin, filesPlugin]);
+    vscodeOn();
+    useSettings.setState((s) => ({
+      values: {
+        ...s.values,
+        'plugins.files.enabled': { value: true, source: 'default' },
+        'files.openLinks': { value: 'editor', source: 'default' },
+      },
+    }));
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      if (url.endsWith('/files/stat')) {
+        const entries = (body.paths as string[]).map((path) => ({ path, exists: true, is_dir: folders.includes(path), size: 0, mtime: 0 }));
+        return new Response(JSON.stringify({ entries }), { status: 200 });
+      }
+      if (url.includes('/files/list')) return new Response(JSON.stringify({ entries: [] }), { status: 200 });
+      posts.push({ url, body });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    hub = new FakeHub();
+    hub.machine('a', [FakeHub.term('s1', { cwd: '/home/u/proj' })], {
+      version: 2,
+      workspaces: [{ id: 'w1', name: '', cwd: '/home/u/proj', tabs: [{ root: { terminal: 's1' }, focused: 's1' }], selected: 0 }],
+      selected: 0,
+    });
+    hub.install();
+    const s = useStore.getState();
+    s.setReadOnly(false);
+    s.setMachines([{ id: 'a', label: 'a', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
+    s.selectMachine('a');
+    hub.model.subscribe('a');
+    await settle();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('opens terminal file links in the File Explorer preview editor by default with line ranges', async () => {
+    openLink(
+      { kind: 'path', text: 'configs/simple_plane/hardware/local/mvtrack.yaml:17-20' },
+      { m: 'a', pane: 's1', cwd: '/home/u/proj', home: '/home/u' },
+    );
+    await settle();
+    const ws = hub.model.layout('a')!.workspaces[0];
+    const editors = L.pluginViews(ws, 'files', 'editor');
+    expect(editors).toHaveLength(1);
+    expect(editors[0].view).toMatchObject({
+      plugin: 'files',
+      kind: 'editor',
+      path: '/home/u/proj/configs/simple_plane/hardware/local/mvtrack.yaml',
+      preview: true,
+      line: 17,
+      col: 1,
+      endLine: 20,
+    });
+    // Did not launch or bridge into VS Code.
+    expect(L.codeViews(ws)).toHaveLength(0);
+    expect(posts).toEqual([]);
+  });
+
+  it('opens a file beside the terminal, where the next link replaces it', async () => {
+    const ctx = { m: 'a', pane: 's1', cwd: '/home/u/proj', home: '/home/u' };
+    openLink({ kind: 'path', text: 'src/a.ts' }, ctx);
+    await settle();
+    let ws = hub.model.layout('a')!.workspaces[0];
+    expect(ws.tabs).toHaveLength(1);
+    expect(ws.tabs[0].root).toMatchObject({ split: 'horizontal', children: [{ terminal: 's1' }, {}] });
+    expect(L.pluginViews(ws, 'files', 'editor').map((v) => v.view)).toMatchObject([{ path: '/home/u/proj/src/a.ts', preview: true }]);
+    openLink({ kind: 'path', text: 'src/b.ts' }, ctx);
+    await settle();
+    ws = hub.model.layout('a')!.workspaces[0];
+    expect(ws.tabs).toHaveLength(1);
+    expect(L.pluginViews(ws, 'files', 'editor').map((v) => v.view.path)).toEqual(['/home/u/proj/src/b.ts']);
+  });
+
+  it('shows a folder expanded in the explorer instead of an editor', async () => {
+    folders = ['/home/u/proj/configs'];
+    openLink({ kind: 'path', text: 'configs' }, { m: 'a', pane: 's1', cwd: '/home/u/proj', home: '/home/u' });
+    await settle();
+    const ws = hub.model.layout('a')!.workspaces[0];
+    expect(L.pluginViews(ws, 'files', 'editor')).toHaveLength(0);
+    expect(ws.tabs[0].root).toEqual({ terminal: 's1' });
+    const tree = useTree.getState();
+    expect(tree.m).toBe('a');
+    expect(tree.expanded['/home/u/proj/configs']).toBe(true);
+    expect(tree.selection).toEqual(['/home/u/proj/configs']);
+  });
+
+  it('routes to VS Code when files.openLinks is set to vscode', async () => {
+    useSettings.setState((s) => ({
+      values: { ...s.values, 'files.openLinks': { value: 'vscode', source: 'global' } },
+    }));
+    openLink({ kind: 'path', text: 'src/main.ts:12:4' }, { m: 'a', pane: 's1', cwd: '/home/u/proj', home: '/home/u' });
+    await settle();
+    const ws = hub.model.layout('a')!.workspaces[0];
+    expect(L.pluginViews(ws, 'files', 'editor')).toHaveLength(0);
+    expect(L.codeViews(ws)).toHaveLength(1);
+    expect(posts[0].body).toMatchObject({ cmd: 'openFile', path: '/home/u/proj/src/main.ts', line: 12, col: 4 });
+  });
+
+  it('keeps right-click Open in VS Code working even when default Cmd+Click opens File Explorer preview', async () => {
+    const entries = surfaceMenu({
+      ctx: { m: 'a', pane: 's1', cwd: '/home/u/proj', home: '/home/u' },
+      link: { kind: 'path', text: 'src/app.ts:10-20' },
+    });
+    const previewItem = entries.filter(isItem).find((i) => i.label.includes('Preview'))!;
+    const codeItem = entries.filter(isItem).find((i) => i.label.includes('VS Code'))!;
+    previewItem.run!();
+    await settle();
+    const ws = hub.model.layout('a')!.workspaces[0];
+    expect(L.pluginViews(ws, 'files', 'editor')[0].view).toMatchObject({
+      path: '/home/u/proj/src/app.ts',
+      preview: true,
+      line: 10,
+      endLine: 20,
+    });
+    codeItem.run!();
+    await settle();
+    expect(L.codeViews(hub.model.layout('a')!.workspaces[0])).toHaveLength(1);
+    expect(posts[0].body).toMatchObject({ cmd: 'openFile', path: '/home/u/proj/src/app.ts', line: 10 });
+  });
+});
+
+function mkRow(text: string, cols = text.length, opts: { wrap?: boolean; writtenEnd?: number } = {}): RowText {
+  const colOf: number[] = [];
+  let c = 0;
+  for (let i = 0; i < text.length; i++) {
+    colOf.push(c);
+    // Treat CJK ideographs as double-width cells for realistic column mapping.
+    c += text.charCodeAt(i) > 0x2e80 ? 2 : 1;
+  }
+  while (c < cols) {
+    colOf.push(c);
+    text += ' ';
+    c++;
+  }
+  colOf.push(cols);
+  return { text, colOf, ...opts };
+}
+
+describe('linksAround on narrow screens and wrapped rows', () => {
+  it('joins soft-wrapped paths with trailing unwritten padding before wide CJK chars', () => {
+    const line0 = '看 /Users/alice/Projects/webh';
+    const rows = [mkRow(line0, 32, { wrap: true, writtenEnd: line0.length }), mkRow('erdr/web/src/terminal/links.ts', 32)];
+    const links = linksAround(0, 0, rows.length, (y) => rows[y]);
+    expect(links.map((l) => l.text)).toEqual(['/Users/alice/Projects/webherdr/web/src/terminal/links.ts']);
+    expect(links[0].cells).toHaveLength(2);
+    // Hovering the second row finds the same full path.
+    expect(linksAround(1, 0, rows.length, (y) => rows[y]).map((l) => l.text)).toEqual([
+      '/Users/alice/Projects/webherdr/web/src/terminal/links.ts',
+    ]);
+  });
+
+  it('preserves explicit trailing spaces on soft-wrapped rows so separate words do not glue', () => {
+    const rows = [mkRow('open src/app.ts ', 16, { wrap: true, writtenEnd: 16 }), mkRow('then run tests', 16)];
+    const links = linksAround(0, 0, rows.length, (y) => rows[y]);
+    expect(links.map((l) => l.text)).toEqual(['src/app.ts']);
+  });
+
+  it('joins paths wrapped inside TUI box borders and right-padded narrow columns', () => {
+    const boxed = [mkRow('│ /Users/alice/Projects/web │', 29), mkRow('│ herdr/web/src/vt/pane.ts  │', 29)];
+    expect(linksAround(0, 0, boxed.length, (y) => boxed[y]).map((l) => l.text)).toEqual([
+      '/Users/alice/Projects/webherdr/web/src/vt/pane.ts',
+    ]);
+
+    const padded = [mkRow('  /Users/alice/Projects/web', 30), mkRow('  herdr/web/src/vt/pane.ts:42', 30)];
+    expect(linksAround(1, 0, padded.length, (y) => padded[y]).map((l) => l.text)).toEqual([
+      '/Users/alice/Projects/webherdr/web/src/vt/pane.ts:42',
+    ]);
+  });
+
+  it('joins narrow slash-wrapped paths without gluing prose after a complete filename', () => {
+    const slashWrap = [mkRow('  /Users/alice/Projects/', 28), mkRow('  webherdr/src/main.ts', 28)];
+    expect(linksAround(0, 0, slashWrap.length, (y) => slashWrap[y]).map((l) => l.text)).toEqual([
+      '/Users/alice/Projects/webherdr/src/main.ts',
+    ]);
+
+    const prose = [mkRow('  Please check src/app.ts', 28), mkRow('  and verify line 10', 28)];
+    expect(linksAround(0, 0, prose.length, (y) => prose[y]).map((l) => l.text)).toEqual(['src/app.ts']);
+  });
+
+  it('preserves column-0 spaces on soft-wrapped continuation rows so following words do not glue onto links', () => {
+    const url = 'https://example.com/exact';
+    const rows = [mkRow(url, url.length, { wrap: true, writtenEnd: url.length }), mkRow(' nextword here', url.length)];
+    expect(linksAround(0, 0, rows.length, (y) => rows[y]).map((l) => l.text)).toEqual([url]);
+    expect(linksAround(1, 0, rows.length, (y) => rows[y])).toEqual([]);
+  });
+
+  it('does not bridge links across a blank TUI box-bordered row', () => {
+    const rows = [
+      mkRow('│ /Users/alice/Projects/app.ts │', 32),
+      mkRow('│                              │', 32),
+      mkRow('│ /Users/alice/Projects/other  │', 32),
+    ];
+    expect(linksAround(0, 0, rows.length, (y) => rows[y]).map((l) => l.text)).toEqual(['/Users/alice/Projects/app.ts']);
+    expect(linksAround(1, 0, rows.length, (y) => rows[y])).toEqual([]);
+    expect(linksAround(2, 0, rows.length, (y) => rows[y]).map((l) => l.text)).toEqual(['/Users/alice/Projects/other']);
+
+    const tight = [mkRow('│ src/a.ts│', 11), mkRow('│   │      ', 11), mkRow('│ src/b.ts│', 11)];
+    expect(linksAround(0, 0, tight.length, (y) => tight[y]).map((l) => l.text)).toEqual(['src/a.ts']);
+    expect(linksAround(2, 0, tight.length, (y) => tight[y]).map((l) => l.text)).toEqual(['src/b.ts']);
   });
 });

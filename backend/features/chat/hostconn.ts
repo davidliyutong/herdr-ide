@@ -49,6 +49,10 @@ const response = z.object({
   states: z.array(chatState).nullish(),
   trusted: z.array(object).nullish(),
   hostStatus: object.nullish(),
+  models: z.array(object).nullish(),
+  fetchedAt: z.string().nullish(),
+  markdown: z.string().nullish(),
+  data: object.nullish(),
 });
 export type Response = z.output<typeof response>;
 

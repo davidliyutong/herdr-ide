@@ -28,46 +28,48 @@
    "live": true,
    "item": "toolu_0001",
    "update": {
-    "kind": "execute",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0001",
     "title": "Bash",
-    "toolCallId": "toolu_0001"
-   }
-  },
-  {
-   "t": "update",
-   "item": "toolu_0001",
-   "update": {
     "kind": "execute",
-    "rawInput": {
-     "command": "touch cancel.txt \u0026\u0026 ls -l cancel.txt",
-     "description": "Create cancel.txt and list it"
-    },
-    "sessionUpdate": "tool_call",
     "status": "pending",
-    "title": "Create cancel.txt and list it",
-    "toolCallId": "toolu_0001"
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0001",
+    "title": "Create cancel.txt and list it",
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {
+     "command": "touch cancel.txt && ls -l cancel.txt",
+     "description": "Create cancel.txt and list it"
+    }
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000036"
+  },
+  {
+   "t": "update",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
+    "status": "failed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "failed",
-    "toolCallId": "toolu_0001"
-   }
+    ]
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000044"
   },
   {
    "t": "turn",
@@ -81,7 +83,7 @@
    "ToolCall": {
     "kind": "execute",
     "rawInput": {
-     "command": "touch cancel.txt \u0026\u0026 ls -l cancel.txt",
+     "command": "touch cancel.txt && ls -l cancel.txt",
      "description": "Create cancel.txt and list it"
     },
     "status": "pending",
@@ -314,15 +316,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -356,7 +358,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 0,

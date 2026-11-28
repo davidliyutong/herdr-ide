@@ -124,14 +124,21 @@
 /* ---- tabs and tools ---- */
 .vault-tabs {
   display: flex;
+  min-width: 0;
 }
 .vault-tabs button {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  font-size: var(--fs-md);
+  gap: 4px;
+  padding: 0 6px;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+}
+.vault-tabs button > .lucide {
+  flex: none;
 }
 .vault-toolbar {
   display: flex;
@@ -194,10 +201,11 @@
 /* Choosing variables: all of those shown, and what to do with the chosen. */
 .vault-select-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-height: var(--ctl);
-  padding: 0 8px 0 10px;
+  padding: 2px 8px 2px 10px;
   font-size: var(--fs-md);
 }
 .vault-select-bar .muted {
@@ -708,4 +716,201 @@
 }
 .vault-import-unknown {
   color: var(--warning);
+}
+
+/* ---- groups and presets ---- */
+.vault-group-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.vault-group-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.vault-group-pill > .lucide {
+  flex: none;
+}
+.vault-group-pill:hover {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.vault-group-pill.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.vault-active-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+.vault-active-group-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-md);
+}
+.vault-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.vault-group-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vault-group-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px;
+}
+.vault-group-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px;
+  border: 0;
+  background: none;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.vault-group-toggle:hover {
+  color: var(--fg);
+}
+.vault-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.vault-group-empty {
+  padding: 8px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+.vault-preset-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 8px;
+  padding: 10px;
+}
+.vault-preset-row + .vault-preset-row {
+  border-top: 1px solid var(--line);
+}
+.vault-preset-row:hover {
+  background: var(--bg-2);
+}
+.vault-preset-main {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.vault-preset-name {
+  font-weight: 600;
+  font-size: var(--fs-md);
+}
+.vault-preset-members {
+  max-height: none;
+}
+.vault-group-chip,
+.vault-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+.vault-group-chip {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.vault-link-chip {
+  background: var(--bg-3);
+  color: var(--fg-dim);
+}
+.vault-preset-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.vault-chips code.missing {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+.vault-missing-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+}
+.vault-missing-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vault-missing-banner > span {
+  flex: 1;
+}
+.vault-link-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.vault-link-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(50vh, 360px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.vault-link-list li + li {
+  border-top: 1px solid var(--line);
+}
+.vault-link-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.vault-link-option:hover {
+  background: var(--bg-2);
+}
+.vault-link-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-md);
 }

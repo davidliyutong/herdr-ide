@@ -527,15 +527,18 @@ export class Store {
   }
 
   /** Makes addr's current generation its previous one, replacing the
-   * previous one. */
-  rotate(addr: string): void {
+   * previous one. With clearPid, the rotated generation's pid is cleared
+   * to 0 so a new process that reused the same pid after a host reboot is
+   * not mistaken for the one before it. */
+  rotate(addr: string, o?: { clearPid?: boolean }): void {
     const st = this.terms.get(addr);
     if (!st?.cur) return;
+    const pid = o?.clearPid ? 0 : st.cur.pid;
     this.change(true, (tx) => {
       tx.run('DELETE FROM history_snapshots WHERE terminal = ? AND prev = 1', addr);
-      tx.run('UPDATE history_snapshots SET prev = 1 WHERE terminal = ? AND prev = 0', addr);
+      tx.run('UPDATE history_snapshots SET prev = 1, pid = ? WHERE terminal = ? AND prev = 0', pid, addr);
     });
-    st.prev = st.cur;
+    st.prev = { ...st.cur, pid };
     st.cur = null;
   }
 
@@ -544,7 +547,7 @@ export class Store {
    * later, and removes from's snapshots either way; false when nothing
    * moved. One transaction: readers see the generation at from or at to.
    * One that fails changes nothing. */
-  adopt(from: string, to: string): boolean {
+  adopt(from: string, to: string, o?: { clearPid?: boolean }): boolean {
     const src = this.terms.get(from);
     if (!src) return false;
     const prev = src.cur === null;
@@ -554,14 +557,15 @@ export class Store {
       this.removeTerminal(from);
       return false;
     }
+    const pid = o?.clearPid ? 0 : m.pid;
     this.change(true, (tx) => {
       tx.run('DELETE FROM history_snapshots WHERE terminal = ? AND prev = 1', to);
-      tx.run('UPDATE history_snapshots SET terminal = ?, prev = 1 WHERE terminal = ? AND prev = ?', to, from, prev ? 1 : 0);
+      tx.run('UPDATE history_snapshots SET terminal = ?, prev = 1, pid = ? WHERE terminal = ? AND prev = ?', to, pid, from, prev ? 1 : 0);
       tx.run('DELETE FROM history_snapshots WHERE terminal = ?', from);
     });
     let dst = this.terms.get(to);
     if (!dst) this.terms.set(to, (dst = new Stored()));
-    dst.prev = { ...m, terminal: to };
+    dst.prev = { ...m, terminal: to, pid };
     this.terms.delete(from);
     return true;
   }

@@ -4,7 +4,7 @@ Single source for commands, flags, settings, keyboard shortcuts, endpoints, envi
 
 ## Commands
 
-On Linux and macOS the hub's executable is the machine build of its own platform too ([42](features/42-typescript-backend.md)): besides `serve`, `fetch-assets` and `version` it runs the machine's commands (`node`, `mcp`, `chat-host`), and each machine runs its platform's from `~/.veldr/agent/<build>/veldr`, downloaded from the release or uploaded by the hub. On Linux machines the GUI helper it carries (`veldr-gui`, [14](features/14-gui-windows.md)) has the display's commands.
+On Linux and macOS the hub's executable is the machine build of its own platform too ([42](features/42-typescript-backend.md)): besides `serve`, `fetch-assets` and `version` it runs the machine's commands (`node`, `mcp`, `chat-host`, `term-env`), and each machine runs its platform's from `~/.veldr/agent/<build>/veldr`, downloaded from the release or uploaded by the hub. On Linux machines the GUI helper it carries (`veldr-gui`, [14](features/14-gui-windows.md)) has the display's commands.
 
 | Command | Description |
 | --- | --- |
@@ -21,6 +21,7 @@ On Linux and macOS the hub's executable is the machine build of its own platform
 | `veldr-gui gui-keep --socket S --pid P --xauth F --hc-socket H --lock L --display D` | The GUI helper's display keeper: holds a machine's virtual display while the instance's terminal core runs; started by the agent. |
 | `veldr-gui gui-wl --device NODE [--nvidia]` | The GUI helper's compositor of a machine's GPU display: a Wayland server showing nothing, for the one Xwayland on file descriptor 3, drawing with the render node's GPU (`--nvidia`: NVIDIA's buffer layouts); started by the agent. |
 | `veldr chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)), serving `chat.sock` in `--run` with its journal and log in `--base`; started by the agent as a hidden terminal of the terminal core. Ends on SIGHUP/SIGTERM/SIGINT, when asked to make way, or a minute after going idle. Exit 2: bad command line; 1: socket taken, directories not the user's alone, a newer host's journal, or not stopped within 30 s. Linux and macOS; with the ACP, Codex and Claude Code adapters, Claude Code's on Anthropic's Agent SDK, which the hub has the machine fetch before such a chat starts (a chat whose agent starts without it fails `sdk_unavailable`, [42](features/42-typescript-backend.md#claude-code)). |
+| `veldr term-env <token>` | Internal trampoline started by herdr-core for a terminal with staged workspace vault preset variables ([30](features/30-variable-vault.md)): consumes the single-use 48-hex-character token over `<run>/env.sock` (5 s timeout), merges the variables and replaces itself in place via `execve` with the target shell or command. Exit 2: invalid token; 126: socket or token unavailable; 127: target command not found. Linux and macOS. |
 
 ## `serve` flags
 
@@ -46,8 +47,8 @@ A flag given on the command line sets its setting ([settings](#settings)) for ev
 | `--machine` | – | Connect only these machines, by id, label or ssh target (repeatable). |
 | `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored (repeatable). At most 255 bytes, not starting with `-`, without whitespace, control characters or ``! " $ & ' ( ) * ; < > ? \ ` { \| }``; the hub refuses to start otherwise. |
 | `--machine-download` | `true` | Have SSH machines download their platform's archive from the release before the hub uploads it (`false` skips the machine download). Setting `machines.download`, per machine. |
-| `--instance` | – | State instance: this hub's files (`settings-<instance>.json` and the rest of the configuration directory) and, unless `--node-instance` says otherwise, `~/.veldr-<instance>` on machines, with its own node, sockets, terminal core session `veldr-<instance>-<host id>` and code-server. |
-| `--node-instance` | `--instance` | The namespace on machines: their `~/.veldr[-<instance>]` and terminal core session, shared with every hub of the same namespace; empty (`--node-instance=`) is the default one, which the desktop app uses ([39](features/39-nodes.md)). |
+| `--instance` | – | The hub's instance: its ssh control directory (`/tmp/veldr-<uid>/s-<instance>` on Linux and macOS) and the default of `--node-instance`, so that a hub of another instance gets a namespace of its own: `~/.veldr-<instance>` on the hub host (its settings, keybindings, machines, vault and database) and on machines, with its own node, sockets, terminal core session `veldr-<instance>-<host id>` and code-server. |
+| `--node-instance` | `--instance` | The namespace: its data directory `~/.veldr[-<instance>]` on the hub host, which holds the hub's files ([files](#files-and-directories)), and on machines, with their terminal core session. Every hub of the same namespace shares them: on the hub host the settings, keybindings, machines list, vault and hub database. Empty (`--node-instance=`) is the default one, which the desktop app uses ([39](features/39-nodes.md)). |
 
 ### code-server
 
@@ -98,7 +99,7 @@ Boolean flags of settings also accept `on` and `off`. GUI settings apply to pane
 
 ## Settings
 
-Every setting is defined in the hub (`backend/kernel/config` and the features' `settings`) and shown in the settings dialog ([13](features/13-settings-and-appearance.md)). Values live in `settings[-<instance>].json` on the hub host, which can be edited by hand (reread within two seconds). A setting with a scope can have a value per machine under `"[machine:<id>]"`. The table is generated by `backend/scripts/registry.ts` (`make tokens`; `make check` fails when it is stale).
+Every setting is defined in the hub (`backend/kernel/config` and the features' `settings`) and shown in the settings dialog ([13](features/13-settings-and-appearance.md)). Values live in `settings.json` in the data directory of the hub's namespace on the hub host ([files](#files-and-directories)), shared by every hub of that namespace there; it can be edited by hand, and each hub rereads it within two seconds. A setting with a scope can have a value per machine under `"[machine:<id>]"`. The table is generated by `backend/scripts/registry.ts` (`make tokens`; `make check` fails when it is stale).
 
 <!-- make tokens: settings -->
 
@@ -108,9 +109,12 @@ Every setting is defined in the hub (`backend/kernel/config` and the features' `
 | `appearance.colorTheme` | `blue`, `vscode`, `teal`, `violet`, `rose`, `amber`, `graphite` | `"blue"` | – | – |
 | `appearance.language` | `auto`, `en`, `zh-CN` | `"auto"` | – | – |
 | `appearance.uiFontSize` | integer, 11–20 | `13` | – | – |
+| `appearance.uiFontFamily` | string | `""` | – | – |
+| `appearance.uiCjkFontFamily` | string | `""` | – | – |
 | `window.zoom` | integer, 50–300 | `100` | – | – |
 | `layout.undoClose` | integer, 3–120 | `5` | – | – |
 | `terminal.fontFamily` | string | `""` | – | – |
+| `terminal.cjkFontFamily` | string | `""` | – | – |
 | `terminal.fontSize` | number, 6–40 | `13` | – | – |
 | `terminal.fontWeight` | `regular`, `medium` | `"regular"` | – | – |
 | `terminal.lineHeight` | number, 0.8–2 | `1.05` | – | – |
@@ -162,6 +166,8 @@ Every setting is defined in the hub (`backend/kernel/config` and the features' `
 | `files.sortOrder` | `default`, `mixed`, `filesFirst`, `type`, `modified` | `"default"` | – | – |
 | `files.followFocus` | `true`, `false` | `true` | – | – |
 | `files.confirmTrash` | `true`, `false` | `false` | – | – |
+| `files.openLinks` | `editor`, `vscode` | `"editor"` | – | – |
+| `files.wordWrap` | `true`, `false` | `false` | – | – |
 | `git.mixedLineEndings` | `keep`, `unify`, `readOnly` | `"keep"` | – | – |
 | `git.changesView` | `list`, `tree` | `"list"` | – | – |
 | `git.untrackedChanges` | `mixed`, `separate` | `"mixed"` | – | – |
@@ -175,8 +181,10 @@ Every setting is defined in the hub (`backend/kernel/config` and the features' `
 | `usage.refreshIdle` | integer, 5–240 | `30` | – | – |
 | `usage.costRefresh` | integer, 1–1440 | `15` | – | – |
 | `usage.statusBar` | `true`, `false` | `true` | – | – |
-| `usage.alerts` | `true`, `false` | `true` | – | – |
+| `usage.statusBarWindow` | `auto`, `5h`, `7d`, `both` | `"auto"` | – | – |
 | `monitor.statusBar` | `true`, `false` | `true` | – | – |
+| `usage.statusBarProvider` | `auto`, `claude`, `codex`, `grok`, `antigravity`, `kimi` | `"auto"` | – | – |
+| `usage.alerts` | `true`, `false` | `true` | – | – |
 | `usage.thresholds` | list of strings | `["80","95"]` | – | – |
 | `usage.prices` | list of strings | `[]` | – | – |
 | `monitor.confirmKill` | `true`, `false` | `true` | – | – |
@@ -217,6 +225,32 @@ Every setting is defined in the hub (`backend/kernel/config` and the features' `
 | `chat.retentionDays` | integer, 1–365 | `30` | – | per machine |
 | `chat.maxTotalMB` | integer, 64–2048 | `512` | – | per machine |
 | `chat.maxChatMB` | integer, 8–256 | `64` | – | per machine |
+| `chat.handoffMaxKB` | integer, 16–512 | `96` | – | – |
+| `chat.permissionMode.claude` | `inherit`, `default`, `acceptEdits`, `plan`, `full` | `"inherit"` | – | per machine |
+| `chat.permissionMode.codex` | `inherit`, `default`, `acceptEdits`, `plan`, `full` | `"inherit"` | – | per machine |
+| `chat.permissionMode.agy` | `inherit`, `default`, `acceptEdits`, `plan`, `full` | `"inherit"` | – | per machine |
+| `chat.permissionMode.kimi` | `inherit`, `default`, `plan`, `full` | `"inherit"` | – | per machine |
+| `chat.permissionMode.grok` | `inherit`, `default`, `acceptEdits`, `full` | `"inherit"` | – | per machine |
+| `chat.providers.claude` | `true`, `false` | `true` | – | – |
+| `chat.providers.codex` | `true`, `false` | `true` | – | – |
+| `chat.providers.agy` | `true`, `false` | `true` | – | – |
+| `chat.providers.kimi` | `true`, `false` | `true` | – | – |
+| `chat.providers.grok` | `true`, `false` | `true` | – | – |
+| `chat.visibleModels.claude` | list of strings | `[]` | – | – |
+| `chat.visibleModels.codex` | list of strings | `[]` | – | – |
+| `chat.visibleModels.agy` | list of strings | `[]` | – | – |
+| `chat.visibleModels.kimi` | list of strings | `[]` | – | – |
+| `chat.visibleModels.grok` | list of strings | `[]` | – | – |
+| `chat.model.claude` | string | `""` | – | – |
+| `chat.model.codex` | string | `""` | – | – |
+| `chat.model.agy` | string | `""` | – | – |
+| `chat.model.kimi` | string | `""` | – | – |
+| `chat.model.grok` | string | `""` | – | – |
+| `chat.lastModel.claude` | string | `""` | – | – |
+| `chat.lastModel.codex` | string | `""` | – | – |
+| `chat.lastModel.agy` | string | `""` | – | – |
+| `chat.lastModel.kimi` | string | `""` | – | – |
+| `chat.lastModel.grok` | string | `""` | – | – |
 | `performance.keptTerminals` | integer, 0–64 | `12` | – | – |
 | `machines.download` | `true`, `false` | `true` | `--machine-download` | per machine |
 
@@ -235,7 +269,7 @@ VS Code has two switches, both off by default ([05](features/05-vscode-panes.md)
 
 ## Keyboard shortcuts
 
-Keys come from `backend/kernel/config/keybindings` and can be changed in **Settings → Keyboard Shortcuts** or in `keybindings[-<instance>].json` on the hub host ([04](features/04-layout-and-keyboard.md)):
+Keys come from `backend/kernel/config/keybindings` and can be changed in **Settings → Keyboard Shortcuts** or in `keybindings.json` beside the settings file on the hub host ([04](features/04-layout-and-keyboard.md)):
 
 - A rule is `{"key", "command", "when"}`; `"command": "-<id>"` removes a key; `when` is `terminal` (the main window, terminals and VS Code panes included), `editor` (the main window except while a terminal has the keyboard), `vscode`, `dialog` or `always`.
 - A key is modifiers (`cmd`, `ctrl`, `alt`, `shift`) and a key joined by `+`; a chord is strokes separated by spaces (`ctrl+k c`, the second within 3 s). The first stroke needs `cmd`, `ctrl` or `alt`, or is a function key. A stroke that starts a bound chord waits for the next one; pressed twice it reaches the terminal. Keys follow the keyboard layout's characters.
@@ -266,7 +300,7 @@ The table is generated by `backend/scripts/registry.ts`.
 | `workspace.unmute` | `terminal` | – | – | – | – | – | – |
 | `workspace.close` | `terminal` | – | – | – | – | – | – |
 | `workspace.closeOthers` | `terminal` | – | – | – | – | – | – |
-| `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – | `ctrl+shift+t` | – |
+| `tab.new` | `terminal` | `cmd+t` | – | `ctrl+t` | – | `ctrl+t` | – |
 | `tab.rename` | `terminal` | – | – | – | – | – | – |
 | `tab.next` | `terminal` | `cmd+shift+bracketright`, `ctrl+tab` | – | `ctrl+tab` | – | `ctrl+tab`, `ctrl+pagedown` | – |
 | `tab.previous` | `terminal` | `cmd+shift+bracketleft`, `ctrl+shift+tab` | – | `ctrl+shift+tab` | – | `ctrl+shift+tab`, `ctrl+pageup` | – |
@@ -304,9 +338,11 @@ The table is generated by `backend/scripts/registry.ts`.
 | `pane.focusPrevious` | `terminal` | – | – | – | – | – | – |
 | `pane.back` | `terminal` | `cmd+bracketleft` | – | `alt+left` | – | `alt+left` | – |
 | `pane.forward` | `terminal` | `cmd+bracketright` | – | `alt+right` | – | `alt+right` | – |
-| `pane.undoClose` | `terminal` | `cmd+z` | – | `ctrl+shift+z` | – | `ctrl+shift+z` | – |
+| `pane.undoClose` | `terminal` | `cmd+shift+t` | – | `ctrl+shift+t` | – | `ctrl+shift+t` | – |
 | `view.toggleSidebar` | `terminal` | `cmd+b` | – | `ctrl+shift+b` | – | `ctrl+shift+b` | – |
 | `view.togglePanel` | `terminal` | `cmd+alt+b` | – | `alt+shift+b` | – | `alt+shift+b` | – |
+| `view.panel.next` | `terminal` | – | – | – | – | – | – |
+| `view.panel.previous` | `terminal` | – | – | – | – | – | – |
 | `view.panel.files` | `terminal` | `cmd+shift+e` | – | `ctrl+shift+e` | – | `ctrl+shift+e` | – |
 | `view.zoomIn` | `always` | `cmd+shift+equal`, `cmd+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – |
 | `view.zoomOut` | `always` | `cmd+minus` | – | `ctrl+minus` | – | `ctrl+minus` | – |
@@ -330,7 +366,7 @@ In terminals ([26](features/26-web-terminals.md)):
 
 - Keys are encoded for the program's mode (legacy, application cursor and keypad, kitty keyboard protocol); the bytes are in [`vt-keys.json`](../web/src/__tests__/testdata/vt-keys.json). Shift+Enter is `CSI 13;2u` under the kitty protocol; Alt+Enter is `ESC CR`.
 - Drag selects (double click a word, triple click a line; Shift-drag where the program takes the mouse); `terminal.copyOnSelect` copies on release. The wheel scrolls the scrollback (arrow keys on the alternate screen).
-- ⌘/Ctrl-click opens paths (media in a preview pane, code in VS Code) and URLs.
+- ⌘/Ctrl-click opens paths (by default in the File Explorer's preview editor, `files.openLinks = "editor"`; media in a preview pane, or code in VS Code when `files.openLinks = "vscode"`) and URLs.
 - `find.open` searches the terminal and its scrollback (ASCII case-insensitive): Enter older, Shift+Enter newer, Escape closes.
 - Pasting or dropping files uploads them to the terminal's machine and pastes their paths (dropped files go to the terminal's directory); the right-click menu downloads paths and chosen files (folders as zips). The downloads panel is in the status bar.
 
@@ -375,7 +411,7 @@ Every endpoint passes the same guards (Host, Origin, proxy secret, [SECURITY.md]
 
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
-| `GET /api/m/{id}/file` | – | A file (`?path=`, `&download=1` as attachment) with HTTP ranges; `404` missing, `403` denied, `502` machine error. |
+| `GET /api/m/{id}/file` | – | A file (`?path=`, `&download=1` as attachment, `&max_size=` byte cap returning `413` if larger) with HTTP ranges; `404` missing, `403` denied, `502` machine error. |
 | `GET /api/m/{id}/list` | – | A directory's entries (`?path=`), at most 20 000. |
 | `GET /api/m/{id}/download` | – | One file, or several paths as a zip (`?path=`…, `&dl=<id>` to follow on `/ws`). |
 | `POST /api/m/{id}/upload` | writes | Writes the body to a file (`?name=`, `&dir=` absolute, else the upload directory). |
@@ -402,6 +438,7 @@ Plugin routes answer `404 plugin_disabled` while their plugin is off; changes ar
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
 | `POST /api/m/{id}/p/files/stat` | – | State of 1–200 paths (`{"paths"}`) for the explorer's poll; a POST only for size ([28](features/28-file-explorer.md)). |
+| `GET /api/m/{id}/p/files/find` | – | Bounded recursive file and directory search below `?dir=` (`&query=`, `&limit=` 1–500, default 50, `&match=fuzzy\|name`, `&regex=1`, `&hidden=1`, `&exclude=`); `match=fuzzy` (default, for `@` path completion) respects `.gitignore` and caps at 2000 entries / 2 s, `match=name` (for the explorer's whole-project filename filter) honors `hidden` and `exclude` and caps at 50000 entries / 5 s; never follows symlinks; invalid regex answers `400 bad_regex`. |
 | `POST /api/m/{id}/p/files/{action}` | writes | `mkdir` (`"unique"`), `mkdirs`, `create`, `rename`, `move`, `copy`, `trash`, `remove`; never replaces existing names. |
 | `POST /api/m/{id}/p/files/write` | writes | Saves the body (≤ 8 MiB) to `?path=` if it still has `&mtime=&size=` (`&new=1`, `&force=1`); else `409 conflict`. |
 | `POST /api/m/{id}/p/files/upload` | writes | Writes the body (≤ 4 GiB) to `?path=` under a free name, or over it with `&replace=1`. |
@@ -421,7 +458,7 @@ Plugin routes answer `404 plugin_disabled` while their plugin is off; changes ar
 | `GET /api/p/usage/cost` | – | Log cost at API prices by day, provider, model, project and machine (`?days=` 1–90, `&tz=`), and each machine's quarters of an hour with spend since `recentSince` (8 days back) by provider; `ETag`. |
 | `POST /api/p/usage/refresh` | writes | Polls every machine now, at most every 30 s (`202 {queued, at}`). |
 | `PUT /api/m/{id}/p/usage/deepseek-key` | writes | Writes the machine's DeepSeek key (`{"key"}`, `""` removes); never read back. |
-| `GET /api/m/{id}/p/usage/session` | – | One agent session's use at API prices (`?kind=claude\|codex&session=`). |
+| `GET /api/m/{id}/p/usage/session` | – | One agent session's use at API prices (`?kind=claude\|codex\|grok\|kimi\|agy\|opencode`, `&session=` UUID or OpenCode `ses_*`, or unambiguous `&cwd=` and optional `&pid=`). |
 | `GET /api/m/{id}/p/agents/resolve` | – | Whether a session's transcript exists and ran in a directory (`?kind=&session=&cwd=`): `{ok}` or `{ok: false, code}` ([33](features/33-workspace-restore.md)). |
 | `GET /api/m/{id}/p/history` | – | The machine's terminal output snapshots and whether herdr-core restores screens itself ([36](features/36-terminal-history.md)). |
 | `GET /api/m/{id}/p/history/read` | – | One generation's bytes (`?terminal=&generation=current\|previous`), ≤ 2 MiB, as a sandboxed attachment. |
@@ -434,11 +471,16 @@ The chat plugin ([37](features/37-agent-chats.md)). GETs never start a machine's
 
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
-| `GET /api/m/{id}/p/chat/agents` | – | Agent kinds the chat host can start, with version or reason (`not_found`, `unsupported`). |
-| `POST /api/m/{id}/p/chat/agents` | writes | The same, starting the host. |
+| `GET /api/m/{id}/p/chat/agents` | – | Agent kinds the chat host can start, with version or reason (`not_found`, `unsupported`); hub-cached (bypass with `?refresh=1`). |
+| `POST /api/m/{id}/p/chat/agents` | writes | The same, starting the host (optional `?refresh=1`). |
+| `GET /api/m/{id}/p/chat/models` | – | Cached model list for an agent kind (`?kind=`), starting no host or agent. |
+| `POST /api/m/{id}/p/chat/models` | writes | Refreshes or fetches the model list for an agent kind (`{kind, cwd?, refresh?}`), starting the host and probing the agent. |
 | `GET /api/m/{id}/p/chat/chats` | – | The machine's chats, latest first. |
-| `POST /api/m/{id}/p/chat/sessions` | writes | A page of an agent's sessions for a directory (`?kind=&cwd=&cursor=`); a change because listing may run the agent. |
-| `POST /api/m/{id}/p/chat/new` | writes | A new chat (`{kind, cwd, resume?, import?, options?: {model?, effort?, mode?}}`). |
+| `POST /api/m/{id}/p/chat/sessions` | writes | A page of an agent's sessions for a directory (`?kind=&cwd=&cursor=`, optional `&refresh=1` to bypass the hub cache); a change because listing may run the agent. |
+| `POST /api/m/{id}/p/chat/new` | writes | A new chat (`{kind, cwd, resume?, import?, options?: {model?, effort?, mode?, models?}, workspace?}`; `models`: at most 64 models to start with, in order, when the agent does not offer `model`). When `workspace` has linked vault presets and the vault is unlocked, injects resolved preset env vars into the new agent process (never persisted to disk) and returns an optional non-secret `vault` summary. |
+| `POST /api/m/{id}/p/chat/fork` | writes | Forks a chat (`{chat, upToSeq?, title?}`) into a new chat using native session fork where supported or a context-seeded fallback. |
+| `POST /api/m/{id}/p/chat/switch` | writes | Exports a chat's conversation digest and creates a new chat of `targetKind` (`{chat, targetKind, options?, upToSeq?, maxBytes?}`) seeded once with that context. |
+| `GET /api/m/{id}/p/chat/export` | – | Bounded Markdown digest (`?chat=`, optional `&upToSeq=&maxBytes=`) or lossless raw JSON (`&format=json`) of a chat's conversation. |
 | `POST /api/m/{id}/p/chat/close` | writes | Ends a chat's agent, keeping the chat (`?chat=`). |
 | `DELETE /api/m/{id}/p/chat/chat` | writes | Forgets a chat and its log; the agent's own session stays. |
 | `POST /api/m/{id}/p/chat/archive` | writes | Ends the agent and keeps the chat archived. |
@@ -456,14 +498,22 @@ The chat plugin ([37](features/37-agent-chats.md)). GETs never start a machine's
 
 ### Variable vault
 
-Semantics (sessions, proofs, unlock entries, approvals, exemptions) are in [30](features/30-variable-vault.md). *Gated* routes answer `401 vault_session` without an open `X-Vault-Session`; *passphrase* means a session opened with the passphrase, not a proof or unlock. Values leave only through `reveal` and `export`, each recorded in the access log first.
+Semantics (sessions, proofs, unlock entries, approvals, exemptions) are in [30](features/30-variable-vault.md). *Gated* routes answer `401 vault_session` without an open `X-Vault-Session`; *passphrase* means a session opened with the passphrase, not a proof or unlock. Values leave only through `reveal` and `export`, each recorded in the access log first. A request that would write over a vault file another hub of the namespace changed meanwhile answers `409 vault_changed`; the next one takes the file as it is.
 
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
-| `GET /api/p/vault` | – | Status, variables (never values), session, authenticators, guard rule, exemptions, idle and auto-lock times, unlock ways; `503` with `unavailable`, `version`, `invalid` or `failed` when the store does not open. |
-| `PUT /api/p/vault/vars/{name}` | writes, gated | Creates, changes or renames (`to`) a variable. Names `^[A-Za-z_][A-Za-z0-9_]*$` (≤ 128), values ≤ 64 KiB. Widening access needs a proof or the passphrase under the verify-every-Allow rule. |
+| `GET /api/p/vault` | – | Status, variables (never values), groups, presets, workspace links, session, authenticators, guard rule, exemptions, idle and auto-lock times, unlock ways; `503` with `unavailable`, `version`, `invalid` or `failed` when the store does not open. |
+| `PUT /api/p/vault/vars/{name}` | writes, gated | Creates, changes or renames (`to`) a variable, including optional `group` (`""` ungroups). Names `^[A-Za-z_][A-Za-z0-9_]*$` (≤ 128), values ≤ 64 KiB. Widening access or assigning into a group used by a linked workspace preset needs a proof or the passphrase under the verify-every-Allow rule. |
 | `DELETE /api/p/vault/vars/{name}` | writes, gated | Removes a variable. |
 | `POST /api/p/vault/vars/{name}/reveal` | writes, gated | Returns the value; logged as `revealed` before it is sent. |
+| `POST /api/p/vault/groups` | writes, gated | Creates a variable group (`{name, description?}`); at most 128 groups. |
+| `PUT /api/p/vault/groups/{id}` | writes, gated | Renames or updates a group's description. |
+| `DELETE /api/p/vault/groups/{id}` | writes, gated | Deletes a group; its variables remain in the vault as ungrouped and the group is removed from presets. |
+| `POST /api/p/vault/groups/assign` | writes, gated | Moves variables (`{names, group}`) to a group or ungroups them (`group: ""`) atomically; moving into a group used by a linked preset needs the passphrase under the verify-every-Allow rule. |
+| `POST /api/p/vault/presets` | writes, gated | Creates a preset (`{name, description?, variables?, groups?}`); at most 128 presets. |
+| `PUT /api/p/vault/presets/{id}` | writes, gated | Updates a preset; adding variables or groups to a preset linked to workspaces needs the passphrase under the verify-every-Allow rule. |
+| `DELETE /api/p/vault/presets/{id}` | writes, gated | Deletes a preset and unlinks it from workspaces. |
+| `PUT /api/p/vault/workspaces/{machine}/{workspace}` | writes, gated | Sets the presets linked to a workspace (`{presets}`, empty unlinks; ≤ 32 per workspace); adding links needs the passphrase under the verify-every-Allow rule. |
 | `POST /api/p/vault/export` | writes, passphrase | An encrypted export file (Argon2id, AES-256-GCM) of the named variables; file passphrase ≥ 12 characters; ≤ 16 MiB. |
 | `POST /api/p/vault/import/preview` | writes, passphrase | What an export file holds and how its machines map here, never values. |
 | `POST /api/p/vault/import` | writes, passphrase | Imports chosen variables (`import`, `overwrite`, `rename`, `skip`) in one write; any refusal changes nothing. |
@@ -494,13 +544,15 @@ Semantics (sessions, proofs, unlock entries, approvals, exemptions) are in [30](
 | `VELDR_AGENT_DIR` | Electron, development instances; `veldr node` | Machine builds searched first, as `--agent-dir`. |
 | `VELDR_SEED_DIR` | Electron, development instances | A directory of code-server releases and extensions, as `--seed-dir`. |
 | `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and single-instance lock, for smoke tests beside another copy. |
-| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | hub on Linux; agent | Configuration (default `~/.config`) and cache (default `~/.cache`) directories; on a machine also where herdr-core's `config.toml` is read for `restore_screen`. |
+| `XDG_CONFIG_HOME` | agent | Configuration directory (default `~/.config`) where herdr-core's `config.toml` is read for `restore_screen` and `shell`. |
+| `XDG_CACHE_HOME` | hub on Linux | Cache directory (default `~/.cache`) of code-server downloads. |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `KIMI_CODE_HOME` | agent | AI CLIs' credential, log and session directories when not the defaults; on Linux read from a running agent's environment to find its session ([35](features/35-agent-native-view.md)). |
 | `KIMI_DISABLE_OAUTH_LOCK` | agent (AI usage) | `1`: Kimi Code renews without its lock, so the plugin does not renew it. |
 | `XDG_DATA_HOME`, `OPENCODE_DB` | agent (AI usage) | OpenCode's database location when not `~/.local/share/opencode/opencode.db`. |
 | `DEEPSEEK_API_KEY` | agent (AI usage) | DeepSeek key for the balance: after the key file the panel writes, before Claude Code's settings. |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | agent (AI usage), hub (status pages) | Proxy for the AI providers' hosts (the language server on loopback goes through none). |
 | `SHELL` | chat host | Login shell run as `$SHELL -l -i -c env` for the chats' agents' environment; `/bin/sh -l` if not absolute ([37](features/37-agent-chats.md)). |
+| `VELDR_VERSION`, `VELDR_INSTALL_DIR`, `VELDR_GITHUB_REPO`, `VELDR_GITHUB_URL`, `VELDR_RELEASE_URL` | `scripts/install.sh` | CLI installer overrides: release tag (default latest), target bin directory (default `~/.local/bin`), GitHub repo, GitHub base URL, and direct release asset base URL (mirrors/tests). |
 
 Build scripts and tests:
 
@@ -549,7 +601,7 @@ On every machine (the agent's `$HOME`); `<data>` is `~/.veldr[-<instance>]`, `<h
 | `<data>/hosts/<host>/` (0700) | This host's own files of the namespace (below) | Touched at each agent start and every 24 h; another host's unused 30 days loses all but `hc/`, and goes whole after 180 days. |
 | `<data>/hosts/<host>/hc/herdr-core` (0700 directory) | Terminal core executable, accepted only with its SHA-256 | Replaced by the next build. |
 | `~/.local/state/herdr-core/veldr[-<instance>]-<host id>/` (`$XDG_STATE_HOME`) | herdr-core's own state (records, saved screens, logs) | Until the user removes it. |
-| `<run>/` (0700, the user's, never a link) | Sockets (0600): `node.sock` (with its lock `node.lock`), `hc.sock` and its holders', `cs.sock`, `bridge.sock`, `vault.sock`, `chat.sock`; `cs.pid`; display files `gui.json`, `xauth`, `xauth.server` (0600), `gui.lock`, `gui-keep.lock` | Sockets while their owner runs; display files kept so terminals keep a valid environment; in `/run/user/<uid>` until the user's last session ends (kept while lingering). |
+| `<run>/` (0700, the user's, never a link) | Sockets (0600): `node.sock` (with its lock `node.lock`), `hc.sock` and its holders', `cs.sock`, `bridge.sock`, `vault.sock`, `env.sock`, `chat.sock`; `cs.pid`; display files `gui.json`, `xauth`, `xauth.server` (0600), `gui.lock`, `gui-keep.lock` | Sockets while their owner runs; display files kept so terminals keep a valid environment; in `/run/user/<uid>` until the user's last session ends (kept while lingering). |
 | `<data>/hosts/<host>/xvfb.log`, `xwayland.log`, `gui-keep.log` | Output of the last display, compositor and keeper | Replaced at each start. |
 | `<data>/hosts/<host>/node.log`, `node.old.log` (0600) | The nodes' log | Moved to `node.old.log` past 1 MiB when a node starts. |
 | `<data>/hosts/<host>/code-server.log` | Output of the last code-server | Replaced at each start. |
@@ -562,21 +614,21 @@ On every machine (the agent's `$HOME`); `<data>` is `~/.veldr[-<instance>]`, `<h
 | `<data>/chat-<host>.db` (0600, with `-wal`, `-shm`) | The chat host's journal ([37](features/37-agent-chats.md)): chats, their events, trusted folders, settings; never secret answers or agents' stderr | Within `chat.maxChatMB`, `chat.maxTotalMB`, `chat.maxChats`, `chat.retentionDays`. Agents' own session files are never touched. Another host's unopened for 30 days is removed. |
 | `<data>/chat-host-<host>.log`, `chat-host.old-<host>.log` (0600) | Chat host log (no prompts or answers) | Rotated at 1 MiB; another host's removed after 30 days unwritten. |
 
-On the hub host, in the user configuration directory (`~/Library/Application Support/veldr/` on macOS, `$XDG_CONFIG_HOME/veldr/` on Linux, `%AppData%\veldr\` on Windows; 0700 with 0600 files on Linux and macOS, replaced atomically, kept until removed):
+On the hub host, in the data directory of the hub's namespace (`--node-instance`, by default `--instance`): `~/.veldr[-<instance>]/`, on Windows `%USERPROFILE%\.veldr[-<instance>]\`, the directory the local machine's node of that namespace uses (0700 with 0600 files on Linux and macOS, replaced atomically, kept until removed). Every hub of the namespace on this host reads and writes the same files, and each rereads within two seconds what another wrote: the desktop app and `veldr` without `--instance` share those of `~/.veldr/`.
 
 | File | Content |
 | --- | --- |
-| `settings[-<instance>].json` | Settings; hand-editable, reread within two seconds, unknown entries kept. |
-| `keybindings[-<instance>].json` | Keybinding rules; hand-editable. |
-| `machines[-<instance>].json` | `{"version": 1, "machines": [{id, label, kind, target, enabled}], "order": [ids]}`: SSH machines, the local machine once changed, and the order. Written by the hub from the first change; unknown fields kept. |
-| `vault[-<instance>].json` | Variable vault, values encrypted under a key derived from the passphrase ([30](features/30-variable-vault.md)). |
-| `hub[-<instance>]-<host>[-<id>].db` (with `-wal`, `-shm`) | The hub's SQLite database ([38](features/38-sqlite-state.md)): the vault's access log (last 1000 releases, 500 other records; never values) and the AI usage history (30 days of windows' use, alert periods). The hub removes any `core[-<instance>]-<host>[-<id>].db` (from earlier releases) for this host and instance when it starts, without reading it. |
+| `settings.json` | Settings; hand-editable, reread within two seconds, unknown entries kept. |
+| `keybindings.json` | Keybinding rules; hand-editable, reread within two seconds. |
+| `machines.json` | `{"version": 1, "machines": [{id, label, kind, target, enabled}], "order": [ids]}`: SSH machines, the local machine once changed, and the order. Written by a hub from the first change, each change applied to the file as it is then; unknown fields kept. Reread within two seconds: the machines another hub added are connected, those it removed end their session. A file that is no machines file keeps the list read before and refuses changes until it is fixed; a removed one removes no machine. |
+| `vault.json` | Variable vault, values encrypted under a key derived from the passphrase ([30](features/30-variable-vault.md)). Each hub keeps its own unlock; a write over a file another hub changed meanwhile is refused (`409 vault_changed`). |
+| `hub-<host>[-<id>].db` (with `-wal`, `-shm`) | The hub's SQLite database ([38](features/38-sqlite-state.md)), one per host of a shared home, opened by every hub of the namespace on this host: the vault's access log (last 1000 releases, 500 other records; never values) and the AI usage history (30 days of windows' use, alert periods). The hub removes this host's `core-<host>[-<id>].db` beside it, if there is one, when it starts, without reading it. |
 
 Also on the hub host: ssh control sockets in `/tmp/veldr-<uid>/s` (`s-<instance>` for another instance, `h-<hash>` for one longer than 16 characters; Linux and macOS; owned by you, 0700), and code-server downloads with `.sha256` sidecars in the user cache directory (`~/Library/Caches/veldr/code-server`, `~/.cache/veldr/code-server`, `%LocalAppData%\veldr\code-server`), and what the hub fetched from its release (`~/.veldr/cache/machine/`: `SHA256SUMS-<version>` and the archives machines needed, `veldr-<platform>-<digest>.tar.gz`, checked when read, removed unused for 14 days).
 
 A release directory holds the hub, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `licenses.md` and `licenses/` (`herdr-core/`, `herdr-detect/`, `encoder/`). These are not copied to SSH machines.
 
-In the browser, `localStorage` under `veldr.*` holds only that browser's state: the sidebar's state and width (`sidebarOpen`, `sidebarWidth`), the selected machine (`machine`), and the last 50 uploads and downloads (`uploads`, `downloads`; names and paths, no contents). Settings and layouts are the hub's.
+In the browser, `localStorage` under `veldr.*` holds only that browser's state: the sidebar's state and width (`sidebarOpen`, `sidebarWidth`), right-rail panel order and hidden icons (`railOrder`, `hiddenRailPanels`), the selected machine (`machine`), collapsed AI usage account cards (`usage.collapsedAccounts`), per-browser editor word-wrap override (`files.wordWrap`), and the last 50 uploads and downloads (`uploads`, `downloads`; names and paths, no contents). Settings and layouts are the hub's.
 
 Desktop artifacts in `dist/desktop/` (`make desktop-app` unpacked, `make desktop-dist` installers):
 
@@ -584,4 +636,4 @@ Desktop artifacts in `dist/desktop/` (`make desktop-app` unpacked, `make desktop
 - Windows: `win-unpacked/veldr.exe`, `veldr-<version>-win-x64.exe`
 - Linux: `linux-unpacked/veldr`, `linux-arm64-unpacked/veldr`, `veldr-<version>-linux-x86_64.AppImage`, `-linux-arm64.AppImage`, `-linux-amd64.deb`, `-linux-arm64.deb`
 
-The desktop app embeds this host's Stage 1 compiled Bun hub executable (`Contents/Helpers/veldr` on macOS, `resources/bin/veldr[.exe]` on Linux and Windows) and all 6 Stage 1 machine release archives (`resources/machines/*.tar.gz` + `SHA256SUMS`). Shell code builds into `desktop/dist/`; `make clean` removes the outputs. Icon sources are in `desktop/assets/` (`make desktop-icons` regenerates them on macOS). Electron's profile is `veldr-desktop` (`-dev`, or `--user-data-dir`) in the system's application data directory and survives uninstalling; on macOS `veldr-desktop-keychain.json` beside it records which build owns the safeStorage keychain item ([30](features/30-variable-vault.md)). The desktop hub uses `settings-desktop.json` and, on machines, the default `~/.veldr/`. No desktop log files are kept: the last 16 KiB of the hub's stderr stay in memory for error dialogs.
+The desktop app embeds this host's Stage 1 compiled Bun hub executable (`Contents/Helpers/veldr` on macOS, `resources/bin/veldr[.exe]` on Linux and Windows) and all 6 Stage 1 machine release archives (`resources/machines/*.tar.gz` + `SHA256SUMS`). Shell code builds into `desktop/dist/`; `make clean` removes the outputs. Icon sources are in `desktop/assets/` (`make desktop-icons` regenerates them on macOS). Electron's profile is `veldr-desktop` (`veldr-desktop-<instance>` for a development instance, or `--user-data-dir`) in the system's application data directory and survives uninstalling; on macOS `veldr-desktop-keychain.json` beside it records which build owns the safeStorage keychain item ([30](features/30-variable-vault.md)). The desktop hub's namespace is the default one: on its host and on machines it uses `~/.veldr/`, with the settings, keybindings, machines list, vault and database of `veldr` without `--instance`. No desktop log files are kept: the last 16 KiB of the hub's stderr stay in memory for error dialogs.

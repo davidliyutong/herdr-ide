@@ -6,7 +6,7 @@
   align-items: center;
   gap: 4px;
   /* The first button is centered on the header row beside it. */
-  padding-top: calc((var(--h-header) - var(--ds-size-rail-button)) / 2);
+  padding: calc((var(--h-header) - var(--ds-size-rail-button)) / 2) 0 6px;
   background: var(--bg-1);
   border-left: 1px solid var(--line);
   min-height: 0;

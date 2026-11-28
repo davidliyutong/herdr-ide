@@ -179,16 +179,68 @@ const base = (m: string) => `/api/m/${encodeURIComponent(m)}/p/git`;
 
 const failure = failureOf((code, message) => new GitError(code, message));
 
+/** Whether e is a fetch AbortError from a cancelled request. */
+export const isAbortError = (e: unknown): boolean => e instanceof Error && e.name === 'AbortError';
+
+/** Maximum concurrent background git reads per machine (half of the machine's
+ * MAX_RUNS = 8 so interactive diffs, logs and writes retain headroom). */
+export const MAX_CONCURRENT_GIT_READS = 4;
+
+interface MachineGate {
+  active: number;
+  queue: Array<() => void>;
+}
+const machineGates = new Map<string, MachineGate>();
+
+/** Runs fn within machine m's client-side read concurrency cap, cancelling
+ * cleanly if signal aborts while queued. */
+export async function limitGitRead<T>(m: string, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+  let gate = machineGates.get(m);
+  if (!gate) {
+    gate = { active: 0, queue: [] };
+    machineGates.set(m, gate);
+  }
+  if (gate.active < MAX_CONCURRENT_GIT_READS) {
+    gate.active++;
+  } else {
+    await new Promise<void>((resolve, reject) => {
+      const wake = () => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      };
+      const onAbort = () => {
+        const i = gate!.queue.indexOf(wake);
+        if (i >= 0) gate!.queue.splice(i, 1);
+        reject(signal!.reason ?? new DOMException('Aborted', 'AbortError'));
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      gate!.queue.push(wake);
+    });
+  }
+  try {
+    if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+    return await fn();
+  } finally {
+    const next = gate.queue.shift();
+    if (next) next();
+    else {
+      gate.active--;
+      if (gate.active === 0 && machineGates.get(m) === gate) machineGates.delete(m);
+    }
+  }
+}
+
 type Query = Record<string, string | number | boolean | string[] | undefined>;
 
-async function get<T>(m: string, action: string, q: Query): Promise<T> {
+async function get<T>(m: string, action: string, q: Query, signal?: AbortSignal): Promise<T> {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(q)) {
     if (v === undefined || v === false || v === '') continue;
     if (Array.isArray(v)) for (const x of v) p.append(k, x);
     else p.set(k, v === true ? '1' : String(v));
   }
-  return answer<T>(await fetch(`${base(m)}/${action}?${p}`, { cache: 'no-store' }), failure);
+  return answer<T>(await fetch(`${base(m)}/${action}?${p}`, signal ? { cache: 'no-store', signal } : { cache: 'no-store' }), failure);
 }
 
 async function post<T = { output?: string }>(m: string, action: string, body: Record<string, unknown>): Promise<T> {
@@ -200,17 +252,18 @@ async function post<T = { output?: string }>(m: string, action: string, body: Re
 export type Source = 'worktree' | 'index' | 'head' | string;
 
 export const gitApi = {
-  repo: (m: string, path: string) => get<RepoInfo>(m, 'repo', { path }),
-  status: (m: string, repo: string) => get<Status>(m, 'status', { repo }),
-  log: (m: string, repo: string, o: { skip?: number; limit?: number; branches?: string[]; remotes?: boolean } = {}) =>
-    get<LogPage>(m, 'log', { repo, skip: o.skip, limit: o.limit, branch: o.branches, remotes: o.remotes }),
-  show: (m: string, repo: string, rev: string, o: { parent?: number; rev2?: string } = {}) =>
-    get<Shown>(m, 'show', { repo, rev, parent: o.parent, rev2: o.rev2 }),
-  blob: (m: string, repo: string, path: string, source: Source, parent?: number) => get<Blob>(m, 'blob', { repo, path, source, parent }),
-  branches: (m: string, repo: string) => get<Branch[]>(m, 'branches', { repo }),
-  tags: (m: string, repo: string) => get<Tag[]>(m, 'tags', { repo }),
-  stashes: (m: string, repo: string) => get<Stash[]>(m, 'stashes', { repo }),
-  watch: (m: string, repo: string) => get<Watch>(m, 'watch', { repo }),
+  repo: (m: string, path: string, signal?: AbortSignal) => get<RepoInfo>(m, 'repo', { path }, signal),
+  status: (m: string, repo: string, signal?: AbortSignal) => get<Status>(m, 'status', { repo }, signal),
+  log: (m: string, repo: string, o: { skip?: number; limit?: number; branches?: string[]; remotes?: boolean; signal?: AbortSignal } = {}) =>
+    get<LogPage>(m, 'log', { repo, skip: o.skip, limit: o.limit, branch: o.branches, remotes: o.remotes }, o.signal),
+  show: (m: string, repo: string, rev: string, o: { parent?: number; rev2?: string; noFiles?: boolean; signal?: AbortSignal } = {}) =>
+    get<Shown>(m, 'show', { repo, rev, parent: o.parent, rev2: o.rev2, noFiles: o.noFiles }, o.signal),
+  blob: (m: string, repo: string, path: string, source: Source, parent?: number, signal?: AbortSignal) =>
+    get<Blob>(m, 'blob', { repo, path, source, parent }, signal),
+  branches: (m: string, repo: string, signal?: AbortSignal) => get<Branch[]>(m, 'branches', { repo }, signal),
+  tags: (m: string, repo: string, signal?: AbortSignal) => get<Tag[]>(m, 'tags', { repo }, signal),
+  stashes: (m: string, repo: string, signal?: AbortSignal) => get<Stash[]>(m, 'stashes', { repo }, signal),
+  watch: (m: string, repo: string, signal?: AbortSignal) => get<Watch>(m, 'watch', { repo }, signal),
   /** A change (Params of backend/features/git/protocol.ts). */
   run: (m: string, repo: string, action: string, params: Record<string, unknown> = {}) => post(m, action, { ...params, repo }),
 };

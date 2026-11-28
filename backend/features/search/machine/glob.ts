@@ -3,6 +3,7 @@
 // pattern without "/" matching names, one with "/" paths below the
 // directory searched. ripgrep gets them as --glob values; the walker
 // matches them itself.
+import { RE2JS } from 're2js';
 
 /** Bounds the include or exclude patterns of a search. */
 const MAX_PATTERNS = 100;
@@ -107,16 +108,18 @@ export function globRegexp(g: string): string {
 /** Matches paths below the directory searched ("/" between names) against
  * patterns: one without "/" the name of the file or of a folder it is in,
  * one with "/" (a leading one dropped) the path or a folder's path on it. A
- * pattern that is not a valid expression is left out. */
+ * pattern that is not a valid expression is left out. The expressions are
+ * RE2's (re2js): a glob such as "*a*a*a*b" takes time linear in the path,
+ * where a backtracking engine takes time exponential in its stars. */
 export class Matcher {
-  private readonly names: RegExp[] = [];
-  private readonly paths: RegExp[] = [];
+  private readonly names: RE2JS[] = [];
+  private readonly paths: RE2JS[] = [];
 
   constructor(patterns: string[]) {
     for (const p of patterns) {
-      let re: RegExp;
+      let re: RE2JS;
       try {
-        re = new RegExp(globRegexp(p.replace(/^\//, '')), 'u');
+        re = RE2JS.compile(globRegexp(p.replace(/^\//, '')));
       } catch {
         continue;
       }
@@ -132,7 +135,7 @@ export class Matcher {
    * folder that does is not entered. */
   self(rel: string): boolean {
     const name = rel.slice(rel.lastIndexOf('/') + 1);
-    return this.names.some((re) => re.test(name)) || this.paths.some((re) => re.test(rel));
+    return this.names.some((re) => re.matcher(name).matches()) || this.paths.some((re) => re.matcher(rel).matches());
   }
 
   /** Whether the path or a folder it is in matches. */

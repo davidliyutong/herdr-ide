@@ -1,10 +1,9 @@
 // The status bar's item of the chat in the focused pane (chat.usage): what
-// its session cost so far, the share of the context window in use and the
-// subscription's limit window closest to its end, as the chat states them
-// (source.ts). Nothing shows while the focused pane is no chat or its chat
-// told none of these.
-import { contextPercent, formatCost, tightest, windowLabel } from '../../conversation/format';
-import type { Limit } from './protocol';
+// its session cost so far and the share of the context window in use, as the
+// chat states them (source.ts). Rate-limit windows live in the AI Usage
+// plugin's own status bar item instead. Nothing shows while the focused pane
+// is no chat or its chat told neither.
+import { contextPercent, formatCost } from '../../conversation/format';
 import { locale, t } from '../../i18n';
 import { useStore } from '../../state/store';
 import { useTerms } from '../../state/terms';
@@ -28,28 +27,19 @@ function useFocusedChat(): { m: string; chat: string; kind?: string } | undefine
   return m && ref?.chat ? { m, chat: ref.chat, kind: ref.agent ?? stated } : undefined;
 }
 
-/** A limit window's name: its label, else its length. */
-const limitName = (l: Limit) => l.label || (l.windowMinutes ? windowLabel(l.windowMinutes) : l.id);
-
 export function ChatUsageItem() {
   const focused = useFocusedChat();
   const usage = useChats((s) => (focused ? s.live[liveKey(focused.m, focused.chat)]?.usage : undefined));
   if (!focused || !usage) return null;
   const cost = usage.cost ? formatCost(usage.cost, locale) : undefined;
   const pct = contextPercent(usage);
-  const limit = tightest(usage.limits);
-  if (cost === undefined && pct === undefined && !limit) return null;
-  const parts = [
-    cost,
-    pct !== undefined ? t('chat.usage.context', { pct: Math.round(pct) }) : undefined,
-    limit ? t('chat.usage.limit', { window: limitName(limit), pct: Math.round(limit.usedPercent) }) : undefined,
-  ].filter((x): x is string => !!x);
+  if (cost === undefined && pct === undefined) return null;
+  const parts = [cost, pct !== undefined ? t('chat.usage.context', { pct: Math.round(pct) }) : undefined].filter((x): x is string => !!x);
   const agent = agentName(focused.kind);
   const Icon = focused.kind ? kindIcon(focused.kind) : undefined;
-  const level = limit && limit.usedPercent >= 90 ? 'out' : limit && limit.usedPercent >= 75 ? 'warn' : undefined;
   return (
     <span
-      className={`chat-usage-item ${level ?? ''}`}
+      className="chat-usage-item"
       role="status"
       aria-label={t('chat.usage.label', { agent, usage: parts.join(', ') })}
       title={t('chat.usage.label', { agent, usage: parts.join(', ') })}

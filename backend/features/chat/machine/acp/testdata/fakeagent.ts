@@ -31,6 +31,8 @@ const EXACT = new Set([
   'session/new',
   'session/load',
   'session/resume',
+  'session/close',
+  'session/fork',
   'session/prompt',
   'session/cancel',
   'session/set_config_option',
@@ -137,11 +139,23 @@ class Lines {
     });
   }
 
-  drained(): Promise<void> {
-    return new Promise((resolve) => {
-      if (this.ended) return resolve();
-      process.stdin.on('end', () => resolve());
-    });
+  /** Drains remaining input until EOF; when answerClose is true, answers
+   * graceful session/close requests so legacy scripts close without waiting. */
+  async drained(answerClose: boolean): Promise<void> {
+    for (;;) {
+      const l = await this.next(60_000);
+      if (l === null) return;
+      if (l === 'timeout') continue;
+      if (!answerClose) continue;
+      try {
+        const got = JSON.parse(l) as Wire;
+        if (got.method === 'session/close' && 'id' in got) {
+          out(JSON.stringify({ jsonrpc: '2.0', id: got.id, result: {} }));
+        }
+      } catch {
+        // ignore
+      }
+    }
   }
 }
 
@@ -218,7 +232,7 @@ async function main(): Promise<number> {
         return fail(i, `unknown step ${JSON.stringify(s.dir)}`);
     }
   }
-  await lines.drained();
+  await lines.drained(!stubborn);
   if (stubborn) await new Promise(() => setInterval(() => {}, 1 << 30));
   return 0;
 }

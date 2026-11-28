@@ -259,6 +259,10 @@ describe('the reads', () => {
       expect(shown.commit.message).toBe('rename b\n\nlonger body');
       expect(shown.commit.subject).toBe('rename b');
       expect(shown.files).toEqual([{ path: 'c.txt', orig: 'b.txt', status: 'R', added: 0, deleted: 0 }]);
+      // Metadata only (used to prefill the Amend message without diffing).
+      const metaOnly = await g.call('show', { repo: dir, rev: lg.commits[0].hash, noFiles: true });
+      expect(metaOnly.commit.message).toBe('rename b\n\nlonger body');
+      expect(metaOnly.files).toEqual([]);
       // The merge against its second parent: main's change.
       shown = await g.call('show', { repo: dir, rev: lg.commits[1].hash, parent: 2 });
       expect(shown.files.map((f: { path: string; added: number }) => [f.path, f.added])).toEqual([['a.txt', 1]]);

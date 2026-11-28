@@ -151,6 +151,10 @@ export class Keybindings {
   // Set while the file is not a JSON array: the rules stay as they were and
   // nothing is written over it.
   #broken = false;
+  // Cached derived views for GET /api/keybindings (read by both the desktop
+  // shell and the UI at startup); cleared whenever the user's rules change.
+  #allDefaults?: Record<Platform, Rule[]>;
+  #cachedState?: State;
 
   /** A store of the commands' bindings with the user's rules saved in
    * path ("" keeps them in memory). Invalid commands and default keys
@@ -279,19 +283,23 @@ export class Keybindings {
 
   /** The default bindings of every platform. */
   allDefaults(): Record<Platform, Rule[]> {
-    return Object.fromEntries(SORTED_PLATFORMS.map((p) => [p, this.defaults(p)])) as Record<Platform, Rule[]>;
+    this.#allDefaults ??= Object.fromEntries(SORTED_PLATFORMS.map((p) => [p, this.defaults(p)])) as Record<Platform, Rule[]>;
+    return structuredClone(this.#allDefaults);
   }
 
   /** The user's rules, the effective bindings and conflicts per platform,
    * and the problems of the file. */
   state(): State {
-    const effective = Object.fromEntries(SORTED_PLATFORMS.map((p) => [p, this.#effective(p)])) as Record<Platform, Rule[]>;
-    return {
-      user: structuredClone(this.#user),
-      effective,
-      conflicts: Object.fromEntries(SORTED_PLATFORMS.map((p) => [p, conflicts(effective[p])])) as Record<Platform, Conflict[]>,
-      problems: this.#problems.map((p) => ({ ...p })),
-    };
+    if (!this.#cachedState) {
+      const effective = Object.fromEntries(SORTED_PLATFORMS.map((p) => [p, this.#effective(p)])) as Record<Platform, Rule[]>;
+      this.#cachedState = {
+        user: structuredClone(this.#user),
+        effective,
+        conflicts: Object.fromEntries(SORTED_PLATFORMS.map((p) => [p, conflicts(effective[p])])) as Record<Platform, Conflict[]>,
+        problems: this.#problems.map((p) => ({ ...p })),
+      };
+    }
+    return structuredClone(this.#cachedState);
   }
 
   /** The rules applied to the defaults on a platform. */
@@ -319,6 +327,7 @@ export class Keybindings {
     if (detail !== undefined) {
       this.#broken = true;
       this.#problems = [{ index: -1, code: 'parse', detail }];
+      this.#cachedState = undefined;
       return;
     }
     this.#broken = false;
@@ -344,6 +353,7 @@ export class Keybindings {
     this.#user = user;
     this.#rules = rules;
     this.#problems = problems;
+    this.#cachedState = undefined;
   }
 
   #notify(): void {

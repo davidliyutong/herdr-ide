@@ -1,3 +1,4 @@
+import { uptime } from 'node:os';
 import { Fail } from '#shared/lib/fail.ts';
 import {
   HistoryGeneration,
@@ -10,7 +11,7 @@ import {
 } from '#shared/proto/agentproto/index.ts';
 import { HOST_FILE_RETENTION, MACHINE_DB, pruneHostFiles } from '#shared/store/index.ts';
 import type { MachineEnv } from '#machine/feature.ts';
-import { TIMING, capture, recorded, storeError, type CaptureEnv, type Timing } from './capture.ts';
+import { BOOT_SKEW_MS, TIMING, capture, recorded, storeError, type CaptureEnv, type Timing } from './capture.ts';
 import { restoreScreen } from './config.ts';
 import { Memory } from './memory.ts';
 import { COLUMNS, Store, expired, hasSnapshots, openDB, scanMeta, type MetaRow } from './store.ts';
@@ -19,6 +20,8 @@ export interface HistoryMachineOptions {
   timing?: Partial<Timing>;
   /** The time, in ms since the epoch (tests). */
   now?: () => number;
+  /** Estimated host boot time, in ms since the epoch (tests). */
+  bootedAt?: () => number | undefined;
   /** What the agent remembers of the terminals between captures (tests
    * share it to see it, or forget it as an agent started again would). */
   memory?: Memory;
@@ -48,8 +51,9 @@ export type HistoryEnvironment = Pick<MachineEnv, 'base' | 'home' | 'hcSocket'>;
 export function historyOperations(env: HistoryEnvironment, o: HistoryMachineOptions = {}) {
   const timing: Timing = { ...TIMING, ...o.timing };
   const now = o.now ?? Date.now;
+  const bootedAt = o.bootedAt ?? (o.now ? undefined : () => Date.now() - Math.floor(uptime() * 1000));
   const memory = o.memory ?? new Memory();
-  const cap: CaptureEnv = { base: env.base, hcSocket: env.hcSocket, memory, timing, now };
+  const cap: CaptureEnv = { base: env.base, hcSocket: env.hcSocket, memory, timing, now, ...(bootedAt ? { bootedAt } : {}) };
   let capturing = false;
   const within = (signal: AbortSignal, ms: number) => AbortSignal.any([signal, AbortSignal.timeout(ms)]);
   /** Another hub's capture ended less than shareMs ago. */
@@ -92,6 +96,7 @@ export function historyOperations(env: HistoryEnvironment, o: HistoryMachineOpti
       } catch {
         return out;
       }
+      const boot = bootedAt?.();
       const by = new Map<string, HistoryListResult['terminals'][number]>();
       for (const r of rows) {
         const { m, prev, whole } = scanMeta(r);
@@ -104,7 +109,12 @@ export function historyOperations(env: HistoryEnvironment, o: HistoryMachineOpti
           by.set(m.terminal, en);
           out.terminals.push(en);
         }
-        const snap = { pid: m.pid, at: m.at, lines: m.lines, bytes: m.bytes, cols: m.cols, rows: m.rows };
+        // A current generation from before the current host boot reports pid 0
+        // (matching how capture rotates it) so a kept terminal reusing the same
+        // pid after reboot immediately shows its pre-reboot history even when
+        // list runs before the first post-reboot capture.
+        const pid = !prev && boot !== undefined && m.at < boot - BOOT_SKEW_MS ? 0 : m.pid;
+        const snap = { pid, at: m.at, lines: m.lines, bytes: m.bytes, cols: m.cols, rows: m.rows };
         if (prev) en.previous = snap;
         else {
           Object.assign(en, snap);
@@ -139,13 +149,15 @@ export function historyOperations(env: HistoryEnvironment, o: HistoryMachineOpti
         throw notFound;
       }
       if (!row) throw notFound;
-      const { m, whole } = scanMeta(row);
+      const { m, prev, whole } = scanMeta(row);
       const data = row.data ?? new Uint8Array();
       if (!whole || expired(m, t, 0) || data.length !== m.bytes) throw notFound;
+      const boot = bootedAt?.();
+      const pid = !prev && boot !== undefined && m.at < boot - BOOT_SKEW_MS ? 0 : m.pid;
       return {
         terminal: p.terminal,
         generation: p.generation,
-        pid: m.pid,
+        pid,
         at: m.at,
         lines: m.lines,
         bytes: m.bytes,
@@ -197,7 +209,10 @@ export function historyOperations(env: HistoryEnvironment, o: HistoryMachineOpti
       try {
         withinClear.throwIfAborted();
         memory.forgetTerminal(p.from);
-        return { adopted: store.adopt(p.from, p.to) };
+        const boot = bootedAt?.();
+        const srcCur = store.terms.get(p.from)?.cur;
+        const clearPid = !!srcCur && boot !== undefined && srcCur.at < boot - BOOT_SKEW_MS;
+        return { adopted: store.adopt(p.from, p.to, { clearPid }) };
       } catch (e) {
         throw storeError(e);
       } finally {

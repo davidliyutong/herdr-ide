@@ -57,6 +57,7 @@ Protocol v2 with `experimentalApi`, the model `gpt-6-luna`, effort `low` unless 
 
 The client advertised no file system and no terminal (`clientCapabilities {fs: {readTextFile: false, writeTextFile: false}, terminal: false}`). Each agent's directory has the same scenarios.
 
+- `agy/`: Antigravity CLI 1.5.18, `agy acp --stdio`, models `gemini-4-neon`, `claude-opus-5-5`, `gpt-oss-120b-medium`, thinking `high` (`01-initialize.jsonl` handshake & auth methods; `02-session-new.jsonl` modes including `auto`, models, `configOptions`, and `/compact`/`/plan`/`/goal` commands; `03-prompt-and-config.jsonl` thought/message chunks, `usage_update`, `session/set_config_option`, `/compact`, and `session/close`; `04-list.jsonl` `session/list` across workspaces).
 - `kimi/`: Kimi Code 2.7.2, `kimi acp`, the model `kimi-code/k3.1-pro`, thinking `max`.
 - `grok/`: Grok 1.0.92, `grok agent --no-leader stdio`, the model `grok-4.7`, effort `high`. The user's configuration approves everything: the `-always-approve` files show that; the others started their session with `_meta: {"yoloMode": false}` (`02-session-new-yolo-off.jsonl`).
 

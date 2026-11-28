@@ -71,7 +71,7 @@ match; the bridge extension is reinstalled whenever its content changes.
    stores no attestations for private repositories outside Enterprise
    Cloud) and creates the GitHub release with the changelog section as
    notes. Nothing is published unless every build succeeds.
-7. Smoke test a downloaded archive: `sha256sum -c --ignore-missing SHA256SUMS` (it names the installers and the executables inside the archives too), `version`,
+7. Smoke test the release: install the CLI via `curl -fsSL https://veldr.app/cli/install.sh | sh` (served from `site/` via `make site-deploy`, sharing `scripts/install.sh`, which pulls the GitHub release and verifies `SHA256SUMS`), or verify a downloaded archive manually with `sha256sum -c --ignore-missing SHA256SUMS` (it names the installers and the executables inside the archives too), check `veldr version`,
    then start with `--local-only` and open the UI. Install the desktop app
    on each system ([deployment](docs/deployment.md#desktop-app)) and check
    that it starts its hub and loads the UI: on a Mac from the DMG

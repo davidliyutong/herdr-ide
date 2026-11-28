@@ -80,6 +80,15 @@ export const machinesFeature = (o: MachinesFeatureOptions) =>
     setup(ctx) {
       const { machines, pages } = ctx;
       const broadcastList = () => pages.broadcast({ t: 'machines', list: machines.states() });
+      // Another hub of the namespace changed the machines file: what the
+      // features keep for the machines that left goes, and every page gets
+      // the list.
+      machines.subscribe({
+        list: (removed) => {
+          for (const id of removed) ctx.forget(id);
+          broadcastList();
+        },
+      });
 
       // What a page starts from and follows.
       pages.onOpen((p) => {

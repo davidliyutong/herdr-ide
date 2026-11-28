@@ -13,8 +13,9 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { DesktopEnroll, DesktopShell, DesktopUnlock, NotificationTarget, OpenedFolders, ProcessUsage } from '../../web/src/shell';
 import { channels } from './bridge';
+import { parseOpenTabRequest } from './detached';
 import { setUpFrame } from './frames';
-import { parseNotificationOptions, parseNotificationTarget, sanitizeTag } from './notifications';
+import { parseBadgeCount, parseNotificationOptions, parseNotificationTarget, sanitizeTag } from './notifications';
 import { MAC_TITLEBAR_INSET, MAC_TITLEBAR_MIN_HEIGHT, MAC_TITLEBAR_TOP_SPACE } from './titlebar';
 
 /** Listens on channel for payloads that pass valid; returns a function that
@@ -115,11 +116,35 @@ const shell: DesktopShell = {
   onCloseRequest: (fn) =>
     listen(
       channels.closeRequest,
-      (v): v is undefined => v === undefined,
-      () => fn(),
+      (v): v is 'close' | 'quit' | undefined => v === undefined || v === 'close' || v === 'quit',
+      (reason) => fn(reason),
     ),
   answerClose(answer) {
     if (answer === 'asking' || answer === 'close' || answer === 'stay') ipcRenderer.send(channels.closeAnswer, answer);
+  },
+  windows: {
+    async openTab(opts) {
+      const valid = parseOpenTabRequest(opts);
+      if (!valid) return false;
+      try {
+        return (await ipcRenderer.invoke(channels.windowOpenTab, valid)) === true;
+      } catch {
+        return false;
+      }
+    },
+    focusMain() {
+      ipcRenderer.send(channels.windowFocusMain);
+    },
+    async isOverMain(screenX, screenY) {
+      if (typeof screenX !== 'number' || typeof screenY !== 'number' || !Number.isFinite(screenX) || !Number.isFinite(screenY)) {
+        return false;
+      }
+      try {
+        return (await ipcRenderer.invoke(channels.windowIsOverMain, { x: screenX, y: screenY })) === true;
+      } catch {
+        return false;
+      }
+    },
   },
   browser: { onOpen: (fn) => listen(channels.browserOpen, isWebURL, fn) },
   async metrics() {
@@ -150,6 +175,10 @@ const shell: DesktopShell = {
     close(tag) {
       const valid = sanitizeTag(tag);
       if (valid) ipcRenderer.send(channels.notifyClose, valid);
+    },
+    setBadgeCount(count) {
+      const valid = parseBadgeCount(count);
+      if (valid !== undefined) ipcRenderer.send(channels.notifyBadge, valid);
     },
     onClick(fn) {
       const off = listen(
@@ -199,9 +228,33 @@ const shell: DesktopShell = {
   },
 };
 
+/** Narrow per-window bridge exposed to detached tab windows (least privilege:
+ * omits main-window-only privacy, titlebar, vault biometric, notifications,
+ * metrics, opened-folder queue, and menu-state controls). */
+export type DetachedDesktopShell = Pick<
+  DesktopShell,
+  'detached' | 'onCommand' | 'pathForFile' | 'setUnsaved' | 'onCloseRequest' | 'answerClose' | 'windows' | 'browser'
+>;
+
 /** The bridge of a system (process.platform): Full Disk Access and the
- * integrated title bar are macOS's. */
-export function desktopShellFor(platform: string): DesktopShell {
+ * integrated title bar are macOS's; detached windows receive only the narrow
+ * per-window bridge and keep native window frames. */
+export function desktopShellFor(platform: string, detached?: false): DesktopShell;
+export function desktopShellFor(platform: string, detached: true): DetachedDesktopShell;
+export function desktopShellFor(platform: string, detached?: boolean): DesktopShell | DetachedDesktopShell;
+export function desktopShellFor(platform: string, detached = false): DesktopShell | DetachedDesktopShell {
+  if (detached) {
+    return {
+      detached: true,
+      onCommand: shell.onCommand,
+      pathForFile: shell.pathForFile,
+      setUnsaved: shell.setUnsaved,
+      onCloseRequest: shell.onCloseRequest,
+      answerClose: shell.answerClose,
+      windows: shell.windows,
+      browser: shell.browser,
+    };
+  }
   return {
     ...shell,
     ...(platform === 'darwin' && {
@@ -225,7 +278,8 @@ export function desktopShellFor(platform: string): DesktopShell {
   };
 }
 
-// The shell's bridge is the main window's page's, not its frames' (VS
+// The shell's bridge is the app window's top frame's, not its subframes' (VS
 // Code's among them).
+const isDetachedPage = location.pathname === '/window/tab' || location.pathname === '/window/tab/';
 if (setUpFrame({ origin: self.origin, pathname: location.pathname }) && window.top === window)
-  contextBridge.exposeInMainWorld('desktopShell', desktopShellFor(process.platform));
+  contextBridge.exposeInMainWorld('desktopShell', desktopShellFor(process.platform, isDetachedPage));

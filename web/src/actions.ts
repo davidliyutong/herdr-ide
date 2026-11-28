@@ -6,11 +6,22 @@
 // they came from (docs/features/05-vscode-panes.md).
 
 import * as L from './term/layout';
-import { describeView, isPluginOn, viewStatus, viewUnopened } from './plugins/registry';
+import { describeView, ensurePluginLoaded, isPluginOn, viewStatus, viewUnopened, workspaceCreated } from './plugins/registry';
+import {
+  confirmDetachedTabs,
+  detachedRecordForPane,
+  detachedRecordForTab,
+  focusDetachedRecord,
+  getDetachedCurrent,
+  isDetachedWindow,
+  useDetachedTabs,
+} from './detachedWindow';
 import { isLive, type TerminalRecord } from './term/protocol';
 import { terms, useTerms } from './state/terms';
 import { useStore } from './state/store';
-import { withView } from './state/panes';
+import { saveWorkspacePresets } from './state/workspacePresets';
+import { withView, unsavedPanes } from './state/panes';
+import { settingValue } from './settings';
 import { aggregate, agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } from './lib/machine';
 import { mediaExt } from './terminal/links';
 import { bridge, hasFrame, type BridgeCommand } from './lib/bridge';
@@ -37,26 +48,36 @@ export interface AttentionItem {
   status: AgentStatus;
 }
 
+/** Statuses that represent an unread / attention-requesting indicator badge
+ * (suppressed when a tab or workspace is muted). */
+const isAttentionStatus = (s: AgentStatus | undefined): boolean => s === 'blocked' || s === 'done';
+
 /** Terminals with an agent (or a status their program reports), the
  * plugins' panes with a status, and active/attention-needing plugin
  * conversations without an open pane on every machine followed, by how
  * much they need the user; terminals before panes, panes before unopened
- * chats within the same status. */
+ * chats within the same status. Muted panes' unread/attention statuses
+ * (blocked, done) are omitted. */
 export function attentionList(): AttentionItem[] {
   const s = useStore.getState();
   const tm = useTerms.getState().machines;
   const out: AttentionItem[] = [];
   for (const m of s.order) {
+    const layout = tm[m]?.layout;
     for (const r of Object.values(tm[m]?.terminals ?? {})) {
       const status = agentStatus(r);
-      if (isLive(r) && status && (agentOf(r) || status !== 'idle')) out.push({ m, terminal: r.address, record: r, status });
+      if (!isLive(r) || !status || (!agentOf(r) && status === 'idle')) continue;
+      if (isAttentionStatus(status) && layout && L.paneMuted(layout, r.address)) continue;
+      out.push({ m, terminal: r.address, record: r, status });
     }
   }
   for (const m of s.order) {
     const layout = tm[m]?.layout;
     for (const { key, view } of layout ? L.layoutViews(layout) : []) {
       const status = viewStatus(m, view);
-      if (status) out.push({ m, terminal: key, view, status });
+      if (!status) continue;
+      if (isAttentionStatus(status) && layout && L.paneMuted(layout, key)) continue;
+      out.push({ m, terminal: key, view, status });
     }
   }
   for (const m of s.order) {
@@ -91,14 +112,23 @@ export function paneStatus(m: string, leaf: L.Leaf): AgentStatus | undefined {
   return L.isPluginLeaf(leaf) ? viewStatus(m, leaf.view) : undefined;
 }
 
-/** The status a tab shows: the highest of its panes' (aggregate). */
-export function tabStatus(m: string, tab: L.Tab): AgentStatus | undefined {
-  return aggregate(L.leavesOf(tab.root).map((leaf) => paneStatus(m, leaf)));
+/** The status a tab shows: the highest of its panes' (aggregate), suppressing
+ * unread/attention statuses (blocked, done) when the tab or its workspace is
+ * muted. */
+export function tabStatus(m: string, tab: L.Tab, muted = false): AgentStatus | undefined {
+  const hideUnread = muted || !!tab.muted;
+  return aggregate(
+    L.leavesOf(tab.root).map((leaf) => {
+      const s = paneStatus(m, leaf);
+      return hideUnread && isAttentionStatus(s) ? undefined : s;
+    }),
+  );
 }
 
-/** The status a workspace shows: the highest of its tabs'. */
+/** The status a workspace shows: the highest of its tabs', suppressing
+ * unread/attention statuses from muted tabs or when the workspace is muted. */
 export function workspaceStatus(m: string, ws: L.Workspace): AgentStatus | undefined {
-  return aggregate(ws.tabs.map((tab) => tabStatus(m, tab)));
+  return aggregate(ws.tabs.map((tab) => tabStatus(m, tab, !!ws.muted)));
 }
 
 /** Each pane's share of its tab, from the split tree. */
@@ -108,13 +138,47 @@ export const paneRects = L.paneRects;
 /** Whether a pane of the history is still open. */
 export const spotOpen = (s: Spot) => paneOpen(useTerms.getState().machines[s.m]?.layout, s.pane);
 
+/** Updates focus to `key` in `layout`: in a detached window, updates only
+ * that tab's focused pane without mutating `layout.selected` or `ws.selected`
+ * so the main window never jumps workspaces or tabs. */
+export function focusPaneInLayout(layout: L.Layout, key: string): L.Layout {
+  if (!isDetachedWindow()) return L.focusPane(layout, key);
+  const at = L.locate(layout, key);
+  if (!at) return layout;
+  const ws = layout.workspaces[at.workspace];
+  const tab = ws.tabs[at.tab];
+  if (tab.focused === key) return layout;
+  const tabs = ws.tabs.map((t, i) => (i === at.tab ? { ...t, focused: key } : t));
+  const workspaces = layout.workspaces.map((w, i) => (i === at.workspace ? { ...w, tabs } : w));
+  return { ...layout, workspaces };
+}
+
+/** Triggers lazy loading of the vault plugin before workspace dialogs so
+ * workspace preset links and their saver are registered (including inside
+ * detached windows where the right rail never mounted). */
+async function ensureVaultReady() {
+  if (isPluginOn('vault')) await ensurePluginLoaded('vault').catch(() => {});
+}
+
 export function current() {
+  if (isDetachedWindow()) {
+    const det = getDetachedCurrent();
+    if (!det) return undefined;
+    const layout = useTerms.getState().machines[det.m]?.layout;
+    const ws = layout?.workspaces.find((w) => w.id === det.wsId);
+    const tab = ws?.tabs[det.tabIndex];
+    if (!layout || !ws || !tab) return undefined;
+    return { m: det.m, layout, ws, tabIndex: det.tabIndex, tab, focused: tab.focused || undefined };
+  }
   const m = useStore.getState().machineId;
   const layout = m ? useTerms.getState().machines[m]?.layout : undefined;
   if (!m || !layout) return undefined;
   const ws = L.selectedWorkspace(layout);
-  const tab = ws?.tabs[ws.selected];
-  return { m, layout, ws, tabIndex: ws?.selected ?? 0, tab, focused: tab?.focused || undefined };
+  if (!ws) return { m, layout, ws: undefined, tabIndex: 0, tab: undefined, focused: undefined };
+  const records = useDetachedTabs.getState().records;
+  const visible = ws.tabs.map((tb, i) => ({ tb, i })).filter(({ tb }) => !detachedRecordForTab(m, tb, records));
+  const entry = visible.find((x) => x.i === ws.selected) ?? visible[0];
+  return { m, layout, ws, tabIndex: entry?.i ?? 0, tab: entry?.tb, focused: entry?.tb.focused || undefined };
 }
 
 /** Puts the keyboard in a pane once it is on screen. */
@@ -289,6 +353,10 @@ export const slotIndex = (from: number, slot: number) => (slot > from ? slot - 1
 
 const axisOf = (dir: 'right' | 'down'): L.Axis => (dir === 'right' ? 'horizontal' : 'vertical');
 
+let lastReveal = 0;
+/** A strictly increasing reveal token so repeated jumps to the same line trigger again. */
+const nextReveal = () => (lastReveal = Math.max(Date.now(), lastReveal + 1));
+
 /** Starts, restarts or stops a machine's terminal core
  * (POST /api/m/{id}/hc/{action}) without asking; one action at a time per
  * machine. Failures are reported. */
@@ -318,11 +386,13 @@ export const actions = {
   /** Splits a pane: the new terminal starts in its directory (a VS Code
    * pane's folder, a preview's file's directory). */
   async split(m: string, pane: string, dir: 'right' | 'down', argv?: string[]) {
-    terms.mutate(m, (l) => L.focusPane(l, pane));
+    terms.mutate(m, (l) => focusPaneInLayout(l, pane));
     const layout = terms.layout(m);
     const cwd = layout ? paneDirectory(m, L.findLeaf(layout, pane)) : undefined;
+    const at = layout ? L.locate(layout, pane) : null;
+    const workspace = at ? layout!.workspaces[at.workspace]?.id : undefined;
     try {
-      const address = await terms.run(m, { split: true, argv, cwd }, (l, a) => {
+      const address = await terms.run(m, { workspace, split: true, argv, cwd }, (l, a) => {
         const next = L.splitPane(l, pane, axisOf(dir), { terminal: a });
         return next === l ? L.openTerminal(l, a) : next;
       });
@@ -343,6 +413,7 @@ export const actions = {
         ? L.moveToNewTab(L.createWorkspace(l, ws, create.name, create.cwd), pane, ws)
         : L.moveToNewTab(l, pane, ws),
     );
+    if (moved && create) workspaceCreated(m, ws);
     if (moved) focusDom(m, pane);
   },
 
@@ -352,10 +423,25 @@ export const actions = {
     const layout = terms.layout(m);
     const leaf = layout && L.findLeaf(layout, pane);
     if (!leaf) return;
+    void ensureVaultReady();
     const def = paneDirectory(m, leaf) || useStore.getState().machines[m]?.info?.home || '~';
     const input = await newWorkspaceDialog(m, def);
     if (!input) return;
-    actions.movePaneToWorkspace(m, pane, L.newId(), { name: input.label, cwd: input.cwd });
+    const id = L.newId();
+    actions.movePaneToWorkspace(m, pane, id, { name: input.label, cwd: input.cwd });
+    if (input.presets?.length) {
+      await ensureVaultReady();
+      await saveWorkspacePresets(m, id, input.presets, input.passphrase).catch((e) =>
+        useStore
+          .getState()
+          .toast(
+            t('vault.workspace.presetsSaveFailed', { error: e instanceof Error ? e.message : String(e) }),
+            undefined,
+            undefined,
+            'warning',
+          ),
+      );
+    }
   },
 
   /** Shows a pane alone in its tab, or all of the tab again. */
@@ -369,6 +455,7 @@ export const actions = {
    * later, and Undo Close brings it back until then (closedPanes.ts). */
   async closePane(m: string, pane: string) {
     if (!(await confirmUnsaved(m, [pane]))) return;
+    if (!isDetachedWindow() && !(await confirmDetachedTabs(m, [pane]))) return;
     const layout = terms.layout(m);
     if (layout) closeWithUndo(m, layout, [[pane]], t('closed.pane'));
     terms.mutate(m, (l) => L.closePane(l, pane));
@@ -444,8 +531,13 @@ export const actions = {
     const layout = terms.layout(m);
     const tab = layout?.workspaces.find((w) => w.id === ws)?.tabs[index];
     if (!layout || !tab) return;
-    if (!(await confirmUnsaved(m, L.tabPanes(tab)))) return;
-    closeWithUndo(m, layout, [L.tabPanes(tab)], t('closed.tab'));
+    const panes = L.tabPanes(tab);
+    if (!(await confirmUnsaved(m, panes))) return;
+    if (!isDetachedWindow() && !(await confirmDetachedTabs(m, panes))) return;
+    const liveLayout = terms.layout(m);
+    const liveTab = liveLayout?.workspaces.find((w) => w.id === ws)?.tabs[index];
+    if (!liveLayout || !liveTab) return;
+    closeWithUndo(m, liveLayout, [L.tabPanes(liveTab)], t('closed.tab'));
     terms.mutate(m, (l) => L.closeTab(l, ws, index));
   },
 
@@ -457,13 +549,9 @@ export const actions = {
     const found = before && tabsAt(before, keys);
     if (!found) return;
     if (found.indexes.length === 1) return actions.closeTab(m, found.ws.id, found.indexes[0]);
-    if (
-      !(await confirmUnsaved(
-        m,
-        found.indexes.flatMap((i) => L.tabPanes(found.ws.tabs[i])),
-      ))
-    )
-      return;
+    const allPanes = found.indexes.flatMap((i) => L.tabPanes(found.ws.tabs[i]));
+    if (!(await confirmUnsaved(m, allPanes))) return;
+    if (!isDetachedWindow() && !(await confirmDetachedTabs(m, allPanes))) return;
     // Read again: another client may have changed the tabs meanwhile.
     const layout = terms.layout(m);
     const now = layout && tabsAt(layout, keys);
@@ -479,11 +567,15 @@ export const actions = {
   },
 
   /** Closes every tab of a workspace but one (others) or those after it
-   * (right), at once, with one Undo, as closeTabs; pinned tabs stay. */
+   * (right), at once, with one Undo, as closeTabs; pinned and detached tabs
+   * stay open in their own windows. */
   async closeTabsBeside(m: string, ws: string, index: number, which: 'others' | 'right') {
     const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
     if (!w?.tabs[index]) return;
-    const keys = w.tabs.filter((tab, i) => !tab.pinned && (which === 'others' ? i !== index : i > index)).map((tab) => L.tabPanes(tab)[0]);
+    const records = useDetachedTabs.getState().records;
+    const keys = w.tabs
+      .filter((tab, i) => !tab.pinned && !detachedRecordForTab(m, tab, records) && (which === 'others' ? i !== index : i > index))
+      .map((tab) => L.tabPanes(tab)[0]);
     if (keys.length) await actions.closeTabs(m, keys);
   },
 
@@ -515,6 +607,7 @@ export const actions = {
       if (!at) return l;
       return L.moveTabsToWorkspace(create ? L.createWorkspace(l, target, create.name, create.cwd) : l, at.ws.id, at.indexes, target);
     });
+    if (moved && create) workspaceCreated(m, target);
     const layout = terms.layout(m);
     const focused = moved && layout && L.focusedPane(layout);
     if (focused) focusDom(m, focused);
@@ -526,11 +619,26 @@ export const actions = {
     const layout = terms.layout(m);
     const at = layout && tabsAt(layout, keys);
     if (!at) return;
+    void ensureVaultReady();
     const first = at.ws.tabs[at.indexes[0]];
     const def = paneDirectory(m, L.leafOf(first.root, first.focused)) || useStore.getState().machines[m]?.info?.home || '~';
     const input = await newWorkspaceDialog(m, def);
     if (!input) return;
-    actions.moveTabsToWorkspace(m, keys, L.newId(), { name: input.label, cwd: input.cwd });
+    const id = L.newId();
+    actions.moveTabsToWorkspace(m, keys, id, { name: input.label, cwd: input.cwd });
+    if (input.presets?.length) {
+      await ensureVaultReady();
+      await saveWorkspacePresets(m, id, input.presets, input.passphrase).catch((e) =>
+        useStore
+          .getState()
+          .toast(
+            t('vault.workspace.presetsSaveFailed', { error: e instanceof Error ? e.message : String(e) }),
+            undefined,
+            undefined,
+            'warning',
+          ),
+      );
+    }
   },
 
   /** Adds an SSH machine to the hub's machines (docs/features/02) and
@@ -556,26 +664,24 @@ export const actions = {
   },
 
   /** Enables or disables a machine (stored by the hub). Disabling a
-   * connected machine asks first: its agent disconnects and VS Code there
-   * stops; its programs keep running there. */
+   * connected machine asks first (and offers to stop its terminal service):
+   * its agent disconnects and VS Code there stops; its programs keep running
+   * there. Already-offline machines disable directly without asking. */
   async setMachineEnabled(m: string, enabled: boolean) {
     const st = useStore.getState().machines[m];
     const machine = st?.label ?? m;
     let stop = false;
-    if (!enabled && st?.status !== 'disabled') {
-      const ask = {
+    if (!enabled && st?.status === 'ready' && !st.code) {
+      const res = await confirmCheckDialog({
         title: t('confirm.disableMachineTitle', { machine }),
         message: t('confirm.disableMachine'),
         confirm: t('menu.disableMachine'),
         danger: true,
-      };
-      // While its agent is connected, the machine's terminal core can be
-      // stopped with it (unchecked: that ends every terminal there).
-      if (st?.status === 'ready' && !st.code) {
-        const res = await confirmCheckDialog({ ...ask, check: t('confirm.disableStopCore'), checked: false });
-        if (!res) return;
-        stop = res.checked;
-      } else if (!(await confirmDialog(ask))) return;
+        check: t('confirm.disableStopCore'),
+        checked: false,
+      });
+      if (!res) return;
+      stop = res.checked;
     }
     // Stopped before the session ends; a failed stop is reported and the
     // machine is disabled all the same.
@@ -583,9 +689,10 @@ export const actions = {
     await putEnabled(m, enabled);
   },
 
-  /** Enables or disables several machines; disabling asks once, naming
-   * them, and may stop the terminal services of those connected. Machines
-   * already so, and those never connected (a code), are left. */
+  /** Enables or disables several machines; disabling asks once when any is
+   * connected, naming them, and may stop the terminal services of those
+   * connected. Already-offline machines disable directly without asking.
+   * Machines already so, and those never connected (a code), are left. */
   async setMachinesEnabled(ids: string[], enabled: boolean) {
     const s = useStore.getState();
     const list = ids
@@ -593,18 +700,17 @@ export const actions = {
       .filter((st) => st && !st.code && (enabled ? st.status === 'disabled' : st.status !== 'disabled'));
     if (list.length <= 1) return list[0] && actions.setMachineEnabled(list[0].id, enabled);
     let stop = false;
-    if (!enabled) {
-      const ask = {
+    if (!enabled && list.some((st) => st.status === 'ready')) {
+      const res = await confirmCheckDialog({
         title: t('confirm.disableMachinesTitle', { n: list.length }),
         message: t('confirm.disableMachines', { machines: quotedNames(list.map((st) => st.label)) }),
         confirm: t('confirm.disable'),
         danger: true,
-      };
-      if (list.some((st) => st.status === 'ready')) {
-        const res = await confirmCheckDialog({ ...ask, check: t('confirm.disableStopCores'), checked: false });
-        if (!res) return;
-        stop = res.checked;
-      } else if (!(await confirmDialog(ask))) return;
+        check: t('confirm.disableStopCores'),
+        checked: false,
+      });
+      if (!res) return;
+      stop = res.checked;
     }
     await Promise.all(
       list.map(async (st) => {
@@ -738,19 +844,38 @@ export const actions = {
     if (!m) return;
     useStore.getState().selectMachine(m);
     terms.subscribe(m);
+    let presets: string[] | undefined;
+    let passphrase: string | undefined;
     if (cwd === undefined) {
+      void ensureVaultReady();
       const c = current();
       const def = (c?.m === m && terms.directory(m, c.focused)) || useStore.getState().machines[m]?.info?.home || '~';
       const input = await newWorkspaceDialog(m, def);
       if (!input) return;
       cwd = input.cwd;
       name = input.label;
+      presets = input.presets;
+      passphrase = input.passphrase;
     }
     const id = L.newId();
     const own = name.trim();
     const dir = cwd;
     await whenLoaded(m);
     terms.mutate(m, (l) => L.createWorkspace(l, id, own, dir));
+    workspaceCreated(m, id);
+    if (presets?.length) {
+      await ensureVaultReady();
+      await saveWorkspacePresets(m, id, presets, passphrase).catch((e) =>
+        useStore
+          .getState()
+          .toast(
+            t('vault.workspace.presetsSaveFailed', { error: e instanceof Error ? e.message : String(e) }),
+            undefined,
+            undefined,
+            'warning',
+          ),
+      );
+    }
     await actions.newTab(m, id);
   },
 
@@ -792,13 +917,9 @@ export const actions = {
     const layout = terms.layout(m);
     const list = ids.map((id) => layout?.workspaces.find((w) => w.id === id)).filter((w) => w !== undefined);
     if (!list.length) return;
-    if (
-      !(await confirmUnsaved(
-        m,
-        list.flatMap((w) => w.tabs.flatMap(L.tabPanes)),
-      ))
-    )
-      return;
+    const allPanes = list.flatMap((w) => w.tabs.flatMap(L.tabPanes));
+    if (!(await confirmUnsaved(m, allPanes))) return;
+    if (!isDetachedWindow() && !(await confirmDetachedTabs(m, allPanes))) return;
     // What they hold now: another client may have changed them meanwhile.
     const now = terms.layout(m);
     if (!now) return;
@@ -834,8 +955,23 @@ export const actions = {
   async editWorkspace(m: string, ws: string) {
     const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
     if (!w) return;
-    const input = await editWorkspaceDialog(m, w.cwd, w.name);
-    if (input) terms.mutate(m, (l) => L.editWorkspace(l, ws, input.label, input.cwd));
+    void ensureVaultReady();
+    const input = await editWorkspaceDialog(m, w.cwd, w.name, w.id);
+    if (!input) return;
+    terms.mutate(m, (l) => L.editWorkspace(l, ws, input.label, input.cwd));
+    if (input.presets !== undefined) {
+      await ensureVaultReady();
+      await saveWorkspacePresets(m, ws, input.presets, input.passphrase).catch((e) =>
+        useStore
+          .getState()
+          .toast(
+            t('vault.workspace.presetsSaveFailed', { error: e instanceof Error ? e.message : String(e) }),
+            undefined,
+            undefined,
+            'warning',
+          ),
+      );
+    }
   },
 
   /** Names a terminal's pane (its "name" label); empty shows its title again. */
@@ -859,18 +995,40 @@ export const actions = {
     terms.mutate(m, (l) => L.selectTab(l, ws, index));
   },
 
-  /** Selects a pane's machine, workspace and tab and gives it the focus. */
+  /** Selects a pane's machine, workspace and tab and gives it the focus.
+   * When called from the main window for a pane hosted in a detached window,
+   * updates that tab's focused pane in place and brings the detached window
+   * forward instead of leaving the main window on a hidden tab. */
   focusPane(m: string, pane: string) {
+    if (!isDetachedWindow()) {
+      const detached = detachedRecordForPane(m, pane);
+      if (detached) {
+        terms.mutate(m, (l) => {
+          const at = L.locate(l, pane);
+          if (!at) return l;
+          const ws = l.workspaces[at.workspace];
+          const tab = ws.tabs[at.tab];
+          if (tab.focused === pane) return l;
+          const tabs = ws.tabs.map((t, i) => (i === at.tab ? { ...t, focused: pane } : t));
+          const workspaces = l.workspaces.map((w, i) => (i === at.workspace ? { ...w, tabs } : w));
+          return { ...l, workspaces };
+        });
+        void focusDetachedRecord(detached);
+        return;
+      }
+    }
     useStore.getState().selectMachine(m);
     terms.subscribe(m);
-    terms.mutate(m, (l) => L.focusPane(l, pane));
+    terms.mutate(m, (l) => focusPaneInLayout(l, pane));
     focusDom(m, pane);
   },
 
   focusDirection(dir: L.Direction) {
     const c = current();
-    const next = c && L.neighbor(c.layout, dir);
-    if (c && next) actions.focusPane(c.m, next);
+    if (!c?.ws || !c.tab) return;
+    const scoped: L.Layout = { version: c.layout.version, selected: 0, workspaces: [{ ...c.ws, selected: c.tabIndex }] };
+    const next = L.neighbor(scoped, dir);
+    if (next) actions.focusPane(c.m, next);
   },
 
   /** Goes back (-1) or forward (1) through the panes focused (paneHistory.ts). */
@@ -896,14 +1054,25 @@ export const actions = {
     actions.selectWorkspace(c.m, c.layout.workspaces[(c.layout.selected + step + n) % n].id);
   },
 
-  /** Selects the next (1) or previous (-1) tab, the tab at an index, or the last one. */
+  /** Selects the next (1) or previous (-1) visible tab, the visible tab at an
+   * index, or the last visible one (skipping tabs open in detached windows). */
   switchTab(step: number | { index: number } | { last: true }) {
     const c = current();
     if (!c?.ws) return;
-    const n = c.ws.tabs.length;
+    const records = useDetachedTabs.getState().records;
+    const visible = c.ws.tabs.map((tb, i) => ({ tb, i })).filter(({ tb }) => !detachedRecordForTab(c.m, tb, records));
+    const n = visible.length;
     if (!n) return;
-    const index = typeof step === 'number' ? (c.ws.selected + step + n) % n : 'last' in step ? n - 1 : step.index;
-    if (index < n) actions.selectTab(c.m, c.ws.id, index);
+    let target: number | undefined;
+    if (typeof step === 'number') {
+      const pos = visible.findIndex((x) => x.i === c.tabIndex);
+      target = visible[((pos >= 0 ? pos : 0) + step + n) % n]?.i;
+    } else if ('last' in step) {
+      target = visible[n - 1]?.i;
+    } else {
+      target = visible[step.index]?.i;
+    }
+    if (target !== undefined) actions.selectTab(c.m, c.ws.id, target);
   },
 
   /** The focused pane (the terminal, when it is one), its machine and the
@@ -917,16 +1086,83 @@ export const actions = {
     return { m: c.m, pane: leaf ? c.focused : undefined, terminal, cwd };
   },
 
-  /** Opens a path found in a pane (from; the focused pane by default): media,
-   * and anything with the VS Code plugin off, in a preview pane
-   * (openPreview), anything else in VS Code at the line:
-   * in a VS Code pane of the workspace, the one of from's tab whose folder
-   * holds the file first, then one of another tab that holds it, then any
-   * of from's tab, then any; else in a new one split beside from, for the
-   * terminal's directory or the workspace's when the file is below it, else
-   * for the file's directory. */
-  async openPath(m: string, path: string, line?: number, col?: number, from?: string) {
-    // Without VS Code, Quick Look shows text as well.
+  /** Opens a file in the File Explorer plugin's editor/preview pane: in a tab
+   * of the workspace by default (or split beside from with side, reusing
+   * only from's tab's editors), reusing an existing editor for the same path
+   * or an unedited preview editor. */
+  async openEditor(
+    m: string,
+    path: string,
+    o: {
+      preview?: boolean;
+      side?: boolean;
+      line?: number;
+      col?: number;
+      endLine?: number;
+      endCol?: number;
+      from?: string;
+      focus?: boolean;
+    } = {},
+  ) {
+    await whenLoaded(m);
+    const preview = !!o.preview;
+    const hasLine = typeof o.line === 'number' && o.line > 0;
+    const endLine = hasLine && typeof o.endLine === 'number' && o.endLine >= o.line! ? o.endLine : undefined;
+    const endCol = endLine !== undefined && typeof o.endCol === 'number' && o.endCol > 0 ? o.endCol : undefined;
+    const at = hasLine
+      ? {
+          line: o.line,
+          col: o.col && o.col > 0 ? o.col : 1,
+          endLine,
+          endCol,
+          reveal: nextReveal(),
+        }
+      : { line: undefined, col: undefined, endLine: undefined, endCol: undefined, reveal: undefined };
+    const view = { plugin: 'files', kind: 'editor', path, ...at };
+    const tab = !o.side;
+    const layout = terms.layout(m);
+    const ws = layout ? originOf(m, layout, o.from).ws : undefined;
+    const openEditors = ws ? L.pluginViews(ws, 'files', 'editor').map((v) => v.view) : [];
+    if (openEditors.some((v) => v.path === path))
+      return actions.openView(m, preview ? view : { ...view, preview: false }, {
+        reuse: (v) => v.path === path,
+        tab,
+        from: o.from,
+        focus: o.focus,
+      });
+    const replaceable = (v: L.PluginView) => preview && v.preview === true && !unsavedPanes(m, [L.viewKey(v.id)]).length;
+    return actions.openView(m, { ...view, preview }, { reuse: replaceable, tab, from: o.from, focus: o.focus });
+  },
+
+  /** Opens a path found in a pane (from; the focused pane by default). A
+   * folder (with the File Explorer plugin on, which tells by asking the
+   * machine) is shown expanded in the explorer's tree. A file, by default
+   * (files.openLinks = 'editor'), in the File Explorer plugin's preview
+   * editor (at line/col/endLine/endCol when given): in a tab of the
+   * workspace, or with side split beside from, where the next link's
+   * preview replaces it. When files.openLinks is 'vscode' (or the files
+   * plugin is off) non-media files open in VS Code when its plugin is on,
+   * falling back to Quick Look (openPreview). */
+  async openPath(
+    m: string,
+    path: string,
+    o: { line?: number; col?: number; endLine?: number; endCol?: number; from?: string; side?: boolean } = {},
+  ) {
+    const { line, col, from } = o;
+    if (isPluginOn('files') && line === undefined) {
+      const files = await ensurePluginLoaded('files');
+      if (await files?.openFolder?.(m, path)) return;
+    }
+    const editor = () =>
+      actions.openEditor(m, path, { preview: true, side: o.side, line, col, endLine: o.endLine, endCol: o.endCol, from });
+    const preferCode = settingValue('files.openLinks') === 'vscode';
+    if (preferCode) {
+      if (!mediaExt.test(path) && isPluginOn('vscode')) return actions.openInCode(m, path, line, col, from);
+      if (isPluginOn('files')) return editor();
+      return actions.openPreview(m, path, from);
+    }
+    if (isPluginOn('files')) return editor();
+    // Without the files plugin (or VS Code), Quick Look shows text as well.
     if (mediaExt.test(path) || !isPluginOn('vscode')) return actions.openPreview(m, path, from);
     return actions.openInCode(m, path, line, col, from);
   },
@@ -977,7 +1213,7 @@ export const actions = {
   async openView(
     m: string,
     view: { plugin: string; kind: string } & Record<string, unknown>,
-    opts: { from?: string; reuse?: (v: L.PluginView) => boolean; tab?: boolean } = {},
+    opts: { from?: string; reuse?: (v: L.PluginView) => boolean; tab?: boolean; focus?: boolean } = {},
   ) {
     await whenLoaded(m);
     const layout = terms.layout(m)!;
@@ -989,13 +1225,13 @@ export const actions = {
     const found = views.find((v) => v.tab === o.tab) ?? (opts.tab ? views[0] : undefined);
     if (found) {
       terms.mutate(m, (l) => L.focusPane(L.setViewFields(l, found.key, view), found.key));
-      focusDom(m, found.key);
+      if (opts.focus !== false) focusDom(m, found.key);
       return found.key;
     }
     const id = L.newId();
     if (opts.tab) terms.mutate(m, (l) => L.openPane(l, { view: { ...view, id } }, o.ws?.id));
     else openBeside(m, { view: { ...view, id } }, o.ws, o.from);
-    focusDom(m, L.viewKey(id));
+    if (opts.focus !== false) focusDom(m, L.viewKey(id));
     return L.viewKey(id);
   },
 
@@ -1056,23 +1292,24 @@ export const actions = {
   },
 };
 
-/** A workspace's name as shown: the user's, else the folder of its only
- * pane (a terminal's current directory, a VS Code pane's folder) while it
- * has one pane, else its own directory (the folder its first pane started
- * in) or, without one, its focused pane's folder; the home directory of
- * its machine as "~". */
+/** A workspace's name as shown: the user's explicit name, else the basename of
+ * its configured fixed directory (ws.cwd) even when its panes navigate
+ * elsewhere, else the folder of its only or focused pane when it has no fixed
+ * directory; the home directory of its machine as "~". */
 export function workspaceTitle(m: string, ws: L.Workspace): string {
-  // Without a directory of its own, a workspace with several panes goes by
-  // its focused one's, where its new terminals start.
-  const leaf = L.soleLeaf(ws) ?? (ws.cwd ? null : L.focusedLeaf(ws));
+  const home = useStore.getState().machines[m]?.info?.home;
+  if (ws.cwd.trim()) return L.workspaceTitle(ws, home);
+  const leaf = L.soleLeaf(ws) ?? L.focusedLeaf(ws);
   const dir = !leaf
     ? undefined
     : L.isCodeLeaf(leaf)
       ? leaf.code.folder
       : L.isTerminalLeaf(leaf)
         ? terms.directory(m, leaf.terminal)
-        : undefined;
-  return L.workspaceTitle(ws, useStore.getState().machines[m]?.info?.home, dir);
+        : L.isPluginLeaf(leaf)
+          ? describeView(m, leaf.view).directory
+          : undefined;
+  return L.workspaceTitle(ws, home, dir);
 }
 
 /** A pane's title: a terminal's (terminalTitle), a VS Code pane's folder

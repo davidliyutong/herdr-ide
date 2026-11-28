@@ -12,7 +12,7 @@ import { act } from 'react';
 import { t } from '../i18n';
 import { useFrames } from '../plugins/browser/frames';
 import type { MachineState } from '../lib/machine';
-import { forwardGranted } from '../plugins/browser/api';
+import { browserApi, BrowserError, forwardGranted } from '../plugins/browser/api';
 import { useStore } from '../state/store';
 import { click, fakeBrowserApi, flush, json, mountPane, typeAddress, type Harness } from './browserHarness';
 
@@ -322,7 +322,7 @@ describe('the address field', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     h = await mountPane({ url: '' });
     await typeAddress(h.host, 'example.com/docs');
-    expect(open).toHaveBeenCalledWith('https://example.com/docs', '_blank', 'noopener');
+    expect(open).toHaveBeenCalledWith('https://example.com/docs', '_blank', 'noopener,noreferrer');
     expect(h.view()).toMatchObject({ url: 'https://example.com/docs' });
     expect(iframe()).toBeNull();
     expect(text()).toContain(t('browser.outside'));
@@ -331,13 +331,25 @@ describe('the address field', () => {
     expect(open).toHaveBeenCalledTimes(2);
   });
 
+  it('normalizes scheme-less outside layout URLs before opening externally', async () => {
+    fakeBrowserApi();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    h = await mountPane({ url: 'example.com/path' });
+    await flush();
+    expect(h.host.querySelector('.browser-url')?.textContent).toBe('https://example.com/path');
+    await click([...h.host.querySelectorAll('button')].find((b) => b.textContent === t('browser.outsideOpen')));
+    expect(open).toHaveBeenCalledWith('https://example.com/path', '_blank', 'noopener,noreferrer');
+    await click(h.host.querySelector(`[aria-label="${t('browser.openOutside')}"]`));
+    expect(open).toHaveBeenLastCalledWith('https://example.com/path', '_blank', 'noopener,noreferrer');
+  });
+
   it('opens the real address outside, from the toolbar', async () => {
     fakeBrowserApi({ forward: (b) => json({ m: 'a', port: b.port, local: 41000, created: '', connections: 0 }) });
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     h = await mountPane({ url: 'http://localhost:3000/a', m: 'a', port: 3000 }, { asked: true });
     await flush();
     await click(h.host.querySelector(`[aria-label="${t('browser.openOutside')}"]`));
-    expect(open).toHaveBeenCalledWith('http://localhost:41000/a', '_blank', 'noopener');
+    expect(open).toHaveBeenCalledWith('http://localhost:41000/a', '_blank', 'noopener,noreferrer');
   });
 });
 
@@ -464,5 +476,49 @@ describe('Ports', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('preserves AbortError in browserApi.listening and aborts ListeningPorts fetch on unmount', async () => {
+    const ac = new AbortController();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_res, rej) => {
+            init?.signal?.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError')), { once: true });
+          }),
+      ),
+    );
+    const pending = browserApi.listening('a', ac.signal);
+    ac.abort();
+    let caught: unknown;
+    try {
+      await pending;
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).not.toBeInstanceOf(BrowserError);
+    expect((caught as { name?: string })?.name).toBe('AbortError');
+
+    // Unmounting a start-page pane aborts its ListeningPorts request.
+    let captured: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (String(url).endsWith('/listening')) {
+          captured = init?.signal ?? undefined;
+          return new Promise<Response>((_res, rej) => {
+            init?.signal?.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError')), { once: true });
+          });
+        }
+        return Promise.resolve(json({ forwards: [], available: true }));
+      }),
+    );
+    h = await mountPane({ url: '' });
+    expect(captured).toBeDefined();
+    expect(captured?.aborted).toBe(false);
+    h.unmount();
+    h = undefined;
+    expect(captured?.aborted).toBe(true);
   });
 });

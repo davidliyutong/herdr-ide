@@ -10,6 +10,7 @@ import { defineFeature, type FeatureDef } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
 import { SSH_ENV } from '#kernel/config/ui/index.ts';
+import type { Client } from '#kernel/http/env.ts';
 import { Backend } from './backend.ts';
 import { Switchboard } from './switchboard.ts';
 import { hcStatus, online, type HCSource } from './lifecycle.ts';
@@ -30,6 +31,13 @@ export interface TerminalsOptions {
   /** The variables of a machine's virtual display that new terminals get
    * (program windows, feature 14); none by default. */
   paneEnv?: (m: Machine) => Record<string, string> | undefined;
+  /** Optional vault preset environment variables for a workspace's new
+   * terminals (feature 30); none by default. */
+  workspaceEnv?: (
+    m: Machine,
+    workspace: string,
+    client: Client,
+  ) => Promise<{ env: Record<string, string>; names: string[]; presets: string[] } | undefined>;
   /** Told whether a machine's terminal core is ready, at each change of
    * the backend's state (program windows follow it). */
   onReady?: (m: Machine, ready: boolean) => void;
@@ -80,6 +88,7 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
         hc: o.hc,
         ...(o.embeddedHC ? { embeddedHC: o.embeddedHC } : {}),
         paneEnv: o.paneEnv ?? (() => undefined),
+        workspaceEnv: o.workspaceEnv,
         // SSH_CONNECTION and SSH_CLIENT as the ssh session of the agent of
         // an ssh machine has them (sshenv.ts).
         sshEnv: (m) => (m.local || !setting(SSH_ENV, m.id) ? null : sshEnv(m.sshConnection)),
@@ -97,7 +106,8 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
       ctx.route('/api/v1').get('/term', (c) => {
         if (!c.env.upgrade) throw new Fail('upgrade_required', 426);
         const who = c.var.who;
-        return c.env.upgrade((ch) => h.connect(ch, who));
+        const client = c.var.client;
+        return c.env.upgrade((ch) => h.connect(ch, who, client));
       });
 
       const api = ctx.route('/api');
@@ -169,14 +179,17 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
       ctx.onForget((id) => h.forget(id));
 
       ctx.service('backends', async (signal) => {
-        // A machine that connects (again) ends the wait of its backend.
-        const ready = new Map<string, boolean>();
+        // A machine that connects (again) ends the wait of its backend; a
+        // disabled machine that is enabled again starts its terminal core
+        // anew even if it was stopped before being disabled.
+        const status = new Map<string, string>(ctx.machines.states().map((st) => [st.id, st.status]));
         const unsubscribe = ctx.machines.subscribe({
           state: (st) => {
-            const now = st.status === 'ready';
-            const before = ready.get(st.id) ?? false;
-            ready.set(st.id, now);
-            if (now && !before) h.wakeUp(st.id);
+            const before = status.get(st.id);
+            status.set(st.id, st.status);
+            if (before === 'disabled' && st.status !== 'disabled') h.enable(st.id);
+            else if (st.status === 'ready' && before !== 'ready') h.wakeUp(st.id);
+            else if (st.status === 'disabled' && before !== 'disabled') h.wakeUp(st.id);
           },
         });
         await new Promise<void>((r) => (signal.aborted ? r() : signal.addEventListener('abort', () => r(), { once: true })));

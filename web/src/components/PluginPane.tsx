@@ -5,9 +5,17 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { Eye, Puzzle } from 'lucide-react';
 import { registerPane } from '../state/panes';
 import * as L from '../term/layout';
-import { allPlugins, findPanel, paneView, PANEL_VIEW, useActivePlugins } from '../plugins/registry';
+import {
+  allPlugins,
+  ensurePluginLoaded,
+  findPanel,
+  isPluginPending,
+  paneView,
+  PANEL_VIEW,
+  useActivePlugins,
+  usePluginList,
+} from '../plugins/registry';
 import type { PluginDef } from '../plugins/api';
-import { useSettings } from '../settings';
 import { t } from '../i18n';
 import { CodeIcon } from './icons';
 import { PluginBoundary } from './PluginBoundary';
@@ -18,10 +26,25 @@ export function pluginName(id: string): string {
   return p ? t(p.title) : id;
 }
 
-export function PluginPane({ m, pane, view, focused }: { m: string; pane: string; view: L.PluginView; focused: boolean }) {
+export function PluginPane({
+  m,
+  pane,
+  view,
+  focused,
+  shown = true,
+  onActivate,
+}: {
+  m: string;
+  pane: string;
+  view: L.PluginView;
+  focused: boolean;
+  shown?: boolean;
+  /** Pointer or focus interaction inside the pane focuses it in the layout. */
+  onActivate?(): void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
-  // Re-rendered when a plugin is turned on or off.
-  useSettings((s) => s.values);
+  // Re-rendered when a plugin is turned on or off, or finishes lazy-loading.
+  useActivePlugins();
   const { def, on } = paneView(view.plugin, view.kind);
   useEffect(
     () =>
@@ -34,13 +57,20 @@ export function PluginPane({ m, pane, view, focused }: { m: string; pane: string
     [m, pane],
   );
   const Body = on ? def?.component : undefined;
+  const loading = on && !Body && isPluginPending(view.plugin);
+  useEffect(() => {
+    if (loading) void ensurePluginLoaded(view.plugin).catch((err) => console.warn(`plugin ${view.plugin}: failed to load`, err));
+  }, [loading, view.plugin]);
+  const activate = () => {
+    if (shown && !focused) onActivate?.();
+  };
   return (
-    <div ref={ref} className="plugin-pane" tabIndex={-1}>
+    <div ref={ref} className="plugin-pane" tabIndex={-1} onMouseDownCapture={activate} onFocusCapture={activate}>
       {Body ? (
         <PluginBoundary plugin={pluginName(view.plugin)} resetKey={JSON.stringify(view)}>
-          <Body m={m} pane={pane} view={view} focused={focused} />
+          <Body m={m} pane={pane} view={view} focused={focused} shown={shown} />
         </PluginBoundary>
-      ) : (
+      ) : loading ? null : (
         <div className="plugin-pane-off muted">{t(def ? 'plugins.paneOff' : 'plugins.paneUnknown', { plugin: view.plugin })}</div>
       )}
     </div>
@@ -59,6 +89,7 @@ interface TitleProps {
  * struck through while what it shows is gone (PaneViewDef.useGone), its
  * tooltip then saying so. */
 export function ViewTitle(p: TitleProps & { view: L.PluginView }) {
+  usePluginList((s) => s.list);
   const { def, on } = paneView(p.view.plugin, p.view.kind);
   const className = `${p.className} ${def?.preview?.(p.m, p.view) ? 'is-preview' : ''}`;
   const use = on ? def?.useGone : undefined;
@@ -72,9 +103,17 @@ export function ViewTitle(p: TitleProps & { view: L.PluginView }) {
 }
 
 /** The plugin that is on and says whether files are gone
- * (PluginDef.useFileGone), re-rendered when plugins are turned on or off. */
+ * (PluginDef.useFileGone), re-rendered when plugins are turned on or off.
+ * Triggers loading the lazy files plugin when a preview pane mounts before
+ * the Files panel or an editor has loaded it. */
 function useFileGoneSource(): PluginDef | undefined {
-  return useActivePlugins().find((x) => x.useFileGone);
+  const active = useActivePlugins();
+  const source = active.find((x) => x.useFileGone);
+  const pendingFiles = !source && active.some((x) => x.id === 'files' && isPluginPending('files'));
+  useEffect(() => {
+    if (pendingFiles) void ensurePluginLoaded('files').catch((err) => console.warn('plugin files: failed to load', err));
+  }, [pendingFiles]);
+  return source;
 }
 
 /** The title of an app's pane that shows a file of machine m (a preview)
@@ -122,11 +161,12 @@ function GoneTitle(p: Omit<TitleProps, 'm'> & { useGone(): string | undefined })
 }
 
 /** The icon of a pane that is not a terminal: VS Code, a preview, or its plugin's. */
-export function LeafIcon({ leaf, className }: { m: string; leaf: L.Leaf; className?: string }) {
+export function LeafIcon({ m, leaf, className }: { m: string; leaf: L.Leaf; className?: string }) {
   if (L.isCodeLeaf(leaf)) return <CodeIcon className={className} />;
   if (L.isPluginLeaf(leaf)) {
     const v = leaf.view;
-    const Icon = (v.kind === PANEL_VIEW ? findPanel(v.plugin, v.panel)?.icon : undefined) ?? paneView(v.plugin, v.kind).def?.icon ?? Puzzle;
+    const def = paneView(v.plugin, v.kind).def;
+    const Icon = (v.kind === PANEL_VIEW ? findPanel(v.plugin, v.panel)?.icon : undefined) ?? def?.iconFor?.(m, v) ?? def?.icon ?? Puzzle;
     return <Icon className={className} />;
   }
   return <Eye className={className} />;

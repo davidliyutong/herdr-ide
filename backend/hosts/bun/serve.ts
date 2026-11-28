@@ -186,7 +186,6 @@ export async function serve(argv: string[]): Promise<void> {
   const audit = f['audit-log'] ? await auditFile(f['audit-log'], logger) : undefined;
   const guard = new Guard({ allowedOrigins: f['allowed-origin'], proxySecret: secret, logger });
   const { hub, specs, run } = composeHub({
-    instance,
     nodeInstance,
     features,
     flags: settingValues,

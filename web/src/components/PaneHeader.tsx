@@ -13,9 +13,10 @@ import { openMenu } from '../contextMenu';
 import { openPaneMenu, paneMenu } from '../menus';
 import { isMenuKey, isRenameKey } from '../rowKeys';
 import { PaneActions } from './PaneActions';
+import { PluginBoundary } from './PluginBoundary';
 import { t } from '../i18n';
-import { FileTitle, LeafIcon, ViewTitle } from './PluginPane';
-import { describeView, TerminalHeaderActions, useViewStatus } from '../plugins/registry';
+import { FileTitle, LeafIcon, pluginName, ViewTitle } from './PluginPane';
+import { describeView, paneView, TerminalHeaderActions, useActivePlugins, useViewStatus } from '../plugins/registry';
 
 interface Props {
   m: string;
@@ -39,7 +40,7 @@ function drawn(el: HTMLElement): boolean {
  * the title renames the pane, the menu key or Shift+F10 opens the pane's
  * menu, Escape gives the keyboard to the pane. Enter and Space on a button
  * press it. Keys typed in the rename field are its own. */
-function onHeaderKey(e: React.KeyboardEvent<HTMLElement>, m: string, pane: string, renamable: boolean) {
+function onHeaderKey(e: React.KeyboardEvent<HTMLElement>, m: string, pane: string, onRename?: () => void) {
   const target = e.target as HTMLElement;
   if (target.closest('input')) return;
   const header = e.currentTarget;
@@ -59,9 +60,9 @@ function onHeaderKey(e: React.KeyboardEvent<HTMLElement>, m: string, pane: strin
   else if (plain && e.key === 'ArrowLeft') go(at < 0 ? items.length - 1 : at - 1);
   else if (plain && e.key === 'Home') go(0);
   else if (plain && e.key === 'End') go(items.length - 1);
-  else if (((onTitle && (isRenameKey(e) || (plain && e.key === 'Enter'))) || (plain && e.key === 'F2')) && renamable) {
+  else if (((onTitle && (isRenameKey(e) || (plain && e.key === 'Enter'))) || (plain && e.key === 'F2')) && onRename) {
     done();
-    actions.startRename('pane', m, pane);
+    onRename();
   } else if (isMenuKey(e)) {
     done();
     openPaneMenu(m, pane);
@@ -85,8 +86,19 @@ export function PaneHeader({ m, pane, leaf, ws, focused, zoomed }: Props) {
   const machine = useStore((s) => s.machines[m]?.label ?? m);
   // The terminal's record, for its title, agent and folder.
   useTerms((s) => (L.isTerminalLeaf(leaf) ? s.machines[m]?.terminals[pane] : undefined));
+  useActivePlugins();
   const title = paneTitle(m, leaf, pane);
   const ref = useRef<HTMLDivElement>(null);
+  const onRename = readOnly
+    ? undefined
+    : L.isTerminalLeaf(leaf)
+      ? () => actions.startRename('pane', m, pane)
+      : L.isPluginLeaf(leaf)
+        ? (() => {
+            const { def, on } = paneView(leaf.view.plugin, leaf.view.kind);
+            return on && def?.startRename ? () => def.startRename!(m, leaf.view) : undefined;
+          })()
+        : undefined;
   // One stop of the Tab key: the header; its buttons are reached with the arrows.
   useEffect(() => ref.current?.querySelectorAll('button').forEach((b) => (b.tabIndex = -1)));
   return (
@@ -109,7 +121,7 @@ export function PaneHeader({ m, pane, leaf, ws, focused, zoomed }: Props) {
         actions.focusPane(m, pane);
       }}
       onFocus={() => !focused && terms.mutate(m, (l) => L.focusPane(l, pane))}
-      onKeyDown={(e) => onHeaderKey(e, m, pane, L.isTerminalLeaf(leaf) && !readOnly)}
+      onKeyDown={(e) => onHeaderKey(e, m, pane, onRename)}
       onContextMenu={(e) => !(e.target as HTMLElement).closest('input') && openMenu(e, paneMenu(m, pane))}
     >
       {L.isTerminalLeaf(leaf) ? (
@@ -128,7 +140,7 @@ export function PaneHeader({ m, pane, leaf, ws, focused, zoomed }: Props) {
           </span>
         </>
       ) : L.isPluginLeaf(leaf) ? (
-        <PluginHeading m={m} view={leaf.view} home={home} />
+        <PluginHeading m={m} pane={pane} view={leaf.view} home={home} />
       ) : (
         <>
           <Eye className="pane-kind" />
@@ -197,11 +209,20 @@ export function PaneTitle({ m, terminal, title, name }: { m: string; terminal: s
   );
 }
 
-/** A plugin's pane: its agent's state when its plugin has one (a chat's;
- * ViewStatusDef), its icon, title and path. */
-function PluginHeading({ m, view, home }: { m: string; view: L.PluginView; home?: string }) {
+/** A plugin's pane: its custom header (PaneViewDef.header) when it provides
+ * one, else its agent's state (ViewStatusDef), its icon, title and path. */
+function PluginHeading({ m, pane, view, home }: { m: string; pane: string; view: L.PluginView; home?: string }) {
+  const { def, on } = paneView(view.plugin, view.kind);
   const d = describeView(m, view);
   const status = useViewStatus(m, view);
+  if (on && def?.header) {
+    const Header = def.header;
+    return (
+      <PluginBoundary plugin={pluginName(view.plugin)} compact resetKey={JSON.stringify(view)}>
+        <Header m={m} pane={pane} view={view} home={home} />
+      </PluginBoundary>
+    );
+  }
   return (
     <>
       {status && <StatusDot status={status} />}

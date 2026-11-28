@@ -262,6 +262,22 @@ describe('the machine’s confirmation of a session', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(result).toBe(false);
   });
+
+  it('retries transient 429 and 503 answers within RESOLVE_TIMEOUT_MS', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const fetch = vi.fn(() => {
+      calls++;
+      if (calls === 1) return answer({ error: 'busy' }, 429);
+      if (calls === 2) return answer({ error: 'unavailable' }, 503);
+      return answer({ ok: true }, 200);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const p = confirmSession('m', 'claude', S1, '/srv/app');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await p).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe('a page resuming an agent', () => {

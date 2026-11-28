@@ -7,9 +7,9 @@ import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { SLUG } from '#shared/lib/brand.ts';
 import { AgentError } from '#kernel/machines/transport/session.ts';
-import { sleep, TEST_INFO, waitFor } from '#kernel/testing.ts';
+import { sleep, sshSpec, TEST_INFO, testHub, testMachines, waitFor } from '#kernel/testing.ts';
 import { offline } from '#kernel/fail.ts';
-import { statStatus } from './hub.ts';
+import { fileTransfersFeature, statStatus } from './hub.ts';
 import { serveFile, TransferFail } from './serve.ts';
 import { filesHub, testPage, type FilesHub } from './testdata/hub.ts';
 
@@ -177,6 +177,18 @@ describe('file', () => {
     expect([res.status, await res.text(), res.headers.get('Content-Type')]).toEqual([400, 'is a directory\n', 'text/plain; charset=utf-8']);
     res = await fetch(`${fc.url}/api/m/local/file`);
     expect(res.status).toBe(400);
+
+    // Direct single-RTT GET with max_size: accepts files within limit, rejects
+    // oversized ones with 413 without streaming, and handles empty 0-byte files.
+    res = await file(at('proj/a.txt'), {}, '&max_size=10');
+    expect([res.status, await res.text(), res.headers.get('Content-Length')]).toEqual([200, 'alpha', '5']);
+    res = await file(at('proj/a.txt'), {}, '&max_size=4');
+    expect(res.status).toBe(413);
+    writeFileSync(join(dir, 'empty.txt'), '');
+    res = await file(at('empty.txt'), {}, '&max_size=1024');
+    expect([res.status, await res.text(), res.headers.get('Content-Length')]).toEqual([200, '', '0']);
+    res = await file(at('missing.txt'), {}, '&max_size=1024');
+    expect(res.status).toBe(404);
   });
 
   test('statStatus', () => {
@@ -219,6 +231,17 @@ test('list', async () => {
   // The UI matches the agent's text (dialog.ts folderProblem).
   expect(r.status).toBe(404);
   expect(r.body.error).toContain('no such file or directory');
+
+  // An offline/disabled machine returns 409 for /list and 502 for direct /file
+  // (never masquerading as 404).
+  const offlineHub = testHub({
+    features: [fileTransfersFeature()],
+    machines: testMachines([sshSpec('off', 'off', 'off', false)]),
+  });
+  const offRes = await offlineHub.request('GET', '/api/m/off/list?path=/tmp');
+  expect(offRes.status).toBe(409);
+  const offFile = await offlineHub.request('GET', '/api/m/off/file?path=/tmp/a.txt&max_size=1024');
+  expect(offFile.status).toBe(502);
 });
 
 describe('upload', () => {

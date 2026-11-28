@@ -9,7 +9,7 @@ import { t } from '../../i18n';
 import { FilesPanel } from './FilesPanel';
 import { EditorPane } from './EditorPane';
 import { useFileGone } from './gone';
-import { revealEntries } from './ops';
+import { openFolder, revealEntries } from './ops';
 import { baseName, parentOf } from './tree';
 
 export { registerFileDecorations, refreshDecorations } from './decorations';
@@ -28,6 +28,8 @@ export const filesPlugin: PluginDef = {
   settings: { section: 'files' },
   // The previews' titles too, with the editors' checks (gone.ts).
   useFileGone: goneNote,
+  // A link to a folder expands it in the tree instead of an editor.
+  openFolder,
   panels: [{ id: 'files', title: 'files.title', icon: Files, component: FilesPanel, command: 'view.panel.files' }],
   paneViews: {
     editor: {

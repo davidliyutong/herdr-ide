@@ -12,9 +12,12 @@
 // canvas.
 
 import type { AttachOptions, Display, StreamHandler } from '../term/connection';
+import { CORE_ENDED, TermError } from '../term/protocol';
+import { retryDelay } from '../lib/retry';
 import { displayColors, type Appearance } from '../appearance';
+import { isCjkText } from '../terminal/fonts';
 import { loadVt, type Vt } from './module';
-import { Terminal, newFrame, type Frame, type Row } from './terminal';
+import { Terminal, WIDE_HEAD, newFrame, type Frame, type Row } from './terminal';
 import { createRenderer, replaceCanvas, lookOf, hexColor, type Cells, type Look, type Overlay, type Renderer } from './renderer';
 import { measureCell, type Metrics } from './atlas';
 import { keyInput, isMac, modsOf, mouseButton, textInput, wheelLines } from './input';
@@ -22,6 +25,7 @@ import { forgetProgramClipboard, programClipboard, programClipboardCopied, progr
 import { findResult, useFind } from './find';
 import { findPlace, noteScroll, takeScroll } from './scrollMemory';
 import { carriesFiles } from '../drop';
+import { carriesPaths } from '../pathsDrag';
 import { linksAround, linkTitle, safeUrl, selectedLink, type LinkContext, type RowText } from '../terminal/links';
 import { openLink } from '../terminal/openLink';
 import { mathAt } from '../terminal/math';
@@ -64,9 +68,13 @@ const PAINT_MAX_MS = 600;
 const PAINT_BULK = 4096;
 const PAINT_ONE_CREDIT = 192 * 1024;
 // An attach that is refused (a kept terminal whose shell the core is
-// starting again answers unavailable for a moment) is tried again.
-const ATTACH_RETRY_MS = 1500;
+// starting again answers unavailable for a moment, or busy under load) is
+// tried again with exponential backoff and jitter so mounted panes never
+// synchronize retries into a thundering herd.
+const ATTACH_RETRY_MIN_MS = 1000;
+const ATTACH_RETRY_MAX_MS = 8000;
 const ATTACH_RETRIES = 5;
+const ATTACH_BUSY_RETRIES = 12;
 // A prelude (state/preludes.ts) that appears, changes or goes while the
 // pane is attached is shown by attaching again: once, when its changes
 // have paused this long.
@@ -158,7 +166,14 @@ export interface PaneOptions {
   /** Files dropped from outside the page: the text to paste. The items are
    * read before anything is awaited. */
   onDropFiles?(items: DataTransferItemList): Promise<string | undefined>;
-  onDropTarget?(on: boolean): void;
+  /** Rows of the file explorer dragged over the pane: whether it takes
+   * them (until the drop only the drag's types are known). */
+  takesPaths?(dt: DataTransfer): boolean;
+  /** The explorer's rows dropped: the text to paste (their paths). */
+  onDropPaths?(dt: DataTransfer): string | undefined;
+  /** What a drop at the pointer would paste: files from outside the page,
+   * the explorer's paths, or nothing. */
+  onDropTarget?(what: 'files' | 'paths' | undefined): void;
   /** A tooltip for what is under the pointer (a link). */
   setTitle(title: string): void;
   onMath?(m: ShownMath | undefined): void;
@@ -180,6 +195,8 @@ export interface PaneOptions {
   onRenderer?(kind: 'webgl' | 'canvas'): void;
   /** The terminal is attached: input reaches its program. */
   onAttached?(): void;
+  /** The terminal's last size reported by the machine's core, if known. */
+  remoteSize?(): { cols: number; rows: number } | undefined;
 }
 
 const overPopover = (target: EventTarget | null | undefined) => !!(target as Element | null)?.closest?.('.math-popover');
@@ -193,21 +210,28 @@ function inTriangle(px: number, py: number, a: [number, number], b: [number, num
   return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
 }
 
+// After a pane resizes (or recovers from a collapsed width), re-verify once
+// that the remote terminal core received and applied the settled size.
+const RESIZE_SETTLE_MS = 120;
+
 /** A row's text with the column of each UTF-16 index, as links.ts reads rows. */
 export function rowCols(r: Row | undefined): RowText {
   const colOf: number[] = [];
   let text = '';
   if (!r) return { text, colOf: [0] };
   const cols = r.codes.length;
+  let writtenEnd = 0;
   for (let x = 0; x < cols; x++) {
     const w = r.wide[x];
     if (w === 2 || w === 3) continue;
-    const s = r.text[x] ?? (r.codes[x] ? String.fromCodePoint(r.codes[x]) : ' ');
+    const code = r.codes[x];
+    const s = r.text[x] ?? (code ? String.fromCodePoint(code) : ' ');
     for (let i = 0; i < s.length; i++) colOf.push(x);
     text += s;
+    if (code !== 0 || r.text[x]) writtenEnd = text.length;
   }
   colOf.push(cols);
-  return { text, colOf };
+  return { text, colOf, wrap: r.wrap, writtenEnd };
 }
 
 interface PaneLink {
@@ -274,6 +298,11 @@ export class TermPane {
   private dprQuery?: MediaQueryList;
   private dpr = 1;
   private grid = { cols: 0, rows: 0 };
+  /** The grid last sent to the core on the current attach/stream. */
+  private sentGrid = { cols: 0, rows: 0 };
+  /** True while the host was shrunk to zero width or height. */
+  private collapsed = false;
+  private resizeVerifyTimer?: number;
   private overlay: Overlay = { focused: false, blinkOn: true, matches: [] };
   private wheelAccum = 0;
   private drag?: { kind: 'mouse'; button: number } | { kind: 'select'; x: number; y: number };
@@ -303,6 +332,12 @@ export class TermPane {
   /** The stream ended for good (the program's end): nothing attaches until
    * the terminal has another program (setProgram). */
   private closedFor = false;
+  /** The stream closed because the core or host ended (rather than the program
+   * exiting): after reconnect a restarted kept shell may reuse the same pid. */
+  private closedByCore = false;
+  /** The stream ended because the connection or backend dropped: waits for
+   * onConnection(true) rather than retrying on program updates while away. */
+  private disconnected = false;
   /** The pid of the terminal's program while its record says it is live
    * (setProgram); the program the stream was attached to; the one whose
    * stream ended for good. */
@@ -335,8 +370,14 @@ export class TermPane {
     this.offConnection = o.onConnection((up) => {
       if (!up) return;
       // The connection or the machine's terminals are back: a new round
-      // of attempts.
+      // of attempts. A pane closed by core/host shutdown forgets endedProgram
+      // so a restarted kept shell that reused the same pid still reopens.
+      this.disconnected = false;
+      if (this.closedFor && this.closedByCore) this.endedProgram = undefined;
       this.attachFailures = 0;
+      window.clearTimeout(this.attachTimer);
+      this.attachTimer = undefined;
+      this.reopen();
       this.attach();
     });
     this.offFind = useFind.subscribe((st, prev) => this.findChanged(st, prev));
@@ -443,7 +484,12 @@ export class TermPane {
     if ((window.devicePixelRatio || 1) !== this.dpr) return this.setAppearance(this.appearance);
     const w = Math.round(this.host.clientWidth * this.dpr);
     const h = Math.round(this.host.clientHeight * this.dpr);
-    if (w <= 0 || h <= 0) return;
+    if (w <= 0 || h <= 0) {
+      this.collapsed = true;
+      return;
+    }
+    const wasCollapsed = this.collapsed;
+    this.collapsed = false;
     this.renderer.resize(w, h);
     this.canvas.style.width = `${w / this.dpr}px`;
     this.canvas.style.height = `${h / this.dpr}px`;
@@ -452,9 +498,46 @@ export class TermPane {
     const changed = cols !== this.grid.cols || rows !== this.grid.rows;
     this.grid = { cols, rows };
     if (!this.o.readOnly()) this.term?.resize(cols, rows, m.cw, m.ch);
-    if (changed && this.stream !== undefined && !this.o.readOnly()) this.o.connection.resize(this.stream, cols, rows);
+    if (changed || wasCollapsed) this.renderer.invalidate();
+    if (this.stream !== undefined && !this.o.readOnly()) {
+      if (changed || wasCollapsed || cols !== this.sentGrid.cols || rows !== this.sentGrid.rows) {
+        this.sendResize(this.stream, cols, rows);
+        this.scheduleResizeVerify();
+      }
+    }
     if (!this.term) this.attach();
+    else if (this.stream === undefined && !this.attaching && !this.closedFor && !this.disconnected && this.attachFailures > 0) {
+      this.attachFailures = 0;
+      window.clearTimeout(this.attachTimer);
+      this.attachTimer = undefined;
+      this.attach();
+    }
     this.schedule();
+  }
+
+  private sendResize(stream: number, cols: number, rows: number) {
+    this.sentGrid = { cols, rows };
+    this.o.connection.resize(stream, cols, rows);
+  }
+
+  /** Re-checks the measured and remote grid once after a resize burst settles,
+   * recovering if a narrow collapse or remote latency left the core behind. */
+  private scheduleResizeVerify() {
+    window.clearTimeout(this.resizeVerifyTimer);
+    this.resizeVerifyTimer = window.setTimeout(() => {
+      this.resizeVerifyTimer = undefined;
+      if (this.disposed || this.hidden || this.o.readOnly() || this.stream === undefined) return;
+      this.measureSize();
+      if (this.stream === undefined || this.grid.cols <= 0 || this.grid.rows <= 0) return;
+      const remote = this.o.remoteSize?.();
+      const remoteBehind =
+        !!remote && remote.cols > 0 && remote.rows > 0 && (remote.cols !== this.grid.cols || remote.rows !== this.grid.rows);
+      if (remoteBehind || this.grid.cols !== this.sentGrid.cols || this.grid.rows !== this.sentGrid.rows) {
+        this.sendResize(this.stream, this.grid.cols, this.grid.rows);
+        this.renderer?.invalidate();
+        this.schedule();
+      }
+    }, RESIZE_SETTLE_MS);
   }
 
   // ---- the stream ----
@@ -497,20 +580,31 @@ export class TermPane {
     this.cursorAt = '';
     this.startBlink();
     this.renderer?.invalidate();
+    window.clearTimeout(this.paintTimer);
+    this.paintTimer = undefined;
     this.painting = true;
     this.preludeShown = preludeOf(this.o.m, this.o.address);
     if (this.preludeShown) this.replay(term, this.preludeShown);
-    const paintLimit = performance.now() + PAINT_MAX_MS;
     this.paintBytes = 0;
-    this.awaitPaint(paintLimit);
+    let paintLimit = 0;
+    const ensurePaintLimit = () => {
+      if (!paintLimit) {
+        paintLimit = performance.now() + PAINT_MAX_MS;
+        this.awaitPaint(paintLimit);
+      }
+      return paintLimit;
+    };
     const observe = this.o.readOnly();
+    const attachCols = this.grid.cols;
+    const attachRows = this.grid.rows;
+    this.sentGrid = { cols: attachCols, rows: attachRows };
     this.o.connection
       .attach(
         {
           machine: this.o.m,
           terminal: this.o.address,
-          cols: this.grid.cols,
-          rows: this.grid.rows,
+          cols: attachCols,
+          rows: attachRows,
           history: this.o.scrollback(),
           observe,
           display: this.sentDisplayOf(),
@@ -521,13 +615,14 @@ export class TermPane {
             term.write(data);
             this.unacked += data.length;
             if (!this.painting) return this.schedule();
+            const limit = ensurePaintLimit();
             // Credit is returned at once: the rest of the paint waits for it.
             this.ack();
             this.paintBytes += data.length;
             const now = performance.now();
             // Bulk puts the end off; a program's own small output only brings it nearer.
             const quiet = now + (this.paintBytes > PAINT_ONE_CREDIT ? PAINT_QUIET_LONG_MS : PAINT_QUIET_MS);
-            this.awaitPaint(data.length >= PAINT_BULK ? Math.min(paintLimit, quiet) : Math.min(this.paintEnd, now + PAINT_QUIET_MS));
+            this.awaitPaint(data.length >= PAINT_BULK ? Math.min(limit, quiet) : Math.min(this.paintEnd, now + PAINT_QUIET_MS));
           },
           resized: (cols, rows) => {
             if (this.term !== term) return;
@@ -537,12 +632,19 @@ export class TermPane {
           closed: (reason, exitCode) => {
             if (this.term !== term) return;
             this.stream = undefined;
+            this.sentGrid = { cols: 0, rows: 0 };
+            window.clearTimeout(this.resizeVerifyTimer);
+            this.resizeVerifyTimer = undefined;
             this.unacked = 0;
             this.dropQueue();
             const program = this.streamProgram ?? this.program;
             this.streamProgram = undefined;
-            if (reason === 'disconnected') return; // attached again when the connection is back
+            if (reason === 'disconnected') {
+              this.disconnected = true;
+              return; // attached again when the connection is back
+            }
             this.closedFor = true;
+            this.closedByCore = CORE_ENDED.has(reason);
             this.endedProgram = program;
             this.o.onClosed(reason, exitCode);
             // Another program may be known already.
@@ -554,11 +656,17 @@ export class TermPane {
         (s) => {
           this.attaching = false;
           if (this.disposed || this.term !== term) return this.o.connection.detach(s);
+          this.disconnected = false;
           this.attachFailures = 0;
           this.stream = s;
           this.streamProgram = this.program;
-          if (!observe && (this.grid.cols !== term.cols || this.grid.rows !== term.rows))
-            this.o.connection.resize(s, this.grid.cols, this.grid.rows);
+          if (this.painting) ensurePaintLimit();
+          if (!observe && (this.grid.cols !== this.sentGrid.cols || this.grid.rows !== this.sentGrid.rows)) {
+            this.sendResize(s, this.grid.cols, this.grid.rows);
+            this.renderer?.invalidate();
+            this.schedule();
+          }
+          if (!observe) this.scheduleResizeVerify();
           if (this.focused) this.o.connection.focus(s, true);
           // The theme or font may have changed while attaching.
           if (!observe && JSON.stringify(this.display()) !== this.sentDisplay) this.configure(term);
@@ -570,7 +678,7 @@ export class TermPane {
           // A prelude that changed while attaching is shown by attaching again.
           if (preludeOf(this.o.m, this.o.address) !== this.preludeShown) this.preludeChanged();
         },
-        () => {
+        (e) => {
           this.attaching = false;
           // What was typed for it goes: the stream may come much later, or never.
           this.dropQueue();
@@ -580,9 +688,12 @@ export class TermPane {
             window.clearTimeout(this.paintTimer);
             this.painting = false;
           }
-          if (this.disposed || ++this.attachFailures > ATTACH_RETRIES) return;
+          const busy = e instanceof TermError && e.kind === 'busy';
+          const maxRetries = busy ? ATTACH_BUSY_RETRIES : ATTACH_RETRIES;
+          if (this.disposed || ++this.attachFailures > maxRetries) return;
+          const base = Math.min(ATTACH_RETRY_MAX_MS, ATTACH_RETRY_MIN_MS * 2 ** Math.min(this.attachFailures - 1, 3));
           window.clearTimeout(this.attachTimer);
-          this.attachTimer = window.setTimeout(() => this.attach(), ATTACH_RETRY_MS);
+          this.attachTimer = window.setTimeout(() => this.attach(), retryDelay(base));
         },
       );
   }
@@ -651,12 +762,14 @@ export class TermPane {
   }
 
   /** The last row of the screen with something on it (a character, or a
-   * background color), -1 for none. Read into the pane's frame, which is
-   * the emulator's new one: later updates go on from it. */
+   * background color), -1 for none. Uses a scratch frame sized to term's
+   * current grid so replaying a prelude at its saved size never mutates
+   * this.frame. */
   private lastContentRow(term: Terminal): number {
-    term.update(this.frame);
-    for (let y = this.frame.rows - 1; y >= 0; y--) {
-      const r = this.frame.lines[y];
+    const frame = newFrame(term.cols, term.rows);
+    term.update(frame);
+    for (let y = frame.rows - 1; y >= 0; y--) {
+      const r = frame.lines[y];
       for (let x = 0; x < r.codes.length; x++) if ((r.codes[x] !== 0 && r.codes[x] !== 32) || r.bg[x] !== -1) return y;
     }
     return -1;
@@ -699,13 +812,22 @@ export class TermPane {
     this.program = pid;
     // Attached before the record was known: the stream is the program's.
     if (pid !== undefined && this.stream !== undefined && this.streamProgram === undefined) this.streamProgram = pid;
-    this.reopen();
+    if (this.closedFor) return this.reopen();
+    // A kept terminal that answered unavailable while its shell restarted
+    // may have exhausted its attach retries before the new program arrived.
+    if (pid !== undefined && !this.disconnected && this.stream === undefined && !this.attaching && this.attachFailures > 0) {
+      this.attachFailures = 0;
+      window.clearTimeout(this.attachTimer);
+      this.attachTimer = undefined;
+      this.attach();
+    }
   }
 
   private reopen() {
     const pid = this.program;
     if (this.disposed || !this.closedFor || pid === undefined || pid === this.endedProgram) return;
     this.closedFor = false;
+    this.closedByCore = false;
     this.endedProgram = undefined;
     this.attachFailures = 0;
     this.o.onReopen?.();
@@ -958,7 +1080,12 @@ export class TermPane {
     window.addEventListener('mouseup', this.onMouseUp, { signal });
     window.addEventListener('keydown', this.onModifier, { signal });
     window.addEventListener('keyup', this.onModifier, { signal });
+    window.addEventListener('resize', this.onWindowResize, { signal });
   }
+
+  private onWindowResize = () => {
+    this.measureSize();
+  };
 
   private onKeyDown = (ev: KeyboardEvent) => {
     this.hideMath();
@@ -1008,11 +1135,12 @@ export class TermPane {
     const c = this.frame.cursor;
     const a = this.appearance;
     el.textContent = text;
+    const family = m.cjkFamily && isCjkText(text) ? m.cjkFamily : m.family;
     Object.assign(el.style, {
       display: 'block',
       top: `${(c.y * m.ch) / this.dpr}px`,
       height: `${m.ch / this.dpr}px`,
-      font: `${m.weight} ${m.fontPx / this.dpr}px ${m.family}`,
+      font: `${m.weight} ${m.fontPx / this.dpr}px ${family}`,
       lineHeight: `${m.ch / this.dpr}px`,
       color: a.colors.foreground,
       background: a.colors.background,
@@ -1311,29 +1439,46 @@ export class TermPane {
 
   // ---- dropped files ----
 
-  private dropAllowed(ev: DragEvent): boolean {
-    return !!this.o.onDropFiles && !this.o.readOnly() && carriesFiles(ev.dataTransfer);
+  /** What a drop of this drag would paste: the explorer's paths (checked
+   * first: they are on the machine already), files from outside the page,
+   * or nothing. */
+  private dropKind(ev: DragEvent): 'files' | 'paths' | undefined {
+    const dt = ev.dataTransfer;
+    if (!dt || this.o.readOnly()) return undefined;
+    if (carriesPaths(dt)) return this.o.onDropPaths && this.o.takesPaths?.(dt) ? 'paths' : undefined;
+    return this.o.onDropFiles && carriesFiles(dt) ? 'files' : undefined;
   }
 
   private onDragOver = (ev: DragEvent) => {
-    const ok = this.dropAllowed(ev);
-    this.o.onDropTarget?.(ok);
-    if (!ok) return;
+    const kind = this.dropKind(ev);
+    this.o.onDropTarget?.(kind);
+    if (!kind) return;
     ev.preventDefault();
     ev.dataTransfer!.dropEffect = 'copy';
   };
 
   private onDragLeave = (ev: DragEvent) => {
-    if (!this.host.contains(ev.relatedTarget as Node | null)) this.o.onDropTarget?.(false);
+    if (!this.host.contains(ev.relatedTarget as Node | null)) this.o.onDropTarget?.(undefined);
   };
 
   private onDrop = (ev: DragEvent) => {
-    this.o.onDropTarget?.(false);
-    if (!this.dropAllowed(ev)) return;
+    this.o.onDropTarget?.(undefined);
+    const kind = this.dropKind(ev);
+    if (!kind) return;
     ev.preventDefault();
+    const dt = ev.dataTransfer!;
+    if (kind === 'paths') {
+      // Rows of another machine (a drag from another window) paste nothing.
+      const text = this.o.onDropPaths!(dt);
+      if (!text) return;
+      this.o.activate();
+      this.focus();
+      this.paste(text);
+      return;
+    }
     this.o.activate();
     this.focus();
-    void this.o.onDropFiles!(ev.dataTransfer!.items).then((text) => text && this.paste(text));
+    void this.o.onDropFiles!(dt.items).then((text) => text && this.paste(text));
   };
 
   // ---- links and formulas ----
@@ -1348,11 +1493,39 @@ export class TermPane {
     if (r.link[col]) {
       const target = this.term?.hyperlinkAt(col, row);
       if (target && safeUrl(target)) {
-        let a = col;
-        let b = col + 1;
-        while (a > 0 && r.link[a - 1]) a--;
-        while (b < r.codes.length && r.link[b]) b++;
-        return { cells: [{ y: row, from: a, to: b }], link: { kind: 'url', text: target } };
+        const spanOf = (y: number, seed: number): Cells | undefined => {
+          const line = this.frame.lines[y];
+          if (!line || !line.link[seed] || this.term?.hyperlinkAt(seed, y) !== target) return undefined;
+          let a = seed;
+          let b = seed + 1;
+          while (a > 0 && line.link[a - 1] && this.term?.hyperlinkAt(a - 1, y) === target) a--;
+          while (b < line.codes.length && line.link[b] && this.term?.hyperlinkAt(b, y) === target) b++;
+          return { y, from: a, to: b };
+        };
+        const rowLinkEnd = (line: Row | undefined): number => {
+          if (!line) return 0;
+          let end = line.codes.length;
+          while (end > 0 && line.wide[end - 1] === WIDE_HEAD) end--;
+          return end;
+        };
+        const cur = spanOf(row, col)!;
+        const cells: Cells[] = [cur];
+        // Extend wrapped OSC 8 hyperlinks upward and downward across rows
+        // (skipping trailing WIDE_HEAD spacer cells left when a wide char wraps).
+        for (let y = row - 1; y >= 0 && cells[0].from === 0; y--) {
+          const lastCol = rowLinkEnd(this.frame.lines[y]) - 1;
+          const up = lastCol >= 0 ? spanOf(y, lastCol) : undefined;
+          if (!up) break;
+          cells.unshift(up);
+        }
+        for (let y = row + 1; y < this.frame.rows; y++) {
+          const prevEnd = rowLinkEnd(this.frame.lines[y - 1]);
+          if (prevEnd <= 0 || cells[cells.length - 1].to < prevEnd) break;
+          const down = spanOf(y, 0);
+          if (!down) break;
+          cells.push(down);
+        }
+        return { cells, link: { kind: 'url', text: target } };
       }
     }
     for (const l of linksAround(row, 0, this.frame.rows, this.rowText))
@@ -1540,6 +1713,7 @@ export class TermPane {
     window.clearTimeout(this.autoTimer);
     window.clearTimeout(this.paintTimer);
     window.clearTimeout(this.attachTimer);
+    window.clearTimeout(this.resizeVerifyTimer);
     this.preedit.remove();
     this.listeners.abort();
     this.renderer?.dispose();

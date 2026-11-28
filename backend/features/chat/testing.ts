@@ -84,6 +84,9 @@ export class FakeChatHost {
   states: chat.ChatState[] = [];
   readonly agents = new Map<string, boolean>();
   sessions: chat.Session[] = [];
+  modelsByKind = new Map<string, { models: chat.ModelOption[]; fetchedAt: string }>();
+  exportedMarkdown = '# Conversation Handoff\n';
+  exportedData: chat.ChatExport | undefined;
   trusted: chat.TrustedFolder[] = [];
   hostStatus: chat.HostStatus | undefined;
   /** Refuses the requests of an op; answers the commands of an op with an
@@ -157,6 +160,66 @@ export class FakeChatHost {
         const ch = testChat({ id: chat.newChatID(), kind: req.kind ?? '', cwd: req.cwd ?? '', state: chat.State.Starting });
         this.chats.set(ch.id, ch);
         return void (await c.write({ ok: true, chat: ch }));
+      }
+      case chat.Op.Models: {
+        const k = req.kind ?? '';
+        const entry = this.modelsByKind.get(k);
+        return void (await c.write({
+          ok: true,
+          models: entry?.models ?? [],
+          ...(entry?.fetchedAt ? { fetchedAt: entry.fetchedAt } : {}),
+        }));
+      }
+      case chat.Op.Fork: {
+        const src = this.chats.get(req.chat ?? '');
+        if (!src) return void (await c.write({ error: { code: chat.Code.UnknownChat, message: 'no such chat' } }));
+        const forked = testChat({
+          id: chat.newChatID(),
+          kind: src.kind,
+          cwd: src.cwd,
+          title: req.title || `${src.title} (fork)`,
+          state: chat.State.Starting,
+        });
+        this.chats.set(forked.id, forked);
+        return void (await c.write({ ok: true, chat: forked }));
+      }
+      case chat.Op.Switch: {
+        const src = this.chats.get(req.chat ?? '');
+        if (!src) return void (await c.write({ error: { code: chat.Code.UnknownChat, message: 'no such chat' } }));
+        const switched = testChat({
+          id: chat.newChatID(),
+          kind: req.targetKind ?? 'codex',
+          cwd: src.cwd,
+          title: src.title,
+          state: chat.State.Starting,
+        });
+        this.chats.set(switched.id, switched);
+        return void (await c.write({ ok: true, chat: switched }));
+      }
+      case chat.Op.Export: {
+        const src = this.chats.get(req.chat ?? '');
+        if (!src) return void (await c.write({ error: { code: chat.Code.UnknownChat, message: 'no such chat' } }));
+        if (req.format === 'json') {
+          const data: chat.ChatExport = this.exportedData ?? {
+            version: 1,
+            exportedAt: '2026-01-01T00:00:00Z',
+            chat: {
+              id: src.id,
+              kind: src.kind,
+              title: src.title,
+              cwd: src.cwd,
+              sessionId: src.sessionId,
+              state: src.state,
+              created: src.created,
+              updated: src.updated,
+              seq: src.seq,
+            },
+            ...(req.upToSeq !== undefined ? { upToSeq: req.upToSeq } : {}),
+            events: [],
+          };
+          return void (await c.write({ ok: true, data }));
+        }
+        return void (await c.write({ ok: true, markdown: this.exportedMarkdown }));
       }
       case chat.Op.Trusted:
         return void (await c.write({ ok: true, trusted: [...this.trusted] }));
@@ -417,6 +480,8 @@ export interface RigOptions {
   version?: string;
   /** Prepares the host before the machines connect. */
   host?: (h: FakeChatHost) => void;
+  /** Optional vault workspace env resolver. */
+  workspaceEnv?: import('./hub.ts').ChatOptions['workspaceEnv'];
 }
 
 export interface Rig {
@@ -464,6 +529,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
     limits: o.limits,
     now: () => Date.now() + offset,
     version: () => o.version ?? 'test',
+    workspaceEnv: o.workspaceEnv,
   });
   const store = new Settings('', { modules: [chatSettings, toggles([feature])] });
   const audit = memoryAudit();

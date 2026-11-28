@@ -120,7 +120,7 @@ function closePanes(m: string, panes: readonly string[]) {
  * panes that show them (diffs of the working tree, editors) close once
  * discarded, those with unsaved text asked about first as closing would.
  * Resolves with whether it discarded them. */
-export async function discard(m: string, repo: string, files: StatusFile[]): Promise<boolean> {
+export async function discard(m: string, repo: string, files: StatusFile[], o?: { onConfirmed?: () => void }): Promise<boolean> {
   if (!files.length) return false;
   const untracked = files.filter((f) => f.kind === 'untracked').map((f) => f.path);
   const tracked = files.filter((f) => f.kind !== 'untracked').map((f) => f.path);
@@ -135,6 +135,7 @@ export async function discard(m: string, repo: string, files: StatusFile[]): Pro
   const layout = terms.layout(m);
   const panes = layout ? panesOfFiles(layout, repo, [...tracked, ...untracked]) : [];
   if (!(await confirmUnsaved(m, panes))) return false;
+  o?.onConfirmed?.();
   const done = await runGit(m, repo, 'discard', { paths: tracked, untracked });
   if (done) closePanes(m, panes);
   return done;

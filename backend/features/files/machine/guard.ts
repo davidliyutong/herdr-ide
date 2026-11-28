@@ -26,7 +26,7 @@ function identity(p: string, follow: boolean): ID | null {
 export const errCode = (e: unknown): string | undefined => (e as NodeJS.ErrnoException | null)?.code;
 
 /** An error of the file system as the explorer's code: not_found, exists,
- * denied, no_space, read_only; a Fail as it is; anything else failed, with
+ * denied, no_space, read_only_fs; a Fail as it is; anything else failed, with
  * its message. */
 export function codeOf(e: unknown): Fail {
   if (e instanceof Fail) return e;
@@ -44,7 +44,7 @@ export function codeOf(e: unknown): Fail {
     case 'EDQUOT':
       return new Fail('no_space', 507, msg);
     case 'EROFS':
-      return new Fail('read_only', 403, msg);
+      return new Fail('read_only_fs', 403, msg);
   }
   return new Fail('failed', 500, msg);
 }

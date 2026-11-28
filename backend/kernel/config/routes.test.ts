@@ -85,7 +85,7 @@ describe('settings routes', () => {
     expect([body.problems, body.read_only, body.file, body.client]).toEqual([
       [],
       false,
-      join(dir, 'veldr', 'settings-dev.json'),
+      join(dir, '.veldr-dev', 'settings.json'),
       'browser',
     ]);
   });
@@ -182,7 +182,7 @@ describe('keybindings routes', () => {
       'read_only',
       'file',
     ]);
-    expect(r.body.file).toBe(join(dir, 'veldr', 'keybindings-dev.json'));
+    expect(r.body.file).toBe(join(dir, '.veldr-dev', 'keybindings.json'));
     expect(r.body.sections[0]).toEqual({ id: 'app', order: 10 });
     expect(Object.keys(r.body.effective)).toEqual(['linux', 'linux-browser', 'mac', 'mac-browser', 'windows', 'windows-browser']);
 

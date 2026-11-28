@@ -4,8 +4,6 @@
 // at a time: a new one cancels the one in flight (the machine stops it).
 import { create } from 'zustand';
 import { actions } from '../../actions';
-import { isPluginOn } from '../registry';
-import { openEditor } from '../files/ops';
 import { errorText, search, type SearchParams, type SearchResult } from './api';
 import { paramsKey } from './model';
 
@@ -97,10 +95,9 @@ export function cancelSearch() {
   setSearch({ busy: false });
 }
 
-/** Opens a file at a line and column: in VS Code while its plugin is on,
- * else in the file explorer's editor (preview), else in Quick Look. */
+/** Opens a file at a line and column as a path found in a pane does
+ * (actions.openPath): in the file explorer's own preview editor by default,
+ * in VS Code when files.openLinks says so, else in Quick Look. */
 export function openMatch(m: string, path: string, line?: number, col?: number) {
-  if (isPluginOn('vscode')) return actions.openInCode(m, path, line, col);
-  if (isPluginOn('files')) return openEditor(m, path, { preview: true, line, col });
-  return actions.openPreview(m, path);
+  return actions.openPath(m, path, { line, col });
 }

@@ -1,11 +1,24 @@
 // A machine's workspaces after its terminal core started again: terminals
 // that ended with the core are started again in their place, and a
 // terminal that lost its agent asks for it back, once.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as L from '../term/layout';
-import { endedWithCore, rememberAgents, replaceTerminal, takeResume } from '../restore';
+import {
+  AGENT_FORGET_MS,
+  endedWithCore,
+  keptWhileRestarting,
+  missingOnEmptyCore,
+  rememberAgents,
+  replaceTerminal,
+  takeResume,
+} from '../restore';
 import { FakeHub, settle } from './fakeTerms';
 import { useStore } from '../state/store';
+
+afterEach(() => {
+  vi.useRealTimers();
+  useStore.setState({ readOnly: false });
+});
 
 const layoutOf = (...leaves: L.TerminalLeaf[]): L.Layout => ({
   version: 2,
@@ -195,5 +208,235 @@ describe('restore', () => {
     expect(typed).toEqual([]);
     await settle();
     expect(typed).toEqual(['claude --continue\r']);
+  });
+
+  it('preserves workspaces, kept/restarting terminals, agent sessions and open file tabs across offline -> disable -> re-enable -> reboot', async () => {
+    vi.useFakeTimers();
+    useStore.setState({ readOnly: false });
+    const S1 = '0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f';
+    const editorLeaf: L.PluginLeaf = { view: { id: 'e1', plugin: 'files', kind: 'editor', path: '/srv/proj/a.ts' } };
+    const previewLeaf: L.PreviewLeaf = { preview: { id: 'p1', path: '/srv/proj/README.md' } };
+    const initial: L.Layout = {
+      version: 2,
+      workspaces: [
+        {
+          id: 'w1',
+          name: 'proj',
+          cwd: '/srv/proj',
+          tabs: [
+            { root: { terminal: 't1', agent: 'claude', pid: 7, session: S1 }, focused: 't1' },
+            { root: editorLeaf, focused: 'view:e1' },
+            { root: previewLeaf, focused: 'preview:p1' },
+          ],
+          selected: 0,
+        },
+      ],
+      selected: 0,
+    };
+    const hub = new FakeHub();
+    const fm = hub.machine('m', [FakeHub.term('t1', { pid: 7, agent: 'claude', agent_session: S1, agent_session_source: 'pid' })], initial);
+    const model = hub.install();
+    model.subscribe('m');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(model.layout('m')?.workspaces[0].tabs).toHaveLength(3);
+
+    // Shutdown starts killing the agent before SSH drops, starting the forget timer.
+    hub.event('m', 'labels', 't1', { record: FakeHub.term('t1', { pid: 7 }) });
+    // Remote host powers off and the user manually disables it.
+    hub.push({ t: 'backend', m: 'm', state: 'error', code: 'machine_offline', version: '' });
+    const setsBefore = hub.calls.filter((c) => c.method === 'doc.set').length;
+
+    // Disabled for much longer than AGENT_FORGET_MS (30s): layout, agent session
+    // and open file tabs stay intact and nothing writes to doc.set.
+    await vi.advanceTimersByTimeAsync(AGENT_FORGET_MS * 4);
+    expect(model.layout('m')?.workspaces[0].tabs).toHaveLength(3);
+    expect(leaves(model.layout('m')!)[0]).toMatchObject({ terminal: 't1', agent: 'claude', pid: 7, session: S1 });
+    expect(hub.calls.filter((c) => c.method === 'doc.set')).toHaveLength(setsBefore);
+
+    // Host boots back up and is re-enabled: snapshot arrives with kept t1 in
+    // restarting ('lost') state; it must NOT be pruned or have its agent wiped.
+    expect(keptWhileRestarting(FakeHub.term('t1', { state: 'lost', keep: true }))).toBe(true);
+    fm.terminals = [FakeHub.term('t1', { state: 'lost', keep: true })];
+    hub.push({ t: 'backend', m: 'm', state: 'ready', code: '', version: '1.0' });
+    hub.push({ t: 'snapshot', m: 'm', terminals: fm.terminals });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(model.layout('m')?.workspaces[0].tabs).toHaveLength(3);
+    expect(leaves(model.layout('m')!)[0]).toMatchObject({ terminal: 't1', agent: 'claude', pid: 7, session: S1 });
+
+    // Core finishes restarting kept t1 — even if Linux reused the exact same pid (7)!
+    hub.event('m', 'restarted', 't1', FakeHub.term('t1', { pid: 7, keep: true }));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(leaves(model.layout('m')!)).toEqual([{ terminal: 't1', session: S1, resume: 'claude' }, editorLeaf, previewLeaf]);
+  });
+
+  it('restores terminals on an empty core (e.g. >24h disable/reboot) in workspace cwd, keeps file tabs, and recovers if doc is null', async () => {
+    useStore.setState({ readOnly: false });
+    const S1 = '0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f';
+    const editorLeaf: L.PluginLeaf = { view: { id: 'e1', plugin: 'files', kind: 'editor', path: '/srv/proj/a.ts' } };
+    const initial: L.Layout = {
+      version: 2,
+      workspaces: [
+        {
+          id: 'w1',
+          name: 'proj',
+          cwd: '/srv/proj',
+          tabs: [
+            { root: { terminal: 't1', agent: 'claude', pid: 7, session: S1 }, focused: 't1' },
+            { root: editorLeaf, focused: 'view:e1' },
+          ],
+          selected: 0,
+        },
+      ],
+      selected: 0,
+    };
+    expect(missingOnEmptyCore(initial, [])).toEqual(['t1']);
+    expect(missingOnEmptyCore(initial, [FakeHub.term('t1')])).toEqual([]);
+
+    const hub = new FakeHub();
+    hub.next = 3;
+    const fm = hub.machine('m', [FakeHub.term('t1', { pid: 7, cwd: '/srv/proj' })], initial);
+    const model = hub.install();
+    model.subscribe('m');
+    await settle();
+
+    // Machine goes offline/disabled for >24h; core returns with no terminal records.
+    hub.push({ t: 'backend', m: 'm', state: 'error', code: 'machine_offline', version: '' });
+    fm.terminals = [];
+    hub.push({ t: 'backend', m: 'm', state: 'ready', code: '', version: '1.0' });
+    hub.push({ t: 'snapshot', m: 'm', terminals: [] });
+    await settle();
+    await settle();
+    const afterEmpty = leaves(model.layout('m')!);
+    expect(afterEmpty).toEqual([{ terminal: 't3', before: 't1', session: S1, resume: 'claude' }, editorLeaf]);
+    expect(model.terminal('m', 't3')?.cwd).toBe('/srv/proj');
+
+    // Even if the rebooted core lost its layout document entirely (value: null)
+    // along with all records, an open page recovers its loaded workspaces from memory.
+    hub.push({ t: 'backend', m: 'm', state: 'error', code: 'machine_offline', version: '' });
+    fm.terminals = [];
+    fm.layout = null;
+    fm.version = 0;
+    hub.push({ t: 'backend', m: 'm', state: 'ready', code: '', version: '1.0' });
+    hub.push({ t: 'snapshot', m: 'm', terminals: [] });
+    await settle();
+    await settle();
+    const recovered = leaves(model.layout('m')!);
+    expect(recovered).toEqual([{ terminal: 't4', before: 't3', session: S1, resume: 'claude' }, editorLeaf]);
+    expect(leaves(hub.layout('m')!)).toEqual(recovered);
+  });
+
+  it('retries transient doc.get failure on reconnect', async () => {
+    vi.useFakeTimers();
+    useStore.setState({ readOnly: false });
+    const hub = new FakeHub();
+    hub.machine('m', [FakeHub.term('t1', { pid: 7 })], layoutOf({ terminal: 't1' }));
+    const handle = hub.handle.bind(hub);
+    let failures = 2;
+    hub.handle = (msg) => {
+      if (msg.t === 'call' && msg.method === 'doc.get' && failures > 0) {
+        failures--;
+        hub.push({ t: 'res', rid: msg.rid, error: { kind: 'unavailable', message: 'busy' } });
+        return;
+      }
+      handle(msg);
+    };
+    const model = hub.install();
+    model.subscribe('m');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(model.layout('m')).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(leaves(model.layout('m')!)).toEqual([{ terminal: 't1' }]);
+  });
+
+  it('does not drop a same-pid restarted event arriving while loadLayout is in flight', async () => {
+    useStore.setState({ readOnly: false });
+    const S1 = '0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f';
+    const hub = new FakeHub();
+    const fm = hub.machine(
+      'm',
+      [FakeHub.term('t1', { state: 'lost', keep: true })],
+      layoutOf({ terminal: 't1', agent: 'claude', pid: 7, session: S1 }),
+    );
+    const handle = hub.handle.bind(hub);
+    let heldGet: Record<string, unknown> | undefined;
+    hub.handle = (msg) => {
+      if (!heldGet && msg.t === 'call' && msg.method === 'doc.get') {
+        heldGet = msg;
+        return;
+      }
+      handle(msg);
+    };
+    const model = hub.install();
+    model.subscribe('m');
+    await settle();
+    expect(heldGet).toBeDefined();
+
+    // While doc.get is still in flight, kept t1 finishes restarting with the SAME pid (7).
+    const restarted = FakeHub.term('t1', { pid: 7, keep: true });
+    fm.terminals = [restarted];
+    hub.event('m', 'restarted', 't1', restarted);
+    await settle();
+
+    // Now doc.get resolves: pending restart is applied so resume is set instead of forgetting the agent.
+    handle(heldGet!);
+    await settle();
+    expect(leaves(model.layout('m')!)).toEqual([{ terminal: 't1', session: S1, resume: 'claude' }]);
+  });
+
+  it('does not prune sibling terminals when loadLayout runs mid-restore on an empty core', async () => {
+    useStore.setState({ readOnly: false });
+    const hub = new FakeHub();
+    hub.next = 3;
+    const initial: L.Layout = {
+      version: 2,
+      workspaces: [
+        {
+          id: 'w1',
+          name: 'proj',
+          cwd: '/srv/proj',
+          tabs: [
+            { root: { terminal: 't1', agent: 'claude', pid: 7 }, focused: 't1' },
+            { root: { terminal: 't2', agent: 'codex', pid: 8 }, focused: 't2' },
+          ],
+          selected: 0,
+        },
+      ],
+      selected: 0,
+    };
+    const fm = hub.machine('m', [], initial);
+    const handle = hub.handle.bind(hub);
+    const heldRuns: Array<Record<string, unknown>> = [];
+    hub.handle = (msg) => {
+      if (msg.t === 'call' && msg.method === 'terminal.run' && heldRuns.length < 2) {
+        heldRuns.push(msg);
+        return;
+      }
+      handle(msg);
+    };
+    const model = hub.install();
+    model.subscribe('m');
+    await settle();
+    // Both t1 and t2 are restoring in parallel on the empty core.
+    expect(heldRuns).toHaveLength(2);
+
+    // t1 finishes first (creating t3 so records.length becomes 1), then another client's
+    // doc event triggers loadLayout while t2's terminal.run is still in flight.
+    handle(heldRuns[0]);
+    await settle();
+    fm.version++;
+    hub.event('m', 'doc', '', { name: 'layout', version: fm.version });
+    await settle();
+    // t2 must NOT be pruned while its restore is in flight.
+    expect(L.layoutTerminals(model.layout('m')!)).toEqual(['t3', 't2']);
+
+    // t2's terminal.run completes -> replaces t2 cleanly as t4.
+    handle(heldRuns[1]);
+    await settle();
+    await settle();
+    expect(leaves(model.layout('m')!)).toEqual([
+      { terminal: 't3', before: 't1', resume: 'claude' },
+      { terminal: 't4', before: 't2', resume: 'codex' },
+    ]);
+    expect(hub.calls.some((c) => c.method === 'terminal.kill')).toBe(false);
   });
 });

@@ -97,6 +97,47 @@ export interface ChatUsage {
   limits?: Limit[];
 }
 
+/** How a prompt sent while a turn runs is delivered (chatproto.Delivery). */
+export const DELIVERIES = ['queue', 'steer', 'interrupt'] as const;
+export type Delivery = (typeof DELIVERIES)[number];
+
+/** The kind of a running or recent background task (chatproto.TaskKind). */
+export const TASK_KINDS = ['shell', 'subagent', 'monitor', 'workflow', 'other'] as const;
+export type TaskKind = (typeof TASK_KINDS)[number];
+
+/** The lifecycle state of a background task (chatproto.TaskStatus). */
+export const TASK_STATUSES = ['running', 'pending', 'completed', 'failed', 'stopped'] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+/** A model offered by an agent kind (chatproto.ModelOption; Op.Models). */
+export interface ModelOption {
+  value: string;
+  name: string;
+  description?: string;
+  efforts?: string[];
+  defaultEffort?: string;
+  images?: boolean;
+}
+
+/** A background task or subagent tracked by a live chat session (chatproto.BackgroundTask). */
+export interface BackgroundTask {
+  id: string;
+  kind: TaskKind;
+  status: TaskStatus;
+  description: string;
+  command?: string;
+  agentType?: string;
+  toolCallId?: string;
+  parentTaskId?: string;
+  pid?: number;
+  backgrounded?: boolean;
+  stoppable?: boolean;
+  startedAt?: string;
+  tokens?: number;
+  toolUses?: number;
+  durationMs?: number;
+}
+
 /** What a chat's agent can do. */
 export interface Capabilities {
   images: boolean;
@@ -107,6 +148,16 @@ export interface Capabilities {
   effort: boolean;
   model: boolean;
   cancelQueued: boolean;
+  /** Mid-turn steering via Delivery.Steer (prompt / steer_queued). */
+  steer?: boolean;
+  /** Terminate individual running background tasks/subagents (stop_task). */
+  stopTask?: boolean;
+  /** Native session fork (Op.Fork; host falls back to context-seeded fork when false). */
+  fork?: boolean;
+  /** Truncate/rewind conversation history to an earlier user turn (rewind). */
+  rewind?: boolean;
+  /** Restore file edits/checkpoints on rewind (Claude with checkpointing). */
+  rewindFiles?: boolean;
 }
 
 /** A chat as the host knows it (chatproto.Chat). */
@@ -135,6 +186,8 @@ export interface Chat {
   config?: ConfigOption[];
   commands?: SlashCommand[];
   usage?: ChatUsage;
+  /** Running background tasks and subagents while the agent process is live. */
+  tasks?: BackgroundTask[];
   capabilities: Capabilities;
 }
 
@@ -244,6 +297,7 @@ export interface HostSettings {
   maxTotalBytes?: number;
   maxChatBytes?: number;
   defaultMode?: Mode;
+  defaultModes?: Record<string, Mode>;
   allowFull?: boolean;
 }
 
@@ -254,7 +308,22 @@ export interface HostSettings {
  * The hub attaches a read-only page's subscription with noCatchUp: it
  * starts nothing on the machine (no catch-up of what the session did in
  * a terminal). */
-export const REQUEST_OPS = ['agents', 'chats', 'sessions', 'new', 'close', 'delete', 'seen', 'attach', 'trust', 'untrust'] as const;
+export const REQUEST_OPS = [
+  'agents',
+  'chats',
+  'sessions',
+  'new',
+  'close',
+  'delete',
+  'seen',
+  'attach',
+  'trust',
+  'untrust',
+  'models',
+  'fork',
+  'switch',
+  'export',
+] as const;
 
 /** What a new chat starts with; each a value of the chat's option of
  * that category. */
@@ -262,6 +331,8 @@ export interface Options {
   model?: string;
   effort?: string;
   mode?: string;
+  /** Models to start with when the agent does not offer model, in order. */
+  models?: string[];
 }
 
 /** The operations of a command (chatproto.Op*), each answered by an ack. */
@@ -272,9 +343,12 @@ export const COMMAND_OPS = [
   'answer',
   'set_config',
   'cancel_queued',
+  'steer_queued',
   'compact',
   'rename',
   'handoff',
+  'stop_task',
+  'rewind',
 ] as const;
 export type CommandOp = (typeof COMMAND_OPS)[number];
 
@@ -283,11 +357,13 @@ export type CommandOp = (typeof COMMAND_OPS)[number];
 export interface Command {
   op: CommandOp;
   id?: string;
-  /** prompt: ACP content blocks (text, image, resource_link). */
+  /** prompt, rewind: ACP content blocks (text, image, resource_link). */
   content?: ContentBlock[];
-  /** prompt: the page's id of the message, given back in its user or
+  /** prompt, rewind: the page's id of the message, given back in its user or
    * queued event. */
   clientId?: string;
+  /** prompt, steer_queued: how to deliver while a turn runs. */
+  delivery?: Delivery;
   /** permission, answer: the request answered. */
   request?: string;
   /** permission: the optionId chosen. */
@@ -299,10 +375,18 @@ export interface Command {
   /** set_config */
   config?: string;
   value?: string;
-  /** cancel_queued */
+  /** cancel_queued, steer_queued */
   message?: string;
   /** rename */
   title?: string;
+  /** stop_task: BackgroundTask.id to terminate. */
+  task?: string;
+  /** rewind: target EventType.User seq to rewind to. */
+  seq?: number;
+  /** rewind: restore file checkpoints (when capabilities.rewindFiles). */
+  restoreFiles?: boolean;
+  /** compact: optional compaction guidance instructions. */
+  instructions?: string;
 }
 
 /** The permission options the host shows for an agent without its own
@@ -354,6 +438,7 @@ export const HOST_CODES = [
   'unknown_chat',
   'too_many',
   'busy',
+  'probe_busy',
   'not_found',
   'start_failed',
   'protocol',

@@ -106,7 +106,9 @@ export const COMMANDS: readonly Command[] = [
   // does.
   cmd('workspace.closeOthers', 'workspace'),
 
-  cmd('tab.new', 'tab', on(macApp, 'cmd+t'), on(winLinuxApp, 'ctrl+shift+t')),
+  // Browsers' keys on every system: ctrl+t is then no shell's (readline's
+  // transpose, fzf's file search) in the desktop app on Windows and Linux.
+  cmd('tab.new', 'tab', on(macApp, 'cmd+t'), on(winLinuxApp, 'ctrl+t')),
   cmd('tab.rename', 'tab'),
   cmd(
     'tab.next',
@@ -172,15 +174,18 @@ export const COMMANDS: readonly Command[] = [
   // Finder and Xcode on macOS and Explorer/VS Code elsewhere.
   cmd('pane.back', 'pane', on(macApp, 'cmd+bracketleft'), on(winLinuxApp, 'alt+left')),
   cmd('pane.forward', 'pane', on(macApp, 'cmd+bracketright'), on(winLinuxApp, 'alt+right')),
-  // Brings back what Close Pane or Close Tab closed in the last seconds.
-  // Cmd+Z in a terminal: the page takes it there; text fields and VS Code
-  // keep it for Undo (desktop/src/menu.ts).
-  cmd('pane.undoClose', 'pane', on(macApp, 'cmd+z'), on(winLinuxApp, 'ctrl+shift+z')),
+  // Brings back what Close Pane or Close Tab closed in the last seconds,
+  // with browsers' key for reopening a closed tab.
+  cmd('pane.undoClose', 'pane', on(macApp, 'cmd+shift+t'), on(winLinuxApp, 'ctrl+shift+t')),
 
   cmd('view.toggleSidebar', 'view', on(macApp, 'cmd+b'), on(winLinuxApp, 'ctrl+shift+b')),
   // The right sidebar: the plugins' panels (web/src/plugins), with VS
   // Code's key for its secondary sidebar.
   cmd('view.togglePanel', 'view', on(macApp, 'cmd+alt+b'), on(winLinuxApp, 'alt+shift+b')),
+  // The right sidebar's next or previous tool in the rail's order (also
+  // Cmd/Alt held with a vertical swipe, web/src/panelSwipe.ts); no keys.
+  cmd('view.panel.next', 'view'),
+  cmd('view.panel.previous', 'view'),
   // The file explorer's panel, with VS Code's key for its explorer.
   cmd('view.panel.files', 'view', on(macApp, 'cmd+shift+e'), on(winLinuxApp, 'ctrl+shift+e')),
   // The desktop app's zoom (the window.zoom setting), with the keys

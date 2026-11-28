@@ -12,11 +12,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: vi.fn() } }));
 
 import { chatPlugin } from '../plugins/chat';
-import { fullAccessAllowed, permissionMode, readState, readStates } from '../plugins/chat/api';
+import {
+  LAST_MODEL,
+  fullAccessAllowed,
+  modelUnavailable,
+  permissionMode,
+  readState,
+  readStates,
+  rememberModel,
+  startModelOptions,
+} from '../plugins/chat/api';
 import { chatMenu, cleanDir, useChatUi } from '../plugins/chat/ops';
 import { STATES_PATH, type ChatState } from '../plugins/chat/protocol';
 import { chatSource, dropSources } from '../plugins/chat/source';
-import { applyMessage, chatGone, loadSnapshot, resetChats, SNAPSHOT_GAP_MS, useChats } from '../plugins/chat/state';
+import { applyMessage, chatGone, liveKey, loadSnapshot, setLive, resetChats, SNAPSHOT_GAP_MS, useChats } from '../plugins/chat/state';
 import { resetSeen, SEEN_RETRY_MAX_MS, SEEN_RETRY_MS, SEEN_TRIES } from '../plugins/chat/status';
 import { definePlugins } from '../plugins/registry';
 import { useSettings } from '../settings';
@@ -367,6 +376,7 @@ describe('new chats', () => {
     expect(items()).toEqual([
       ['chat.claude', 'Claude Code Chat'],
       ['chat.codex', 'Codex Chat'],
+      ['chat.agy', 'Antigravity Chat'],
       ['chat.kimi', 'Kimi Code Chat'],
       ['chat.grok', 'Grok Chat'],
     ]);
@@ -390,7 +400,7 @@ describe('new chats', () => {
     await settle();
     const post = calls.find((c) => c.method === 'POST')!;
     expect(post.url).toBe('/api/m/m/p/chat/new');
-    expect(post.body).toEqual({ kind: 'codex', cwd: '/src/proj', options: { mode: 'acceptEdits' } });
+    expect(post.body).toEqual({ kind: 'codex', cwd: '/src/proj', options: { mode: 'acceptEdits' }, workspace: 'w1w1w1w1' });
     const ws = hub.layout('m')!.workspaces[0];
     expect(ws.tabs).toHaveLength(2);
     const leaf = ws.tabs[1].root as L.PluginLeaf;
@@ -410,12 +420,125 @@ describe('new chats', () => {
     expect(permissionMode(values({ 'chat.permissionMode': 'plan' }), 'm')).toBe('plan');
     expect(permissionMode(values({ 'chat.permissionMode': 'rm -rf' }), 'm')).toBe('default');
     expect(permissionMode({}, 'm')).toBe('default');
+    // Per-agent permission mode overrides global chat.permissionMode when not 'inherit',
+    // and still enforces allowFullAccess.
+    expect(
+      permissionMode(
+        values({
+          'chat.permissionMode': 'default',
+          'chat.permissionMode.agy': 'full',
+          'chat.permissionMode.claude': 'plan',
+          'chat.permissionMode.codex': 'inherit',
+        }),
+        'm',
+        'agy',
+      ),
+    ).toBeUndefined();
+    expect(
+      permissionMode(
+        values({
+          'chat.permissionMode': 'default',
+          'chat.permissionMode.agy': 'full',
+          'chat.permissionMode.claude': 'plan',
+          'chat.permissionMode.codex': 'inherit',
+          'chat.allowFullAccess': true,
+        }),
+        'm',
+        'agy',
+      ),
+    ).toBe('full');
+    expect(
+      permissionMode(
+        values({ 'chat.permissionMode': 'acceptEdits', 'chat.permissionMode.claude': 'plan', 'chat.permissionMode.codex': 'inherit' }),
+        'm',
+        'claude',
+      ),
+    ).toBe('plan');
+    expect(
+      permissionMode(
+        values({ 'chat.permissionMode': 'acceptEdits', 'chat.permissionMode.claude': 'plan', 'chat.permissionMode.codex': 'inherit' }),
+        'm',
+        'codex',
+      ),
+    ).toBe('acceptEdits');
     // A machine's own value first, then the app's; off by default.
     expect(fullAccessAllowed({}, 'm')).toBe(false);
     const own = { 'chat.allowFullAccess': { value: false, source: 'global' as const, machines: { m: true } } };
     expect([fullAccessAllowed(own, 'm'), fullAccessAllowed(own, 'n')]).toEqual([true, false]);
     expect(cleanDir('/a//b/./c/../d/')).toBe('/a/b/d');
     expect(cleanDir('rel')).toBeUndefined();
+  });
+
+  it('start on a shown model when the agent’s default is hidden from the picker (not the hidden default)', async () => {
+    answers['POST /api/m/m/p/chat/new'] = newChat(A, 'claude');
+    answers['GET /api/m/m/p/chat/agents'] = agents([{ kind: 'claude', available: true }]);
+    answers['GET /api/m/m/p/chat/models'] = () =>
+      new Response(
+        JSON.stringify({
+          models: [
+            { value: 'default', name: 'Default (recommended)' },
+            { value: 'opus', name: 'Opus' },
+            { value: 'sonnet', name: 'Sonnet' },
+            { value: 'haiku', name: 'Haiku' },
+          ],
+        }),
+        { status: 200 },
+      );
+    useSettings.setState({ values: { 'chat.visibleModels.claude': { value: ['haiku', 'opus'], source: 'global' } } });
+    const item = chatPlugin.newTabItems!('m').find((i) => i.id === 'chat.claude')!;
+    await item.run('m', 'w1w1w1w1');
+    await settle();
+    const post = calls.find((c) => c.method === 'POST')!;
+    // In the agent's order, the hidden default left out.
+    expect(post.body).toMatchObject({ kind: 'claude', options: { mode: 'default', model: 'opus', models: ['haiku'] } });
+  });
+
+  it('start on the model the settings name, the one chosen last, or the first shown the agent offers', () => {
+    const values = (v: Record<string, unknown>) =>
+      Object.fromEntries(Object.entries(v).map(([k, value]) => [k, { value, source: 'global' as const }]));
+    const offered = ['default', 'opus', 'sonnet', 'haiku'];
+    // Every model shown, no choice: the agent's own default.
+    expect(startModelOptions({}, 'claude', offered)).toEqual({});
+    // A choice: that model; with every model shown nothing else is asked.
+    expect(startModelOptions(values({ 'chat.model.claude': 'sonnet' }), 'claude', offered)).toEqual({ model: 'sonnet' });
+    // A choice the agent no longer lists (its cached list): the agent's own default.
+    expect(startModelOptions(values({ 'chat.model.claude': 'opus-old' }), 'claude', offered)).toEqual({});
+    // Unknown list: the choice is asked, the adapter checks it against the agent's.
+    expect(startModelOptions(values({ 'chat.model.claude': 'opus-old' }), 'claude')).toEqual({ model: 'opus-old' });
+    // Only some shown: the choice first, then the shown ones in the agent's order.
+    const some = { 'chat.visibleModels.claude': ['haiku', 'sonnet'] };
+    expect(startModelOptions(values({ ...some, 'chat.model.claude': 'haiku' }), 'claude', offered)).toEqual({
+      model: 'haiku',
+      models: ['sonnet'],
+    });
+    // A hidden choice or one withdrawn is passed over.
+    expect(startModelOptions(values({ ...some, 'chat.model.claude': 'opus' }), 'claude', offered)).toEqual({
+      model: 'sonnet',
+      models: ['haiku'],
+    });
+    expect(startModelOptions(values({ ...some, 'chat.model.claude': 'haiku' }), 'claude', ['default', 'sonnet'])).toEqual({
+      model: 'sonnet',
+    });
+    // Every shown model withdrawn: the agent's own.
+    expect(startModelOptions(values(some), 'claude', ['default', 'opus'])).toEqual({});
+    // The one chosen last; none chosen yet: as the agent's default.
+    expect(startModelOptions(values({ 'chat.model.claude': LAST_MODEL, 'chat.lastModel.claude': 'opus' }), 'claude', offered)).toEqual({
+      model: 'opus',
+    });
+    expect(startModelOptions(values({ 'chat.model.claude': LAST_MODEL }), 'claude', offered)).toEqual({});
+    // Why a choice cannot start a chat.
+    expect(modelUnavailable(values(some), 'claude', 'opus', offered)).toBe('hidden');
+    expect(modelUnavailable(values(some), 'claude', 'haiku', ['sonnet'])).toBe('withdrawn');
+    expect(modelUnavailable(values(some), 'claude', 'haiku', offered)).toBeUndefined();
+  });
+
+  it('remember the model chosen in a chat only while new chats start with the one chosen last', async () => {
+    const put = () => calls.filter((c) => c.method === 'PUT' && c.url === '/api/settings').map((c) => c.body);
+    await rememberModel('claude', 'opus');
+    expect(put()).toEqual([]);
+    useSettings.setState({ values: { 'chat.model.claude': { value: LAST_MODEL, source: 'global' } } });
+    await rememberModel('claude', 'opus');
+    expect(put()).toEqual([{ key: 'chat.lastModel.claude', value: 'opus' }]);
   });
 
   it('say why one did not start', async () => {
@@ -452,8 +575,64 @@ describe('new chats', () => {
     });
     cmd.run();
     expect((useMenu.getState().menu?.entries ?? []).filter(isItem).map((e) => e.label)).toEqual(['Claude Code', 'Grok']);
+    closeMenu(false);
+    // None it can start: said, not an empty menu.
+    const toast = vi.fn(() => 0);
+    useStore.setState({ toast });
+    useChats.setState({ agents: { m: { list: [{ kind: 'claude', available: false, reason: 'not_found' }], at: Date.now() } } });
+    cmd.run();
+    expect(useMenu.getState().menu).toBeUndefined();
+    expect(toast).toHaveBeenCalledWith(t('chat.noAgents', { machine: 'box' }));
     useStore.getState().setReadOnly(true);
     expect(cmd.enabled!()).toBe(false);
+  });
+
+  const notRunning = () => new Response('{"error":"not_running","message":"no chat host"}', { status: 409 });
+
+  it('a new workspace asks the machine which agents it can start, starting its host; the others are not offered', async () => {
+    answers['GET /api/m/m/p/chat/agents'] = notRunning;
+    answers['POST /api/m/m/p/chat/agents'] = agents([
+      { kind: 'codex', available: true },
+      { kind: 'claude', available: false, reason: 'not_found' },
+    ]);
+    // While no host serves, nothing is known: every enabled kind.
+    await chatPlugin.newTabItems!('m');
+    await settle();
+    expect(chatPlugin.newTabItems!('m')).toHaveLength(5);
+    expect(calls.some((c) => c.method === 'POST' && c.url.includes('/chat/agents'))).toBe(false);
+    const { actions } = await import('../actions');
+    await actions.newWorkspace('m', '/src/new', 'new');
+    await settle();
+    const post = calls.find((c) => c.method === 'POST' && c.url.includes('/chat/agents'))!;
+    expect(post.url).toBe('/api/m/m/p/chat/agents?refresh=1');
+    expect(chatPlugin.newTabItems!('m').map((i) => i.id)).toEqual(['chat.codex']);
+  });
+
+  it('a read-only page starts no host to ask', async () => {
+    answers['GET /api/m/m/p/chat/agents'] = notRunning;
+    useStore.getState().setReadOnly(true);
+    chatPlugin.workspaceCreated!('m', 'w1w1w1w1');
+    await settle();
+    expect(calls.filter((c) => c.url.includes('/chat/agents')).map((c) => c.method)).toEqual(['GET']);
+    expect(useChats.getState().agents.m).toBeUndefined();
+  });
+
+  it('a chat whose agent is not found has the machine asked again, past the hub’s cache', async () => {
+    answers['GET /api/m/m/p/chat/agents'] = agents([{ kind: 'grok', available: false, reason: 'not_found' }]);
+    setLive('m', A, { state: 'starting' });
+    await settle();
+    useChats.setState({ agents: { m: { list: [{ kind: 'grok', available: true }], at: Date.now() } } });
+    calls = [];
+    const error = { code: 'not_found', message: 'grok is not in the user’s PATH' };
+    setLive('m', A, { state: 'failed', error });
+    await settle();
+    // Once per failure, not for each change that repeats it.
+    setLive('m', A, { state: 'failed', error });
+    await settle();
+    expect(calls.filter((c) => c.url.includes('/chat/agents')).map((c) => c.url)).toEqual(['/api/m/m/p/chat/agents?refresh=1']);
+    expect(chatPlugin.newTabItems!('m')).toEqual([]);
+    // The chat still says why it failed.
+    expect(useChats.getState().live[liveKey('m', A)]).toMatchObject({ state: 'failed', error: { code: 'not_found' } });
   });
 });
 
@@ -488,11 +667,21 @@ describe('a chat pane’s menu', () => {
   const labels = (list: ReturnType<typeof chatMenu>) => list.map((e) => (isItem(e) ? e.label : '-'));
   const entry = (list: ReturnType<typeof chatMenu>, label: string) => list.find((e) => isItem(e) && e.label === label) as MenuItem;
 
-  it('renames, closes and deletes the chat', async () => {
+  it('renames, forks, switches agent, exports, closes and deletes the chat', async () => {
     applyMessage('m', msg([st(B, { title: 'Fix it' })], 1, true));
     const v = view(B);
     const list = chatMenu('m', v);
-    expect(labels(list)).toEqual([t('chat.rename'), t('chat.close'), t('chat.delete')]);
+    expect(labels(list)).toEqual([
+      t('chat.rename'),
+      t('chat.fork'),
+      t('chat.switchAgent'),
+      t('chat.export'),
+      t('chat.close'),
+      t('chat.delete'),
+    ]);
+    const sw = entry(list, t('chat.switchAgent'));
+    expect((sw.submenu ?? []).filter(isItem).map((e) => e.label)).not.toContain('Claude Code');
+    expect((sw.submenu ?? []).filter(isItem).map((e) => e.label)).toContain('Codex');
     entry(list, t('chat.rename')).run!();
     expect(useChatUi.getState().renaming).toBe(`m\n${v.id}`);
     entry(list, t('chat.close')).run!();
@@ -514,10 +703,83 @@ describe('a chat pane’s menu', () => {
 
   it('has nothing for a closed chat’s close, a leaf without a chat, or a read-only page', () => {
     applyMessage('m', msg([st(B, { state: 'closed' })], 1, true));
-    expect(labels(chatMenu('m', view(B)))).toEqual([t('chat.rename'), t('chat.delete')]);
+    expect(labels(chatMenu('m', view(B)))).toEqual([
+      t('chat.rename'),
+      t('chat.fork'),
+      t('chat.switchAgent'),
+      t('chat.export'),
+      t('chat.delete'),
+    ]);
     expect(chatMenu('m', view('nope'))).toEqual([]);
     useStore.getState().setReadOnly(true);
-    expect(chatMenu('m', view(B))).toEqual([]);
+    expect(labels(chatMenu('m', view(B)))).toEqual([t('chat.export')]);
+    expect(chatMenu('m', view('nope'))).toEqual([]);
+  });
+
+  it('confirms lossy fork from context menu and passes workspace + reports vault status on fork', async () => {
+    const F = 'c00000000000000f9';
+    const toast = vi.fn(() => 0);
+    useStore.setState({ toast });
+    applyMessage('m', msg([st(B, { kind: 'agy', title: 'Agy Chat' })], 1, true));
+    useChats.setState((s) => ({
+      live: {
+        ...s.live,
+        [`m\n${B}`]: {
+          link: 'attached',
+          info: {
+            id: B,
+            kind: 'agy',
+            title: 'Agy Chat',
+            cwd: '/w',
+            state: 'idle',
+            config: [],
+            commands: [],
+            capabilities: {
+              images: false,
+              compact: false,
+              queue: false,
+              plan: false,
+              questions: false,
+              effort: false,
+              model: false,
+              cancelQueued: false,
+              fork: false,
+            },
+          },
+        },
+      },
+    }));
+    answers[`POST /api/m/m/p/chat/fork`] = () =>
+      new Response(
+        JSON.stringify({
+          chat: st(F, { kind: 'agy', title: 'Agy Chat (fork)' }),
+          vault: { injected: 0, locked: true },
+        }),
+        { status: 200 },
+      );
+
+    const list = chatMenu('m', view(B, { agent: 'agy' }));
+    entry(list, t('chat.fork')).run!();
+    await settle();
+    const dlg = useDialog.getState().current as Extract<DialogRequest, { kind: 'confirm' }>;
+    expect(dlg?.kind).toBe('confirm');
+    expect(dlg?.title).toBe(t('chat.forkLossyTitle'));
+    useDialog.setState({ current: undefined });
+    dlg.resolve(true);
+    await settle();
+    await settle();
+
+    const forkCall = calls.find((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/fork');
+    expect(forkCall).toBeDefined();
+    expect(forkCall!.body).toMatchObject({ chat: B, workspace: 'w2w2w2w2' });
+    await vi.waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        t('vault.inject.locked'),
+        expect.objectContaining({ label: expect.any(String) }),
+        undefined,
+        'warning',
+      ),
+    );
   });
 
   it('titles the pane by the chat, else the agent, and marks a chat that is no more', () => {

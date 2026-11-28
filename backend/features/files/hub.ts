@@ -35,6 +35,7 @@ import { Downloads, DownloadCode, type Download } from './downloads.ts';
 import { archiveName, baseName, downloadPaths, uploadTarget } from './names.ts';
 import {
   CHANGES,
+  MAX_FIND_LIMIT,
   MAX_STAT,
   MAX_UPLOAD,
   MAX_WRITE,
@@ -45,8 +46,8 @@ import {
   type Entry,
   type Result,
 } from './protocol.ts';
-import { FILE_CSP, TransferFail, attachment, failCode, serveFile } from './serve.ts';
-import { settings } from './settings.ts';
+import { FILE_CSP, TransferFail, attachment, failCode, serveFile, serveFileDirect } from './serve.ts';
+import { excludeProblem, settings } from './settings.ts';
 
 /** How long a stat or a listing may take (a machine that does not answer). */
 const STAT_MS = 20_000;
@@ -139,12 +140,21 @@ export const fileTransfersFeature = (o: FileTransfersOptions = {}) =>
       const one = ctx.route('/api/m/:id');
 
       // A file, with ranges so that videos seek without downloading
-      // everything; as an attachment with download=1.
+      // everything; as an attachment with download=1. Plain GET requests
+      // without Range/If-None-Match open Op.FsRead directly in a single
+      // remote round-trip (the reply carries stat before the body).
       one.get('/file', plainErrors, async (c) => {
         const q = queryOf(c);
         const path = q.get('path') ?? '';
         if (!path) throw new Fail('bad_request', 400, 'path required');
         const signal = c.req.raw.signal;
+        const maxRaw = q.get('max_size');
+        const maxNum = maxRaw !== null && /^\d+$/.test(maxRaw) ? Number(maxRaw) : undefined;
+        const maxSize = maxNum !== undefined && Number.isSafeInteger(maxNum) && maxNum < Number.MAX_SAFE_INTEGER ? maxNum : undefined;
+        const dl = q.get('download') === '1';
+        if (c.req.method === 'GET' && !c.req.raw.headers.get('Range') && !c.req.raw.headers.get('If-None-Match')) {
+          return serveFileDirect(c.var.machine, path, dl, maxSize, { request: signal }, statStatus);
+        }
         let st: Stat;
         try {
           st = await statOf(c.var.machine, path, signal);
@@ -152,7 +162,8 @@ export const fileTransfersFeature = (o: FileTransfersOptions = {}) =>
           throw new Fail('stat', statStatus(e), (e as Error).message);
         }
         if (st.is_dir) throw new Fail('is_dir', 400, 'is a directory');
-        return serveFile(c.var.machine, c.req.raw, st, q.get('download') === '1', { request: signal });
+        if (maxSize !== undefined && st.size > maxSize) throw new Fail('too_large', 413, 'file too large');
+        return serveFile(c.var.machine, c.req.raw, st, dl, { request: signal });
       });
 
       // A directory: its stat and entries (an empty list for an empty one).
@@ -163,7 +174,7 @@ export const fileTransfersFeature = (o: FileTransfersOptions = {}) =>
           rep = await c.var.machine.request({ op: Op.FsList, ...(path ? { path } : {}) }, { signal: c.req.raw.signal, timeoutMs: STAT_MS });
           if (!rep.stat) throw new Error('missing stat');
         } catch (e) {
-          throw prose(404, e);
+          throw prose(e instanceof Fail ? e.status : statStatus(e), e);
         }
         noStore(c);
         return c.json({ dir: rep.stat, entries: rep.entries ?? [] });
@@ -381,6 +392,64 @@ export const filesFeature = (o: FilesOptions = {}) =>
         const entries = await ctx.call(c.var.machine, filesProtocol, 'stat', { paths }, { signal: c.req.raw.signal });
         noStore(c);
         return c.json({ entries });
+      });
+
+      // Bounded recursive file/dir search under ?dir= for @ path completion
+      // (match=fuzzy, .gitignore-aware) and the file explorer's whole-project
+      // filename filter (match=name, optional regex/hidden/exclude).
+      api.get('/find', async (c) => {
+        const q = queryOf(c);
+        const dir = q.get('dir') ?? '';
+        if (!dir || Buffer.byteLength(dir) > 4096 || dir.includes('\0')) throw new Fail('bad_request', 400, 'dir required');
+        const query = q.get('query') ?? '';
+        if (Buffer.byteLength(query) > 256 || /[\0\r\n]/.test(query)) throw new Fail('bad_request', 400, 'invalid query');
+        const limitRaw = q.get('limit');
+        let limit: number | undefined;
+        if (limitRaw !== null && limitRaw !== '') {
+          if (!/^\d+$/.test(limitRaw)) throw new Fail('bad_request', 400, 'limit must be an integer');
+          const n = Number(limitRaw);
+          if (n < 1 || n > MAX_FIND_LIMIT) throw new Fail('bad_request', 400, `limit must be between 1 and ${MAX_FIND_LIMIT}`);
+          limit = n;
+        }
+        const matchRaw = q.get('match');
+        let match: 'fuzzy' | 'name' | undefined;
+        if (matchRaw !== null && matchRaw !== '') {
+          if (matchRaw !== 'fuzzy' && matchRaw !== 'name') throw new Fail('bad_request', 400, 'match must be fuzzy or name');
+          match = matchRaw;
+        }
+        const parseFlag = (key: string): boolean | undefined => {
+          const v = q.get(key);
+          if (v === null || v === '') return undefined;
+          if (v === '1' || v === 'true') return true;
+          if (v === '0' || v === 'false') return false;
+          throw new Fail('bad_request', 400, `${key} must be 1 or 0`);
+        };
+        const regex = parseFlag('regex');
+        const hidden = parseFlag('hidden');
+        let exclude: string[] | undefined;
+        if (q.has('exclude')) {
+          const raw = q.getAll('exclude');
+          exclude = raw.length === 1 && raw[0] === '' ? [] : raw;
+          const problem = excludeProblem(exclude);
+          if (problem) throw new Fail('bad_request', 400, problem);
+        }
+        const res = await ctx.call(
+          c.var.machine,
+          filesProtocol,
+          'find',
+          {
+            dir,
+            ...(query ? { query } : {}),
+            ...(limit !== undefined ? { limit } : {}),
+            ...(match !== undefined ? { match } : {}),
+            ...(regex !== undefined ? { regex } : {}),
+            ...(hidden !== undefined ? { hidden } : {}),
+            ...(exclude !== undefined ? { exclude } : {}),
+          },
+          { signal: c.req.raw.signal },
+        );
+        noStore(c);
+        return c.json(res);
       });
 
       // The changes: their JSON is the action's parameters.

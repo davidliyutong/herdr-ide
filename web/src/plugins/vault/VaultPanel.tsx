@@ -9,19 +9,20 @@
 // by machine and outcome, by day) and how to connect a coding agent's CLI
 // on each machine (SetupGuide.tsx).
 import { useEffect, useState } from 'react';
-import { History, Plug, Variable as VariableIcon } from 'lucide-react';
+import { History, Layers, Plug, Variable as VariableIcon } from 'lucide-react';
 import { t } from '../../i18n';
 import { loadErrorText, loadRequests, loadVault, useVault } from './api';
 import { RequestCard } from './Approvals';
 import { Gate } from './Gate';
 import { Variables } from './Variables';
+import { Presets } from './Presets';
 import { AccessLog } from './AccessLog';
 import { SetupGuide } from './SetupGuide';
 
 export { passStrength } from './fields';
 import './vault.css';
 
-type Tab = 'variables' | 'log' | 'connect';
+type Tab = 'variables' | 'presets' | 'log' | 'connect';
 
 /** Why the vault did not load (its file of another version or unreadable,
  * the hub unreachable), with a retry: a file moved away or put back is
@@ -46,7 +47,7 @@ function LoadError({ code }: { code: string }) {
 }
 
 export function VaultPanel() {
-  const { status, variables, error, requests, session } = useVault();
+  const { status, variables, presets, error, requests, session } = useVault();
   const [tab, setTab] = useState<Tab>('variables');
   useEffect(() => {
     void loadVault();
@@ -66,22 +67,31 @@ export function VaultPanel() {
           ))}
         </section>
       )}
-      {(status.mode === 'passphrase' || variables.length > 0) && (
+      {(status.mode === 'passphrase' || variables.length > 0 || presets.length > 0) && (
         <>
           <div className="segmented vault-tabs" role="tablist">
             {(
               [
                 ['variables', VariableIcon, t('vault.tab.variables', { n: variables.length })],
+                ['presets', Layers, t('vault.tab.presets', { n: presets.length })],
                 ['log', History, t('vault.tab.log')],
                 ['connect', Plug, t('vault.tab.connect')],
               ] as const
             ).map(([id, Icon, label]) => (
-              <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>
-                <Icon /> {label}
+              <button
+                key={id}
+                role="tab"
+                data-tab={id}
+                aria-selected={tab === id}
+                className={tab === id ? 'on' : ''}
+                onClick={() => setTab(id)}
+              >
+                <Icon /> <span className="ellipsis">{label}</span>
               </button>
             ))}
           </div>
           {tab === 'variables' && <Variables session={session} />}
+          {tab === 'presets' && <Presets session={session} />}
           {tab === 'log' && <AccessLog />}
           {tab === 'connect' && <SetupGuide />}
         </>

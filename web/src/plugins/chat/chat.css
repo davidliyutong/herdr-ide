@@ -11,52 +11,6 @@
   min-width: 0;
   background: var(--bg);
 }
-.chat-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  min-width: 0;
-  height: var(--h-toolbar);
-  padding: 0 10px;
-  border-bottom: 1px solid var(--line);
-  font-size: var(--fs-sm);
-  color: var(--fg-dim);
-}
-.chat-head-icon,
-.chat-head .ai-logo {
-  flex: none;
-  width: var(--ic-sm);
-  height: var(--ic-sm);
-}
-.chat-agent {
-  flex: none;
-  font-weight: 600;
-  color: var(--fg);
-}
-.chat-title {
-  flex: 0 1 auto;
-  min-width: 0;
-  color: var(--fg);
-  cursor: default;
-}
-.chat-title-edit {
-  flex: 1;
-  min-width: 80px;
-}
-.chat-cwd {
-  flex: 1 1 0;
-  min-width: 0;
-  font-family: var(--mono);
-  color: var(--fg-mute);
-}
-.chat-state {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 5px;
-  margin-left: auto;
-}
 .chat-banner {
   display: flex;
   align-items: center;
@@ -100,6 +54,12 @@
   flex: 1;
   min-height: 0;
   outline: none;
+}
+.chat-action-rewind.is-unsupported {
+  opacity: 0.45;
+}
+.chat-action-rewind.is-unsupported:hover {
+  opacity: 0.8;
 }
 
 /* ---- the panel ---- */
@@ -412,4 +372,183 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* ---- Settings > Agent Chats > Providers & Model List (SettingsPage.tsx) ---- */
+.chat-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: calc(100% + 24px);
+  min-height: 0;
+  padding: 8px 12px;
+  line-height: inherit;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+.chat-settings-row:hover {
+  background: var(--bg-2);
+}
+.chat-settings-open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-settings-open:hover {
+  background: transparent;
+}
+.chat-settings-row.modified::before {
+  top: 8px;
+  bottom: 8px;
+}
+.chat-settings-row .setting-title {
+  flex: 1;
+  min-width: 0;
+}
+.chat-settings-open > .ai-logo {
+  flex: none;
+  width: var(--ic-md, 16px);
+  height: var(--ic-md, 16px);
+}
+.chat-settings-row.off .ai-logo,
+.chat-settings-row.off .setting-title {
+  opacity: 0.6;
+}
+.chat-settings-row > .lucide {
+  flex: none;
+  color: var(--fg-mute);
+}
+.chat-provider-switch-row .setting-head {
+  justify-content: space-between;
+}
+.chat-models-bulk {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.chat-settings-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.chat-settings-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--fg);
+}
+.chat-settings-title > .ai-logo {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+.chat-models-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-settings-machine {
+  margin-left: auto;
+  min-width: 8rem;
+  height: var(--ctl-sm);
+  min-height: var(--ctl-sm);
+  font-size: var(--fs-sm);
+}
+.chat-models-refresh {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.chat-settings-machine + .chat-models-refresh {
+  margin-left: 4px;
+}
+.chat-models-refresh .spin {
+  animation: chat-spin 0.9s linear infinite;
+}
+@keyframes chat-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.chat-models-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.chat-models-filter {
+  max-width: 280px;
+}
+.chat-models-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.chat-model-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.chat-model-row + .chat-model-row {
+  border-top: 1px solid var(--line);
+}
+.chat-model-row:hover {
+  background: var(--bg-2);
+}
+.chat-model-row.unchecked .chat-model-info {
+  opacity: 0.65;
+}
+.chat-model-row > input[type='checkbox'] {
+  flex: none;
+  margin-top: 2px;
+}
+.chat-model-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.chat-model-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.chat-model-name {
+  font-weight: 500;
+  color: var(--fg);
+}
+.chat-model-id {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+}
+.chat-model-desc {
+  line-height: 1.35;
 }

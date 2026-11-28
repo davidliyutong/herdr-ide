@@ -26,11 +26,14 @@ export class NotRegular extends Error {
 
 /** Opens a regular file for reading without blocking: a FIFO or a device
  * at the name, also one swapped in after it was looked at, is refused
- * (NotRegular) once open. */
-export async function openRegular(p: string): Promise<FileHandle> {
-  const fh = await open(p, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY);
+ * (NotRegular) once open. With noFollow, refuses symlinks at the final
+ * component; with uid >= 0, refuses files owned by another user. */
+export async function openRegular(p: string, o: { noFollow?: boolean; uid?: number } = {}): Promise<FileHandle> {
+  const flags = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY | (o.noFollow ? (constants.O_NOFOLLOW ?? 0) : 0);
+  const fh = await open(p, flags);
   try {
-    if ((await fh.stat()).isFile()) return fh;
+    const st = await fh.stat();
+    if (st.isFile() && (o.uid === undefined || o.uid < 0 || st.uid === o.uid)) return fh;
   } catch {
     // refused below
   }

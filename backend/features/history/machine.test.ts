@@ -82,11 +82,15 @@ afterEach(async () => {
 
 /** An agent on a new home with the history feature and a terminal core on
  * its socket. */
-async function setup(o: { timing?: Partial<Timing>; start?: number } = {}): Promise<Env> {
+async function setup(o: { timing?: Partial<Timing>; start?: number; bootedAt?: () => number | undefined } = {}): Promise<Env> {
   const memory = new Memory();
   const clock = new Clock();
   if (o.start !== undefined) clock.t = o.start;
-  const r = await rig({ features: [historyMachine({ timing: { ...FAST, ...o.timing }, now: clock.now, memory })] });
+  const r = await rig({
+    features: [
+      historyMachine({ timing: { ...FAST, ...o.timing }, now: clock.now, ...(o.bootedAt ? { bootedAt: o.bootedAt } : {}), memory }),
+    ],
+  });
   const f = new FakeCore();
   await f.listen(r.agent.hc.socket);
   const e = { r, f, memory, clock, base: r.dirs.base };
@@ -419,6 +423,72 @@ describe('capture', () => {
     f.setText('t1', 'third');
     await capture(e);
     expect(metaOf(e, 't1', true)?.pid).toBe(200);
+  });
+
+  test('rotates a pre-boot snapshot to previous with pid 0 even when the restarted shell reuses the same pid', async () => {
+    const start = Date.UTC(2026, 10, 22, 10);
+    let boot = start - 60_000;
+    const e = await setup({ start, bootedAt: () => boot });
+    const { f } = e;
+    f.set(live('t1', 100));
+    f.setText('t1', 'before reboot');
+    f.setPaint('t1', painter(20, 10, 'before reboot'));
+    expect((await capture(e)).captured).toBe(1);
+    const beforeBytes = dataOf(e, 't1');
+    expect(metaOf(e, 't1')?.pid).toBe(100);
+    expect(metaOf(e, 't1', true)).toBeNull();
+
+    // Host reboots: boot time advances past the pre-boot snapshot, and the
+    // restarted kept shell receives the same pid (100).
+    e.clock.t = start + 120_000;
+    boot = start + 110_000;
+    f.set(live('t1', 100));
+    f.setText('t1', '$ ');
+    f.setPaint('t1', painter(1, 5, '$ '));
+
+    // Even BEFORE the first post-reboot capture runs, list() and read() report
+    // pid 0 for the pre-boot current snapshot so the UI displays it immediately
+    // on same-pid reboot with the same (pid: 0, at) key it will have after rotation.
+    const listedBefore = await list(e);
+    expect(listedBefore.terminals).toHaveLength(1);
+    expect([listedBefore.terminals[0].terminal, listedBefore.terminals[0].pid, listedBefore.terminals[0].at]).toEqual([
+      't1',
+      0,
+      metaOf(e, 't1')!.at,
+    ]);
+    const readBefore = await read(e, 't1', 'current');
+    expect([readBefore.pid, readBefore.at]).toEqual([0, listedBefore.terminals[0].at]);
+    expect(readBefore.data.equals(beforeBytes)).toBe(true);
+
+    expect((await capture(e)).captured).toBe(1);
+    // Pre-reboot history rotated to previous with pid 0 so the UI treats it as a prior program.
+    expect(metaOf(e, 't1', true)?.pid).toBe(0);
+    expect(dataOf(e, 't1', true).equals(beforeBytes)).toBe(true);
+    expect(metaOf(e, 't1')?.pid).toBe(100);
+    const listedAfter = await list(e);
+    expect(listedAfter.terminals[0].previous?.pid).toBe(0);
+    expect(listedAfter.terminals[0].previous?.at).toBe(listedBefore.terminals[0].at);
+
+    // Subsequent captures in the same boot do not overwrite previous.
+    e.clock.t = start + 130_000;
+    f.setText('t1', '$ ls');
+    f.setPaint('t1', painter(2, 5, '$ ls'));
+    expect((await capture(e)).captured).toBe(1);
+    expect(metaOf(e, 't1', true)?.pid).toBe(0);
+    expect(dataOf(e, 't1', true).equals(beforeBytes)).toBe(true);
+
+    // Adopting a pre-boot current snapshot into a replacement terminal also keeps pid 0.
+    e.clock.t = start + 140_000;
+    f.set(live('t1', 100), live('t2', 200));
+    f.setText('t2', 'before second reboot');
+    f.setPaint('t2', painter(5, 5, 'before second reboot'));
+    expect((await capture(e)).captured).toBe(1);
+    e.clock.t = start + 260_000;
+    boot = start + 250_000;
+    f.set(live('t1', 100), live('t3', 300));
+    expect((await list(e)).terminals.find((x) => x.terminal === 't2')?.pid).toBe(0);
+    expect((await adopt(e, 't2', 't3')).adopted).toBe(true);
+    expect((await list(e)).terminals.find((x) => x.terminal === 't3')?.previous?.pid).toBe(0);
   });
 
   test('what the hub asks for is clamped to the hard limits', async () => {

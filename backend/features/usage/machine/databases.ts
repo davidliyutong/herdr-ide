@@ -242,6 +242,51 @@ const int = (v: SQLValue | undefined): number => (typeof v === 'bigint' ? Number
 
 // --- OpenCode ------------------------------------------------------------
 
+/** Decodes one assistant message row of OpenCode's message table into a
+ * record (and its context tokens); null when the row is not an assistant
+ * message with usage since the cutoff. */
+function decodeOpenCodeRow(row: SQLRow, since: number): { r: Rec; contextUsed: number; model: string; tsMs: number } | null {
+  const data = typeof row.data === 'string' ? row.data : '';
+  if (!data.includes('"assistant"')) return null;
+  let m: Record<string, unknown>;
+  try {
+    const v: unknown = JSON.parse(data);
+    if (!isObj(v)) return null;
+    m = v;
+  } catch {
+    return null;
+  }
+  if (m.role !== 'assistant') return null;
+  let ms = typeof obj(m.time).created === 'number' ? (obj(m.time).created as number) : 0;
+  if (!(ms > 0)) ms = int(row.t);
+  const tok = (x: unknown) => (typeof x === 'number' && x > 0 && x <= 1e15 ? Math.round(x) : 0);
+  const t = obj(m.tokens);
+  const cache = obj(t.cache);
+  const [i, o, reason, c, w] = [tok(t.input), tok(t.output), tok(t.reasoning), tok(cache.read), tok(cache.write)];
+  if (!(ms > 0) || ms > 1e15 || Math.trunc(ms / 1000) < since || i + o + reason + c + w === 0) return null;
+  const cost = typeof m.cost === 'number' && m.cost > 0 && m.cost < 1e6 ? m.cost : 0;
+  const model = str(m.modelID) || 'unknown';
+  return {
+    r: rec({
+      k: typeof row.id === 'string' && row.id ? `oc:${row.id}` : '',
+      t: Math.trunc(ms / 1000),
+      m: model,
+      v: str(m.providerID),
+      j: projectName(str(obj(m.path).cwd)),
+      i,
+      c,
+      w,
+      o: o + reason,
+      r: reason,
+      n: 1,
+      p: cost,
+    }),
+    contextUsed: i + c + w,
+    model: str(m.modelID),
+    tsMs: ms,
+  };
+}
+
 /** The steps of OpenCode's database at p from since on: each assistant
  * message of its table message is one step of a turn with its model,
  * provider, directory, tokens (input without the cache's, output without
@@ -258,45 +303,161 @@ export function readOpenCode(p: string, since: number, o: DBRead): Promise<Rec[]
       `SELECT ${id} AS id, ${time} AS t, CASE WHEN ${r.len}(data) <= ? THEN data END AS data FROM message`,
       [OPENCODE_MAX_RECORD],
       (row) => {
-        const data = typeof row.data === 'string' ? row.data : '';
-        if (!data.includes('"assistant"')) return;
-        let m: Record<string, unknown>;
-        try {
-          const v: unknown = JSON.parse(data);
-          if (!isObj(v)) return;
-          m = v;
-        } catch {
-          return;
-        }
-        if (m.role !== 'assistant') return;
-        let ms = typeof obj(m.time).created === 'number' ? (obj(m.time).created as number) : 0;
-        if (!(ms > 0)) ms = int(row.t);
-        const tok = (x: unknown) => (typeof x === 'number' && x > 0 && x <= 1e15 ? Math.round(x) : 0);
-        const t = obj(m.tokens);
-        const cache = obj(t.cache);
-        const [i, o, reason, c, w] = [tok(t.input), tok(t.output), tok(t.reasoning), tok(cache.read), tok(cache.write)];
-        if (!(ms > 0) || ms > 1e15 || Math.trunc(ms / 1000) < since || i + o + reason + c + w === 0) return;
+        const decoded = decodeOpenCodeRow(row, since);
+        if (!decoded) return;
         if (recs.length >= limits.openCodeRecords) throw new DBError('too_large');
-        const cost = typeof m.cost === 'number' && m.cost > 0 && m.cost < 1e6 ? m.cost : 0;
-        recs.push(
-          rec({
-            k: typeof row.id === 'string' && row.id ? `oc:${row.id}` : '',
-            t: Math.trunc(ms / 1000),
-            m: str(m.modelID) || 'unknown',
-            v: str(m.providerID),
-            j: projectName(str(obj(m.path).cwd)),
-            i,
-            c,
-            w,
-            o: o + reason,
-            r: reason,
-            n: 1,
-            p: cost,
-          }),
-        );
+        recs.push(decoded.r);
       },
     );
     return recs;
+  });
+}
+
+/** One session's usage from OpenCode's database at p, matched by session
+ * id or by the most recently updated root session of cwd (sinceMs when a
+ * process start time is known), including child subagent sessions. */
+export function readOpenCodeSession(
+  p: string,
+  opts: {
+    session?: string;
+    cwds?: readonly string[];
+    sinceMs?: number;
+    sinceSec: number;
+    resolveDir?: (dir: string) => Promise<string[]>;
+  },
+  o: DBRead,
+): Promise<{ sessionId: string; updatedAt: number; records: Rec[]; mainModel: string; mainProvider: string; contextUsed: number } | null> {
+  const limits = o.limits ?? DB_LIMITS;
+  const cleanDir = (s: string) => s.replace(/\/+$/, '') || '/';
+  const wants = new Set((opts.cwds ?? []).filter(Boolean).map(cleanDir));
+  const normMs = (v: number) => (v > 0 && v < 1e12 ? v * 1000 : v);
+  return readDB(p, o, async (r) => {
+    const msgCols = await r.columns('message');
+    if (!msgCols.includes('data') || !msgCols.includes('session_id')) return null;
+    const sessCols = await r.columns('session');
+    let rootId = opts.session ?? '';
+    let updatedAt = 0;
+    const hasSession = sessCols.includes('id');
+    const hasParent = sessCols.includes('parent_id');
+    if (!rootId) {
+      if (!hasSession || !sessCols.includes('directory') || wants.size === 0) return null;
+      const timeCol = sessCols.includes('time_updated') ? 'time_updated' : sessCols.includes('time_created') ? 'time_created' : '0';
+      const whereParent = hasParent ? `(parent_id IS NULL OR parent_id = '')` : '1 = 1';
+      let fallbackId = '';
+      let fallbackAt = 0;
+      const consider = (sid: string, tsMs: number) => {
+        if (rootId) return;
+        if (!fallbackId) {
+          fallbackId = sid;
+          fallbackAt = tsMs;
+        }
+        if (opts.sinceMs && tsMs > 0 && tsMs < opts.sinceMs) return;
+        rootId = sid;
+        updatedAt = tsMs;
+      };
+      // Filter directory directly in SQL (including trailing-slash forms) so
+      // projects outside the globally newest 64 sessions are found reliably.
+      const sqlDirs: string[] = [];
+      for (const c of wants) {
+        sqlDirs.push(c);
+        if (c !== '/') sqlDirs.push(`${c}/`);
+      }
+      await r.rows(
+        `SELECT id, ${timeCol} AS t FROM session WHERE ${whereParent} AND directory IN (${sqlDirs.map(() => '?').join(',')}) ORDER BY ${timeCol} DESC LIMIT 16`,
+        sqlDirs,
+        (row) => {
+          const sid = typeof row.id === 'string' ? row.id : '';
+          if (sid) consider(sid, normMs(int(row.t)));
+        },
+      );
+      if (!rootId && !fallbackId) {
+        // Fallback for non-canonical directory paths (e.g. alternate symlinks or
+        // repeated slashes) among recent root sessions.
+        const recent: Array<{ sid: string; dir: string; tsMs: number }> = [];
+        await r.rows(
+          `SELECT id, directory, ${timeCol} AS t FROM session WHERE ${whereParent} ORDER BY ${timeCol} DESC LIMIT 64`,
+          [],
+          (row) => {
+            const sid = typeof row.id === 'string' ? row.id : '';
+            const dir = typeof row.directory === 'string' ? row.directory : '';
+            if (sid && dir) recent.push({ sid, dir, tsMs: normMs(int(row.t)) });
+          },
+        );
+        const resolved = new Map<string, string[]>();
+        for (const row of recent) {
+          if (rootId) break;
+          const cleaned = cleanDir(row.dir);
+          let hit = wants.has(cleaned);
+          if (!hit && opts.resolveDir) {
+            o.signal.throwIfAborted();
+            let vs = resolved.get(cleaned);
+            if (!vs) {
+              vs = await opts.resolveDir(cleaned);
+              resolved.set(cleaned, vs);
+            }
+            hit = vs.some((v) => wants.has(cleanDir(v)));
+          }
+          if (hit) consider(row.sid, row.tsMs);
+        }
+      }
+      if (!rootId && fallbackId) {
+        rootId = fallbackId;
+        updatedAt = fallbackAt;
+      }
+      if (!rootId) return null;
+    } else if (hasSession) {
+      let exists = false;
+      const timeCol = sessCols.includes('time_updated') ? 'time_updated' : sessCols.includes('time_created') ? 'time_created' : '0';
+      await r.rows(`SELECT id, ${timeCol} AS t FROM session WHERE id = ? LIMIT 1`, [rootId], (row) => {
+        if (typeof row.id === 'string' && row.id === rootId) {
+          exists = true;
+          updatedAt = normMs(int(row.t));
+        }
+      });
+      if (!exists) {
+        // Minimal databases may have messages without a session row; check below.
+      }
+    }
+    const ids = [rootId];
+    if (hasSession && hasParent) {
+      await r.rows(`SELECT id FROM session WHERE parent_id = ? LIMIT 256`, [rootId], (row) => {
+        if (typeof row.id === 'string' && row.id && !ids.includes(row.id)) ids.push(row.id);
+      });
+    }
+    const idCol = msgCols.includes('id') ? 'id' : 'NULL';
+    const timeCol = msgCols.includes('time_created') ? 'time_created' : 'NULL';
+    const recs: Rec[] = [];
+    let mainModel = '';
+    let mainProvider = '';
+    let contextUsed = 0;
+    let latestMs = -1;
+    let anyRow = false;
+    await r.rows(
+      `SELECT ${idCol} AS id, session_id AS sid, ${timeCol} AS t, CASE WHEN ${r.len}(data) <= ? THEN data END AS data FROM message WHERE session_id IN (${ids.map(() => '?').join(',')})`,
+      [OPENCODE_MAX_RECORD, ...ids],
+      (row) => {
+        anyRow = true;
+        const decoded = decodeOpenCodeRow(row, opts.sinceSec);
+        if (!decoded) return;
+        if (recs.length >= limits.openCodeRecords) throw new DBError('too_large');
+        recs.push(decoded.r);
+        if (row.sid === rootId && decoded.tsMs >= latestMs) {
+          latestMs = decoded.tsMs;
+          if (decoded.model) mainModel = decoded.model;
+          if (decoded.r.v) mainProvider = decoded.r.v;
+          if (decoded.contextUsed > 0) contextUsed = decoded.contextUsed;
+        }
+      },
+    );
+    if (!anyRow && updatedAt === 0) return null;
+    return {
+      sessionId: rootId,
+      updatedAt: Math.max(updatedAt, latestMs > 0 ? latestMs : 0),
+      records: recs,
+      mainModel,
+      mainProvider,
+      contextUsed,
+    };
   });
 }
 
@@ -458,24 +619,24 @@ export function parseGen(b: Uint8Array): Gen | null {
   return usage ? g : null;
 }
 
-/** The workspace directory's name of a file:// URI or a path. */
-function uriProject(s: string): string {
+/** The workspace path of a file:// URI or a path. */
+function uriPath(s: string): string {
   if (!s) return '';
   if (s.startsWith('file://')) {
     try {
       const p = decodeURIComponent(new URL(s).pathname);
-      if (p) return projectName(p);
+      if (p) return p.replace(/\/+$/, '') || '/';
     } catch {
       // as a path
     }
   }
-  return projectName(s);
+  return s.replace(/\/+$/, '') || '/';
 }
 
-/** trajectory_metadata_blob's workspace (field 7, else 1.1) and the
- * conversation's start (field 2.1). */
-export function parseTrajectory(b: Uint8Array): { project: string; ts: number } {
-  let project = '';
+/** trajectory_metadata_blob's workspace path (field 7, else 1.1), its
+ * project name, and the conversation's start (field 2.1). */
+export function parseTrajectoryWorkspace(b: Uint8Array): { workspace: string; project: string; ts: number } {
+  let workspace = '';
   let ts = 0;
   let uri = '';
   for (const f of protoFields(b)) {
@@ -488,9 +649,17 @@ export function parseTrajectory(b: Uint8Array): { project: string; ts: number } 
         }
       }
     } else if (f.num === 2 && !ts) ts = protoTimestamp(f.b);
-    else if (f.num === 7 && !project) project = uriProject(protoString(f.b, 4096));
+    else if (f.num === 7 && !workspace) workspace = uriPath(protoString(f.b, 4096));
   }
-  return { project: project || uriProject(uri), ts };
+  const resolved = workspace || (uri ? uriPath(uri) : '');
+  return { workspace: resolved, project: projectName(resolved), ts };
+}
+
+/** trajectory_metadata_blob's workspace (field 7, else 1.1) and the
+ * conversation's start (field 2.1). */
+export function parseTrajectory(b: Uint8Array): { project: string; ts: number } {
+  const { project, ts } = parseTrajectoryWorkspace(b);
+  return { project, ts };
 }
 
 /** A step's time from steps.metadata: created_at (field 1), else its
@@ -510,16 +679,121 @@ export function parseStepTime(b: Uint8Array): number {
 const bytesOf = (v: SQLValue | undefined): Uint8Array =>
   v instanceof Uint8Array ? v : typeof v === 'string' ? Buffer.from(v) : new Uint8Array();
 
+/** One root conversation entry from Antigravity's conversation_summaries.db. */
+export interface AntigravitySummary {
+  id: string;
+  workspaces: string[];
+  modifiedMs: number;
+  active: boolean;
+}
+
+const AG_MAX_SUMMARIES = 512;
+
+function parseSummaryTime(v: SQLValue | undefined): number {
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v < 1e12 ? Math.trunc(v * 1000) : Math.trunc(v);
+  if (typeof v === 'bigint') {
+    const n = Number(v);
+    if (n > 0) return n < 1e12 ? Math.trunc(n * 1000) : Math.trunc(n);
+  }
+  if (typeof v !== 'string') return 0;
+  const s = v.trim();
+  if (!s) return 0;
+  let iso = s.includes(' ') && !s.includes('T') ? s.replace(' ', 'T') : s;
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) iso += 'Z';
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+}
+
+/** Reads root conversations from Antigravity's conversation_summaries.db
+ * (read-only via SQLiteWorker), most recently modified first. */
+export function readAntigravitySummaries(p: string, o: DBRead): Promise<AntigravitySummary[]> {
+  return readDB(p, o, async (r) => {
+    const cols = await r.columns('conversation_summaries');
+    if (!cols.includes('conversation_id') || !cols.includes('workspace_uris')) return [];
+    const sel = [
+      'conversation_id',
+      'workspace_uris',
+      cols.includes('parent_conversation_id') ? 'parent_conversation_id' : "'' AS parent_conversation_id",
+      cols.includes('nesting_depth') ? 'nesting_depth' : '0 AS nesting_depth',
+      cols.includes('status') ? 'status' : "'' AS status",
+      cols.includes('not_fully_idle') ? 'not_fully_idle' : '0 AS not_fully_idle',
+      cols.includes('killed') ? 'killed' : '0 AS killed',
+      cols.includes('last_modified_time') ? 'last_modified_time' : 'NULL AS last_modified_time',
+    ].join(', ');
+    const order = cols.includes('last_modified_time') ? ' ORDER BY last_modified_time DESC' : '';
+    const out: AntigravitySummary[] = [];
+    await r.rows(`SELECT ${sel} FROM conversation_summaries${order} LIMIT ?`, [AG_MAX_SUMMARIES], (row) => {
+      const id = typeof row.conversation_id === 'string' ? row.conversation_id : '';
+      if (!id) return;
+      const parent = typeof row.parent_conversation_id === 'string' ? row.parent_conversation_id : '';
+      const depth = int(row.nesting_depth);
+      const killed = row.killed === 1 || row.killed === 1n || row.killed === '1' || row.killed === 'true';
+      if (parent || depth > 0 || killed) return;
+      const rawWs = typeof row.workspace_uris === 'string' ? row.workspace_uris : '';
+      let workspaces: string[] = [];
+      if (rawWs) {
+        try {
+          const parsed: unknown = JSON.parse(rawWs);
+          if (Array.isArray(parsed)) {
+            workspaces = parsed
+              .filter((x): x is string => typeof x === 'string')
+              .map((u) => uriPath(u))
+              .filter(Boolean);
+          }
+        } catch {
+          // malformed JSON
+        }
+      }
+      if (!workspaces.length) return;
+      const status = typeof row.status === 'string' ? row.status : '';
+      const notIdle = row.not_fully_idle === 1 || row.not_fully_idle === 1n || row.not_fully_idle === '1' || row.not_fully_idle === 'true';
+      out.push({
+        id,
+        workspaces,
+        modifiedMs: parseSummaryTime(row.last_modified_time),
+        active: status === 'CASCADE_RUN_STATUS_RUNNING' || notIdle,
+      });
+    });
+    return out;
+  });
+}
+
+/** Reads only trajectory_metadata_blob from an Antigravity conversation
+ * database to match a conversation to a workspace directory. */
+export function readAntigravityTrajectory(p: string, o: DBRead): Promise<{ workspace: string; project: string; ts: number } | null> {
+  return readDB(p, o, async (r) => {
+    const metaCols = await r.columns('trajectory_metadata_blob');
+    if (!metaCols.includes('data')) return null;
+    let out: { workspace: string; project: string; ts: number } | null = null;
+    await r.rows(`SELECT CASE WHEN ${r.len}(data) <= ? THEN data END AS data FROM trajectory_metadata_blob`, [AG_MAX_META], (row) => {
+      if (out?.workspace && out.ts) return;
+      const b = bytesOf(row.data);
+      if (!b.length) return;
+      const t = parseTrajectoryWorkspace(b);
+      if (!out) out = t;
+      else {
+        out.workspace ||= t.workspace;
+        out.project ||= t.project;
+        out.ts ||= t.ts;
+      }
+    });
+    return out;
+  });
+}
+
 /** The generations of an Antigravity conversation database at p from since
- * on: gen_metadata first, then trajectory_metadata_blob and only the steps
- * rows the generations name (at most AG_MAX_STEPS). fallbackTs (the
- * file's time) dates a generation nothing else dates. */
-export function readAntigravity(p: string, since: number, fallbackTs: number, o: DBRead): Promise<Rec[]> {
+ * on, plus the latest generation's model and context tokens. */
+export function readAntigravitySession(
+  p: string,
+  since: number,
+  fallbackTs: number,
+  o: DBRead,
+): Promise<{ records: Rec[]; model: string; contextUsed: number }> {
   const limits = o.limits ?? DB_LIMITS;
   const conv = p.replace(/^.*\//, '').replace(/\.db$/, '');
   return readDB(p, o, async (r) => {
     const genCols = await r.columns('gen_metadata');
-    if (genCols.length === 0) return [];
+    if (genCols.length === 0) return { records: [], model: '', contextUsed: 0 };
     if (!genCols.includes('data')) throw new DBError('unreadable');
     const gens: { idx: number; g: Gen }[] = [];
     const need = new Set<number>();
@@ -540,7 +814,7 @@ export function readAntigravity(p: string, since: number, fallbackTs: number, o:
         gens.push({ idx: row.idx === null ? int(row.rid) : int(row.idx), g });
       },
     );
-    if (!gens.length) return [];
+    if (!gens.length) return { records: [], model: '', contextUsed: 0 };
     let project = '';
     let convTs = 0;
     const metaCols = await r.columns('trajectory_metadata_blob');
@@ -575,6 +849,8 @@ export function readAntigravity(p: string, since: number, fallbackTs: number, o:
       }
     }
     const recs: Rec[] = [];
+    let latestModel = '';
+    let contextUsed = 0;
     for (const { idx, g } of gens) {
       let ts = 0;
       for (const s of g.steps) {
@@ -585,11 +861,14 @@ export function readAntigravity(p: string, since: number, fallbackTs: number, o:
       ts ||= convTs || fallbackTs;
       if (ts <= 0 || ts < since) continue;
       const key = g.requestId ? `ag:${g.requestId}` : g.cascadeId ? `ag:${g.cascadeId}:${idx}` : conv ? `ag:${conv}:${idx}` : '';
+      const model = firstNonEmpty(g.model, 'unknown');
+      if (g.model) latestModel = g.model;
+      if (g.input + g.cached > 0) contextUsed = g.input + g.cached;
       recs.push(
         rec({
           k: key,
           t: ts,
-          m: firstNonEmpty(g.model, 'unknown'),
+          m: model,
           j: project,
           i: g.input,
           c: g.cached,
@@ -599,6 +878,14 @@ export function readAntigravity(p: string, since: number, fallbackTs: number, o:
         }),
       );
     }
-    return recs;
+    return { records: recs, model: latestModel, contextUsed };
   });
+}
+
+/** The generations of an Antigravity conversation database at p from since
+ * on: gen_metadata first, then trajectory_metadata_blob and only the steps
+ * rows the generations name (at most AG_MAX_STEPS). fallbackTs (the
+ * file's time) dates a generation nothing else dates. */
+export async function readAntigravity(p: string, since: number, fallbackTs: number, o: DBRead): Promise<Rec[]> {
+  return (await readAntigravitySession(p, since, fallbackTs, o)).records;
 }

@@ -35,13 +35,14 @@ test('guards', async () => {
 });
 
 test('the kinds whose sessions are priced', () => {
-  expect(['claude', 'codex', 'opencode', 'gemini', 'kimi', 'grok', 'Claude', ''].map(sessionProvider)).toEqual([
+  expect(['claude', 'codex', 'opencode', 'gemini', 'kimi', 'grok', 'agy', 'Claude', ''].map(sessionProvider)).toEqual([
     'claude',
     'codex',
+    'opencode',
     undefined,
-    undefined,
-    undefined,
-    undefined,
+    'kimi',
+    'grok',
+    'antigravity',
     undefined,
     undefined,
   ]);
@@ -198,16 +199,16 @@ test('a session’s numbers', async () => {
   ]);
 });
 
-// Only a kind whose sessions are priced and a session id reach the machine.
+// Only a kind whose sessions are priced and a valid session id (or absolute cwd) reach the machine.
 test('a session’s params', async () => {
-  const { request, of } = await withHub(answers, true);
+  const { request, of, st } = await withHub(answers, true);
   for (const [kind, id] of [
     ['', SESSION],
     ['nope', SESSION],
     ['Claude', SESSION],
     ['gemini', SESSION],
-    ['opencode', SESSION],
     ['claude', ''],
+    ['claude', 'ses_abc1234'],
     ['claude', '../x'],
     ['claude', SESSION.toUpperCase()],
     ['claude', SESSION.slice(0, 35)],
@@ -218,12 +219,27 @@ test('a session’s params', async () => {
     const res = await session(request, kind!, id!);
     expect([kind, id, res.status, ((await res.json()) as { error: string }).error]).toEqual([kind, id, 400, 'bad_request']);
   }
+  // Relative cwd or invalid pid is refused before reaching the machine.
+  for (const qs of ['kind=grok&cwd=relative/path', 'kind=grok&cwd=/work&pid=-1', 'kind=grok&cwd=/work&pid=abc']) {
+    const res = await request('GET', `/api/m/box/p/usage/session?${qs}`);
+    expect([qs, res.status, ((await res.json()) as { error: string }).error]).toEqual([qs, 400, 'bad_request']);
+  }
   expect(of('session')).toEqual([]);
   // Valid ones are asked, also of a read-only hub.
-  for (const kind of ['claude', 'codex']) expect((await session(request, kind, SESSION)).status).toBe(200);
+  for (const kind of ['claude', 'codex', 'grok', 'kimi', 'agy']) expect((await session(request, kind, SESSION)).status).toBe(200);
+  expect((await session(request, 'opencode', 'ses_test1234')).status).toBe(200);
+  expect((await request('GET', '/api/m/box/p/usage/session?kind=grok&cwd=/work/repo&pid=42')).status).toBe(200);
+  st.set('usage.codexHomes', '', ['/srv/codex-alt']);
+  expect((await request('GET', '/api/m/box/p/usage/session?kind=codex&cwd=/work/repo')).status).toBe(200);
   expect(of('session')).toEqual([
     { kind: 'claude', session: SESSION },
     { kind: 'codex', session: SESSION },
+    { kind: 'grok', session: SESSION },
+    { kind: 'kimi', session: SESSION },
+    { kind: 'agy', session: SESSION },
+    { kind: 'opencode', session: 'ses_test1234' },
+    { kind: 'grok', session: '', cwd: '/work/repo', pid: 42 },
+    { kind: 'codex', session: '', cwd: '/work/repo', codexHomes: ['/srv/codex-alt'] },
   ]);
 });
 
@@ -252,9 +268,10 @@ test('a session’s failures', async () => {
   expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([409, 'offline']);
 });
 
-// At most MAX_SESSION_READS session requests are under way per machine
-// (more: 429 busy, the machine not asked); another machine is not held up,
-// and a request ended gives its place back.
+// At most MAX_SESSION_READS distinct session requests are under way per machine
+// (more: 429 busy, the machine not asked); duplicate requests for the same
+// session coalesce onto one read and reuse the hub cache; another machine is
+// not held up, and a request ended gives its place back.
 test('a machine busy reading sessions', async () => {
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
@@ -263,15 +280,36 @@ test('a machine busy reading sessions', async () => {
     if (of('session').length <= MAX_SESSION_READS) await gate;
     return usageOf();
   });
-  const held = Array.from({ length: MAX_SESSION_READS }, () => session(request, 'claude', SESSION));
+  const sid = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+  // Concurrent reads of the same session coalesce into a single machine call.
+  const coalesced = [session(request, 'claude', sid(0)), session(request, 'claude', sid(0))];
+  const rest = Array.from({ length: MAX_SESSION_READS - 1 }, (_, i) => session(request, 'claude', sid(i + 1)));
+  const held = [...coalesced, ...rest];
   await waitFor('the reads under way', () => of('session').length === MAX_SESSION_READS);
-  let res = await session(request, 'claude', SESSION);
+  let res = await session(request, 'claude', sid(MAX_SESSION_READS));
   expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([429, 'busy']);
   expect(of('session')).toHaveLength(MAX_SESSION_READS);
   // Another machine is not held up.
-  res = await session(request, 'claude', SESSION, 'gpu');
+  res = await session(request, 'claude', sid(0), 'gpu');
   expect(res.status).toBe(200);
   release();
-  expect((await Promise.all(held)).map((r) => r.status)).toEqual(Array(MAX_SESSION_READS).fill(200));
-  expect((await session(request, 'claude', SESSION)).status).toBe(200);
+  expect((await Promise.all(held)).map((r) => r.status)).toEqual(Array(held.length).fill(200));
+  // Cached hit does not call the machine again.
+  expect((await session(request, 'claude', sid(0))).status).toBe(200);
+  expect(of('session')).toHaveLength(MAX_SESSION_READS + 1);
+  // A fresh distinct session succeeds once slots free up.
+  expect((await session(request, 'claude', sid(MAX_SESSION_READS + 1))).status).toBe(200);
+});
+
+test('session cache key is injective across codexHomes and prices', async () => {
+  let calls = 0;
+  const { request, st } = await withHub((action, p) => {
+    if (action !== 'session') return answers(action, p);
+    return usageOf(`model-${++calls}`);
+  });
+  st.set('usage.codexHomes', '', ['/a', '/b']);
+  const r1 = (await (await request('GET', '/api/m/box/p/usage/session?kind=codex&cwd=/work')).json()) as { model: string };
+  st.set('usage.codexHomes', '', ['/a']);
+  const r2 = (await (await request('GET', '/api/m/box/p/usage/session?kind=codex&cwd=/work')).json()) as { model: string };
+  expect([r1.model, r2.model]).toEqual(['model-1', 'model-2']);
 });

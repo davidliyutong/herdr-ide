@@ -37,7 +37,7 @@ slug=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.
 echo "==> brand literals"
 # String literals containing the slug outside the brand files, ignoring
 # comments.
-hits=$(grep -rnE --include='*.ts' --include='*.tsx' "[\"'\`][^\"'\`]*\b${slug}\b" web/src extensions/*/src desktop/src backend --exclude-dir=node_modules 2>/dev/null \
+hits=$(grep -rnE --include='*.ts' --include='*.tsx' "[\"'\`][^\"'\`]*\b${slug}\b" web/src extensions/*/src desktop/src backend site/src --exclude-dir=node_modules 2>/dev/null \
   | grep -vE '(web/src/brand\.ts|backend/shared/lib/brand\.ts|extensions/[^/]+/src/brand\.ts|\.test\.ts:|__tests__/|/testdata/|/testing\.ts:)' \
   | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' || true)
 if [[ -n "$hits" ]]; then
@@ -107,6 +107,9 @@ echo "==> Codex's app-server types"
 
 echo "==> pinned native submodules"
 bun backend/scripts/fetch-deps.ts --check || fail=1
+
+echo "==> CLI installer shell syntax"
+sh -n scripts/install.sh || fail=1
 
 echo "==> shared test vectors"
 # The web UI's tests, or the desktop shell's for vectors the hub shares

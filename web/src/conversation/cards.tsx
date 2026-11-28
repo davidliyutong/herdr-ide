@@ -4,20 +4,20 @@
 // input), the approval of a plan (the plan as Markdown, approved to go on
 // in a mode, or planning on), and questions (one or more, a choice of one
 // or several options with their previews, the user's own words where
-// allowed, hidden as typed where secret; or skipped). The first answer is
-// the one that counts, and another window may give it: a card shows an
-// answer as the user's own only when this page gave it (parts.tsx
-// answeredOf, which outlives the view while the page lives); any other
-// answer it shows as given, without saying where (after a reload, or
-// attaching again, a card may come waiting and its answer after it, which
-// the page cannot tell from another window's). Number keys choose a
-// permission's options while the card has the keyboard.
+// allowed, hidden as typed where secret, optional or non-blocking async;
+// or skipped). The first answer is the one that counts, and another window
+// may give it: a card shows an answer as the user's own only when this page
+// gave it (parts.tsx answeredOf, which outlives the view while the page
+// lives); any other answer it shows as given, without saying where (after a
+// reload, or attaching again, a card may come waiting and its answer after
+// it, which the page cannot tell from another window's). Number keys choose
+// a permission's options while the card has the keyboard.
 
-import { useContext, useId, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useContext, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { ClipboardList, MessageCircleQuestion, ShieldQuestion } from 'lucide-react';
 import { Markdown } from '../markdown/Markdown';
 import { hasMessage, t } from '../i18n';
-import { commandOf, displayMath, inputText, jsonText } from './format';
+import { commandOf, inputText, jsonText } from './format';
 import {
   asText,
   OPTION_ALLOW_ONCE,
@@ -60,6 +60,7 @@ function doneText(by: string | undefined, chosen: string | undefined, mine: bool
     return mine ? t('conversation.ask.youChose', { option: chosen }) : t('conversation.ask.answered', { option: chosen });
   if (by === 'cancel') return t('conversation.ask.cancelled');
   if (by === 'ended') return t('conversation.ask.ended');
+  if (by === 'superseded') return t('conversation.ask.superseded');
   return mine ? t('conversation.ask.youDismissed') : t('conversation.ask.dismissed');
 }
 
@@ -72,6 +73,8 @@ function Card({
   request,
   state,
   parent,
+  badge,
+  isAsync,
   children,
   onKeyDown,
 }: {
@@ -83,6 +86,8 @@ function Card({
   request: string;
   state: 'waiting' | 'done' | 'stale';
   parent?: string;
+  badge?: ReactNode;
+  isAsync?: boolean;
   children: ReactNode;
   onKeyDown?: (e: KeyboardEvent<HTMLDivElement>) => void;
 }) {
@@ -94,6 +99,7 @@ function Card({
       data-ask={kind}
       data-request={request}
       data-state={state}
+      data-async={isAsync ? 'true' : undefined}
       role="group"
       aria-labelledby={id}
       tabIndex={-1}
@@ -104,6 +110,7 @@ function Card({
         <span id={id} className="conv-ask-title">
           {heading}
         </span>
+        {badge}
         {parent && <span className="conv-ask-from">{t('conversation.ask.fromSubagent')}</span>}
       </div>
       {children}
@@ -369,7 +376,7 @@ export function PlanCard({ item, ctx }: { item: PermissionItem; ctx: ItemContext
     >
       {plan.trim() && (
         <div className="conv-ask-plan">
-          <Markdown text={displayMath(plan)} className="conv-md conv-tool-md" />
+          <Markdown text={plan} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-tool-md" />
         </div>
       )}
       {a.waiting && (
@@ -430,8 +437,21 @@ function answersOf(q: Question, d: Draft): string[] {
   return out;
 }
 
-function QuestionField({ q, draft, disabled, onChange }: { q: Question; draft: Draft; disabled: boolean; onChange: (d: Draft) => void }) {
+function QuestionField({
+  q,
+  draft,
+  disabled,
+  ctx,
+  onChange,
+}: {
+  q: Question;
+  draft: Draft;
+  disabled: boolean;
+  ctx: ItemContext;
+  onChange: (d: Draft) => void;
+}) {
   const name = useId();
+  const otherInputRef = useRef<HTMLInputElement>(null);
   const multi = !!q.multiSelect;
   const options = q.options ?? [];
   const pick = (label: string, on: boolean) => {
@@ -444,43 +464,57 @@ function QuestionField({ q, draft, disabled, onChange }: { q: Question; draft: D
     <fieldset className="conv-q" disabled={disabled}>
       <legend>
         {q.header && <span className="conv-q-header">{q.header}</span>}
-        <span className="conv-q-text">{q.question}</span>
+        <Markdown text={q.question} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-q-text" />
+        {q.optional && <span className="conv-q-optional">{t('conversation.question.optional')}</span>}
       </legend>
       {options.length > 0 && (
         <div className="conv-q-options">
-          {options.map((o) => (
-            <label key={o.label} className="conv-q-option">
-              <input
-                type={multi ? 'checkbox' : 'radio'}
-                name={name}
-                value={o.label}
-                checked={draft.chosen.includes(o.label)}
-                onChange={(e) => pick(o.label, e.target.checked)}
-                onFocus={() => o.preview && onChange({ ...draft, preview: o.label })}
-              />
-              <span className="conv-q-label">{o.label}</span>
-              {o.description && <span className="conv-q-desc">{o.description}</span>}
-            </label>
-          ))}
+          {options.map((o) => {
+            const selected = draft.chosen.includes(o.label);
+            return (
+              <label key={o.label} className={selected ? 'conv-q-option selected' : 'conv-q-option'}>
+                <input
+                  type={multi ? 'checkbox' : 'radio'}
+                  name={name}
+                  value={o.label}
+                  checked={selected}
+                  onChange={(e) => pick(o.label, e.target.checked)}
+                  onFocus={() => o.preview && onChange({ ...draft, preview: o.label })}
+                />
+                <span className="conv-q-label">{o.label}</span>
+                {o.description && <span className="conv-q-desc">{o.description}</span>}
+              </label>
+            );
+          })}
           {q.allowOther && (
-            <label className="conv-q-option conv-q-other">
+            <div className={draft.other ? 'conv-q-option conv-q-other selected' : 'conv-q-option conv-q-other'}>
+              <label className="conv-q-other-toggle">
+                <input
+                  type={multi ? 'checkbox' : 'radio'}
+                  name={name}
+                  checked={draft.other}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    onChange({ ...draft, other: checked, chosen: multi ? draft.chosen : [] });
+                    if (checked) queueMicrotask(() => otherInputRef.current?.focus());
+                  }}
+                />
+                <span className="conv-q-label">{t('conversation.question.other')}</span>
+              </label>
               <input
-                type={multi ? 'checkbox' : 'radio'}
-                name={name}
-                checked={draft.other}
-                onChange={(e) => onChange({ ...draft, other: e.target.checked, chosen: multi ? draft.chosen : [] })}
-              />
-              <span className="conv-q-label">{t('conversation.question.other')}</span>
-              <input
+                ref={otherInputRef}
                 type={textType}
                 className="conv-q-input"
                 value={draft.text}
                 aria-label={t('conversation.question.otherLabel')}
                 placeholder={t('conversation.question.otherPlaceholder')}
                 autoComplete="off"
+                onFocus={() => {
+                  if (!draft.other) onChange({ ...draft, other: true, chosen: multi ? draft.chosen : [] });
+                }}
                 onChange={(e) => onChange({ ...draft, text: e.target.value, other: true, chosen: multi ? draft.chosen : [] })}
               />
-            </label>
+            </div>
           )}
         </div>
       )}
@@ -496,7 +530,7 @@ function QuestionField({ q, draft, disabled, onChange }: { q: Question; draft: D
       )}
       {preview && (
         <div className="conv-q-preview">
-          <Markdown text={displayMath(preview)} className="conv-md conv-tool-md" />
+          <Markdown text={preview} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-tool-md" />
         </div>
       )}
     </fieldset>
@@ -512,13 +546,21 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
   /** How this page answered: ANSWERED or SKIPPED. */
   const [mine, setMine] = useMine(item.id);
   const [failed, setFailed] = useState<string | undefined>(undefined);
-  const waiting = !item.done && answering.open && answering.waiting.has(item.id);
+  const canAnswer = item.async ? answering.openAsync : answering.open;
+  const waiting = !item.done && canAnswer && answering.waiting.has(item.id);
   const draftOf = (q: Question) => drafts.get(q.id) ?? emptyDraft();
-  const ready = item.questions.every((q) => answersOf(q, draftOf(q)).length > 0);
+  const required = item.questions.filter((q) => !q.optional);
+  const ready =
+    required.length > 0
+      ? required.every((q) => answersOf(q, draftOf(q)).length > 0)
+      : item.questions.some((q) => answersOf(q, draftOf(q)).length > 0);
   const reply = (cancelled: boolean) => {
     if (!waiting || sending) return;
     const answers: Record<string, string[]> = Object.create(null);
-    for (const q of item.questions) answers[q.id] = answersOf(q, draftOf(q));
+    for (const q of item.questions) {
+      const a = answersOf(q, draftOf(q));
+      if (a.length || !q.optional) answers[q.id] = a;
+    }
     setSending(true);
     setFailed(undefined);
     setMine(cancelled ? SKIPPED : ANSWERED);
@@ -535,6 +577,13 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
     e.preventDefault();
     if (ready) reply(false);
   };
+  const onFormKeyDown = (e: KeyboardEvent<HTMLFormElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.nativeEvent.isComposing) return;
+    if (item.questions.length === 1 && ready && (e.target as HTMLElement)?.tagName === 'INPUT') {
+      e.preventDefault();
+      reply(false);
+    }
+  };
   const state: 'waiting' | 'done' | 'stale' = item.done ? 'done' : waiting ? 'waiting' : 'stale';
   const heading =
     item.questions.length > 1
@@ -546,6 +595,7 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
     if (answered) status = mine === ANSWERED ? t('conversation.question.youAnswered') : t('conversation.question.answered');
     else if (item.by === 'cancel') status = t('conversation.ask.cancelled');
     else if (item.by === 'ended') status = t('conversation.ask.ended');
+    else if (item.by === 'superseded') status = t('conversation.ask.superseded');
     else status = t('conversation.question.skipped');
   } else if (!waiting) status = answering.readOnly ? t('conversation.ask.readOnly') : t('conversation.ask.stale');
   return (
@@ -557,15 +607,24 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
       request={item.request}
       state={state}
       parent={item.parent}
+      isAsync={item.async}
+      badge={
+        item.async ? (
+          <span className="conv-ask-badge" title={t('conversation.question.asyncHint')}>
+            {t('conversation.question.async')}
+          </span>
+        ) : undefined
+      }
     >
       {waiting ? (
-        <form className="conv-ask-body conv-q-form" onSubmit={submit}>
+        <form className="conv-ask-body conv-q-form" onSubmit={submit} onKeyDown={onFormKeyDown}>
           {item.questions.map((q) => (
             <QuestionField
               key={q.id}
               q={q}
               draft={draftOf(q)}
               disabled={sending}
+              ctx={ctx}
               onChange={(d) => setDrafts((x) => new Map(x).set(q.id, d))}
             />
           ))}
@@ -584,7 +643,9 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
             const a = item.answers && Object.hasOwn(item.answers, q.id) ? item.answers[q.id] : undefined;
             return (
               <Section key={q.id} title={q.header || q.question}>
-                {q.header && <div className="conv-q-text">{q.question}</div>}
+                {q.header && q.header !== q.question && (
+                  <Markdown text={q.question} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-q-text" />
+                )}
                 {a?.length ? <div className="conv-q-answer">{q.secret ? t('conversation.question.secret') : a.join(', ')}</div> : null}
               </Section>
             );

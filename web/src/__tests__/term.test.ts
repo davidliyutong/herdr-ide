@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { TermConnection, type Socket, type StreamHandler } from '../term/connection';
+import { MAX_CONCURRENT_ATTACHES, TermConnection, type Socket, type StreamHandler } from '../term/connection';
 import {
   adoptDirectory,
   closePane,
@@ -270,7 +270,7 @@ describe('layout', () => {
     ]);
   });
 
-  it('names a workspace after its first pane, or its only one', () => {
+  it('names a workspace by manual name, then fixed path basename, then dynamic pane directory', () => {
     // A workspace without a directory takes its first pane's, once.
     let layout = openTerminal(createWorkspace(emptyLayout, 'w', ''), 't1');
     layout = adoptDirectory(layout, 't1', '/home/u/app');
@@ -285,12 +285,17 @@ describe('layout', () => {
     const ws = () => layout.workspaces[0];
     expect(soleLeaf(ws())).toBeNull();
     expect(workspaceTitle(ws(), '/home/u')).toBe('app');
-    // One pane left: its directory names the workspace.
+    // Fixed path takes priority over dynamic pane cwd even when one pane is left and it cds elsewhere.
     layout = closePane(layout, 't1');
     expect(soleLeaf(ws())).toEqual({ terminal: 't2' });
-    expect(workspaceTitle(ws(), '/home/u', '/home/u/lib')).toBe('lib');
-    expect(workspaceTitle(ws(), '/home/u', '/home/u')).toBe('~');
-    // The user's name wins.
+    expect(workspaceTitle(ws(), '/home/u', '/home/u/lib')).toBe('app');
+    expect(workspaceTitle(ws(), '/home/u', '/home/u')).toBe('app');
+    expect(workspaceTitle({ name: '', cwd: '/home/u/projects/veldr/' }, '/home/u', '/tmp/other')).toBe('veldr');
+    expect(workspaceTitle({ name: 'Workspace', cwd: '/home/u/projects/veldr' }, '/home/u', '/tmp/other')).toBe('veldr');
+    // Without a fixed path, the workspace follows the dynamic pane directory.
+    expect(workspaceTitle({ name: '', cwd: '' }, '/home/u', '/home/u/lib')).toBe('lib');
+    expect(workspaceTitle({ name: '', cwd: '' }, '/home/u', '/home/u')).toBe('~');
+    // Explicit manual name wins over both fixed path and dynamic directory.
     expect(workspaceTitle({ ...ws(), name: 'mine' }, '/home/u', '/home/u/lib')).toBe('mine');
   });
 
@@ -448,5 +453,96 @@ describe('terminal connection', () => {
     vi.advanceTimersByTime(10_000);
     vi.useRealTimers();
     expect(sockets.length).toBe(2);
+  });
+
+  it('queues concurrent attaches beyond MAX_CONCURRENT_ATTACHES so reconnects do not burst into hub busy errors', async () => {
+    const socket = new FakeSocket();
+    const conn = new TermConnection(() => socket);
+    conn.start();
+    socket.onopen!();
+    const handler: StreamHandler = { output: () => {}, resized: () => {}, closed: () => {} };
+    const total = 20;
+    const promises = Array.from({ length: total }, (_, i) => conn.attach({ machine: 'x', terminal: `t${i}`, cols: 80, rows: 24 }, handler));
+    const sentAttaches = () => socket.sent.filter((m): m is Record<string, unknown> => !(m instanceof Uint8Array) && m.t === 'attach');
+    expect(sentAttaches()).toHaveLength(8);
+    // Complete attaches as they arrive until all 20 drain cleanly.
+    let replied = 0;
+    while (replied < total) {
+      const batch = sentAttaches().slice(replied);
+      expect(batch.length).toBeGreaterThan(0);
+      expect(batch.length).toBeLessThanOrEqual(8);
+      for (const msg of batch) {
+        replied++;
+        socket.text({ t: 'attached', rid: msg.rid, s: replied });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    expect(await Promise.all(promises)).toEqual(Array.from({ length: total }, (_, i) => i + 1));
+    conn.close();
+  });
+
+  it('never exceeds MAX_CONCURRENT_ATTACHES when new attaches interleave with dequeued microtasks', async () => {
+    const sockets: FakeSocket[] = [];
+    const conn = new TermConnection(() => {
+      const s = new FakeSocket();
+      sockets.push(s);
+      return s;
+    });
+    conn.start();
+    const socket = sockets[0];
+    socket.onopen!();
+    const handler: StreamHandler = { output: () => {}, resized: () => {}, closed: () => {} };
+    const sentAttaches = (s: FakeSocket) =>
+      s.sent.filter((m): m is Record<string, unknown> => !(m instanceof Uint8Array) && m.t === 'attach');
+
+    const promises = Array.from({ length: 12 }, (_, i) => conn.attach({ machine: 'x', terminal: `t${i}`, cols: 80, rows: 24 }, handler));
+    expect(sentAttaches(socket)).toHaveLength(MAX_CONCURRENT_ATTACHES);
+
+    // Complete 4 in-flight attaches and synchronously fire 4 new attaches BEFORE
+    // dequeued waiters resume their microtasks.
+    let replied = 0;
+    for (let i = 0; i < 4; i++) {
+      const msg = sentAttaches(socket)[replied++];
+      socket.text({ t: 'attached', rid: msg.rid, s: replied });
+    }
+    for (let i = 12; i < 16; i++) {
+      promises.push(conn.attach({ machine: 'x', terminal: `t${i}`, cols: 80, rows: 24 }, handler));
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sentAttaches(socket).length - replied).toBeLessThanOrEqual(MAX_CONCURRENT_ATTACHES);
+
+    // Drain remaining attaches verifying in-flight never exceeds the cap.
+    while (replied < promises.length) {
+      const batch = sentAttaches(socket).slice(replied);
+      expect(batch.length).toBeGreaterThan(0);
+      expect(batch.length).toBeLessThanOrEqual(MAX_CONCURRENT_ATTACHES);
+      for (const msg of batch) {
+        replied++;
+        socket.text({ t: 'attached', rid: msg.rid, s: replied });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    expect(await Promise.all(promises)).toHaveLength(16);
+
+    // If a socket drops right after transferring a slot to a waiter and reconnects
+    // before the waiter resumes, the stale waiter must reject cleanly without corrupting the new socket.
+    const burst = Array.from({ length: MAX_CONCURRENT_ATTACHES + 1 }, (_, i) =>
+      conn.attach({ machine: 'x', terminal: `drop${i}`, cols: 80, rows: 24 }, handler).catch((e: unknown) => e),
+    );
+    const firstMsg = sentAttaches(socket)[replied];
+    socket.text({ t: 'attached', rid: firstMsg.rid, s: 99 }); // transfers slot to waiter #9
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    socket.onclose!();
+    vi.advanceTimersByTime(10_000);
+    vi.useRealTimers();
+    sockets[1].onopen!();
+    const results = await Promise.all(burst);
+    expect(results[0]).toBe(99);
+    expect(results[MAX_CONCURRENT_ATTACHES]).toBeInstanceOf(TermError);
+    expect(sentAttaches(sockets[1])).toHaveLength(0);
+    conn.close();
   });
 });

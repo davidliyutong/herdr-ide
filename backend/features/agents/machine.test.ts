@@ -167,7 +167,14 @@ describe('op detect', () => {
   // whose peers are the detector's.
   test('sessions only when asked', async () => {
     const made: string[] = [];
-    const resolver: SessionResolver = { resolve: async () => null, stamp: async () => '' };
+    let closed = 0;
+    const resolver: SessionResolver = {
+      resolve: async () => null,
+      stamp: async () => '',
+      close: () => {
+        closed++;
+      },
+    };
     const { r, core } = await setup({
       detect: {
         newResolver: (home, peers) => {
@@ -184,6 +191,9 @@ describe('op detect', () => {
     const b = await open(r, true);
     expect(await b.next()).toEqual({ terminal: 't1', agent: 'claude', status: 'idle' });
     expect(made).toEqual([r.home]);
+    expect(closed).toBe(0);
+    b.conn.stream.end();
+    await until(() => closed === 1, 'resolver closed when detect stream ends');
   });
 
   // Events follow the terminal core's notifications in order; the stream

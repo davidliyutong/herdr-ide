@@ -164,19 +164,26 @@ export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): bo
   }
 }
 
-/** Runs `pane.leave` when `ev` matches a single-stroke binding for it in the
- * terminal context (used in capture phase inside Monaco editors and pane inputs
- * so Ctrl+B escapes focus to the app chrome before the editor consumes it). */
-export function handlePaneLeaveKey(ev: KeyboardEvent): boolean {
+/** The commands whose keys the app takes before Monaco editors and pane
+ * inputs see them (handleEditorKey): leaving the pane (Ctrl+B) and Go Back
+ * and Go Forward (Cmd+[ and Cmd+] on macOS), which only navigate; editors
+ * indent with Tab and Shift+Tab. */
+const EDITOR_COMMANDS: ReadonlySet<string> = new Set(['pane.leave', 'pane.back', 'pane.forward']);
+
+/** Runs one of EDITOR_COMMANDS when `ev` matches a single-stroke binding for
+ * it in the terminal context (used in capture phase inside Monaco editors
+ * and pane inputs, so the key reaches the app before the editor consumes
+ * it). */
+export function handleEditorKey(ev: KeyboardEvent): boolean {
   if (ev.type !== 'keydown' || modifierKeys.has(ev.key)) return false;
   if (keyContext() === 'dialog') return false;
   const stroke = strokeOf(ev);
   if (!stroke) return false;
-  const match = bindings().find((b) => applies(b.when, 'terminal') && b.key === stroke && b.command === 'pane.leave');
+  const match = bindings().find((b) => applies(b.when, 'terminal') && b.key === stroke && EDITOR_COMMANDS.has(b.command));
   if (!match) return false;
   ev.preventDefault();
   ev.stopPropagation();
-  if (!ev.repeat) runCommand('pane.leave');
+  if (!ev.repeat || REPEATING_COMMANDS.has(match.command)) runCommand(match.command);
   return true;
 }
 

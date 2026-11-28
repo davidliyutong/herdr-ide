@@ -7,8 +7,19 @@
 import { createHash } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import { gunzipSync } from 'node:zlib';
+import { HUB_BIN } from '#shared/lib/brand.ts';
 import { Reader } from '#shared/lib/streamio.ts';
-import { ChunkReader, Op, writeLine, type Header, type HCStatus, type PrivacyStatus, type Reply } from '#shared/proto/agentproto/index.ts';
+import {
+  ChunkReader,
+  Op,
+  readBody,
+  writeLine,
+  type Header,
+  type HCStatus,
+  type PrivacyStatus,
+  type Reply,
+  type TermEnvStageParams,
+} from '#shared/proto/agentproto/index.ts';
 import { encodeFrame, Kind, readFrame } from '#shared/proto/hc/wire.ts';
 import { pairDuplex } from '#shared/proto/yamux.ts';
 import { channelPair, type Channel } from '#kernel/channel.ts';
@@ -174,7 +185,7 @@ export class FakeHC {
           write(reply({ result: this.list }));
           break;
         case 'terminal.run':
-          write(reply({ result: { address: 't2' } }));
+          write(reply({ result: { address: 't2', ...(Array.isArray(p.argv) ? { argv: p.argv } : {}) } }));
           break;
         case 'terminal.kill':
           write(reply({ error: { kind: 'not_found', message: 'no terminal t9', hint: 'h' } }));
@@ -246,6 +257,10 @@ export class AgentSim {
   onDetect: (h: Header) => object[] = () => [];
   readonly detects: DetectStream[] = [];
   readonly actions: string[] = [];
+  readonly stagedEnvs: Array<{ token: string; env: Record<string, string>; argv?: string[]; line?: string; dropped?: boolean }> = [];
+  private envSeq = 0;
+  /** Answers Op.TermEnv as a node of an earlier release does: unknown op. */
+  termEnvUnknown = false;
 
   status(): HCStatus {
     return {
@@ -321,6 +336,31 @@ export class AgentSim {
       }
       case Op.Privacy:
         return once({ ok: true, privacy: this.privacy });
+      case Op.TermEnv: {
+        if (this.termEnvUnknown) return once({ ok: false, error: `unknown op ${JSON.stringify(h.op)}` });
+        const raw = h.params_length && h.params_length > 0 ? await readBody(conn.reader, h.params_length) : h.params;
+        if (h.action === 'stage') {
+          const p = raw as TermEnvStageParams;
+          const token = (++this.envSeq).toString(16).padStart(48, '0');
+          this.stagedEnvs.push({
+            token,
+            env: { ...p.env },
+            ...(p.argv?.length ? { argv: [...p.argv] } : {}),
+            ...(p.line !== undefined ? { line: p.line } : {}),
+          });
+          return once({
+            ok: true,
+            termenv: { token, launch: [`/usr/bin/${HUB_BIN}`, 'term-env', token, ...(p.argv ?? [])] },
+          });
+        }
+        if (h.action === 'drop') {
+          const tok = (raw as { token?: string } | undefined)?.token;
+          const hit = this.stagedEnvs.find((x) => x.token === tok);
+          if (hit) hit.dropped = true;
+          return once({ ok: true });
+        }
+        return once({ ok: false, error: 'unknown term.env action' });
+      }
     }
     return once({ ok: false, error: 'unsupported op' });
   }

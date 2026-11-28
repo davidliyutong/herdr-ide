@@ -131,8 +131,10 @@
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-/* A tab of VS Code or a preview alone: its mark before its name. */
-.tab-kind.lucide {
+/* A tab of VS Code, a chat, or a preview alone: its mark before its name. */
+.tab-kind.lucide,
+.tab-kind.ai-logo {
+  flex: none;
   width: var(--ic-sm);
   height: var(--ic-sm);
   margin-right: -2px;
@@ -144,13 +146,29 @@
   color: var(--fg-mute);
   margin: 0 -2px;
 }
-/* A muted tab or workspace: no sounds or notifications. */
+/* A muted tab or workspace: no sounds, notifications, or badges. */
 .tab-muted.lucide,
 .ws-muted.lucide {
   width: 0.85rem;
   height: 0.85rem;
   color: var(--fg-mute);
   flex: none;
+}
+/* A workspace with linked variable vault presets. */
+.ws-presets.lucide {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--accent);
+  flex: none;
+}
+.workspace-presets-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.workspace-presets-field > span:first-child {
+  font-size: var(--fs-md);
+  font-weight: 500;
 }
 /* A preview pane's title (a file shown by a single click, replaced by the
    next one), as VS Code's preview editors. */
@@ -388,7 +406,7 @@
   text-decoration: underline;
   z-index: 3;
 }
-/* Files from outside the page dragged over a terminal. */
+/* Files from outside the page, or the file explorer's rows, dragged over a terminal. */
 .pane-drop {
   position: absolute;
   inset: 0;
@@ -457,8 +475,10 @@
 .pane-header.focused {
   color: var(--fg);
 }
-/* What a pane other than a terminal is: VS Code's mark, a preview's eye. */
-.pane-kind.lucide {
+/* What a pane other than a terminal is: VS Code's mark, a chat's agent logo, a preview's eye. */
+.pane-kind.lucide,
+.pane-kind.ai-logo {
+  flex: none;
   width: var(--ic-sm);
   height: var(--ic-sm);
   margin-right: -2px;
@@ -492,6 +512,23 @@
 }
 .pane-agent {
   color: var(--accent);
+}
+.pane-header .chat-agent {
+  flex: none;
+  font-weight: 600;
+  color: var(--fg);
+}
+.pane-header .chat-state {
+  flex: none;
+  margin-left: auto;
+  padding: 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+.pane-header .chat-state + .pane-plugin-actions,
+.pane-header .chat-state ~ .pane-actions {
+  margin-left: 0;
 }
 .pane-cwd {
   color: var(--fg-mute);
@@ -544,7 +581,7 @@
 .pane-actions button.danger:hover {
   color: var(--error);
 }
-.pane-actions .sep {
+:is(.pane-actions, .pane-plugin-actions) .sep {
   width: 1px;
   height: 1.1rem;
   background: var(--line-2);
@@ -565,6 +602,7 @@
 }
 @container (max-width: 26rem) {
   .pane-header .pane-agent,
+  .pane-header .chat-agent,
   .pane-header .pane-actions .code,
   .pane-header .pane-plugin-actions {
     display: none;
@@ -572,13 +610,20 @@
   .pane-header .pane-plugin-actions + .pane-actions {
     margin-left: auto;
   }
+  .pane-header .chat-state ~ .pane-actions {
+    margin-left: 0;
+  }
   .pane-header .pane-actions .more {
     display: inline-flex;
   }
 }
 @container (max-width: 18rem) {
-  .pane-header .pane-actions .split {
+  .pane-header .pane-actions .split,
+  .pane-header .chat-state {
     display: none;
+  }
+  .pane-header .chat-state ~ .pane-actions {
+    margin-left: auto;
   }
 }
 @container (max-width: 12rem) {

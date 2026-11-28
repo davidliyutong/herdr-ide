@@ -31,10 +31,11 @@ import { createHash } from 'node:crypto';
 import { stat, type FileHandle } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { validSessionId } from '#shared/agents/kinds.ts';
-import { claudeInfoOf, claudeStamp, claudeSubagents, resolveClaude, searchClaude } from './claude.ts';
-import { codexStamp, codexSubagents, decodeSessionMeta, rolloutMeta, resolveCodex, searchCodex, type RolloutMeta } from './codex.ts';
-import { Files, readMetadata, sameFile, type FileId } from './files.ts';
+import { rolloutMeta, type RolloutMeta } from './codex.ts';
+import { driverOf } from './driver.ts';
+import { Files, sameFile, type FileId } from './files.ts';
 import { systemProcs, type ProcEntry, type ProcSource } from './procs.ts';
+import { ReadOnlySQLiteWorker } from './sqlworker.ts';
 import {
   Format,
   LIMITS,
@@ -53,7 +54,8 @@ import {
 } from './common.ts';
 
 export * from './common.ts';
-export { CLAUDE_MAX_NAME, claudeArgv, claudeEscape, claudeProjectDirs } from './claude.ts';
+export { agyArgv, agyConvId, agyResumedArgv } from './agy.ts';
+export { CLAUDE_MAX_NAME, claudeArgv, claudeEscape, claudeInfoOf, claudeProjectDirs } from './claude.ts';
 export { codexArgv, codexDays, decodeSessionMeta, rolloutId, uuidTime, type RolloutMeta } from './codex.ts';
 
 interface Miss {
@@ -131,6 +133,8 @@ export class Resolver {
   private readonly located = new Map<string, Location>();
   /** locate's misses, by format and id. */
   readonly misses = new Map<string, Miss>();
+  /** Lazy off-main-thread read-only SQLite worker shared by drivers (e.g. Antigravity). */
+  private dbWorker: ReadOnlySQLiteWorker | null = null;
 
   constructor(o: ResolverOptions = {}) {
     this.files = o.files ?? new Files();
@@ -141,36 +145,36 @@ export class Resolver {
     this.nowFn = o.now ?? Date.now;
   }
 
+  /** Lazily created off-main-thread read-only SQLite worker for external agent DBs. */
+  sqlWorker(): ReadOnlySQLiteWorker {
+    return (this.dbWorker ??= new ReadOnlySQLiteWorker());
+  }
+
+  /** Releases background resources held by this resolver (e.g. SQLite worker). */
+  close(): void {
+    this.dbWorker?.close();
+    this.dbWorker = null;
+  }
+
   /** The session of the agent of kind that p runs; null when none is known
    * (yet: Codex writes no file before the first prompt, and a caller tries
    * again when stamp changes). */
   async resolve(kind: string, p: Proc, signal: AbortSignal = new AbortController().signal): Promise<Found | null> {
-    switch (formatOf(kind)) {
-      case Format.Claude:
-        return resolveClaude(this, kind, p, signal);
-      case Format.Codex:
-        return resolveCodex(this, kind, p, signal);
-    }
-    return null;
+    const driver = driverOf(formatOf(kind));
+    return driver ? driver.resolve(this, kind, p, signal) : null;
   }
 
   /** Something cheap that changes when resolve's answer may have changed
    * (the mtime and size of Claude Code's <pid>.json and of its sessions
    * directory; for Codex the newest rollout's name in the dated
-   * directories resolve reads, and its mtime when last is a guess); "" for
-   * a kind without sessions. */
+   * directories resolve reads, and its mtime when last is a guess; for
+   * Antigravity its summary index and conversations directory); "" for a
+   * kind without sessions. */
   async stamp(kind: string, p: Proc, last: Found): Promise<string> {
+    const driver = driverOf(formatOf(kind));
+    if (!driver) return '';
     const out: string[] = [];
-    switch (formatOf(kind)) {
-      case Format.Claude:
-        await claudeStamp(this, p, last, out);
-        break;
-      case Format.Codex:
-        await codexStamp(this, p, last, out);
-        break;
-      default:
-        return '';
-    }
+    await driver.stamp(this, p, last, out);
     return createHash('sha256').update(out.join('')).digest('hex').slice(0, 16);
   }
 
@@ -183,9 +187,9 @@ export class Resolver {
    * remembered (TIMING): a transcript made meanwhile is found within
    * missRecheckMs of a caller asking again, one that existed before only
    * after missTtlMs. */
-  async locate(kind: string, id: string): Promise<SessionFile> {
+  async locate(kind: string, id: string, extraCodexHomes?: readonly string[]): Promise<SessionFile> {
     const f = this.check(kind, id);
-    return this.fileOf(f, id, await this.locateIn(f, id));
+    return this.fileOf(f, id, await this.locateIn(f, id, extraCodexHomes));
   }
 
   /** locate and SessionFile.open in one: the session's transcript, open as
@@ -203,18 +207,18 @@ export class Resolver {
   }
 
   /** What a transcript says of itself without its conversation: Claude
-   * Code's first conversation line, Codex's session_meta; empty when it
-   * does not say (yet). */
+   * Code's first conversation line, Codex's session_meta, or Antigravity's
+   * summary/trajectory metadata; empty when it does not say (yet). */
   async describe(kind: string, id: string): Promise<Info> {
     const f = this.check(kind, id);
-    const { fh } = await this.open(f, id);
-    try {
-      if (f === Format.Claude) return await claudeInfoOf(fh);
-      const m = await readMetadata(fh, LIMITS.metaLine, decodeSessionMeta);
-      return m ? { cwd: m.cwd, started: m.started } : { cwd: '', started: null };
-    } finally {
-      await fh.close().catch(() => {});
-    }
+    const driver = driverOf(f);
+    if (!driver) throw new SessionError('unknown_kind');
+    return driver.describe(
+      this,
+      id,
+      () => this.open(f, id),
+      () => this.locateIn(f, id),
+    );
   }
 
   private check(kind: string, id: string): Format {
@@ -225,7 +229,8 @@ export class Resolver {
   }
 
   private async fileOf(f: Format, id: string, loc: Location): Promise<SessionFile> {
-    const subs = f === Format.Claude ? await claudeSubagents(this, loc) : await codexSubagents(this, loc, id);
+    const driver = driverOf(f);
+    const subs = driver?.subagents ? await driver.subagents(this, loc, id) : [];
     return new SessionFile(this.files, loc, subs);
   }
 
@@ -244,8 +249,11 @@ export class Resolver {
   /** Finds a session's transcript of format f; an earlier answer is used
    * again while it still names, through no link, the file found, and an
    * earlier miss while it is remembered. */
-  private async locateIn(f: Format, id: string): Promise<Location> {
-    const key = `${f}/${id}`;
+  private async locateIn(f: Format, id: string, extraCodexHomes?: readonly string[]): Promise<Location> {
+    const driver = driverOf(f);
+    if (!driver) throw new SessionError('unknown_kind');
+    const extraKey = driver.cacheKeyExtra?.(extraCodexHomes) ?? '';
+    const key = `${f}/${id}${extraKey}`;
     const known = this.located.get(key);
     if (known) {
       if ((await this.files.realpath(known.file)) === known.file) {
@@ -259,13 +267,11 @@ export class Resolver {
     const missed = !!m && !(now - m.at >= TIMING.missTtlMs || now < m.at);
     if (m && missed && now - m.checked < TIMING.missRecheckMs && !(now < m.checked)) throw m.err;
     const s = new Search();
-    if (f === Format.Claude) await searchClaude(this, s, id);
-    // While a miss is remembered, only where a new rollout is made.
-    else await searchCodex(this, s, id, now, !missed);
+    await driver.search(this, s, id, { now, full: !missed, extraHomes: extraCodexHomes });
     if (!s.best) {
       const err = new SessionError(s.compressed ? 'compressed' : 'not_found');
       if (!m) m = { err, at: now, checked: now };
-      if (!missed || f === Format.Claude) m.at = now;
+      if (!missed || !driver.incrementalMissSearch) m.at = now;
       m.err = err;
       m.checked = now;
       this.rememberMiss(key, m, now);
@@ -356,10 +362,18 @@ export class Resolver {
     return uniq(this.expand(this.getenv('CLAUDE_CONFIG_DIR'), h), under(h, '.claude'), under(h, '.config/claude'));
   }
 
-  /** The agent's user's Codex homes: $CODEX_HOME and ~/.codex. */
-  codexHomes(): string[] {
+  /** The agent's user's Codex homes: $CODEX_HOME, ~/.codex, and any
+   * configured extra homes. */
+  codexHomes(extra?: readonly string[]): string[] {
     const h = this.home();
-    return uniq(this.expand(this.getenv('CODEX_HOME'), h), under(h, '.codex'));
+    return uniq(this.expand(this.getenv('CODEX_HOME'), h), under(h, '.codex'), ...(extra ?? []).map((x) => this.expand(x.trim(), h)));
+  }
+
+  /** The agent's user's Antigravity data directories (CLI first, then
+   * desktop and IDE). */
+  agyDirs(): string[] {
+    const h = this.home();
+    return uniq(under(h, '.gemini/antigravity-cli'), under(h, '.gemini/antigravity'), under(h, '.gemini/antigravity-ide'));
   }
 
   /** Whether a configuration directory a process's environment names

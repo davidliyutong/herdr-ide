@@ -50,6 +50,7 @@
 }
 /* The panel's tools: a toolbar like a pane's header; the branch, a row. */
 .git-toolbar {
+  position: relative;
   flex: none;
   height: var(--h-toolbar);
   padding: 0 4px 0 12px;
@@ -118,8 +119,42 @@
   color: var(--error);
   white-space: pre-wrap;
 }
+/* Overlaid along the bottom edge of the toolbar so long-running git actions
+   indicate progress without shifting the commit box or file list vertically. */
 .git-busy {
-  margin: 0 10px 4px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.git-busy::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 40%;
+  background: var(--accent);
+  animation: git-progress 1.2s ease-in-out infinite;
+}
+@keyframes git-progress {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(350%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .git-busy::after {
+    left: 0;
+    width: 100%;
+    opacity: 0.5;
+    animation: none;
+  }
 }
 .git-commit {
   padding: 0 8px 6px;
@@ -157,6 +192,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overflow-anchor: none;
 }
 /* The groups' rows (Section, TreeRow of components/tree), windowed. */
 .git-rows {

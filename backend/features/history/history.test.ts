@@ -105,6 +105,7 @@ function testScheduler(...ready: string[]) {
     reply: undefined as ((m: string, action: string, params: unknown) => unknown) | undefined,
     readOnly: false,
     now: Date.UTC(2026, 10, 22, 10),
+    coreReady: undefined as ((m: string) => void) | undefined,
   };
   const ask = async (m: string, action: string, params: unknown, signal: AbortSignal) => {
     f.calls.push({ m, action, params });
@@ -120,6 +121,12 @@ function testScheduler(...ready: string[]) {
       clear: (m, signal) => ask(m, 'clear', {}, signal) as Promise<{ removed: number }>,
     },
     ready: () => [...f.ready],
+    onTerminalCoreReady: (wake) => {
+      f.coreReady = wake;
+      return () => {
+        f.coreReady = undefined;
+      };
+    },
     settings: st,
     enabled: () => st.bool(SWITCH),
     switchKey: SWITCH,
@@ -338,6 +345,62 @@ describe('scheduler', () => {
     await waitFor('a capture', () => f.calls.some((c) => c.action === 'capture'));
     ac.abort();
     await Promise.race([done, Bun.sleep(2000).then(() => Promise.reject(new Error('run outlived its signal')))]);
+  });
+
+  // After a reboot, SSH becomes ready before herdr-core starts; the first
+  // capture hits not_running. Once herdr-core becomes ready, the scheduler
+  // retries immediately rather than sleeping a full history.interval (also
+  // when core readiness arrives while the failing capture is still in flight).
+  test('wakes immediately when terminal core becomes ready after not_running', async () => {
+    const { s, f, st } = testScheduler('gpu');
+    st.set('history.capture', 'gpu', true);
+    st.set('history.interval', 'gpu', 600);
+    let fail = true;
+    f.reply = () => {
+      if (fail) throw new Fail('not_running', 503, 'not running');
+      return {};
+    };
+    const ac = new AbortController();
+    const done = s.run(ac.signal);
+    await waitFor('first failing capture', () => f.calls.length === 1);
+    await s.idle();
+    // Without core ready, the next capture is 600s away; firing coreReady wakes it now.
+    fail = false;
+    f.coreReady?.('gpu');
+    await waitFor('immediate retry after core ready', () => f.calls.length === 2);
+    await s.idle();
+
+    // In-flight race: coreReady arrives while a not_running capture is still running.
+    let release!: () => void;
+    f.block = new Promise((r) => (release = r));
+    fail = true;
+    f.now += 600_000;
+    s.step(ac.signal);
+    await waitFor('in-flight failing capture started', () => f.calls.length === 3);
+    f.coreReady?.('gpu');
+    f.block = undefined;
+    release();
+    await waitFor('immediate retry after in-flight not_running', () => f.calls.length === 4);
+    ac.abort();
+    await done;
+  });
+
+  // Disabling an offline machine and later re-enabling it after a reboot
+  // preserves snapshots and never triggers a clear.
+  test('offline, disable and re-enable preserves snapshots without clearing', async () => {
+    const { f, st, step, actions } = testScheduler('gpu');
+    st.set('history.capture', 'gpu', true);
+    await step();
+    expect(actions('gpu')).toEqual(['capture']);
+    // Machine goes offline and is manually disabled for a day.
+    f.ready = [];
+    f.now += 24 * HOUR;
+    await step();
+    expect(actions('gpu')).toEqual(['capture']);
+    // Re-enabled after reboot: captures again, never clears.
+    f.ready = ['gpu'];
+    await step();
+    expect(actions('gpu')).toEqual(['capture', 'capture']);
   });
 });
 

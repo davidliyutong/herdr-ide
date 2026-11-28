@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { FakeAPI, TEST_NOW, removeHomes, script, tempHome, testEnv, testNowSec, write } from '../testdata/machine.ts';
 import { hashId, type Account, type UsageEnv } from './env.ts';
-import { parseAgy, parsePS, procPorts } from './antigravity.ts';
+import { LS_MEMO_MS, parseAgy, parsePS, procPorts } from './antigravity.ts';
 import { limits } from './limits.ts';
 import { run } from './run.ts';
 
@@ -142,6 +142,111 @@ printf 'p345\\nf20\\nn127.0.0.1:${ls.port}\\nf21\\nn10.0.0.2:9999\\n'`,
     );
     expect(await procPorts(root, 77)).toEqual([0xa1b2]);
   });
+
+  test('discovers all user-owned language servers and deduplicates by account id', async () => {
+    const ls1 = languageServer(
+      'tok-a',
+      `{"userStatus":{"email":"a@example.com","cascadeModelConfigData":{"clientModelConfigs":[{"label":"Gemini","quotaInfo":{"remainingFraction":0.8}}]}}}`,
+    );
+    const ls2 = languageServer(
+      'tok-b',
+      `{"userStatus":{"email":"b@example.com","cascadeModelConfigData":{"clientModelConfigs":[{"label":"Gemini","quotaInfo":{"remainingFraction":0.4}}]}}}`,
+    );
+    const lsDup = languageServer(
+      'tok-a2',
+      `{"userStatus":{"email":"a@example.com","cascadeModelConfigData":{"clientModelConfigs":[{"label":"Gemini","quotaInfo":{"remainingFraction":0.8}}]}}}`,
+    );
+    const home = tempHome();
+    const e = testEnv(home, { platform: 'darwin', uid: 501 });
+    e.programs.ps = script(
+      join(home, 'bin/ps'),
+      `cat <<'EOF'
+  501   345 /x/language_server_macos_arm --csrf_token tok-a antigravity
+  501   346 /x/language_server_macos_arm --csrf_token tok-b antigravity
+  501   347 /x/language_server_macos_arm --csrf_token tok-a2 antigravity
+  502   348 /x/language_server_macos_arm --csrf_token other antigravity
+EOF`,
+    );
+    e.programs.lsof = script(
+      join(home, 'bin/lsof'),
+      `case "$*" in
+  *"-p 345"*) printf 'n127.0.0.1:${ls1.port}\\n' ;;
+  *"-p 346"*) printf 'n127.0.0.1:${ls2.port}\\n' ;;
+  *"-p 347"*) printf 'n127.0.0.1:${lsDup.port}\\n' ;;
+esac`,
+    );
+    const accs = await limits(e, { providers: ['antigravity'] });
+    expect(accs.map((a) => [a.email, a.windows?.[0]?.usedPct])).toEqual([
+      ['a@example.com', 20],
+      ['b@example.com', 60],
+    ]);
+  });
+
+  test('invalidates LS endpoint memo on auth state change or force refresh', async () => {
+    const home = tempHome();
+    const state = join(home, 'state');
+    const runs = join(home, 'runs');
+    const e = testEnv(home, { platform: 'darwin', uid: 501 });
+    e.programs.ps = script(
+      join(home, 'bin/ps'),
+      `echo ps >> ${runs}.ps\nprintf '  501   345 /x/language_server_macos_arm --csrf_token %s antigravity\\n' "$(cut -d' ' -f1 ${state})"`,
+    );
+    e.programs.lsof = script(join(home, 'bin/lsof'), `printf 'n127.0.0.1:%s\\n' "$(cut -d' ' -f2 ${state})"`);
+    const body = (email: string) =>
+      `{"userStatus":{"email":"${email}","cascadeModelConfigData":{"clientModelConfigs":[{"label":"M","quotaInfo":{"remainingFraction":0.5}}]}}}`;
+    const ls1 = languageServer('tok-1', body('first@example.com'));
+    const ls2 = languageServer('tok-2', body('second@example.com'));
+    write(state, `tok-1 ${ls1.port}`);
+    expect((await one(e)).email).toBe('first@example.com');
+    expect(count(`${runs}.ps`)).toBe(1);
+    // Unchanged auth state reuses memoized LS endpoint.
+    expect((await one(e)).email).toBe('first@example.com');
+    expect(count(`${runs}.ps`)).toBe(1);
+    // Auth state file changes while ls1 is still alive: immediately re-discovers ls2.
+    write(state, `tok-2 ${ls2.port}`);
+    write(join(home, '.gemini/antigravity/antigravity_state.pbtxt'), 'account: "second@example.com"\n');
+    expect((await one(e)).email).toBe('second@example.com');
+    expect(count(`${runs}.ps`)).toBe(2);
+    // Explicit force bypasses memo even without file changes.
+    write(state, `tok-1 ${ls1.port}`);
+    expect((await one(e, { force: true })).email).toBe('first@example.com');
+    expect(count(`${runs}.ps`)).toBe(3);
+
+    // .gemini/antigravity-ide state file changes also invalidate the LS memo.
+    write(state, `tok-2 ${ls2.port}`);
+    write(join(home, '.gemini/antigravity-ide/antigravity_state.pbtxt'), 'account: "second@example.com"\n');
+    expect((await one(e)).email).toBe('second@example.com');
+    expect(count(`${runs}.ps`)).toBe(4);
+  });
+
+  test('LS memo expires after LS_MEMO_MS and skipLocal does not skip named LS discovery', async () => {
+    const home = tempHome();
+    const state = join(home, 'state');
+    const runs = join(home, 'runs');
+    let now = TEST_NOW;
+    const e = testEnv(home, { platform: 'darwin', uid: 501, now: () => now });
+    e.programs.ps = script(
+      join(home, 'bin/ps'),
+      `echo ps >> ${runs}.ps\nprintf '  501   345 /x/language_server_macos_arm --csrf_token %s antigravity\\n' "$(cut -d' ' -f1 ${state})"`,
+    );
+    e.programs.lsof = script(join(home, 'bin/lsof'), `printf 'n127.0.0.1:%s\\n' "$(cut -d' ' -f2 ${state})"`);
+    const body = (email: string) =>
+      `{"userStatus":{"email":"${email}","cascadeModelConfigData":{"clientModelConfigs":[{"label":"M","quotaInfo":{"remainingFraction":0.5}}]}}}`;
+    const ls1 = languageServer('tok-1', body('named@example.com'));
+    const ls2 = languageServer('tok-2', body('fresh@example.com'));
+    write(state, `tok-1 ${ls1.port}`);
+
+    // skipLocal: ['antigravity'] must NOT hide named LS accounts.
+    const a = await one(e, { skipLocal: ['antigravity'] });
+    expect(a).toMatchObject({ status: 'ok', email: 'named@example.com', id: hashId('named@example.com') });
+    expect(count(`${runs}.ps`)).toBe(1);
+
+    // Advancing clock by LS_MEMO_MS (60s, well under 10m agyEveryMs) re-discovers newly started LS.
+    write(state, `tok-2 ${ls2.port}`);
+    now += LS_MEMO_MS;
+    expect((await one(e)).email).toBe('fresh@example.com');
+    expect(count(`${runs}.ps`)).toBe(2);
+  });
 });
 
 const agyOut =
@@ -226,17 +331,60 @@ describe('agy', () => {
 
   test('agy 1.5’s groups of buckets', () => {
     const out =
-      '{"conversation_id":"","status":"SUCCESS","response":"Gemini Models\\tWeekly Limit Remaining\\t85%\\n","command":{"name":"usage","data":{"groups":[' +
+      '{"conversation_id":"","status":"SUCCESS","response":"Gemini Models\\tWeekly Limit Remaining\\t85%\\n","command":{"name":"usage","data":{"plan":"Google AI Pro","groups":[' +
       '{"name":"Gemini Models","buckets":[{"id":"gemini-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":0.85,"reset_time":"2026-11-21T06:22:44Z"},' +
       '{"id":"gemini-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":0.65,"reset_time":"2026-11-15T19:55:53Z"}]},' +
       '{"name":"Gemini 4 Argon","buckets":[{"id":"argon-weekly","name":"Gemini 4 Argon Weekly Limit","window":"monthly-ish","remaining_fraction":1,"reset_time":"2026-11-22T19:48:33Z"}]}]}}}';
     const a: Account = { provider: 'antigravity', status: '' };
     expect(parseAgy(a, out + '\ntrailing text')).toBe(true);
+    expect(a.plan).toBe('Google AI Pro');
     expect(a.windows).toEqual([
       { kind: 'weekly', label: 'Gemini Models', usedPct: 15, resetsAt: 1795242164, windowSec: 7 * 86400 },
       { kind: 'session', label: 'Gemini Models', usedPct: 35, resetsAt: Date.UTC(2026, 10, 15, 19, 55, 53) / 1000, windowSec: 5 * 3600 },
       { kind: 'model', label: 'Gemini 4 Argon Weekly Limit', usedPct: 0, resetsAt: Date.UTC(2026, 10, 22, 19, 48, 33) / 1000 },
     ]);
+  });
+
+  test('invalidates agy memo when auth log changes or force is set', async () => {
+    const h = agyHome(agyOut);
+    const log = join(h.home, '.gemini/antigravity-cli/cli.log');
+    write(log, 'OAuth: authenticated successfully as first@example.com\n');
+    expect((await one(h.e)).email).toBe('first@example.com');
+    expect(h.runs()).toBe(1);
+    // Within agyEveryMs, changing cli.log immediately busts the agy cache.
+    h.at(TEST_NOW + 10_000);
+    write(log, 'OAuth: authenticated successfully as second@example.com\nsecond-switch\n');
+    expect((await one(h.e)).email).toBe('second@example.com');
+    expect(h.runs()).toBe(2);
+    // Explicit force bypasses agyEveryMs even when cli.log has not changed.
+    h.at(TEST_NOW + 20_000);
+    expect((await one(h.e, { force: true })).email).toBe('second@example.com');
+    expect(h.runs()).toBe(3);
+  });
+
+  test('agyEmail refuses symlinked, wrong-uid, and FIFO cli.log files', async () => {
+    // Symlink at cli.log must not be followed (O_NOFOLLOW).
+    const hLink = agyHome(agyOut);
+    const outside = join(hLink.home, 'outside.log');
+    write(outside, 'OAuth: authenticated successfully as leaked@example.com\n');
+    mkdirSync(join(hLink.home, '.gemini/antigravity-cli'), { recursive: true });
+    symlinkSync(outside, join(hLink.home, '.gemini/antigravity-cli/cli.log'));
+    expect((await one(hLink.e)).email).toBeUndefined();
+
+    // Wrong-uid cli.log must be ignored.
+    const hUid = agyHome(agyOut);
+    write(join(hUid.home, '.gemini/antigravity-cli/cli.log'), 'OAuth: authenticated successfully as other@example.com\n');
+    const otherUidEnv = { ...hUid.e, uid: (process.getuid?.() ?? 0) + 999 };
+    expect((await one(otherUidEnv)).email).toBeUndefined();
+
+    // FIFO at cli.log must not block (O_NONBLOCK + isFile check).
+    const hFifo = agyHome(agyOut);
+    mkdirSync(join(hFifo.home, '.gemini/antigravity-cli'), { recursive: true });
+    if (Bun.spawnSync(['mkfifo', join(hFifo.home, '.gemini/antigravity-cli/cli.log')]).exitCode === 0) {
+      const a = await one(hFifo.e);
+      expect(a.status).toBe('ok');
+      expect(a.email).toBeUndefined();
+    }
   });
 });
 

@@ -39,7 +39,14 @@ const describe: Record<string, string> = {
 function failure(e: unknown): Reply {
   const err = e as NodeJS.ErrnoException;
   const text = err.syscall ? `${err.syscall} ${err.path}: ${describe[err.code ?? ''] ?? err.message}` : err.message;
-  const code = err.code === 'ENOENT' || err.code === 'ENOTDIR' ? 'not_found' : err.code === 'EACCES' ? 'denied' : undefined;
+  const code =
+    err.code === 'ENOENT' || err.code === 'ENOTDIR'
+      ? 'not_found'
+      : err.code === 'EACCES'
+        ? 'denied'
+        : err.code === 'EISDIR'
+          ? 'is_dir'
+          : undefined;
   return { ok: false, error: text, ...(code ? { code } : {}) };
 }
 
@@ -140,7 +147,14 @@ export function fsAgent(plugin?: PluginHandler, root?: FsRootMap) {
           const f = await open(lp);
           try {
             const fi = await f.stat();
-            if (fi.isDirectory()) throw new Error(`${p} is a directory`);
+            if (fi.isDirectory()) {
+              await reply({ ok: false, code: 'is_dir', error: `${p} is a directory` });
+              break;
+            }
+            if (h.max_size !== undefined && h.max_size >= 0 && fi.size > h.max_size) {
+              await reply({ ok: false, code: 'too_large', error: 'file too large', stat: statOf(p, fi) });
+              break;
+            }
             const offset = h.offset ?? 0;
             let left = h.length && h.length > 0 && offset + h.length <= fi.size ? h.length : fi.size - offset;
             await reply({ ok: true, stat: statOf(p, fi) });

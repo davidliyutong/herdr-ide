@@ -86,15 +86,19 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
 
   // The first page (as many commits as were loaded, up to MAX_RELOAD),
   // again whenever the refs changed.
+  const pageAbort = useRef<AbortController | undefined>(undefined);
   useEffect(() => {
     if (!open) return;
+    pageAbort.current?.abort();
+    const ac = new AbortController();
+    pageAbort.current = ac;
     const pg = newPaging();
     const limit = Math.min(MAX_RELOAD, Math.max(PAGE, page.current.next));
     page.current = pg;
     gitApi
-      .log(m, root, { limit })
+      .log(m, root, { limit, signal: ac.signal })
       .then((l) => {
-        if (page.current !== pg) return;
+        if (page.current !== pg || ac.signal.aborted) return;
         pg.next = l.commits.length;
         pg.ready = true;
         setCommits(l.commits);
@@ -102,21 +106,23 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
         setMore(l.more);
         setError(undefined);
       })
-      .catch((e) => page.current === pg && setError(errorText(e)));
+      .catch((e) => page.current === pg && !ac.signal.aborted && setError(errorText(e)));
+    return () => ac.abort();
   }, [m, root, version, open]);
 
   const loadMore = async () => {
     const pg = page.current;
     if (!more || !pg.ready || pg.loading || pg.failed) return;
     pg.loading = true;
+    const signal = pageAbort.current?.signal;
     try {
-      const l = await gitApi.log(m, root, { skip: pg.next, limit: PAGE });
-      if (page.current !== pg) return;
+      const l = await gitApi.log(m, root, { skip: pg.next, limit: PAGE, signal });
+      if (page.current !== pg || signal?.aborted) return;
       pg.next += l.commits.length;
       setCommits((c) => appendCommits(c, l.commits));
       setMore(l.more && l.commits.length > 0);
     } catch (e) {
-      if (page.current !== pg) return;
+      if (page.current !== pg || signal?.aborted) return;
       // Not asked again until the list is read again.
       pg.failed = true;
       setError(errorText(e));
@@ -131,18 +137,18 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
     if (!expanded) return setFiles(undefined);
     const kept = panelMemory(m, root).openedFiles;
     if (kept?.hash === expanded) return setFiles(kept);
-    let gone = false;
+    const ac = new AbortController();
     setFiles({ hash: expanded });
     gitApi
-      .show(m, root, expanded)
+      .show(m, root, expanded, { signal: ac.signal })
       .then((s) => {
-        if (gone) return;
+        if (ac.signal.aborted) return;
         panelMemory(m, root).openedFiles = { hash: expanded, files: s.files };
         setFiles({ hash: expanded, files: s.files });
       })
-      .catch((e) => !gone && setFiles({ hash: expanded, error: errorText(e) }));
+      .catch((e) => !ac.signal.aborted && setFiles({ hash: expanded, error: errorText(e) }));
     return () => {
-      gone = true;
+      ac.abort();
     };
   }, [m, root, expanded]);
 

@@ -126,6 +126,82 @@ describe('file icons', () => {
     for (const [name, want] of Object.entries(cases)) expect([name, id(name)]).toEqual([name, want]);
   });
 
+  it('does not misclassify source, test, config or prototype-named files via prefix or prototype lookups', () => {
+    // Source and test files starting with doc/tool words must keep their language/test icons.
+    expect(id('History.tsx')).toBe('react');
+    expect(id('history.ts')).toBe('typescript');
+    expect(id('history.test.ts')).toBe('test.typescript');
+    expect(id('security.ts')).toBe('typescript');
+    expect(id('security.go')).toBe('go');
+    expect(id('security.test.ts')).toBe('test.typescript');
+    expect(id('SECURITY.md')).toBe('security');
+    expect(id('SECURITY')).toBe('security');
+    expect(id('changes.diff')).toBe('diff');
+    expect(id('changes.json')).toBe('json');
+    expect(id('CHANGES.txt')).toBe('changelog');
+    expect(id('license.ts')).toBe('typescript');
+    expect(id('license-check.sh')).toBe('shell');
+    expect(id('LICENSE_APACHE')).toBe('license');
+    expect(id('readme_parser.py')).toBe('python');
+    expect(id('readme-gen.ts')).toBe('typescript');
+    expect(id('readme.json')).toBe('json');
+    expect(id('contributing.ts')).toBe('typescript');
+    expect(id('CONTRIBUTING.md')).toBe('contributing');
+    expect(id('CODE-OF-CONDUCT.md')).toBe('contributing');
+    expect(id('dockerfile.ts')).toBe('typescript');
+    expect(id('dockerfile.sh')).toBe('shell');
+    expect(id('dockerfile.md')).toBe('markdown');
+    expect(id('Containerfile.ci')).toBe('docker');
+    expect(id('app.containerfile')).toBe('docker');
+    expect(id('makefile.py')).toBe('python');
+    expect(id('makefile.ts')).toBe('typescript');
+    expect(id('makefile.md')).toBe('markdown');
+    expect(id('Makefile.in')).toBe('make');
+    expect(id('Makefile.dev')).toBe('make');
+    expect(id('vite.config.test.ts')).toBe('test.typescript');
+    expect(id('vite.config.md')).toBe('markdown');
+    expect(id('tsconfig.foojson')).toBe('file');
+    expect(id('tsconfig.test.ts')).toBe('test.typescript');
+    expect(id('jsconfig.app.json')).toBe('jsconfig');
+    expect(id('playwright.screenshots.config.ts')).toBe('playwright');
+    expect(id('.eslintrcfoo')).toBe('file');
+    expect(id('.eslintrc')).toBe('eslint');
+    expect(id('requirementsfoo.txt')).toBe('text');
+    expect(id('requirements_test.in')).toBe('python.package');
+    expect(id('.env.d.ts')).toBe('typescript.declaration');
+    expect(id('.env.ts')).toBe('typescript');
+
+    // Dotfiles, trailing dots, compound extensions and backup suffixes.
+    expect(id('.json')).toBe('file');
+    expect(id('..ts')).toBe('file');
+    expect(id('foo.')).toBe('file');
+    expect(id('.foo.json')).toBe('json');
+    expect(id('.foo.test.ts')).toBe('test.typescript');
+    expect(id('foo.ts.bak')).toBe('file');
+    expect(id('index.d.ts.map')).toBe('sourcemap');
+    expect(id('app.spec.mts')).toBe('test.typescript');
+    expect(id('archive.tar.lz4')).toBe('archive');
+
+    // Paths, trailing slashes, and folder vs file separation.
+    expect(id('src/README.md')).toBe('readme');
+    expect(id('web/src/plugins/git/History.tsx')).toBe('react');
+    expect(id('a/b/src/', 'dir')).toBe('folder.src');
+    expect(id('.', 'dir')).toBe('folder');
+    expect(id('..', 'dir')).toBe('folder');
+    expect(id('package.json', 'dir')).toBe('folder');
+    expect(id('main.ts', 'dir')).toBe('folder');
+    expect(id('.env', 'dir')).toBe('folder.hidden');
+
+    // Object.prototype keys must never match or return undefined icons.
+    for (const proto of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      expect(fileIcon(proto, 'file').id).toBe('file');
+      expect(fileIcon(proto, 'file').icon).toBeTypeOf('object');
+      expect(fileIcon(`foo.${proto}`, 'file').id).toBe('file');
+      expect(fileIcon(proto, 'dir').id).toBe('folder');
+      expect(fileIcon(proto, 'dir').icon).toBeTypeOf('object');
+    }
+  });
+
   it('give other files the plain icon', () => {
     expect(id('notes')).toBe('file');
     expect(id('.hidden')).toBe('file');

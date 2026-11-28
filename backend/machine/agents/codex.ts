@@ -9,7 +9,7 @@ import { parseRFC3339 } from '#shared/lib/gotime.ts';
 import { SessionFrom } from '#shared/proto/agentproto/index.ts';
 import { resolvedRoot } from './claude.ts';
 import { readMetadata, type FileId } from './files.ts';
-import { LIMITS, Search, TIMING, mtimeOf, samePath, uniq, type Found, type Location, type Proc } from './common.ts';
+import { LIMITS, Search, TIMING, mtimeOf, sameDir, uniq, type Found, type Location, type Proc } from './common.ts';
 import type { Resolver } from './sessions.ts';
 
 /** The process whose open rollout identified this result, including a child. */
@@ -66,12 +66,24 @@ export async function resolveCodex(r: Resolver, kind: string, p: Proc, signal: A
   if (p.cwd === '') return null;
   const start = await r.startOf(p.pid);
   if (start === null || r.peers(kind, p.cwd) > 0) return null;
-  const cs = await codexRollouts(r, homes, p.cwd, start, signal);
+  let cs = await codexRollouts(r, homes, p.cwd, start, signal);
+  if (cs.length === 0 && codexResumedArgv(p.argv)) cs = await codexRollouts(r, homes, p.cwd, start, signal, true);
   if (cs.length === 0) return null;
   if (cs.length === 1) return { id: cs[0].id, source: SessionFrom.Start };
   let newest = cs[0];
   for (const c of cs.slice(1)) if (c.mod > newest.mod) newest = c;
   return { id: newest.id, source: SessionFrom.Guess };
+}
+
+/** Whether Codex's command line resumes an existing session (e.g.
+ * `codex resume --last` or interactive `codex resume`) without naming a
+ * session UUID directly. */
+export function codexResumedArgv(argv: readonly string[]): boolean {
+  for (const a of argv) {
+    if (a === '--') break;
+    if (a === 'resume') return true;
+  }
+  return false;
 }
 
 /** The session Codex's command line resumes (resume <id>, also after
@@ -166,6 +178,7 @@ async function codexRollouts(
   cwd: string,
   start: number,
   signal: AbortSignal,
+  resumed = false,
 ): Promise<Array<{ id: string; mod: number }>> {
   const since = start - TIMING.startSlackMs;
   const out: Array<{ id: string; mod: number }> = [];
@@ -182,7 +195,7 @@ async function codexRollouts(
         if (reads >= LIMITS.metaReads || signal.aborted) return out;
         reads++;
         const m = await r.rolloutMeta(posix.join(dir, e.name));
-        if (!m || m.id !== id || m.parent !== '' || !samePath(m.cwd, cwd) || m.started < since) continue;
+        if (!m || m.id !== id || m.parent !== '' || !(await sameDir(r.files, m.cwd, cwd)) || (!resumed && m.started < since)) continue;
         out.push({ id, mod: mtimeOf(st) });
       }
     }
@@ -440,7 +453,14 @@ export async function codexStamp(r: Resolver, p: Proc, last: Found, out: string[
  * and, for a time-ordered id (UUID version 7, which Codex makes), of the
  * day the id names; with walk the others are read when those have no
  * match. */
-export async function searchCodex(r: Resolver, s: Search, id: string, now: number, walk: boolean): Promise<void> {
+export async function searchCodex(
+  r: Resolver,
+  s: Search,
+  id: string,
+  now: number,
+  walk: boolean,
+  extraCodexHomes?: readonly string[],
+): Promise<void> {
   const suffix = `-${id}.jsonl`;
   const match = async (root: string, dir: string): Promise<number> => {
     let n = 0;
@@ -459,7 +479,7 @@ export async function searchCodex(r: Resolver, s: Search, id: string, now: numbe
   const days = codexDays(now, now);
   const t = uuidTime(id);
   if (t !== null) for (const d of codexDays(t, t)) if (!days.includes(d)) days.push(d);
-  for (const h of r.codexHomes())
+  for (const h of r.codexHomes(extraCodexHomes))
     for (const sub of ['sessions', 'archived_sessions']) {
       const root = await resolvedRoot(r, posix.join(h, sub));
       if (!root) continue;

@@ -11,10 +11,23 @@ import { TermConnection } from '../term/connection';
 import { TerminalStore } from '../term/store';
 import { isLive, type BackendState, type TerminalRecord } from '../term/protocol';
 import * as L from '../term/layout';
+import { recentPanes } from '../paneHistory';
 import { nextPlace, settled, SETTLE_MS, type Place } from '../term/place';
 import { currentDisplay } from '../appearance';
+import { t } from '../i18n';
 import { useStore } from './store';
-import { AGENT_FORGET_MS, confirmSession, endedWithCore, rememberAgents, replaceTerminal, resumeSession, takeResume } from '../restore';
+import { useWorkspacePresets, workspacePresetIds } from './workspacePresets';
+import {
+  AGENT_FORGET_MS,
+  confirmSession,
+  endedWithCore,
+  keptWhileRestarting,
+  missingOnEmptyCore,
+  rememberAgents,
+  replaceTerminal,
+  resumeSession,
+  takeResume,
+} from '../restore';
 import { agentOf } from '../lib/machine';
 
 export interface MachineTerms {
@@ -61,12 +74,31 @@ export interface RunOptions {
   cwd?: string;
 }
 
+/** Bounded retry schedule when doc.get fails transiently on reconnect. */
+const LOAD_RETRY_MIN_MS = 500;
+const LOAD_RETRY_MAX_MS = 8_000;
+const LOAD_RETRIES = 6;
+
+/** The directory of the workspace holding terminal address a, when set. */
+function workspaceCwdOf(layout: L.Layout, address: string): string | undefined {
+  const loc = L.locate(layout, address);
+  const cwd = loc && layout.workspaces[loc.workspace]?.cwd;
+  return typeof cwd === 'string' && cwd ? cwd : undefined;
+}
+
 export class TermModel {
   readonly connection: TermConnection;
   readonly store = new TerminalStore();
   private readonly layouts = new Map<string, L.Layout>();
   private readonly versions = new Map<string, number>();
+  /** Machines whose layout has been loaded at least once (kept across remote
+   * offline/disable so open tabs and unsaved edits are not torn down). */
   private readonly loaded = new Set<string>();
+  /** Machines whose layout is synced with the current ready backend session. */
+  private readonly synced = new Set<string>();
+  /** Machines that have previously loaded or saved a non-empty layout (used to
+   * recover if a rebooted core comes back with an empty document and no records). */
+  private readonly hadLayout = new Set<string>();
   private readonly saving = new Set<string>();
   private readonly dirty = new Set<string>();
   /** The newest version of each machine's layout an event named. */
@@ -83,10 +115,17 @@ export class TermModel {
    * and the timers of programs that may settle where they were first seen. */
   private readonly places = new Map<string, Place>();
   private readonly settling = new Map<string, ReturnType<typeof setTimeout>>();
-  /** When each terminal the layout remembers an agent of was first seen without it, by machine and address. */
-  private readonly agentGone = new Map<string, number>();
+  /** When each terminal the layout remembers an agent of was first seen without
+   * it, and its forget timer, by machine and address. */
+  private readonly agentGone = new Map<string, { since: number; timer: ReturnType<typeof setTimeout> }>();
+  /** Pending loadLayout retry state after transient doc.get failures, by machine. */
+  private readonly loadRetries = new Map<string, { tries: number; timer?: ReturnType<typeof setTimeout> }>();
   /** Terminals being started again in place of ones that ended with their core, by machine and old address. */
   private readonly restoring = new Set<string>();
+  /** Terminals that received a `restarted` event while loadLayout(m) was still
+   * in flight (not yet synced), applied once loadLayout finishes so same-pid
+   * restarts still trigger agent resume. */
+  private readonly pendingRestarts = new Map<string, Set<string>>();
   /** Terminals whose agent's session the machine is being asked to
    * confirm before it is resumed, with the pane that types into each, by
    * machine and address. */
@@ -109,8 +148,15 @@ export class TermModel {
     connection.onConnection = (up) => {
       if (!up) {
         this.loaded.clear();
+        this.synced.clear();
         this.saving.clear();
         this.dirty.clear();
+        this.replacements.clear();
+        this.restoring.clear();
+        this.pendingRestarts.clear();
+        this.resuming.clear();
+        this.cancelLoadRetry();
+        this.clearAgentGone();
         for (const m of [...this.written.keys()]) this.settle(m, false);
       }
       useTerms.setState({ connected: up });
@@ -161,20 +207,57 @@ export class TermModel {
     return [...this.subscribed];
   }
 
-  /** A machine that is gone: no longer followed. */
-  forget(m: string) {
+  /** Clears per-connection sync state when a machine's backend leaves ready
+   * (offline, rebooting, disabled), while preserving the loaded layout so
+   * workspaces, open file tabs and agent metadata survive until reconnect. */
+  private resetMachineSession(m: string) {
+    this.synced.delete(m);
+    this.saving.delete(m);
+    this.dirty.delete(m);
     this.replacements.delete(m);
     this.settle(m, false);
-    for (const key of this.agentGone.keys()) if (key.startsWith(`${m}\n`)) this.agentGone.delete(key);
+    this.cancelLoadRetry(m);
+    this.clearAgentGone(m);
+    this.pendingRestarts.delete(m);
+    for (const key of [...this.restoring]) if (key.startsWith(`${m}\n`)) this.restoring.delete(key);
+    for (const key of [...this.resuming.keys()]) if (key.startsWith(`${m}\n`)) this.resuming.delete(key);
+  }
+
+  private clearAgentGone(m?: string) {
+    for (const [key, entry] of [...this.agentGone]) {
+      if (m !== undefined && !key.startsWith(`${m}\n`)) continue;
+      clearTimeout(entry.timer);
+      this.agentGone.delete(key);
+    }
+  }
+
+  private cancelLoadRetry(m?: string) {
+    if (m !== undefined) {
+      const r = this.loadRetries.get(m);
+      if (r?.timer !== undefined) clearTimeout(r.timer);
+      this.loadRetries.delete(m);
+      return;
+    }
+    for (const r of this.loadRetries.values()) if (r.timer !== undefined) clearTimeout(r.timer);
+    this.loadRetries.clear();
+  }
+
+  /** A machine that is gone: no longer followed. */
+  forget(m: string) {
+    this.resetMachineSession(m);
+    for (const [key, c] of [...this.closing]) {
+      if (!key.startsWith(`${m}\n`)) continue;
+      clearTimeout(c.timer);
+      this.closing.delete(key);
+    }
     this.subscribed.delete(m);
     this.connection.unsubscribe(m);
     this.pending.delete(m);
     this.layouts.delete(m);
     this.loaded.delete(m);
+    this.hadLayout.delete(m);
     this.versions.delete(m);
     this.announced.delete(m);
-    this.saving.delete(m);
-    this.dirty.delete(m);
     this.store.forget(m);
     this.trackPlaces(m);
     this.publish(m);
@@ -222,9 +305,16 @@ export class TermModel {
     const m = msg.m;
     if (typeof m !== 'string') return;
     this.store.apply(msg);
+    if (msg.t === 'backend' && msg.state !== 'ready') this.resetMachineSession(m);
     this.trackPlaces(m, msg.t === 'event' && typeof msg.terminal === 'string' ? msg.terminal : undefined);
     this.watchLabels(m, msg);
     if (msg.t === 'snapshot') {
+      // Wait for loadLayout(m) to sync with the reconnected core before
+      // mutating agent metadata or closing panes on the new snapshot.
+      this.synced.delete(m);
+      this.pendingRestarts.delete(m);
+      this.cancelLoadRetry(m);
+      this.clearAgentGone(m);
       for (const fn of [...(this.arrivals.get(m) ?? [])]) fn();
       this.loadLayout(m, () => {
         const waiting = this.pending.get(m);
@@ -242,12 +332,18 @@ export class TermModel {
       // A terminal that ends with its core keeps its pane: the layout
       // brings it back when the core runs again (restore.ts).
       const kept = msg.type === 'finished' && typeof address === 'string' && endedWithCore(this.store.terminal(m, address));
-      if ((msg.type === 'removed' || msg.type === 'finished') && typeof address === 'string' && !kept) {
+      if (this.synced.has(m) && (msg.type === 'removed' || msg.type === 'finished') && typeof address === 'string' && !kept) {
         this.mutate(m, (l) => L.closePane(l, address));
         if (msg.type === 'finished') void this.call(m, 'terminal.rm', { terminal: address }).catch(() => {});
       }
     }
-    this.remember(m);
+    const restartedAddress = msg.t === 'event' && msg.type === 'restarted' && typeof msg.terminal === 'string' ? msg.terminal : undefined;
+    if (this.synced.has(m)) this.remember(m, restartedAddress ? new Set([restartedAddress]) : undefined);
+    else if (restartedAddress) {
+      const set = this.pendingRestarts.get(m) ?? new Set();
+      set.add(restartedAddress);
+      this.pendingRestarts.set(m, set);
+    }
     this.publish(m);
   }
 
@@ -263,49 +359,104 @@ export class TermModel {
     const writes = this.writes.get(m) ?? 0;
     this.call(m, 'doc.get', { name: L.LAYOUT_DOCUMENT }).then(
       (doc) => {
+        if (!this.connection.connected || !this.subscribed.has(m)) return;
+        this.cancelLoadRetry(m);
         // A write of ours is on its way, or began since the read was asked
         // for: the read may be from before it (calls run at once on the
         // core) and would end the replacements that write names. Read
         // again once it is done.
         if (this.saving.has(m)) return void this.afterWrite(m, () => this.loadLayout(m, done));
         if ((this.writes.get(m) ?? 0) !== writes) return this.loadLayout(m, done);
+        const phase = this.store.backends.get(m)?.phase;
+        if (phase === 'error' || phase === 'starting') return;
         this.versions.set(m, typeof doc.version === 'number' ? doc.version : 0);
-        const live = new Set(
-          this.store
-            .terminals(m)
-            .filter(isLive)
-            .map((r) => r.address),
-        );
-        const read = L.parseLayout(doc.value);
+        const records = this.store.terminals(m);
+        const live = new Set(records.filter((r) => isLive(r) || keptWhileRestarting(r)).map((r) => r.address));
+        const rawRead = L.parseLayout(doc.value);
+        const docPresent = doc.value !== null && doc.value !== undefined;
+        const prevLayout = this.layouts.get(m);
+        const read =
+          !docPresent &&
+          records.length === 0 &&
+          !this.readOnly() &&
+          this.hadLayout.has(m) &&
+          prevLayout &&
+          prevLayout.workspaces.some((w) => w.tabs.length > 0)
+            ? prevLayout
+            : rawRead;
         // Another page's layout won: a terminal this one started in place
         // of an ended one and that the layout does not name ends again, and
         // the ended one stays for the layout that names it.
         const named = new Set(L.layoutTerminals(read));
+        const retryMissing = new Set<string>();
         for (const [a, old] of this.replacements.get(m) ?? []) {
           if (named.has(a)) this.retire(m, old);
-          else void this.kill(m, a);
+          else {
+            void this.kill(m, a);
+            // If old was restored from an empty core (no record on core) and is
+            // still named in the winning layout, keep and retry restoring it.
+            if (named.has(old) && !this.store.terminal(m, old)) retryMissing.add(old);
+          }
         }
         this.replacements.delete(m);
-        // Terminals that ended with their core stay, to be started again.
-        const back = this.readOnly() ? [] : L.layoutTerminals(read).filter((a) => endedWithCore(this.store.terminal(m, a)));
+        // Keep sibling terminals whose empty-core restore is still in flight
+        // from being pruned when loadLayout runs mid-restore.
+        const prefix = `${m}\n`;
+        for (const key of this.restoring) {
+          if (!key.startsWith(prefix)) continue;
+          const old = key.slice(prefix.length);
+          if (named.has(old)) live.add(old);
+        }
+        // Terminals that ended with their core — or have no record because the
+        // core started empty after a long power-off or disable — stay, to be
+        // started again.
+        const back = this.readOnly()
+          ? []
+          : [
+              ...new Set([
+                ...L.layoutTerminals(read).filter((a) => endedWithCore(this.store.terminal(m, a))),
+                ...missingOnEmptyCore(read, records),
+                ...retryMissing,
+              ]),
+            ];
         for (const a of back) live.add(a);
-        const layout = this.firstWorkspace(L.pruneLayout(read, live), doc.value !== null && doc.value !== undefined);
+        const layout = this.firstWorkspace(L.pruneLayout(read, live), docPresent || read !== rawRead);
         this.layouts.set(m, layout);
         this.loaded.add(m);
-        if (!L.sameLayout(layout, read)) this.save(m);
-        for (const a of back) this.restore(m, a);
-        this.remember(m);
+        this.synced.add(m);
+        if (docPresent || layout.workspaces.some((w) => w.tabs.length > 0)) this.hadLayout.add(m);
+        if (!L.sameLayout(layout, rawRead)) this.save(m);
+        for (const a of back) this.restore(m, a, workspaceCwdOf(read, a));
+        const pendingRestarts = this.pendingRestarts.get(m);
+        this.pendingRestarts.delete(m);
+        this.remember(m, pendingRestarts);
         this.publish(m);
         done?.();
       },
-      () => {},
+      () => {
+        if (!this.connection.connected || !this.subscribed.has(m)) return;
+        const phase = this.store.backends.get(m)?.phase;
+        if (phase === 'error' || phase === 'starting') return;
+        const cur = this.loadRetries.get(m);
+        const tries = (cur?.tries ?? 0) + 1;
+        if (tries > LOAD_RETRIES) return;
+        if (cur?.timer !== undefined) clearTimeout(cur.timer);
+        const delay = Math.min(LOAD_RETRY_MAX_MS, LOAD_RETRY_MIN_MS * 2 ** (tries - 1));
+        const timer = setTimeout(() => {
+          const r = this.loadRetries.get(m);
+          if (r) r.timer = undefined;
+          if (!this.connection.connected || !this.subscribed.has(m)) return;
+          this.loadLayout(m, done);
+        }, delay);
+        this.loadRetries.set(m, { tries, timer });
+      },
     );
   }
 
   /** Writes a machine's layout, one write at a time: a change made while one
    * is on its way is written when it returns. */
   private save(m: string) {
-    if (!this.loaded.has(m)) return;
+    if (!this.synced.has(m)) return;
     if (this.saving.has(m)) {
       this.dirty.add(m);
       return;
@@ -369,8 +520,11 @@ export class TermModel {
       const placed = change(L.createWorkspace(before, L.newId(), ''));
       if (placed.workspaces.some((w) => w.tabs.length)) after = placed;
     }
+    // A closed tab that was shown gives way to the one the user saw last.
+    after = L.showRecentTab(before, after, recentPanes(m));
     if (L.sameLayout(after, before)) return false;
     this.layouts.set(m, after);
+    if (after.workspaces.some((w) => w.tabs.length > 0)) this.hadLayout.add(m);
     this.save(m);
     this.publish(m);
     return true;
@@ -381,16 +535,20 @@ export class TermModel {
   }
 
   /** Starts a terminal in place of one that ended with its core, in the
-   * directory that one started in, once: the page whose layout still names
-   * the old one when its terminal runs has it take the place, and another
-   * page's ends again. */
-  private restore(m: string, old: string) {
+   * directory that one started in (or its workspace's directory when the old
+   * record is gone), once: the page whose layout still names the old one when
+   * its terminal runs has it take the place, and another page's ends again. */
+  private restore(m: string, old: string, fallbackCwd?: string) {
     const key = `${m}\n${old}`;
     if (this.restoring.has(key)) return;
     this.restoring.add(key);
-    const cwd = this.store.terminal(m, old)?.cwd;
+    const cwd = this.store.terminal(m, old)?.cwd ?? fallbackCwd;
     const params: Record<string, unknown> = { keep: true, display: currentDisplay() };
     if (typeof cwd === 'string' && cwd) params.cwd = cwd;
+    const curLayout = this.layouts.get(m);
+    const at = curLayout ? L.locate(curLayout, old) : null;
+    const ws = at ? curLayout!.workspaces[at.workspace] : undefined;
+    if (ws) params.workspace = ws.id;
     this.call(m, 'terminal.run', params)
       .then(
         (rec) => {
@@ -410,8 +568,8 @@ export class TermModel {
   }
 
   /** Keeps what the layout remembers of its terminals' agents current (restore.ts). */
-  private remember(m: string) {
-    if (!this.layout(m) || this.readOnly()) return;
+  private remember(m: string, restarted?: ReadonlySet<string>) {
+    if (!this.synced.has(m) || !this.layout(m) || this.readOnly()) return;
     const now = Date.now();
     this.mutate(m, (l) =>
       rememberAgents(
@@ -420,19 +578,23 @@ export class TermModel {
         (a) => {
           const key = `${m}\n${a}`;
           if (agentOf(this.store.terminal(m, a))) {
+            const existing = this.agentGone.get(key);
+            if (existing) clearTimeout(existing.timer);
             this.agentGone.delete(key);
             return false;
           }
-          const since = this.agentGone.get(key);
-          if (since === undefined) {
-            this.agentGone.set(key, now);
-            setTimeout(() => this.remember(m), AGENT_FORGET_MS + 100);
+          const existing = this.agentGone.get(key);
+          if (existing === undefined) {
+            const timer = setTimeout(() => this.remember(m), AGENT_FORGET_MS + 100);
+            this.agentGone.set(key, { since: now, timer });
             return false;
           }
-          if (now - since < AGENT_FORGET_MS) return false;
+          if (now - existing.since < AGENT_FORGET_MS) return false;
+          clearTimeout(existing.timer);
           this.agentGone.delete(key);
           return true;
         },
+        restarted?.size ? (a) => restarted.has(a) : undefined,
       ),
     );
   }
@@ -647,7 +809,7 @@ export class TermModel {
    * once they are. */
   run(m: string, o: RunOptions, place: (l: L.Layout, address: string) => L.Layout): Promise<string | undefined> {
     const layout = this.layout(m);
-    if (this.store.backends.get(m)?.phase !== 'ready' || !layout) {
+    if (this.store.backends.get(m)?.phase !== 'ready' || !this.synced.has(m) || !layout) {
       this.subscribe(m);
       return new Promise((resolve) => {
         const list = this.pending.get(m) ?? [];
@@ -667,6 +829,19 @@ export class TermModel {
     const params: Record<string, unknown> = { keep: true, display: currentDisplay() };
     if (cwd) params.cwd = cwd;
     if (o.argv?.length) params.argv = o.argv;
+    if (ws) {
+      params.workspace = ws.id;
+      if (workspacePresetIds(m, ws.id).length > 0 && useWorkspacePresets.getState().locked) {
+        useStore
+          .getState()
+          .toast(
+            t('vault.inject.locked'),
+            { label: t('vault.workspace.presetsOpen'), run: () => useStore.getState().setPanel('vault') },
+            undefined,
+            'warning',
+          );
+      }
+    }
     return this.call(m, 'terminal.run', params).then((rec) => {
       const address = typeof rec.address === 'string' ? rec.address : undefined;
       // The first pane of a workspace without a directory gives it its own.

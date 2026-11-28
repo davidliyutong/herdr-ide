@@ -211,8 +211,9 @@ export function parseDisabled(value: unknown): Set<string> | undefined {
 
 /** Keys of text fields and editors (Monaco, VS Code) on macOS: the menu
  * item shows the key, while the page takes it in terminals and app chrome
- * and editors keep it for editing (Cmd+[/] outdent/indent, Cmd+D next
- * match, Cmd+F/G find, Cmd+/ toggle comment, Cmd+Z/X/C/V/A edit). */
+ * and editors keep it for editing (Cmd+D next match, Cmd+F/G find, Cmd+/
+ * toggle comment, Cmd+Z/X/C/V/A edit). Cmd+[ and Cmd+] are not among them:
+ * they only go back and forward, editors indent with Tab. */
 const EDIT_KEYS: ReadonlySet<string> = new Set([
   'cmd+z',
   'cmd+shift+z',
@@ -220,8 +221,6 @@ const EDIT_KEYS: ReadonlySet<string> = new Set([
   'cmd+c',
   'cmd+v',
   'cmd+a',
-  'cmd+bracketleft',
-  'cmd+bracketright',
   'cmd+d',
   'cmd+f',
   'cmd+g',

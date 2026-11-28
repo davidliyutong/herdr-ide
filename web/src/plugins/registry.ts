@@ -11,6 +11,44 @@ import type { PluginView } from '../term/layout';
 import type { CommandDef, NewTabItem, PaletteItem, PanelDef, PaneViewDef, PluginDef, TerminalHeaderProps, UnopenedAgent } from './api';
 
 let plugins: PluginDef[] = [];
+const pluginLoaders = new Map<string, () => Promise<PluginDef>>();
+const lazyStubs = new Map<string, PluginDef>();
+
+/** Registers the dynamic loader for a lazy plugin id (lazy.ts). */
+export function registerPluginLoader(id: string, load: () => Promise<PluginDef>, stub?: PluginDef) {
+  pluginLoaders.set(id, load);
+  if (stub) lazyStubs.set(id, stub);
+}
+
+/** Whether a registered plugin is still a lazy stub waiting to load. */
+export function isPluginPending(id: string): boolean {
+  const stub = lazyStubs.get(id);
+  return !!stub && plugins.some((p) => p === stub);
+}
+
+/** Triggers loading a registered lazy plugin by id (no-op if already eager or
+ * unknown). */
+export function ensurePluginLoaded(id: string): Promise<PluginDef | undefined> {
+  const load = pluginLoaders.get(id);
+  return load ? load() : Promise.resolve(plugins.find((p) => p.id === id));
+}
+
+/** Triggers loading all registered lazy plugins. */
+export function ensurePluginsLoaded(): Promise<void> {
+  const active = plugins.map((p) => pluginLoaders.get(p.id)).filter((fn): fn is () => Promise<PluginDef> => !!fn);
+  return Promise.all(active.map((fn) => fn().catch(() => undefined))).then(() => undefined);
+}
+
+/** Replaces a registered plugin by id (used by lazy.ts once a plugin module
+ * loads). When expected is given, replaces only if that exact stub is still
+ * registered so test suites swapping plugins via definePlugins are unaffected. */
+export function replacePlugin(id: string, next: PluginDef, expected?: PluginDef) {
+  if (!expected || lazyStubs.get(id) === expected) lazyStubs.delete(id);
+  const idx = plugins.findIndex((p) => p.id === id);
+  if (idx < 0 || (expected && plugins[idx] !== expected)) return;
+  plugins = [...plugins.slice(0, idx), next, ...plugins.slice(idx + 1)];
+  usePluginList.setState({ list: plugins });
+}
 
 /** Sets the app's plugins (index.ts; tests). */
 export function definePlugins(list: PluginDef[]) {
@@ -220,6 +258,19 @@ export function newTabGroups(m: string): NewTabItem[][] {
     .filter((items) => items.length > 0);
 }
 
+/** Tells the plugins that are on of a workspace the user made
+ * (PluginDef.workspaceCreated); one that throws is said in the console and
+ * keeps none of the others from hearing it. */
+export function workspaceCreated(m: string, ws: string) {
+  for (const p of activePlugins()) {
+    try {
+      p.workspaceCreated?.(m, ws);
+    } catch (e) {
+      console.warn(`plugin ${p.id}: workspaceCreated`, e);
+    }
+  }
+}
+
 /** Hands a message of a plugin's hub side to the plugin, when it is on. */
 export function pluginMessage(plugin: string, m: string, data: unknown) {
   const p = activePlugins().find((x) => x.id === plugin);
@@ -256,6 +307,16 @@ export function viewStatus(m: string, view: PluginView): AgentStatus | undefined
   const o = statusOwner(view.plugin);
   const s = o && guarded(o.p, 'status', () => o.def.status(m, view));
   return typeof s === 'string' && Object.hasOwn(statusRank, s) ? s : undefined;
+}
+
+/** Whether a plugin's pane is actively running (working, waiting, or starting)
+ * and should be protected from kept-pane eviction across tab switches. */
+export function viewActive(m: string, view: PluginView): boolean {
+  const o = statusOwner(view.plugin);
+  if (!o) return false;
+  if (o.def.isActive) return guarded(o.p, 'isActive', () => o.def.isActive!(m, view)) === true;
+  const s = guarded(o.p, 'status', () => o.def.status(m, view));
+  return s === 'working' || s === 'blocked';
 }
 
 /** The pane of machine m an agent notification without a terminal points

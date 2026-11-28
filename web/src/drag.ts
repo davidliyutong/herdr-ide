@@ -19,10 +19,12 @@ export interface Box {
 export interface DragOps<T> {
   /** Text of the ghost that follows the pointer. */
   label: string;
+  /** Optional dynamic ghost text and detach badge styling for the current target. */
+  ghost?(target: T | undefined): { label: string; detach?: boolean };
   /** What a drop at this point would do; undefined when nothing. */
-  find(x: number, y: number): T | undefined;
-  /** Where the marker goes and its data-zone (styling) for a target. */
-  marker(target: T): { box: Box; zone: string };
+  find(x: number, y: number, screen?: { screenX: number; screenY: number }): T | undefined;
+  /** Where the marker goes and its data-zone (styling) for a target, or undefined for no in-window marker. */
+  marker(target: T): { box: Box; zone: string } | undefined;
   drop(target: T): Promise<unknown>;
   /** Toast text for a failed drop (default: the error). */
   failed?(error: string): string;
@@ -40,6 +42,7 @@ export interface DragStart {
   screenX: number;
   screenY: number;
   pointerId: number;
+  currentTarget?: EventTarget | null;
 }
 
 /** Pixels the pointer must move on the screen before a drag begins. */
@@ -72,17 +75,25 @@ export function trackDrag<T>(ev: DragStart, ops: DragOps<T>) {
   let ghost: HTMLDivElement | undefined;
   let marker: HTMLDivElement | undefined;
   let target: T | undefined;
-  let at = { x: ev.clientX, y: ev.clientY };
+  let at = { x: ev.clientX, y: ev.clientY, screenX: ev.screenX, screenY: ev.screenY };
   let scroller: ReturnType<typeof setInterval> | undefined;
+  const captureEl = ev.currentTarget instanceof Element ? ev.currentTarget : undefined;
+  let captured = false;
 
   /** Where a drop at the pointer would land, shown by the marker. */
   const update = () => {
-    target = ops.find(at.x, at.y);
-    marker!.hidden = !target;
-    if (target) {
-      const { box, zone } = ops.marker(target);
+    target = ops.find(at.x, at.y, { screenX: at.screenX, screenY: at.screenY });
+    const m = target ? ops.marker(target) : undefined;
+    marker!.hidden = !m;
+    if (m) {
+      const { box, zone } = m;
       Object.assign(marker!.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
       marker!.dataset.zone = zone;
+    }
+    if (ghost && ops.ghost) {
+      const g = ops.ghost(target);
+      ghost.textContent = g.label;
+      ghost.classList.toggle('detach', !!g.detach);
     }
   };
   /** Scrolls the list the pointer is held at the edge of, step by step,
@@ -118,9 +129,17 @@ export function trackDrag<T>(ev: DragStart, ops: DragOps<T>) {
       marker = document.createElement('div');
       marker.className = 'drop-marker';
       document.body.append(marker, ghost);
+      if (captureEl && typeof captureEl.setPointerCapture === 'function') {
+        try {
+          captureEl.setPointerCapture(ev.pointerId);
+          captured = true;
+        } catch {
+          // Synthetic or already-released pointer events may decline capture.
+        }
+      }
       ops.begin?.();
     }
-    at = { x: e.clientX, y: e.clientY };
+    at = { x: e.clientX, y: e.clientY, screenX: e.screenX, screenY: e.screenY };
     ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 8}px)`;
     update();
     autoScroll();
@@ -128,6 +147,14 @@ export function trackDrag<T>(ev: DragStart, ops: DragOps<T>) {
   const end = (commit: boolean) => {
     clearInterval(scroller);
     scroller = undefined;
+    if (captured && captureEl && typeof captureEl.releasePointerCapture === 'function') {
+      try {
+        captureEl.releasePointerCapture(ev.pointerId);
+      } catch {
+        // Already released.
+      }
+    }
+    captured = false;
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onCancel);

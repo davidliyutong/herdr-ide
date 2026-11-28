@@ -99,8 +99,8 @@ export type Tab = Extra & {
    * Right leave it, pane.close leaves its last pane, and it shows a pin
    * where the others have ×. */
   pinned?: true;
-  /** Muted: its agents and terminals make no sound and no notification;
-   * their status still shows. */
+  /** Muted: its agents and terminals make no sound, no notification, no
+   * unread/attention badge, and do not count toward the app badge. */
   muted?: true;
   root: Node;
   /** The pane with the keyboard focus (paneKey). */
@@ -115,8 +115,8 @@ export type Workspace = Extra & {
   cwd: string;
   tabs: Tab[];
   selected: number;
-  /** Muted: its tabs' agents and terminals make no sound and no
-   * notification, as each muted tab's. */
+  /** Muted: its tabs' agents and terminals make no sound, no notification,
+   * no unread/attention badge, and do not count toward the app badge. */
   muted?: true;
 };
 
@@ -237,12 +237,15 @@ export function folderName(cwd: string, home = ''): string {
   return dir ? dir.slice(dir.lastIndexOf('/') + 1) : '/';
 }
 
-/** A workspace's name as shown: the user's, else the folder of dir (the
- * directory of its only pane, when it has one pane), else its own folder's
- * (folderName). An emptied name gives it its folder's again. */
+/** A workspace's name as shown: the user's explicit name, else the basename of
+ * its configured fixed directory (ws.cwd), else the folder of dir (the active
+ * pane's directory when the workspace has no fixed directory). An emptied name
+ * gives it its folder's again. */
 export function workspaceTitle(ws: Pick<Workspace, 'name' | 'cwd'>, home?: string, dir?: string): string {
   const name = ws.name.trim();
-  return name && !GENERATED_NAMES.has(name) ? name : folderName(dir || ws.cwd, home);
+  if (name && !GENERATED_NAMES.has(name)) return name;
+  const fixed = ws.cwd.trim();
+  return folderName(fixed || dir || '', home);
 }
 
 /** A workspace's pane when it has exactly one. */
@@ -468,6 +471,33 @@ export function renameTab(layout: Layout, workspace: string, tab: number, name: 
     const { name: _, ...rest } = current;
     return { ...ws, tabs: ws.tabs.map((t, i) => (i === tab ? (name ? { ...rest, name } : rest) : t)) };
   });
+}
+
+/** The layout after, which closed tabs of before: a workspace whose shown
+ * tab went shows the tab holding the pane focused most recently that it
+ * still has (recent: pane keys, the latest first), as a browser goes back
+ * to the tab it showed before; with none of them, the tab that closing
+ * left shown (its next, else the one before). A workspace that lost no tab
+ * keeps its selection, also when the shown tab's panes changed their keys. */
+export function showRecentTab(before: Layout, after: Layout, recent: readonly string[]): Layout {
+  if (!recent.length) return after;
+  let changed = false;
+  const workspaces = after.workspaces.map((ws) => {
+    const was = before.workspaces.find((w) => w.id === ws.id);
+    const shown = was?.tabs[was.selected];
+    if (!was || !shown || ws.tabs.length >= was.tabs.length) return ws;
+    const gone = new Set(tabPanes(shown));
+    if (ws.tabs.some((t) => tabPanes(t).some((p) => gone.has(p)))) return ws;
+    for (const key of recent) {
+      const i = ws.tabs.findIndex((t) => tabPanes(t).includes(key));
+      if (i < 0) continue;
+      if (i === ws.selected) return ws;
+      changed = true;
+      return { ...ws, selected: i };
+    }
+    return ws;
+  });
+  return changed ? { ...after, workspaces } : after;
 }
 
 /** Removes a tab; its terminals keep running until the caller ends them. */

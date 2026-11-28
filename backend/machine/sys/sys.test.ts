@@ -1,9 +1,21 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { constants, existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  openSync,
+  closeSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { open } from 'node:fs/promises';
 import { createServer, connect } from 'node:net';
 import { join } from 'node:path';
 import { tempHome } from '../testing.ts';
+import { execReplace } from './exec.ts';
 import {
   AT_REMOVEDIR,
   linkGuard,
@@ -191,5 +203,44 @@ describe('the C library', () => {
     expect(libcPath(null)).toBe('libc.so.6');
     // This process's own.
     expect(libcPath()).toMatch(/^(libc\.so\.6|\/.*ld-musl-.*)$/);
+  });
+});
+
+describe('execReplace', () => {
+  test('validates argv and env before calling execve', () => {
+    expect(() => execReplace([], {})).toThrow(/ENOENT/);
+    expect(() => execReplace([''], {})).toThrow(/ENOENT/);
+    expect(() => execReplace(['/bin/true', 'a\0b'], {})).toThrow(/EINVAL/);
+    expect(() => execReplace(['/bin/true'], { 'BAD=KEY': '1' })).toThrow(/EINVAL/);
+    expect(() => execReplace(['/bin/true'], { OK: 'a\0b' })).toThrow(/EINVAL/);
+    expect(() => execReplace([join(h.home, 'no-such-binary')], {})).toThrow(/ENOENT/);
+  });
+
+  test('searches a long PATH and preserves env/argv across execve and ENOEXEC fallback', () => {
+    const execMod = join(import.meta.dir, 'exec.ts');
+    const dirGood = join(h.home, 'exec-good');
+    const dirDenied = join(h.home, 'exec-denied');
+    mkdirSync(dirGood, { recursive: true });
+    mkdirSync(dirDenied, { recursive: true });
+    // Non-executable entry earlier on PATH must be skipped (EACCES) in favor of later dirGood.
+    writeFileSync(join(dirDenied, 'tool'), '#!/bin/sh\necho bad\n');
+    chmodSync(join(dirDenied, 'tool'), 0o600);
+    // Script WITHOUT shebang exercises the POSIX ENOEXEC -> /bin/sh fallback.
+    writeFileSync(join(dirGood, 'tool'), 'printf "%s|%s|%s" "$1" "$EXEC_ENV_A" "$EXEC_ENV_B"\n');
+    chmodSync(join(dirGood, 'tool'), 0o700);
+
+    // Prefix many nonexistent PATH dirs so the loop iterates extensively before succeeding.
+    const misses = Array.from({ length: 64 }, (_, i) => join(h.home, `missing-dir-${i}`));
+    const pathVar = [...misses, dirDenied, dirGood].join(':');
+    const bigEnv: Record<string, string> = { PATH: pathVar, EXEC_ENV_A: 'alpha', EXEC_ENV_B: 'beta' };
+    for (let i = 0; i < 64; i++) bigEnv[`PAD_${i}`] = `value-${i}-${'x'.repeat(32)}`;
+
+    const child = Bun.spawnSync([
+      process.execPath,
+      '-e',
+      `const { execReplace } = await import(${JSON.stringify(execMod)}); execReplace(['tool', 'arg-ok'], ${JSON.stringify(bigEnv)});`,
+    ]);
+    expect(child.exitCode).toBe(0);
+    expect(child.stdout.toString('utf8')).toBe('arg-ok|alpha|beta');
   });
 });

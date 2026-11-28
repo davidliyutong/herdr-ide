@@ -18,7 +18,17 @@ import type { HCState } from '#kernel/machines/spec.ts';
 import { Agents, followAgents, type AgentHost } from './agents.ts';
 import { ensure, hcAction, type LifecycleDeps } from './lifecycle.ts';
 import { Code, type BackendState } from './messages.ts';
-import { hiddenRecord, indexTerminals, isObject, localName, otherMachine, visibleList, type Rec } from './records.ts';
+import {
+  cleanForeground,
+  cleanRecord,
+  hiddenRecord,
+  indexTerminals,
+  isObject,
+  localName,
+  otherMachine,
+  visibleList,
+  type Rec,
+} from './records.ts';
 import type { Timing } from './timing.ts';
 
 /** A client's stream of a terminal, as its backend sees it. */
@@ -94,7 +104,7 @@ class Wake {
         this.wakeUp = null;
         resolve(why);
       };
-      const timer = setTimeout(() => done('timeout'), ms);
+      const timer = ms === Infinity ? undefined : setTimeout(() => done('timeout'), ms);
       const onAbort = () => done('aborted');
       signal.addEventListener('abort', onAbort, { once: true });
       this.wakeUp = () => done('woken');
@@ -235,6 +245,13 @@ export class Backend implements AgentHost {
     this.wakeup.wake();
   }
 
+  /** Clears a prior UI stop when a disabled machine is enabled again, and
+   * wakes the loop so the terminal core starts once the machine connects. */
+  resetStopped(): void {
+    this.stopped = false;
+    this.wakeup.wake();
+  }
+
   /** Drops the backend of a removed machine: its connection closes and its
    * clients no longer count it as subscribed. */
   close(): void {
@@ -316,12 +333,26 @@ export class Backend implements AgentHost {
     const t = this.d.timing;
     let backoff = t.backoffMinMs;
     while (!signal.aborted) {
+      const m = this.d.machines.get(this.id);
+      if (m && !m.spec().enabled) {
+        this.setState('error', Code.Offline);
+        await this.wakeup.until(Infinity, signal);
+        backoff = t.backoffMinMs;
+        continue;
+      }
       const started = Date.now();
       const code = await this.serve(signal).catch((e: Error) => {
         this.d.logger(`term ${this.id}: ${e.message}`);
         return Code.Lost;
       });
       if (signal.aborted) break;
+      const cur = this.d.machines.get(this.id);
+      if (cur && !cur.spec().enabled) {
+        this.setState('error', Code.Offline);
+        await this.wakeup.until(Infinity, signal);
+        backoff = t.backoffMinMs;
+        continue;
+      }
       this.setState('error', code);
       if (Date.now() - started > t.stableMs) backoff = t.backoffMinMs;
       const why = await this.wakeup.until(retryDelay(backoff), signal);
@@ -451,25 +482,31 @@ export class Backend implements AgentHost {
     // Another machine's terminals and documents are none of the clients'.
     if (otherMachine(n.terminal) || n.machine) return;
     const data = isObject(n.data) ? n.data : null;
+    let outData: unknown = n.data;
     const addr = n.terminal;
     if (addr) {
       if (this.conceal(n, data)) return;
       const t = this.terms.get(addr);
       switch (n.type) {
         case 'created':
-        case 'restarted':
+        case 'restarted': {
           // A copy: what is merged into the record is not in the event.
-          this.terms.set(addr, data ? structuredClone(data) : {});
+          const cleaned = data ? cleanRecord(structuredClone(data)) : {};
+          this.terms.set(addr, structuredClone(cleaned));
           this.agents.merge(addr);
+          if (data) outData = cleaned;
           break;
+        }
         case 'removed':
           this.terms.delete(addr);
           this.unpark(addr);
           break;
         case 'labels':
           if (isObject(data?.record)) {
-            this.terms.set(addr, structuredClone(data.record));
+            const cleaned = cleanRecord(structuredClone(data.record));
+            this.terms.set(addr, structuredClone(cleaned));
             this.agents.merge(addr);
+            outData = { ...data, record: cleaned };
           } else if (t) t.labels = data?.labels ?? null;
           break;
         case 'turn':
@@ -481,7 +518,16 @@ export class Backend implements AgentHost {
           if (!t) break;
           if (n.type === 'foreground') {
             if (n.data === undefined || n.data === null) delete t.foreground;
-            else t.foreground = data;
+            else {
+              const fg = cleanForeground(data);
+              if (fg === null) {
+                delete t.foreground;
+                outData = null;
+              } else if (fg !== undefined) {
+                t.foreground = fg;
+                outData = fg;
+              } else t.foreground = data;
+            }
             break;
           }
           if (data) Object.assign(t, data);
@@ -500,7 +546,7 @@ export class Backend implements AgentHost {
     }
     const msg: Record<string, unknown> = { t: 'event', m: this.id, type: n.type };
     if (addr) msg.terminal = addr;
-    if (n.data !== undefined) msg.data = n.data;
+    if (outData !== undefined) msg.data = outData;
     this.broadcast(msg);
     // A record replaced by the event lacks the agent the core knows of:
     // clients get it again right behind.
