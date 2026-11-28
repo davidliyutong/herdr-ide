@@ -233,6 +233,8 @@ describe.skipIf(process.platform === 'win32')('shared CLI install.sh execution',
         'rm',
         'mktemp',
         'tar',
+        // GNU gunzip on Linux is a /bin/sh wrapper that execs gzip via PATH.
+        'gzip',
         'gunzip',
         'uname',
         'sha256sum',
@@ -336,6 +338,7 @@ esac
 
       const okDir = join(tmp, 'ok-wget');
       const okRes = await runInstall(['--bin-dir', okDir], baseEnv);
+      expect(okRes.stderr).toBe('');
       expect(okRes.exitCode).toBe(0);
       expect(okRes.stdout).toContain(`${SLUG} v0.6.0-wget`);
       expect(existsSync(join(okDir, SLUG))).toBe(true);
